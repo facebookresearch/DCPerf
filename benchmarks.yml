@@ -27,7 +27,7 @@ django_workload:
 tao_bench:
   parser: tao_bench
   install_script: ./packages/tao_bench/install_tao_bench.sh
-  cleanup_script: cleanup_tao_bench.sh
+  cleanup_script: ./packages/tao_bench/cleanup_tao_bench.sh
   path: ./packages/tao_bench/run.py
   tags:
     scope:
