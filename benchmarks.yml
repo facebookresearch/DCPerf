@@ -1,0 +1,75 @@
+oss_performance_mediawiki:
+  parser: json
+  install_script: install_oss_performance_mediawiki.sh
+  cleanup_script: cleanup_oss_performance_mediawiki.sh
+  path: ./templates/oss-performance-mediawiki/run.sh
+  tags:
+    scope:
+      - app
+      - web
+    component:
+      - cpu
+  metrics: []
+
+django_workload:
+  parser: django_workload
+  install_script: ./bpkgs/django_workload/install_django_workload.sh
+  cleanup_script: ./bpkgs/django_workload/cleanup_django_workload.sh
+  path: ./benchmarks/django_workload/bin/run.sh
+  tags:
+    scope:
+      - app
+      - django
+    component:
+      - cpu
+  metrics: []
+
+tao_bench:
+  parser: tao_bench
+  install_script: ./packages/tao_bench/install_tao_bench.sh
+  cleanup_script: cleanup_tao_bench.sh
+  path: ./packages/tao_bench/run.py
+  tags:
+    scope:
+      - app
+      - cache
+    component:
+      - cpu
+      - memory
+  metrics: []
+  roles:
+    - server
+    - client
+
+feedsim:
+  parser: feedsim
+  install_script: install_feedsim.sh
+  cleanup_script: cleanup_feedsim.sh
+  path: ./benchmarks/feedsim/run.sh
+  tags:
+    scope:
+      - app
+      - feed
+    component:
+      - cpu
+      - memory
+  metrics:
+    - target_percentile
+    - target_latency_msec
+    - peak_qps
+    - peak_latency_msec
+    - final_requested_qps
+    - final_achieved_qps
+    - final_latency_msec
+
+spark_standalone:
+  parser: spark_standalone
+  install_script: install_spark_standalone.sh
+  path: ./templates/spark_standalone/runner.py
+  tags:
+    scope:
+      - app
+    component:
+      - cpu
+      - memory
+  metrics: []

@@ -1,0 +1,9 @@
+clang:
+  cc: /usr/bin/clang
+  cxx: /usr/bin/clang++
+  ldflags:
+    - -fuse-ld=lld
+
+gcc:
+  cc: /usr/bin/gcc
+  cxx: /usr/bin/g++

@@ -1,0 +1,23 @@
+[manifest]
+name = tao_bench
+
+[download]
+url = http://www.memcached.org/files/memcached-1.6.5.tar.gz
+sha256 = 1f4da3706fc13c33be9df97b2c1c8d7b0891d5f0dc88aebc603cb178e68b27df
+
+[build.os=linux]
+builder = autoconf
+
+[build.not(os=linux)]
+builder = nop
+
+[dependencies]
+folly
+openssl
+lz4
+libevent
+boost
+glog
+
+[autoconf.args]
+--enable-tls=true
