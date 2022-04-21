@@ -12,7 +12,7 @@ BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
 
 # Constants
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
-FEEDSIM_ROOT_SRC="${FEEDSIM_ROOT}/oldisim"
+FEEDSIM_ROOT_SRC="${FEEDSIM_ROOT}/src"
 
 THRIFT_THREADS_DEFAULT="$(nproc)" # Scale with logial cpus
 RANKING_THREADS_DEFAULT="$(( $(nproc) * 7/20))"  # 7/20 is 0.35 cpu factor
