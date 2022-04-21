@@ -1,0 +1,33 @@
+# Copyright 2015 Google Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+package "DriverNodeRank"
+version "0.1"
+usage "DriverNodeRank [options]"
+description "Test driving node for search"
+
+args "-c cc --show-required -C --default-optional -l"
+
+option "verbose" v "Verbosity. Repeat for more verbose." multiple
+option "quiet" - "Disable log messages."
+
+option "threads" - "Number of threads to spawn." int default="1"
+option "server" - "Address of parent node hostname[:port]." string
+option "connections" - "Connections to establish per thread." int default="1"
+option "depth" - "Maximum depth to pipeline requests per thread." int default="1"
+option "qps" - "Rate to send requests at. 0 means send as fast as it can." float default="0"
+
+option "monitor_port" - "Port to run monitoring server on." int default="7777"
+
+option "affinity" - "Set distinct CPU affinity for threads, round-robin"
