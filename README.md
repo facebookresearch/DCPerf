@@ -109,3 +109,72 @@ Once the tao_bench client finishes, benchpress will report the results in JSON f
 }
 
 ```
+
+## feedsim
+
+### Install feedsim
+
+```
+./benchpress_cli.py install feedsim_default
+```
+
+### Run feedsim
+
+```
+./benchpress_cli.py run feedsim_default
+```
+
+This benchmark normally takes 20 minutes to 1 hour to finish.
+
+### Reporting
+
+After the feedsim benchmark finishing, benchpress will report the results in JSON format:
+
+```
+{
+  "benchmark_args": [],
+  "benchmark_desc": "Aggregator like workload. Latency sensitive. Finds maximum QPS that system can sustain while keeping 95th percentile latency <= 500 msecs.\n",
+  "benchmark_hooks": [
+    "cpu-mpstat: {'args': ['-u', '1']}"
+  ],
+  "benchmark_name": "feedsim_default",
+  "machines": [
+    {
+      "cpu_architecture": "x86_64",
+      "cpu_model": "Intel(R) Xeon(R) Platinum 8321HC CPU @ 1.40GHz",
+      "hostname": "<hostname>",
+      "kernel_version": "5.6.13-0_fbk19_zion_6067_g9bad0843d083",
+      "mem_total_kib": "65385308 KiB",
+      "num_logical_cpus": "52",
+      "os_distro": "centos",
+      "os_release_name": "CentOS Stream 8"
+    }
+  ],
+  "metadata": {
+    "L1d cache": "32K",
+    "L1i cache": "32K",
+    "L2 cache": "1024K",
+    "L3 cache": "36608K"
+  },
+  "metrics": {
+    "final_achieved_qps": 25.31,
+    "final_latency_msec": 1009.95,
+    "final_requested_qps": 0.08,
+    "target_latency_msec": 500.0,
+    "target_percentile": "95p"
+  },
+  "run_id": "eab7e5dd",
+  "timestamp": 1650388812
+}
+```
+
+Feedsim will also generate a detailed metrics report at `benchmarks/feedsim/feedsim_results.txt` in CSV format:
+
+```
+duration_secs,total_queries,requested_qps,achieved_qps,total_bytes_rx,total_bytes_tx,rx_MBps,tx_MBps,min_ms,avg_ms,50p_ms,90p_ms,95p_ms,99p_ms,99.9p_ms
+120,5267,0.00,41.46,85637186,15927408,0.64,0.12,388.134,958.509,913.313,956.414,991.523,1812.133,12232.154
+120,5571,0.00,43.86,90618516,16846704,0.68,0.13,388.134,910.627,918.002,960.395,1010.386,1050.379,1848.997
+120,5040,39.97,39.67,82279002,15240960,0.62,0.11,388.134,457.068,446.739,524.929,535.555,569.859,593.868
+120,2737,20.49,21.55,44727453,8276688,0.34,0.06,352.849,423.693,406.253,486.015,509.429,535.926,556.451
+......
+```
