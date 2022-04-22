@@ -177,4 +177,44 @@ duration_secs,total_queries,requested_qps,achieved_qps,total_bytes_rx,total_byte
 120,5040,39.97,39.67,82279002,15240960,0.62,0.11,388.134,457.068,446.739,524.929,535.555,569.859,593.868
 120,2737,20.49,21.55,44727453,8276688,0.34,0.06,352.849,423.693,406.253,486.015,509.429,535.926,556.451
 ......
+
+```
+
+## mediawiki
+
+### install mediawiki
+
+Use the instructions provided under packages/mediawiki/README.md
+
+### run mediawiki
+
+```
+./benchpress_cli.py run oss_performance_mediawiki_mlp
+```
+
+### Reporting
+
+Once the run finishes,benchpress will report results in JSON format below
+
+```
+{
+    "Combined": {
+        "Siege requests": 69942,
+        "Siege wall sec": 0.17,
+        "Siege RPS": 1167.84,
+        "Siege successful requests": 66431,
+        "Siege failed requests": 0,
+        "Nginx hits": 70141,
+        "Nginx avg bytes": 191484.28321524,
+        "Nginx avg time": 0.16001578249526,
+        "Nginx P50 time": 0.158,
+        "Nginx P90 time": 0.212,
+        "Nginx P95 time": 0.234,
+        "Nginx P99 time": 0.28,
+        "Nginx 200": 66564,
+        "Nginx 499": 29,
+        "Nginx 404": 3548,
+        "canonical": 1
+    }
+}
 ```
