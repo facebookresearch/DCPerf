@@ -230,6 +230,8 @@ printf "scaled peak qps = %.2f\n" $peak_qps
 high_qps=$peak_qps
 low_qps=1
 cur_qps=$peak_qps
+max_iters=25
+n_iters=0
 
 # binary search to approx. location
 loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1))" | bc)
@@ -249,11 +251,12 @@ while [[ $loop_cond -eq 1 ]]; do
     low_qps=$cur_qps
   fi
 
-  loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1))" | bc)
+  n_iters=$(echo "$n_iters + 1" | bc)
+  loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1) && $n_iters < $max_iters)" | bc)
 done
 
-# do fine tuning
-loop_cond=$(echo "($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99))" | bc)
+# do fine tuning (skip if the searching loop failed to converge within limit)
+loop_cond=$(echo "($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99) && $n_iters < $max_iters)" | bc)
 while [[ $loop_cond -eq 1 ]]; do
   cur_qps=$(echo "scale=5; $cur_qps * 98 / 100" | bc)
 
@@ -261,7 +264,8 @@ while [[ $loop_cond -eq 1 ]]; do
   run_loadtest measured_qps measured_latency $cur_qps
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
-  loop_cond=$(echo "($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99))" | bc)
+  n_iters=$(echo "$n_iters + 1" | bc)
+  loop_cond=$(echo "($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99) && $n_iters < $max_iters)" | bc)
 done
 
 # do final measurement
@@ -269,5 +273,9 @@ experiment_time=$final_experiment_time
 run_loadtest measured_qps measured_latency $cur_qps
 printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
+# report non-converging error if iteration reaches max tries
+if [ "$n_iters" -ge "$max_iters" ]; then
+    printf "error: binary search iterated %d times but latency still could not converge to target.\n" "$n_iters"
+fi
 
 # End of file
