@@ -11,8 +11,6 @@
     - '--siege-timeout=11m'
     - '--run-as-root'
     - '--i-am-not-benchmarking'
-  hooks:
-    - hook: fb_chef_off_turbo_on
 
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mlp
@@ -27,8 +25,6 @@
     - '--siege-timeout=11m'
     - '--run-as-root'
     - '--i-am-not-benchmarking'
-  hooks:
-    - hook: fb_chef_off_turbo_on
 
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mem
@@ -43,8 +39,6 @@
     - '--siege-timeout=11m'
     - '--run-as-root'
     - '--i-am-not-benchmarking'
-  hooks:
-    - hook: fb_chef_off_turbo_on
 
 - benchmark: django_workload
   name: django_workload_default
@@ -133,5 +127,3 @@
         - '--real'
       vars:
         - 'server_hostname'
-  hooks:
-    - hook: fb_chef_off_turbo_on
