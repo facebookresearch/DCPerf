@@ -117,7 +117,10 @@
         - '--fast-threads-ratio=0.75'
         - '--dispatcher-to-fast-ratio=0.25'
         - '--slow-to-fast-ratio=3'
+        - '--interface-name={interface_name}'
         - '--real'
+      vars:
+        - 'interface_name'
     client:
       args:
         - 'client'

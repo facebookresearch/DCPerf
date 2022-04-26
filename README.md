@@ -57,7 +57,9 @@ Run the following command:
 #### On the server
 
 ```
-./benchpress_cli.py run tao_bench_64g -r server
+# Replace eth0 with the actual network interface name if the interface in your
+# system is not called eth0
+./benchpress_cli.py run tao_bench_64g -r server -i '{"interface_name": "eth0"}'
 ```
 
 #### On the client

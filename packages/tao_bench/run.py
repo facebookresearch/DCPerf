@@ -49,7 +49,7 @@ def run_server(args):
     n_channels = int(n_cores * args.nic_channel_ratio)
     # set # channels
     try:
-        cmd = ["ethtool", "-L", "eth0", "combined", str(n_channels)]
+        cmd = ["ethtool", "-L", args.interface_name, "combined", str(n_channels)]
         run_cmd(cmd)
     except Exception as e:
         print(f"Failed to set channels to {n_channels}: {str(e)}")
@@ -217,6 +217,12 @@ def init_parser():
         type=float,
         default=3,
         help="ratio of # fast threads to # slow threads",
+    )
+    server_parser.add_argument(
+        "--interface-name",
+        type=str,
+        default="eth0",
+        help="name of the NIC interface",
     )
     # client-side arguments
     client_parser.add_argument(
