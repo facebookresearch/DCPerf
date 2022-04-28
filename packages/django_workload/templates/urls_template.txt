@@ -1,0 +1,5 @@
+http://localhost:8000/feed_timeline 30
+http://localhost:8000/timeline 30
+http://localhost:8000/bundle_tray 15
+http://localhost:8000/inbox 20
+http://localhost:8000/seen POST <seen.json 5

@@ -1,0 +1,11 @@
+
+
+@require_user
+def inbox{IDX}(request):
+    # produce an inbox from different sources of information
+    MLP.run(random.randint(50000, 100000), 5)
+    inbox = Inbox(request)
+    result = inbox.results()
+    result = inbox.post_process(result)
+    return HttpResponse(json.dumps(result), content_type='text/json')
+

@@ -1,0 +1,73 @@
+From 85946a1088f2e0c2bcfb438598cb5589b956be49 Mon Sep 17 00:00:00 2001
+From: bambowu <bambowu@fb.com>
+Date: Tue, 4 Aug 2020 12:51:18 -0700
+Subject: [PATCH] Invoke icachebuster library functions
+
+---
+ django-workload/django_workload/views.py | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/django-workload/django_workload/views.py b/django-workload/django_workload/views.py
+index 169d29e..71a9213 100644
+--- a/django-workload/django_workload/views.py
++++ b/django-workload/django_workload/views.py
+@@ -8,6 +8,8 @@ import json
+ import random
+ import uuid
+
++from ctypes import CDLL
++
+ from django.core.cache import cache
+ from django.http import HttpResponse
+ from django.views.decorators.cache import cache_page
+@@ -30,6 +32,8 @@ from .bundle_tray import BundleTray
+ # Used for sample-based profiling
+ SAMPLE_COUNT = 0
+
++libib = CDLL("libicachebuster.so")
++
+
+ @cache_page(30)
+ def index(request):
+@@ -64,6 +68,7 @@ def index(request):
+ @require_user
+ def feed_timeline(request):
+     # Produce a JSON response containing the 'timeline' for a given user
++    libib.ibrun(random.randint(100000, 200000))
+     feed_timeline = FeedTimeline(request)
+     result = feed_timeline.get_timeline()
+     # sort by timestamp and do some more "meaningful" work
+@@ -74,6 +79,7 @@ def feed_timeline(request):
+ @require_user
+ def timeline(request):
+     # Produce a JSON response containing the feed of entries for a user
++    libib.ibrun(random.randint(100000, 200000))
+     feed = Feed(request)
+     result = feed.feed_page()
+     return HttpResponse(json.dumps(result), content_type='text/json')
+@@ -82,6 +88,7 @@ def timeline(request):
+ @require_user
+ def bundle_tray(request):
+     # Fetch bundles of content from followers to show
++    libib.ibrun(random.randint(100000, 200000))
+     bundle = BundleTray(request)
+     result = bundle.get_bundle()
+     result = bundle.post_process(result)
+@@ -91,6 +98,7 @@ def bundle_tray(request):
+ @require_user
+ def inbox(request):
+     # produce an inbox from different sources of information
++    libib.ibrun(random.randint(100000, 200000))
+     inbox = Inbox(request)
+     result = inbox.results()
+     result = inbox.post_process(result)
+@@ -105,6 +113,7 @@ def seen(request):
+     # some random data of our own, cached in memcached
+     global SAMPLE_COUNT
+     should_profile = False
++    libib.ibrun(random.randint(100000, 200000))
+
+     if settings.PROFILING:
+         SAMPLE_COUNT += 1
+--
+2.24.1

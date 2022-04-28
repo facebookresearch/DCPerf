@@ -1,0 +1,150 @@
+From defd6f5f7617352b2b0c0543d8dce7455169a1ea Mon Sep 17 00:00:00 2001
+From: bambowu <bambowu@fb.com>
+Date: Thu, 30 Jul 2020 23:55:04 -0700
+Subject: [PATCH] Increase MLP by adding multi-lane pointer chasing
+
+---
+ django-workload/django_workload/mlp.py   | 56 ++++++++++++++++++++++++
+ django-workload/django_workload/urls.py  |  1 +
+ django-workload/django_workload/views.py | 13 +++++-
+ 3 files changed, 69 insertions(+), 1 deletion(-)
+ create mode 100644 django-workload/django_workload/mlp.py
+
+diff --git a/django-workload/django_workload/mlp.py b/django-workload/django_workload/mlp.py
+new file mode 100644
+index 0000000..fc064f0
+--- /dev/null
++++ b/django-workload/django_workload/mlp.py
+@@ -0,0 +1,56 @@
++# Copyright 2020-present, Facebook, Inc.
++# All rights reserved.
++#
++# This source code is licensed under the license found in the
++# LICENSE file in the root directory of this source tree.
++
++import random
++from django.core.cache import cache
++
++class MemoryLevelParallelism:
++
++    def __init__(self, dict_size=1<<14):
++        self.dict_size = dict_size
++        big_dict = cache.get("big_dict")
++        if big_dict is None or len(big_dict) != dict_size:
++            # need to initialize a big array
++            big_dict = {}
++            alist = [i for i in range(dict_size)]
++            random.shuffle(alist)
++            for key in alist:
++                big_dict[str(key)] = str(key + 1)
++            big_dict[str(dict_size - 1)] = "0"
++            cache.set("big_dict", big_dict, 24 * 60 * 60)
++
++    def run(self , num_hits=1000, num_lanes=4):
++        big_dict = cache.get("big_dict")
++        val0 = str(0 * self.dict_size // num_lanes)
++        val1 = str(1 * self.dict_size // num_lanes)
++        val2 = str(2 * self.dict_size // num_lanes)
++        val3 = str(3 * self.dict_size // num_lanes)
++        val4 = str(4 * self.dict_size // num_lanes)
++        val5 = str(5 * self.dict_size // num_lanes)
++        val6 = str(6 * self.dict_size // num_lanes)
++        for i in range(num_hits):
++            val0 = big_dict[val0]
++            if 2 > num_lanes:
++                continue
++            val1 = big_dict[val1]
++            if 3 > num_lanes:
++                continue
++            val2 = big_dict[val2]
++            if 4 > num_lanes:
++                continue
++            val3 = big_dict[val3]
++            if 5 > num_lanes:
++                continue
++            val4 = big_dict[val4]
++            if 6 > num_lanes:
++                continue
++            val5 = big_dict[val5]
++            if 7 > num_lanes:
++                continue
++            val6 = big_dict[val6]
++        return [val0, val1, val2, val3]
++
++MLP = MemoryLevelParallelism()
+diff --git a/django-workload/django_workload/urls.py b/django-workload/django_workload/urls.py
+index fffad1c..435d784 100644
+--- a/django-workload/django_workload/urls.py
++++ b/django-workload/django_workload/urls.py
+@@ -16,4 +16,5 @@ urlpatterns = [
+     url(r'^bundle_tray$', views.bundle_tray, name='bundle_tray'),
+     url(r'^inbox$', views.inbox, name='inbox'),
+     url(r'^seen$', views.seen, name='seen'),
++    url(r'^mlp$', views.mlp, name='mlp'),
+ ]
+diff --git a/django-workload/django_workload/views.py b/django-workload/django_workload/views.py
+index 169d29e..324352a 100644
+--- a/django-workload/django_workload/views.py
++++ b/django-workload/django_workload/views.py
+@@ -25,7 +25,7 @@ from .models import (
+     BundleSeenModel,
+ )
+ from .bundle_tray import BundleTray
+-
++from .mlp import MLP
+ 
+ # Used for sample-based profiling
+ SAMPLE_COUNT = 0
+@@ -64,6 +64,7 @@ def index(request):
+ @require_user
+ def feed_timeline(request):
+     # Produce a JSON response containing the 'timeline' for a given user
++    MLP.run(random.randint(50000, 100000), 5)
+     feed_timeline = FeedTimeline(request)
+     result = feed_timeline.get_timeline()
+     # sort by timestamp and do some more "meaningful" work
+@@ -74,6 +75,7 @@ def feed_timeline(request):
+ @require_user
+ def timeline(request):
+     # Produce a JSON response containing the feed of entries for a user
++    MLP.run(random.randint(50000, 100000), 5)
+     feed = Feed(request)
+     result = feed.feed_page()
+     return HttpResponse(json.dumps(result), content_type='text/json')
+@@ -82,6 +84,7 @@ def timeline(request):
+ @require_user
+ def bundle_tray(request):
+     # Fetch bundles of content from followers to show
++    MLP.run(random.randint(50000, 100000), 5)
+     bundle = BundleTray(request)
+     result = bundle.get_bundle()
+     result = bundle.post_process(result)
+@@ -91,6 +94,7 @@ def bundle_tray(request):
+ @require_user
+ def inbox(request):
+     # produce an inbox from different sources of information
++    MLP.run(random.randint(50000, 100000), 5)
+     inbox = Inbox(request)
+     result = inbox.results()
+     result = inbox.post_process(result)
+@@ -105,6 +109,7 @@ def seen(request):
+     # some random data of our own, cached in memcached
+     global SAMPLE_COUNT
+     should_profile = False
++    MLP.run(random.randint(50000, 100000), 5)
+ 
+     if settings.PROFILING:
+         SAMPLE_COUNT += 1
+@@ -134,3 +139,9 @@ def seen(request):
+                 ).save()
+ 
+     return HttpResponse(json.dumps({}), content_type='text/json')
++
++
++@require_user
++def mlp(request):
++    vals = MLP.run(10000, 5)
++    return HttpResponse(json.dumps(vals), content_type='text/json')
+-- 
+2.24.1
+

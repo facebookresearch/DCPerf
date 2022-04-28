@@ -1,0 +1,42 @@
+From a713b52a2754572478edf99181d5300b7ae49a5d Mon Sep 17 00:00:00 2001
+From: bambowu <bambowu@fb.com>
+Date: Fri, 31 Jul 2020 08:14:49 -0700
+Subject: [PATCH] Randomize url generation
+
+---
+ client/gen-urls-file | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/client/gen-urls-file b/client/gen-urls-file
+index 006dcfd..42141d9 100755
+--- a/client/gen-urls-file
++++ b/client/gen-urls-file
+@@ -55,17 +55,17 @@ def parse_urls():
+             url_dict[request] = repeat
+             line_no = line_no + 1
+ 
++    # build a random list of URLs with their own repeats
++    url_list = []
++    for request, repeat in url_dict.items():
++        for i in range(repeat):
++            url_list.append(request)
++    random.shuffle(url_list)
++
+     # write to URL input file for Siege
+     with open(URLS_OUT, 'w') as url_file:
+-        while (total > 0):
+-            current_url = random.sample(list(url_dict), 1)[0]
+-            remaining = url_dict[current_url]
+-            if remaining > 1:
+-                url_dict[current_url] = remaining - 1
+-            else:
+-                del url_dict[current_url]
++        for current_url in url_list:
+             url_file.write(current_url + "\n")
+-            total = total - 1
+ 
+     print ("File " + URLS_OUT + " generated successfully\n")
+ 
+-- 
+2.24.1
+

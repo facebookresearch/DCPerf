@@ -1,0 +1,68 @@
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+import json
+import random
+import uuid
+
+from django.core.cache import cache
+from django.http import HttpResponse
+from django.views.decorators.cache import cache_page
+from django.views.decorators.http import require_http_methods
+from django_statsd.clients import statsd
+from django.conf import settings
+
+from cassandra.cqlengine.query import BatchQuery
+
+from .users import require_user
+from .feed import Feed
+from .inbox import Inbox
+from .feed_timeline import FeedTimeline
+from .models import (
+    BundleSeenModel,
+)
+from .bundle_tray import BundleTray
+from .mlp import MLP
+
+# Used for sample-based profiling
+SAMPLE_COUNT = 0
+
+
+@cache_page(30)
+def index(request):
+    return HttpResponse('''\
+<html><head><title>Welcome to the Django workload!</title></head>
+<body>
+<h1>Welcome to the Django workload!</h1>
+
+<p>The following views are being tested</p>
+
+<dl>
+<dt><a href="/feed_timeline">feed_timeline</a></dt>
+<dd>A simple per-user feed of entries in time</dd>
+
+<dt><a href="/timeline">timeline</a></dt>
+<dd>A ranked feed of entries from other users</dd>
+
+<dt><a href="/bundle_tray">bundle_tray</a></dt>
+<dd>A feed of current bundles, with nested content, from other users</dd>
+
+<dt><a href="/inbox">inbox</a></dt>
+<dd>The inbox view in a mobile app for the current user</dd>
+
+<dt>/seen (POST only endpoint)</dt>
+<dd>A view to increase counters and last-seen timestamps</dd>
+</dl>
+
+</body>
+</html>
+''')
+
+
+@require_user
+def mlp(request):
+    vals = MLP.run(10000, 5)
+    return HttpResponse(json.dumps(vals), content_type='text/json')

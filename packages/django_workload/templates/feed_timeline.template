@@ -1,0 +1,11 @@
+
+
+@require_user
+def feed_timeline{IDX}(request):
+    # Produce a JSON response containing the 'timeline' for a given user
+    MLP.run(random.randint(50000, 100000), 5)
+    feed_timeline = FeedTimeline(request)
+    result = feed_timeline.get_timeline()
+    # sort by timestamp and do some more "meaningful" work
+    result = feed_timeline.post_process(result)
+    return HttpResponse(json.dumps(result), content_type='text/json')

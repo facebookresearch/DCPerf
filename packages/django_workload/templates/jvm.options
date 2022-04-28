@@ -1,0 +1,37 @@
+# Note: Make sure -Djava.net.preferIPv4Stack=true is not set or is set to false. Otherwise Cassandra won't bind to the IPv6 address
+
+-Xms16G
+-Xmx24G
+-Xmn4G
+
+-XX:+HeapDumpOnOutOfMemoryError
+-Xss256k
+-XX:StringTableSize=1000003
+
+# CMS settings
+-XX:+UseParNewGC
+-XX:+UseConcMarkSweepGC
+-XX:+CMSParallelRemarkEnabled
+-XX:SurvivorRatio=4
+-XX:MaxTenuringThreshold=1
+-XX:CMSInitiatingOccupancyFraction=60
+-XX:+UseCMSInitiatingOccupancyOnly
+
+-XX:+CMSScavengeBeforeRemark
+-XX:CMSMaxAbortablePrecleanTime=60000
+
+-XX:CMSWaitDuration=30000
+-XX:+CMSParallelInitialMarkEnabled
+-XX:+CMSEdenChunksRecordAlways
+-XX:+CMSClassUnloadingEnabled
+
+# Additional settings
+-XX:+UseCondCardMark
+-XX:MaxTenuringThreshold=2
+-XX:-UseBiasedLocking
+-XX:+UseTLAB
+-XX:+ResizeTLAB
+-XX:+PerfDisableSharedMem
+-XX:+AlwaysPreTouch
+-XX:+UnlockDiagnosticVMOptions
+-XX:ParGCCardsPerStrideChunk=4096

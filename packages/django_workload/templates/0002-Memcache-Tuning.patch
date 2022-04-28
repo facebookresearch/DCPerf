@@ -1,0 +1,12 @@
+diff --git a/django-workload/django_workload/inbox.py b/django-workload/django_workload/inbox.py
+index d6a97ec..c966e41 100644
+--- a/django-workload/django_workload/inbox.py
++++ b/django-workload/django_workload/inbox.py
+@@ -137,5 +137,5 @@ class Inbox(object):
+
+         entries = self.load_inbox_entries()
+         result = {'items': self.aggregate(entries)}
+-        cache.set(key, result, 15)
++        cache.set(key, result, 24 * 60 * 60) #15
+         return result
+

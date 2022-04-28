@@ -1,0 +1,41 @@
+
+
+@require_http_methods(['POST'])
+@require_user
+def seen{IDX}(request):
+    # Record stats for items marked as seen on a mobile device
+    # For workload purposes we ignore the posted data, and instead generate
+    # some random data of our own, cached in memcached
+    global SAMPLE_COUNT
+    should_profile = False
+    MLP.run(random.randint(50000, 100000), 5)
+
+    if settings.PROFILING:
+        SAMPLE_COUNT += 1
+        if SAMPLE_COUNT >= settings.SAMPLE_RATE:
+            SAMPLE_COUNT = 0
+            should_profile = True
+
+    bundleids = cache.get('bundleids')
+    if bundleids is None:
+        bundleids = [uuid.uuid4() for _ in range(1000)]
+        cache.set('bundleids', bundleids, 24 * 60 * 60)
+    entryids = cache.get('entryids')
+    if entryids is None:
+        entryids = [uuid.uuid4() for _ in range(10000)]
+        cache.set('entryids', entryids, 24 * 60 * 60)
+
+    with statsd.pipeline() as pipe, BatchQuery() as b:
+        for bundleid in random.sample(bundleids, random.randrange(3)):
+            if should_profile:
+                pipe.incr('workloadoutput.bundle.{}.seen'.format(bundleid.hex))
+            for entryid in random.sample(entryids, random.randrange(5)):
+                if should_profile:
+                    pipe.incr('workloadoutput.bundle.{}.{}.seen'.format(
+                        bundleid.hex, entryid.hex))
+                BundleSeenModel(
+                    userid=request.user.id, bundleid=bundleid, entryid=entryid
+                ).save()
+
+    return HttpResponse(json.dumps({}), content_type='text/json')
+

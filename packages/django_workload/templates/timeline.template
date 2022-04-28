@@ -1,0 +1,10 @@
+
+
+@require_user
+def timeline{IDX}(request):
+    # Produce a JSON response containing the feed of entries for a user
+    MLP.run(random.randint(50000, 100000), 5)
+    feed = Feed(request)
+    result = feed.feed_page()
+    return HttpResponse(json.dumps(result), content_type='text/json')
+
