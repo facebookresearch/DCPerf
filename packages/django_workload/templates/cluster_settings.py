@@ -16,7 +16,7 @@ DEBUG = False
 ALLOWED_HOSTS = ["localhost", "ip6-localhost", "127.0.0.1", "::1"]
 
 # Cassandra database
-DATABASES["default"]["HOST"] = "localhost"
+DATABASES["default"]["HOST"] = "__CASSANDRA_DB_ADDR__"
 
 # Monitoring server
 STATSD_HOST = "localhost"

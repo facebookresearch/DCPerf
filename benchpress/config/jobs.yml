@@ -44,10 +44,19 @@
   name: django_workload_default
   description: Default run for django-workload
   tee_output: true
-  args:
-    - '-d 5M'
-    - '-l ./siege.log'
-    - '-s urls.txt'
+  roles:
+    clientserver:
+      args:
+        - '-r clientserver'
+        - '-d 5M'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c {db_addr}'
+      vars:
+        - 'db_addr'
+    db:
+      args:
+        - '-r db'
 
 - name: feedsim_default
   benchmark: feedsim

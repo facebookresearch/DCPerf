@@ -85,7 +85,7 @@ mkdir -p /data/cassandra/{commitlog,data,saved_caches,hints}/
 chmod -R 0700 /data/cassandra
 
 # Copy configurations
-cp "${TEMPLATES_DIR}/cassandra.yaml" "${OUT}/apache-cassandra/conf/cassandra.yaml" || exit 1
+cp "${TEMPLATES_DIR}/cassandra.yaml" "${OUT}/apache-cassandra/conf/cassandra.yaml.template" || exit 1
 
 # 5. Install Django and its dependencies
 cd "${OUT}/django-workload/django-workload" || exit 1
@@ -108,8 +108,7 @@ pip install numpy --no-index --find-links file://"$OUT/django-workload/django-wo
 pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 
 # Configure Django and uWSGI
-cp cluster_settings_template.py cluster_settings.py || exit 1
-cp "${TEMPLATES_DIR}/cluster_settings.py" "${OUT}/django-workload/django-workload/cluster_settings.py" || exit 1
+cp "${TEMPLATES_DIR}/cluster_settings.py" "${OUT}/django-workload/django-workload/cluster_settings.py.template" || exit 1
 cp "${TEMPLATES_DIR}/uwsgi.ini" "${OUT}/django-workload/django-workload/uwsgi.ini" || exit 1
 cp "${TEMPLATES_DIR}/urls_template.txt" "${OUT}/django-workload/client/urls_template.txt" || exit 1
 
