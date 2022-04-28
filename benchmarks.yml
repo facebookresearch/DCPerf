@@ -13,8 +13,8 @@ oss_performance_mediawiki:
 
 django_workload:
   parser: django_workload
-  install_script: ./bpkgs/django_workload/install_django_workload.sh
-  cleanup_script: ./bpkgs/django_workload/cleanup_django_workload.sh
+  install_script: ./packages/django_workload/install_django_workload.sh
+  cleanup_script: ./packages/django_workload/cleanup_django_workload.sh
   path: ./benchmarks/django_workload/bin/run.sh
   tags:
     scope:
