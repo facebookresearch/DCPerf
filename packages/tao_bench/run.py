@@ -20,7 +20,7 @@ def get_affinitize_nic_path():
     if os.path.exists(default_path):
         return default_path
     else:
-        return os.path.join(BENCHPRESS_ROOT, "affinitize_nic")
+        return os.path.join(TAO_BENCH_DIR, "affinitize/affinitize_nic.py")
 
 
 def run_cmd(

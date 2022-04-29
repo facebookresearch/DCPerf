@@ -61,6 +61,7 @@ mkdir -p "${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 cp memcached "${BENCHPRESS_ROOT}/benchmarks/tao_bench/tao_bench_server"
 cp "${BPKGS_TAO_BENCH_ROOT}/db_items.json" "${BENCHPRESS_ROOT}/benchmarks/tao_bench/"
 cp "${BPKGS_TAO_BENCH_ROOT}/leader_sizes.json" "${BENCHPRESS_ROOT}/benchmarks/tao_bench/"
+cp -r "${BPKGS_TAO_BENCH_ROOT}/affinitize" "${BENCHPRESS_ROOT}/benchmarks/tao_bench/"
 
 cd "$BP_TMP" || exit 1
 
