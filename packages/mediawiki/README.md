@@ -14,7 +14,34 @@ git $(fwdproxy-config git) \
 
 cd hhvm
 git $(fwdproxy-config git) \
-    submodule update --init --recursive
+    submodule update --init --recursive # (although this command fails, it is important to run it)
+
+The above submodule update command fails because of some broken links - [See Issue](https://issues.guix.gnu.org/42162).
+
+
+1. Update the broken submodule links for cudf and dose with the respective links:
+	1. https://gitlab.com/irill/cudf
+		1. Find all references of https://scm.gforge.inria.fr/anonscm/git/cudf/cudf.git in the hhvm directory cloned earlier
+			1. grep -nr https://scm.gforge.inria.fr/anonscm/git/cudf/cudf.git .
+			2. Edit the files from the command above and replace the links with https://gitlab.com/irill/cudf.git (Alternatively you can use sed)
+			3. grep -nr https://gforge.inria.fr/git/cudf/cudf.git .
+			4. Edit the files from the command above and replace the links with https://gitlab.com/irill/cudf.git (Alternatively you can use sed)
+	2. https://gitlab.com/irill/dose3
+		1. Find all references of https://scm.gforge.inria.fr/anonscm/git/dose/dose.git in the hhvm directory as follows:
+			1. grep -nr https://scm.gforge.inria.fr/anonscm/git/dose/dose.git .
+			2. Edit the files from the command above and replace the links with https://gitlab.com/irill/dose3.git
+2. Re-run git submodule update --init --recursive (It should still fail because the link https://gforge.inria.fr/git/dose-testdata/dose-testdata.git is broken). A workaround is as follows:
+	1. cd $HOME
+	2. git clone https://gitlab.com/irill/dose3.git
+	3. mv $HOME/dose3/test/* $HOME/hhvm-build/hhvm/third_party/ocaml/opam_deps/dose/tests/
+	4. rm -rf $HOME/dose3
+	5. grep -nr https://gforge.inria.fr/git/dose-testdata/dose-testdata.git .
+		1. Remove all references to the test submodule from the files listed in the result of the preceeding grep command
+	6. Running git submodule update --init --recursive should still result in the following errors but we can now proceed to installing the other components
+		1. fatal: No url found for submodule path 'third-party/ocaml/opam_deps/dose/tests' in .gitmodules
+		   Failed to recurse into submodule path 'third-party/ocaml/opam_deps/dose'
+                   Failed to recurse into submodule path 'third-party'
+
 ```
 
 
@@ -53,11 +80,13 @@ gcc gcc-c++ libstdc++ libstdc++-static libatomic \
  libmcrypt-devel libmemcached-devel libsodium-devel snappy-devel \
  libxslt-devel numactl-libs \
 numactl-devel openldap-devel glib2-devel \
-perl
+perl krb5-devel
 ```
 
+Development Tools:
+
 ```
-scl enable devtoolset-8 bash
+sudo dnf -y group install "Development Tools"
 ```
 
 ## Building dependencies
@@ -89,7 +118,7 @@ Download and Install Boost 1.67
 ```
 cd ${HOME}/hhvm-build
 http_proxy=fwdproxy:8080 https_proxy=fwdproxy:8080 \
-   wget -q https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.gz
+   wget -q https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.bz2
 tar -zxvf boost_1_67_0.tar.gz
 cd boost_1_67_0/
 
@@ -162,11 +191,11 @@ cd tbb/
 
 make -j12
 cp -r include/tbb ${HOME}/hhvm-build/build-deps/include/
-cp -r build/linux_intel64_gcc_cc7_libc2.17_kernel4.16.18_release/libtbb* \
+cp -r build/linux_intel64_gcc_cc8_libc2.28_kernel4.18.0_release/libtbb* \
     ${HOME}/hhvm-build/build-deps/lib/
 ```
 
-Download  and Install OpenSSL 1.1.1b
+Download  and Install OpenSSL 1.1.1k
 
 
 ```
@@ -180,6 +209,36 @@ make -j12
 make install
 ```
 
+
+Download and Install MariaDB server
+
+
+```
+sudo dnf -y install mariadb-server
+sudo systemctl start mysqld
+sudo systemctl enable mysqld
+```
+
+Secure MariaDB
+
+
+```
+sudo mysql_secure_installation 
+```
+
+
+Use system Openssl (on Centos 8 stream - Openssl 1.1.1k)
+
+1. Remove libssl.so and libcrypto.so from $HOME/hhvm-build/build-deps/lib
+	1. cd $HOME/hhvm-build/build-deps/lib
+	2. mkdir ../lib-backup
+	3. mv libssl.* libcrypto.* ../lib-backup
+2. Create symbolic links in $HOME/hhvm-build/build-deps/lib to /lib64/libssl.so.1.1.1k and /lib64/libcrypto.so.1.1
+	1. cd $HOME/hhvm-build/build-deps/lib
+	2. ln -s /lib64/libssl.so.1.1.1k libssl.so
+	3. ln -s /lib64/libcrypto.so.1.1 libcrypto.so
+
+
 ## Configure and compile HHVM
 
 ```
@@ -190,9 +249,20 @@ $HOME/hhvm-build/build-deps/bin/cmake ../ -G 'Unix Makefiles' -Wno-dev \
     -DCMAKE_PREFIX_PATH=${HOME}/hhvm-build/build-deps \
     -DSTATIC_CXX_LIB=On -DCMAKE_BUILD_TYPE=RelWithDebInfo
 http_proxy=fwdproxy:8080 https_proxy=fwdproxy:8080 make -j24
-make install
+sudo make install
 
 ```
 
 
+Run hhvm
 
+
+```
+hhvm --version
+```
+
+You should see the following output:
+
+HipHop VM 3.30.12 (rel)
+Compiler: tags/HHVM-3.30.12-0-gabe9500970b23bc9c385bf18a15bd38e830859a6
+Repo schema: 14ae18005e6fed538bd2ad7bb443dc811e53c4a1
