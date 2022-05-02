@@ -195,7 +195,7 @@ cp -r build/linux_intel64_gcc_cc8_libc2.28_kernel4.18.0_release/libtbb* \
     ${HOME}/hhvm-build/build-deps/lib/
 ```
 
-Download  and Install OpenSSL 1.1.1k
+Download  and Install OpenSSL 1.1.1b
 
 
 ```
@@ -229,6 +229,7 @@ sudo mysql_secure_installation
 
 Use system Openssl (on Centos 8 stream - Openssl 1.1.1k)
 
+```
 1. Remove libssl.so and libcrypto.so from $HOME/hhvm-build/build-deps/lib
 	1. cd $HOME/hhvm-build/build-deps/lib
 	2. mkdir ../lib-backup
@@ -237,7 +238,7 @@ Use system Openssl (on Centos 8 stream - Openssl 1.1.1k)
 	1. cd $HOME/hhvm-build/build-deps/lib
 	2. ln -s /lib64/libssl.so.1.1.1k libssl.so
 	3. ln -s /lib64/libcrypto.so.1.1 libcrypto.so
-
+```
 
 ## Configure and compile HHVM
 
