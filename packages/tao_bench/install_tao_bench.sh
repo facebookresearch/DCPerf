@@ -55,7 +55,7 @@ if ! [ -d "${FOLLY_INSTALLED_PATH}/lib64" ]; then
 fi
 
 # Build and install
-./configure --with-folly="${FOLLY_INSTALLED_PATH}" --with-fmt="${FMT_INSTALLED_PATH}"
+./configure --with-folly="${FOLLY_INSTALLED_PATH}" --with-fmt="${FMT_INSTALLED_PATH}" --enable-tls
 make
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 cp memcached "${BENCHPRESS_ROOT}/benchmarks/tao_bench/tao_bench_server"
@@ -72,9 +72,11 @@ cd memtier_client || exit 1
 
 # Build and install
 autoreconf --force --install
-./configure
+./configure --enable-tls
 make || ( automake --add-missing && make )
 cp memtier_benchmark "${BENCHPRESS_ROOT}/benchmarks/tao_bench/tao_bench_client"
 
-cd "$BP_TMP" || exit 1
+# Extract certificates
+tar -zxf "${BPKGS_TAO_BENCH_ROOT}/certs.tar.gz" -C "${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 
+cd "$BP_TMP" || exit 1

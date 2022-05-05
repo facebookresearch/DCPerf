@@ -80,6 +80,8 @@ def run_server(args):
     s_binary = os.path.join(TAO_BENCH_DIR, "tao_bench_server")
     extended_options = [
         "lru_crawler",
+        f"ssl_chain_cert={os.path.join(TAO_BENCH_DIR, 'certs/example.crt')}",
+        f"ssl_key={os.path.join(TAO_BENCH_DIR, 'certs/example.key')}",
         f"tao_it_gen_file={os.path.join(TAO_BENCH_DIR, 'leader_sizes.json')}",
         "tao_max_item_size=65536",
         "tao_gen_payload=0",
@@ -107,6 +109,7 @@ def run_server(args):
         "binary",
         "-I",
         "16m",
+        "-Z",
         "-o",
         ",".join(extended_options),
     ]
@@ -133,6 +136,8 @@ def get_client_cmd(args, n_seconds):
     # command
     s_binary = os.path.join(TAO_BENCH_DIR, "tao_bench_client")
     s_host = args.server_hostname
+    s_cert = os.path.join(TAO_BENCH_DIR, "./certs/example.crt")
+    s_key = os.path.join(TAO_BENCH_DIR, "./certs/example.key")
     client_cmd = [
         s_binary,
         "-s",
@@ -141,6 +146,10 @@ def get_client_cmd(args, n_seconds):
         "11211",
         "-P",
         "memcache_binary",
+        f"--cert={s_cert}",
+        f"--key={s_key}",
+        "--tls",
+        "--tls-skip-verify",
         "--key-pattern=R:R",
         "--distinct-client-seed",
         "--randomize",
