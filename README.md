@@ -54,6 +54,8 @@ Run the following command:
 
 ### Run tao_bench
 
+It's recommended to run tao_bench benchmark using one server and two client machines.
+
 #### On the server
 
 ```
@@ -62,7 +64,9 @@ Run the following command:
 ./benchpress_cli.py run tao_bench_64g -r server -i '{"interface_name": "eth0"}'
 ```
 
-#### On the client
+#### On the clients
+
+Run the following command on two client machines simultaneously:
 
 ```
 ./benchpress_cli.py run tao_bench_64g -r client -i '{"server_hostname": "<server_address>"}'
