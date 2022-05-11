@@ -308,3 +308,8 @@ report the results in JSON format like the following:
   "timestamp": 1651108577
 }
 ```
+
+## spark_standalone
+
+Please refer to the detailed instruction at [packages/spark_standalone/README.md](packages/spark_standalone/README.md)
+regarding how to prepare, install and run spark_standalone benchmark.
