@@ -64,8 +64,8 @@ feedsim:
 
 spark_standalone:
   parser: spark_standalone
-  install_script: install_spark_standalone.sh
-  path: ./templates/spark_standalone/runner.py
+  install_script: ./packages/spark_standalone/install_spark_standalone.sh
+  path: ./packages/spark_standalone/templates/runner.py
   tags:
     scope:
       - app

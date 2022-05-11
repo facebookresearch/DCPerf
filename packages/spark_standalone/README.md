@@ -4,6 +4,10 @@ This benchmarks requires one machine to run the main Spark workload (the compute
 node) and one or more machines to provide a total of 3 NVMe SSDs (the storage
 nodes) for the compute node to connect as backend storage.
 
+**NOTE**: We are currently working on exporting the benchmark dataset
+externally.  The dataset will be hosted in a different repo, and we will update
+the instruction and pointer regarding the dataset when it's ready for download.
+
 ## Kernel support
 
 Please build a version of Linux kernel with NVMe over TCP support enabled by
