@@ -77,7 +77,7 @@ def read_sys_configs() -> Dict[str, int]:
     )
     # memory
     mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    sys_configs["memory"] = int(mem_bytes / (1024.0 ** 3))
+    sys_configs["memory"] = int(mem_bytes / (1024.0**3))
     return sys_configs
 
 
