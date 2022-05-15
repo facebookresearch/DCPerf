@@ -24,9 +24,7 @@ from .graph500 import Graph500Parser
 from .iperf import IperfParser
 from .ltp import LtpParser
 from .memcached_bench import MemcachedBenchParser
-from .minebench import KMeansParser
-from .minebench import PLSAParser
-from .minebench import RSearchParser
+from .minebench import KMeansParser, PLSAParser, RSearchParser
 from .mlc import MlcParser
 from .multichase_fairness import MultichaseFairnessParser
 from .multichase_pingpong import MultichasePingpongParser

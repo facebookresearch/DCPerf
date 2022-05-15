@@ -9,10 +9,10 @@ import sys
 import time
 
 from affinitize_nic_lib import (
-    get_numa_node_for_netdev,
     collect_netdev_irqs,
     configure_netdev,
     get_cpu_count,
+    get_numa_node_for_netdev,
     get_queues,
     int_to_bitlist,
     netdev_state,

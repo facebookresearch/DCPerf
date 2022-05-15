@@ -24,7 +24,7 @@ Constants:
 import importlib.resources
 import logging
 from pathlib import Path
-from typing import Iterator, IO, Union
+from typing import IO, Iterator, Union
 
 import yaml
 

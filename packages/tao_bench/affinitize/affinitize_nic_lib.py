@@ -8,9 +8,9 @@ import multiprocessing
 import os
 import re
 from itertools import cycle
-from typing import Dict, Iterable, List, Set, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
-from lib.schedule_lib import Scheduler, cpu_info
+from lib.schedule_lib import cpu_info, Scheduler
 
 LOG = logging.getLogger(__name__)
 

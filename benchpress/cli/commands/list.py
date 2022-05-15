@@ -9,7 +9,7 @@
 import click
 from benchpress.lib.job_listing import create_job_listing
 
-from .command import TABLE_FORMAT, BenchpressCommand
+from .command import BenchpressCommand, TABLE_FORMAT
 
 
 class ListCommand(BenchpressCommand):

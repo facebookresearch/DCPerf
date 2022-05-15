@@ -4,7 +4,7 @@ import glob
 import os
 import re
 from itertools import cycle, islice, repeat
-from typing import List, Dict, Tuple, Sequence, Iterator
+from typing import Dict, Iterator, List, Sequence, Tuple
 
 
 class NestedDict(dict):

@@ -13,7 +13,7 @@ import click
 import tabulate
 from benchpress.lib.job import get_target_jobs
 
-from .command import TABLE_FORMAT, BenchpressCommand
+from .command import BenchpressCommand, TABLE_FORMAT
 
 
 class InfoCommand(BenchpressCommand):

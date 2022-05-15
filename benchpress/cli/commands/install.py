@@ -12,10 +12,10 @@ import os
 import click
 from benchpress.lib.job import get_target_jobs
 from benchpress.lib.util import (
-    install_benchmark,
-    verify_install,
-    install_tool,
     initialize_env_vars,
+    install_benchmark,
+    install_tool,
+    verify_install,
 )
 
 from .command import BenchpressCommand
