@@ -4,6 +4,7 @@ set -Eeuo pipefail
 # FIXME(cltorres): Copy/link bpkgs benchmark contents into the BP_TMP automatically.
 BPKGS_TAO_BENCH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_TAO_BENCH_ROOT/../..")"
+COMMON_DIR="${BENCHPRESS_ROOT}/packages/common"
 
 # FIXME(cltorres): Remove once we make the BP_TMP the default working diretory
 cd "$BP_TMP" || exit 1
@@ -61,13 +62,13 @@ mkdir -p "${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 cp memcached "${BENCHPRESS_ROOT}/benchmarks/tao_bench/tao_bench_server"
 cp "${BPKGS_TAO_BENCH_ROOT}/db_items.json" "${BENCHPRESS_ROOT}/benchmarks/tao_bench/"
 cp "${BPKGS_TAO_BENCH_ROOT}/leader_sizes.json" "${BENCHPRESS_ROOT}/benchmarks/tao_bench/"
-cp -r "${BPKGS_TAO_BENCH_ROOT}/affinitize" "${BENCHPRESS_ROOT}/benchmarks/tao_bench/"
+cp -r "${COMMON_DIR}/affinitize" "${BENCHPRESS_ROOT}/benchmarks/tao_bench/"
 
 cd "$BP_TMP" || exit 1
 
 # === Build and install memtier_client (tao_bench_client) ===
 # Copy memtier_client source
-cp -r "${BPKGS_TAO_BENCH_ROOT}/memtier_client" "$BP_TMP/"
+cp -r "${COMMON_DIR}/memtier_client" "$BP_TMP/"
 cd memtier_client || exit 1
 
 # Build and install
@@ -77,6 +78,6 @@ make || ( automake --add-missing && make )
 cp memtier_benchmark "${BENCHPRESS_ROOT}/benchmarks/tao_bench/tao_bench_client"
 
 # Extract certificates
-tar -zxf "${BPKGS_TAO_BENCH_ROOT}/certs.tar.gz" -C "${BENCHPRESS_ROOT}/benchmarks/tao_bench"
+tar -zxf "${COMMON_DIR}/certs.tar.gz" -C "${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 
 cd "$BP_TMP" || exit 1
