@@ -152,7 +152,10 @@
         - '--num-bw-threads=2'
         - '--warmup-time=1200'
         - '--test-time=360'
+        - '--interface-name={interface_name}'
         - '--real'
+      vars:
+        - 'interface_name'
     client:
       args:
         - 'client'

@@ -334,7 +334,9 @@ On both server and client machines, run the following command:
 Run the following command on the server machine:
 
 ```
-./benchpress_cli.py run memcached_bench_64g -r server
+# Replace eth0 with the actual network interface name if the interface in your
+# system is not called eth0
+./benchpress_cli.py run memcached_bench_64g -r server -i '{"interface_name": "eth0"}'
 ```
 
 ### On the client(s)
