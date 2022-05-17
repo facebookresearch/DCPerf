@@ -136,3 +136,33 @@
         - '--real'
       vars:
         - 'server_hostname'
+
+- benchmark: memcached_bench
+  name: memcached_bench_64g
+  description:
+      MemCache benchmark using 64GB memory
+      Killing server in 27 mins,
+      MAKE SURE to start clients within 1 minute
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--memsize=64'
+        - '--mem-holdback=7.5'
+        - '--num-bw-threads=2'
+        - '--warmup-time=1200'
+        - '--test-time=360'
+        - '--real'
+    client:
+      args:
+        - 'client'
+        - '--server-hostname={server_hostname}'
+        - '--server-memsize=64'
+        - '--server-mem-holdback=7.5'
+        - '--target-hit-ratio=0.5'
+        - '--tunning-factor=0.98'
+        - '--warmup-time=1200'
+        - '--test-time=360'
+        - '--real'
+      vars:
+        - 'server_hostname'

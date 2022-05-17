@@ -73,3 +73,20 @@ spark_standalone:
       - cpu
       - memory
   metrics: []
+
+memcached_bench:
+  parser: memcached_bench
+  install_script: ./packages/memcached_bench/install_memcached_bench.sh
+  cleanup_script: ./packages/memcached_bench/cleanup_memcached_bench.sh
+  path: ./packages/memcached_bench/run.py
+  tags:
+    scope:
+      - app
+      - cache
+    component:
+      - cpu
+      - memory
+  metrics: []
+  roles:
+    - server
+    - client

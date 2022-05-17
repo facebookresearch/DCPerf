@@ -313,3 +313,111 @@ report the results in JSON format like the following:
 
 Please refer to the detailed instruction at [packages/spark_standalone/README.md](packages/spark_standalone/README.md)
 regarding how to prepare, install and run spark_standalone benchmark.
+
+## memcached_bench
+
+### Installing dependencies
+
+If you haven't, please follow tao_bench's instruction to install folly and other
+system dependencies.
+
+### Install memcached_bench
+
+On both server and client machines, run the following command:
+
+```
+./benchpress_cli.py install memcached_bench_64g
+```
+
+### On the server
+
+Run the following command on the server machine:
+
+```
+./benchpress_cli.py run memcached_bench_64g -r server
+```
+
+### On the client(s)
+
+Run the following command on the client(s):
+
+```
+./benchpress_cli.py run memcached_bench_64g -r client -i '{"server_hostname": "<server_address>"}'
+```
+
+### Reporting
+
+Once the benchmark finishes, benchpress will report the results in JSON format
+like the following:
+
+Server:
+```
+{
+  "benchmark_args": [],
+  "benchmark_desc": "MemCache benchmark using 64GB memory Killing server in 27 mins, MAKE SURE to start clients within 1 minute",
+  "benchmark_hooks": [],
+  "benchmark_name": "memcached_bench_64g",
+  "machines": [
+    {
+      "cpu_architecture": "x86_64",
+      "cpu_model": "Intel(R) Xeon(R) Platinum 8321HC CPU @ 1.40GHz",
+      "hostname": "<server-hostname>",
+      "kernel_version": "5.6.13-05010-g10741cbf0a08",
+      "mem_total_kib": "65387148 KiB",
+      "num_logical_cpus": "52",
+      "os_distro": "centos",
+      "os_release_name": "CentOS Stream 8"
+    }
+  ],
+  "metadata": {
+    "L1d cache": "32K",
+    "L1i cache": "32K",
+    "L2 cache": "1024K",
+    "L3 cache": "36608K"
+  },
+  "metrics": {
+    "hit_latency_us": 24.84,
+    "role": "server"
+  },
+  "run_id": "c1c3ca1d",
+  "timestamp": 1652486421
+}j
+```
+
+Client:
+```
+{
+  "benchmark_args": [],
+  "benchmark_desc": "MemCache benchmark using 64GB memory Killing server in 27 mins, MAKE SURE to start clients within 1 minute",
+  "benchmark_hooks": [],
+  "benchmark_name": "memcached_bench_64g",
+  "machines": [
+    {
+      "cpu_architecture": "x86_64",
+      "cpu_model": "Intel(R) Xeon(R) Platinum 8321HC CPU @ 1.40GHz",
+      "hostname": "<client-hostname>",
+      "kernel_version": "5.6.13-0_fbk19_6064_gabfd136bb69a",
+      "mem_total_kib": "65386024 KiB",
+      "num_logical_cpus": "52",
+      "os_distro": "centos",
+      "os_release_name": "CentOS Stream 8"
+    }
+  ],
+  "metadata": {
+    "L1d cache": "32K",
+    "L1i cache": "32K",
+    "L2 cache": "1024K",
+    "L3 cache": "36608K"
+  },
+  "metrics": {
+    "hit_ratio": 0.4994613979813605,
+    "qps": 1337982.36,
+    "qps_hit": 668270.54,
+    "qps_miss": 669711.82,
+    "role": "client",
+    "set_qps": 267596.72
+  },
+  "run_id": "49ef2f92",
+  "timestamp": 1652486426
+}
+```
