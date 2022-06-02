@@ -70,7 +70,7 @@ void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
                (stats.end_time_ - stats.start_time_) * 1000000000;
 
   // Adjust delay based on QPS
-  this_thread->request_delay *= (qps / this_thread->qps_per_thread);
+  this_thread->request_delay = (1000000 / this_thread->qps_per_thread) * (qps / this_thread->qps_per_thread);
 
   AddRecomputeDelayTimer(*this_thread);
 }
