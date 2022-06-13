@@ -14,6 +14,43 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+function benchreps_tell_state () {
+    BREPS_LFILE=/tmp/feedsim_log.txt
+    date +"${1} %Y-%m-%d_%T" >> $BREPS_LFILE
+}
+
+
+function tuning_reduce_qps () {
+  measured_latency_local=${1}
+  latency_target_local=${2}
+  cur_qps_local=${3}
+
+  # calculate % gap to measured_latency
+  latency_gap=$(echo "scale=5; (($measured_latency_local - $latency_target_local) / $latency_target_local)" | bc)
+  # latency gap bigger than 100%
+  latency_gap_huge_condition=$(echo "$latency_gap > 1" | bc)
+  # latency gap in <50%,100%> range
+  latency_gap_big_condition=$(echo "$latency_gap <= 1 && $latency_gap > 0.5" | bc)
+  # latency gap in (2%, 50%)
+  latency_gap_managable=$(echo "$latency_gap <= 1 && $latency_gap >= 0.05" | bc)
+
+  if [ $latency_gap_huge_condition -eq 1 ] ; then
+    # huge latency gap, just reduce gps by half.
+    cur_qps_local=$(echo "scale=5; $cur_qps_local*0.5" | bc)
+  elif [ $latency_gap_big_condition -eq 1 ] ; then
+    # big latency gap, just reduce gps by half.
+    cur_qps_local=$(echo "scale=5; $cur_qps_local*0.25" | bc)
+  elif [ $latency_gap_managable -eq 1 ] ; then
+    # latency gap in <5%, 50%), reduce qps by that gap divided by 5.
+    cur_qps_local=$(echo "scale=5; $cur_qps_local * (1 - ((($measured_latency_local - $latency_target_local) / $latency_target_local) / 5))" | bc)
+  else
+    cur_qps_local=$(echo "scale=5; $cur_qps_local * 99 / 100" | bc)
+  fi
+
+  echo $cur_qps_local
+}
+
+
 # Usage info
 show_help() {
 cat << EOF
@@ -215,12 +252,16 @@ fi
 echo "Searching for QPS where $latency_type latency <= $latency_target msec"
 
 # warm-up trials
+benchreps_tell_state "before warmup"
 run_loadtest peak_qps measured_latency
 printf "warmup qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
+benchreps_tell_state "after warmup"
 
 # find peak QPS
+benchreps_tell_state "before peak_qps"
 run_loadtest peak_qps measured_latency
 printf "peak qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
+benchreps_tell_state "after peak_qps"
 
 # Pad peak QPS just to be safe
 peak_qps=$(echo "$peak_qps*1.8"|bc)
@@ -230,10 +271,9 @@ printf "scaled peak qps = %.2f\n" $peak_qps
 high_qps=$peak_qps
 low_qps=1
 cur_qps=$peak_qps
-max_iters=25
-n_iters=0
 
 # binary search to approx. location
+benchreps_tell_state "before new_qps"
 loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1))" | bc)
 while [[ $loop_cond -eq 1 ]]; do
   # calculate new QPS
@@ -249,33 +289,68 @@ while [[ $loop_cond -eq 1 ]]; do
     high_qps=$cur_qps
   else
     low_qps=$cur_qps
+    measured_qps_is_higher=$(echo "$measured_qps > $low_qps" | bc)
+    if [[ $measured_qps_is_higher -eq 1 ]] ; then
+      low_qps=$measured_qps
+    fi
+    measured_qps_gap=$(echo "$cur_qps > $measured_qps * 1.02" | bc)
+    if [[ $measured_qps_gap -eq 1 ]] ; then
+      high_qps=$(echo "scale=5; $high_qps*0.96" | bc)
+    fi
   fi
-
-  n_iters=$(echo "$n_iters + 1" | bc)
-  loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1) && $n_iters < $max_iters)" | bc)
+  echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1))"
+  benchreps_tell_state "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1))"
+  loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1))" | bc)
+  benchreps_tell_state $loop_cond
 done
+benchreps_tell_state "after new_qps"
 
-# do fine tuning (skip if the searching loop failed to converge within limit)
-loop_cond=$(echo "($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99) && $n_iters < $max_iters)" | bc)
+# do fine tuning
+benchreps_tell_state "before tuning_qps"
+#loop_cond=$(echo "($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99))" | bc)
+loop_cond=$(echo "($measured_latency > ($latency_target*0.995))" | bc)
+benchreps_tell_state $loop_cond
+benchreps_tell_state "TUNNING LOOP COND ($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99))"
 while [[ $loop_cond -eq 1 ]]; do
-  cur_qps=$(echo "scale=5; $cur_qps * 98 / 100" | bc)
+  benchreps_tell_state "inside tuning_qps"
+  #cur_qps=$(echo "scale=5; $cur_qps * 99 / 100" | bc)
+  cur_qps=`tuning_reduce_qps $measured_latency $latency_target $cur_qps`
+
+  qps_cond=$(echo "$cur_qps > 4" | bc)
+  if [ $qps_cond -eq 0 ] ; then
+    break
+  fi
 
   # run experiment and report result
   run_loadtest measured_qps measured_latency $cur_qps
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
-  n_iters=$(echo "$n_iters + 1" | bc)
-  loop_cond=$(echo "($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99) && $n_iters < $max_iters)" | bc)
+  loop_cond=$(echo "($measured_latency > ($latency_target*0.995))" | bc)
+  #loop_cond=$(echo "($cur_qps > 10 && ($measured_latency > $latency_target && $measured_qps > ($cur_qps * 0.99)))" | bc)
 done
+benchreps_tell_state "after tuning_qps"
+
+# gap tuning
+benchreps_tell_state "before gap_qps"
+loop_cond=$(echo "($cur_qps > ($measured_qps*1.02))" | bc)
+while [[ $loop_cond -eq 1 ]]; do
+  cur_qps=$(echo "scale=5; $cur_qps - (($cur_qps - $measured_qps)/2)" | bc)
+
+  # run experiment and report result
+  run_loadtest measured_qps measured_latency $cur_qps
+  printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
+
+  loop_cond=$(echo "($cur_qps > ($measured_qps*1.02))" | bc)
+done
+benchreps_tell_state "after gap_qps"
+
 
 # do final measurement
+benchreps_tell_state "before final_qps"
 experiment_time=$final_experiment_time
 run_loadtest measured_qps measured_latency $cur_qps
 printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
+benchreps_tell_state "after final_qps"
 
-# report non-converging error if iteration reaches max tries
-if [ "$n_iters" -ge "$max_iters" ]; then
-    printf "error: binary search iterated %d times but latency still could not converge to target.\n" "$n_iters"
-fi
 
 # End of file
