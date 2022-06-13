@@ -3,6 +3,12 @@
 set -Eeo pipefail
 trap cleanup SIGINT SIGTERM ERR EXIT
 
+BREPS_LFILE=/tmp/feedsim_log.txt
+
+function benchreps_tell_state () {
+    date +"${1} %Y-%m-%d_%T" >> $BREPS_LFILE
+}
+
 
 # Assumes run.sh is copied to the benchmark directory
 #  ${BENCHPRESS_ROOT}/feedsim/run.sh
@@ -63,6 +69,9 @@ main() {
     local srv_io_threads
     srv_io_threads="$SRV_IO_THREADS_DEFAULT"
 
+
+    echo > $BREPS_LFILE
+    benchreps_tell_state "start"
 
     while :; do
         case $1 in
@@ -133,11 +142,13 @@ main() {
     # when trying to create sockets for listening.
 
     # Start DriverNode
+    benchreps_tell_state "before search_qps"
     scripts/search_qps.sh -w 15 -f 300 -s 95p:500 -o "${FEEDSIM_ROOT}/feedsim_results.txt" -- \
         build/workloads/ranking/DriverNodeRank \
             --server 0.0.0.0:11222 \
             --threads="${DRIVER_THREADS}" \
             --connections=4
+    benchreps_tell_state "after search_qps"
 
     sleep 5 # wait for queue to drain
     kill -SIGINT $LEAF_PID  # SIGINT so exits cleanly
