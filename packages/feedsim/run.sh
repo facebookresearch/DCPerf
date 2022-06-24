@@ -6,7 +6,7 @@ trap cleanup SIGINT SIGTERM ERR EXIT
 BREPS_LFILE=/tmp/feedsim_log.txt
 
 function benchreps_tell_state () {
-    date +"${1} %Y-%m-%d_%T" >> $BREPS_LFILE
+    date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
 
 
