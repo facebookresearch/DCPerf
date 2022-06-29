@@ -48,8 +48,10 @@ fi
 patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/tao_bench_memcached_0001.diff"
 
 # Find the path to folly and fmt
-FOLLY_INSTALLED_PATH="$("${FOLLY_REPO_PATH}/build/fbcode_builder/getdeps.py" show-inst-dir folly)"
-FMT_INSTALLED_PATH="$("${FOLLY_REPO_PATH}/build/fbcode_builder/getdeps.py" show-inst-dir fmt)"
+cd "$FOLLY_REPO_PATH"
+FOLLY_INSTALLED_PATH="$("${FOLLY_REPO_PATH}/build/fbcode_builder/getdeps.py" --allow-system-packages show-inst-dir folly)"
+FMT_INSTALLED_PATH="$("${FOLLY_REPO_PATH}/build/fbcode_builder/getdeps.py" --allow-system-packages show-inst-dir fmt)"
+cd -
 
 if ! [ -d "${FOLLY_INSTALLED_PATH}/lib64" ]; then
     ln -s -f "${FOLLY_INSTALLED_PATH}/lib" "${FOLLY_INSTALLED_PATH}/lib64"

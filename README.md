@@ -37,7 +37,7 @@ dnf install -y openssl-devel
 3. Build
 
 ```
-./build.sh
+./build/fbcode_builder/getdeps.py --allow-system-packages build
 ```
 
 4. Update the value of `FOLLY_REPO_PATH` at the line 12 of
