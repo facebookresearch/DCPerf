@@ -39,7 +39,7 @@ function tuning_reduce_qps () {
     cur_qps_local=$(echo "scale=5; $cur_qps_local*0.5" | bc)
   elif [ $latency_gap_big_condition -eq 1 ] ; then
     # big latency gap, just reduce gps by half.
-    cur_qps_local=$(echo "scale=5; $cur_qps_local*0.25" | bc)
+    cur_qps_local=$(echo "scale=5; $cur_qps_local*0.5" | bc)
   elif [ $latency_gap_managable -eq 1 ] ; then
     # latency gap in <5%, 50%), reduce qps by that gap divided by 5.
     cur_qps_local=$(echo "scale=5; $cur_qps_local * (1 - ($latency_gap / 5))" | bc)
