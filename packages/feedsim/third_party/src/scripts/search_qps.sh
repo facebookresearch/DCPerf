@@ -302,10 +302,9 @@ while [[ $loop_cond -eq 1 ]]; do
   fi
 
   n_iters=$(echo "$n_iters + 1" | bc)
-  loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1) && $n_iters < $max_iters)" | bc)
 
   echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1))"
-  loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1))" | bc)
+  loop_cond=$(echo "(($high_qps > $low_qps * 1.02) && $cur_qps > ($peak_qps * .1) && $n_iters < $max_iters)" | bc)
 done
 benchreps_tell_state "after new_qps"
 
