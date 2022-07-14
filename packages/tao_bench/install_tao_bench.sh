@@ -58,7 +58,8 @@ if ! [ -d "${FOLLY_INSTALLED_PATH}/lib64" ]; then
 fi
 
 # Build and install
-./configure --with-folly="${FOLLY_INSTALLED_PATH}" --with-fmt="${FMT_INSTALLED_PATH}" --enable-tls
+./configure --with-folly="${FOLLY_INSTALLED_PATH}" --with-fmt="${FMT_INSTALLED_PATH}" \
+            --disable-coverage --enable-tls
 make
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 cp memcached "${BENCHPRESS_ROOT}/benchmarks/tao_bench/tao_bench_server"
