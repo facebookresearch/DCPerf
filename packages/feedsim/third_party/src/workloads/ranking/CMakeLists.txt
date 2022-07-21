@@ -254,6 +254,7 @@ target_include_directories(
     PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/
            ${LIBEVENT_INCLUDE_DIR}
            ${JEMALLOC_INCLUDE_DIR}
+           ${FOLLY_INCLUDE_DIR}
            ${FBTHRIFT_INCLUDE_DIR})
 
 target_link_libraries(
