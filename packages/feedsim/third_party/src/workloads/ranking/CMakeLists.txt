@@ -249,6 +249,7 @@ add_dependencies(DriverNodeRankcmdline DriverNodeRank_gengetopt)
 # Build DriverNodeRank binary
 add_executable(DriverNodeRank
                DriverNodeRank.cc)
+add_dependencies(DriverNodeRank folly fbthrift)
 target_include_directories(
     DriverNodeRank
     PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/
