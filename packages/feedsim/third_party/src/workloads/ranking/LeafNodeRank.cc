@@ -107,7 +107,7 @@ void ThreadStartup(
   this_thread.latency_distribution =
       std::gamma_distribution<double>(alpha, beta);
 
-  this_thread.random_string = RandomString(args.random_data_size_arg);
+  this_thread.random_string = ranking::generators::generateRandomString(args.random_data_size_arg);
 }
 
 std::string compressPayload(const std::string& data, int result) {
