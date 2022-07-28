@@ -5,8 +5,7 @@ import os
 import pathlib
 
 
-# SRC_DATASET = "bpc_x1d0_s05"
-SRC_DATASET = "beest_perf_common_t93586_s2"
+SRC_DATASET = "bpc_t93586_s2_synthetic"
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[3]
 SPARK_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "spark_standalone")
@@ -24,7 +23,7 @@ def exec_cmd(cmd, for_real=True):
 def download_dataset(args):
     dataset_path = os.path.join(DATASET_DIR, SRC_DATASET)
     if os.path.exists(dataset_path):
-        print("Dataset already exists; skip downloading from manifold")
+        print("Dataset already exists; skip downloading.")
         return
     real_dataset_path = os.path.join(args.dataset_path, SRC_DATASET)
     if not os.path.exists(real_dataset_path):

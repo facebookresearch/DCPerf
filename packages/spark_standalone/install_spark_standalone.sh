@@ -8,6 +8,7 @@ TEMPLATES_DIR="${SPARK_PKG_ROOT}/templates"
 
 # Install system dependencies
 dnf install -y java-1.8.0-openjdk
+dnf install -y git-lfs
 
 # copy over directory
 if [ ! -d "${OUT}/scripts" ]; then

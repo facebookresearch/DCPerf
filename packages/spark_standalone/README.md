@@ -4,10 +4,6 @@ This benchmarks requires one machine to run the main Spark workload (the compute
 node) and one or more machines to provide a total of 3 NVMe SSDs (the storage
 nodes) for the compute node to connect as backend storage.
 
-**NOTE**: We are currently working on exporting the benchmark dataset
-externally.  The dataset will be hosted in a different repo, and we will update
-the instruction and pointer regarding the dataset when it's ready for download.
-
 ## Kernel support
 
 Please build a version of Linux kernel with NVMe over TCP support enabled by
@@ -116,7 +112,31 @@ tmpfs             13G   15M   13G   1% /run
 /dev/md127       5.3T  261G  5.0T   5% /flash23
 ```
 
-4. Install and run Spark benchmark
+4. Download dataset
+
+The dataset for this benchmark is hosted in a separate repository
+[DCPerf-datasets](https://github.com/facebookresearch/DCPerf-datasets).
+Due to its large size, we need to use [git-lfs](https://github.com/git-lfs/git-lfs)
+to access the data in it. Below lists the steps to download the dataset:
+
+- Install git-lfs: `dnf install -y git-lfs`
+- Clone the dataset repository:
+  ```
+  cd /flash23
+  git clone https://github.com/facebookresearch/DCPerf-datasets
+  ```
+  `git clone` should automatically download all data included in this repo, but if
+  it didn't, please use the following git-lfs commands to download:
+  ```
+  git lfs track
+  git lfs fetch
+  ```
+- Move the dataset folder `bpc_t93586_s2_synthetic`:
+  ```
+  mv DCPerf-datasets/bpc_t93586_s2_synthetic ./bpc_t93586_s2_synthetic
+  ```
+
+5. Install and run Spark benchmark
 
 Note: please use `alternatives --config python3` to switch python3 to the newer
 version you installed for Benchpress
@@ -150,9 +170,9 @@ results in JSON format like the following:
     {
       "cpu_architecture": "x86_64",
       "cpu_model": "Intel(R) Xeon(R) Platinum 8321HC CPU @ 1.40GHz",
-      "hostname": "<hostname>",
+      "hostname": "<compute-node-hostname>",
       "kernel_version": "5.6.13-05010-g10741cbf0a08",
-      "mem_total_kib": "65387148 KiB",
+      "mem_total_kib": "65387096 KiB",
       "num_logical_cpus": "52",
       "os_distro": "centos",
       "os_release_name": "CentOS Stream 8"
@@ -165,12 +185,12 @@ results in JSON format like the following:
     "L3 cache": "36608K"
   },
   "metrics": {
-    "test_93586": 819.6,
+    "execution_time_test_93586": 1089.5,
     "worker_cores": 36,
     "worker_memory": "42GB"
   },
-  "run_id": "3453c125",
-  "timestamp": 1652219958
+  "run_id": "7e287f2d",
+  "timestamp": 1658971035
 }
 ```
 

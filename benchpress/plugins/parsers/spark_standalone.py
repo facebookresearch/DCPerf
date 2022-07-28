@@ -17,7 +17,8 @@ class SparkStandaloneParser(Parser):
             items = line.split(":")
             if line.strip().startswith("test-release_test"):
                 test_name = items[0].strip().replace("test-release_", "")
-                metrics[test_name] = float(items[1].strip())
+                metrics["execution_time_" + test_name] = float(items[1].strip())
+
             if line.strip().startswith("worker-cores"):
                 metrics["worker_cores"] = int(items[1].strip())
             if line.strip().startswith("worker-memory"):
