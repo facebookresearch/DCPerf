@@ -118,7 +118,7 @@ Download and Install Boost 1.67
 ```
 cd ${HOME}/hhvm-build
 wget -q https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.bz2
-tar -zxvf boost_1_67_0.tar.gz
+tar -jxvf boost_1_67_0.tar.bz2
 cd boost_1_67_0/
 
 ./bootstrap.sh \
@@ -221,7 +221,7 @@ sudo mysql_secure_installation
 ```
 
 
-Use system Openssl (on Centos 8 stream - Openssl 1.1.1k)
+Use system Openssl (on Centos 8 stream - Openssl 1.1.1k) (this may not be necessary)
 
 ```
 1. Remove libssl.so and libcrypto.so from $HOME/hhvm-build/build-deps/lib
@@ -297,3 +297,13 @@ HipHop VM 3.30.12 (rel)
 Compiler: tags/HHVM-3.30.12-0-gabe9500970b23bc9c385bf18a15bd38e830859a6
 Repo schema: 14ae18005e6fed538bd2ad7bb443dc811e53c4a1
 ```
+
+# Installing and Running Mediawiki
+Ref to scripts at [install\_mediawiki\_extern.sh](install_mediawiki_extern.sh) and/or [install\_mediawiki\_intern.sh](install_mediawiki_intern.sh) for installing Medaiwiki.
+
+An example command to run Mediawiki directly
+```
+./packages/mediawiki/run.sh -c200 -m8 -- --mediawiki-mlp \
+  --siege-duration=10M --siege-timeout=11m --run-as-root --i-am-not-benchmarking
+```
+
