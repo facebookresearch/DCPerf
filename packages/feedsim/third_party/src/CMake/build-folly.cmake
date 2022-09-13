@@ -30,7 +30,7 @@ ExternalProject_Add(folly
     BINARY_DIR ${oldisim_BINARY_DIR}/third_party/folly
     BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libfolly.a
     BUILD_COMMAND
-        cmake --build . -v
+        cmake --build .
     )
 add_dependencies(folly fmt)
 
