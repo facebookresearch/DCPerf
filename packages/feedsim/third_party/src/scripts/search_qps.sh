@@ -286,7 +286,7 @@ while [[ $loop_cond -eq 1 ]]; do
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
   # set new QPS ranges
-  latency_good=$(echo "$measured_latency <= $latency_target" | bc)
+  latency_good=$(echo "$measured_latency <= ($latency_target * 1.06)" | bc)
   if [[ $latency_good -eq 0 ]]; then
     high_qps=$cur_qps
   else
