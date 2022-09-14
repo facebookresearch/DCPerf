@@ -28,7 +28,7 @@ ExternalProject_Add(fizz
     BINARY_DIR ${oldisim_BINARY_DIR}/third_party/fizz
     BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libfizz.a
     BUILD_COMMAND
-        cmake --build . -v
+        cmake --build .
     )
 
 

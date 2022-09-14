@@ -42,7 +42,7 @@ ExternalProject_Add(fbthrift
         <INSTALL_DIR>/lib/libthriftprotocol.a
         <INSTALL_DIR>/lib/libconcurrency.a
     BUILD_COMMAND
-        cmake --build . -v
+        cmake --build .
     )
 
 ExternalProject_Add_StepDependencies(fbthrift configure folly wangle rsocket fmt)
