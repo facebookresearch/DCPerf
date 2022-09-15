@@ -176,7 +176,8 @@ def run_client(args):
     cmd = get_client_cmd(args, n_seconds=args.warmup_time)
     stdout = run_cmd(cmd, timeout=0, for_real=args.real)
     print(stdout)
-    time.sleep(5)
+    if args.real:
+        time.sleep(5)
     print("execution phase ...")
     cmd = get_client_cmd(args, n_seconds=args.test_time)
     stdout = run_cmd(cmd, timeout=0, for_real=args.real)
