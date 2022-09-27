@@ -59,7 +59,7 @@ start_cassandra() {
   cd "${SCRIPT_ROOT}/.." || exit 1
   # Set the listening address
   CASSANDRA_YAML="./apache-cassandra/conf/cassandra.yaml"
-  HOST_IP="$(hostname -i)"
+  HOST_IP="$(hostname -i | awk '{print $1}')"
   sed "s/__HOST_IP__/${HOST_IP}/g" < ${CASSANDRA_YAML}.template > ${CASSANDRA_YAML}.tmp
   mv -f "${CASSANDRA_YAML}.tmp" "${CASSANDRA_YAML}"
   # Start Cassandra
