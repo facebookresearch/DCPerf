@@ -31,10 +31,10 @@ sudo yum install -y cmake3 ninja-build flex bison git texinfo binutils-devel \
     libunwind-devel bzip2-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool openssl-devel \
     zlib-devel libdwarf-devel libaio-devel libatomic-static patch
-sudo amazon-linux-extras install epel
+sudo amazon-linux-extras install -y epel
 sudo yum install libsodium-devel double-conversion-devel
 
-sudo ln -sf /usr/bin/cmake3 /usr/local/bin/cmake
+sudo ln -s /usr/bin/cmake3 /usr/local/bin/cmake
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
