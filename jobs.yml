@@ -137,6 +137,41 @@
       vars:
         - 'server_hostname'
 
+- benchmark: tao_bench
+  name: tao_bench_custom
+  description:
+      Tao benchmark using custom amount of memory.
+      MAKE SURE to start clients within 1 minute.
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--memsize={memsize}'
+        - '--nic-channel-ratio=0.5'
+        - '--fast-threads-ratio=0.75'
+        - '--dispatcher-to-fast-ratio=0.25'
+        - '--slow-to-fast-ratio=3'
+        - '--interface-name={interface_name}'
+        - '--real'
+      vars:
+        - 'interface_name'
+        - 'memsize'
+    client:
+      args:
+        - 'client'
+        - '--clients-per-thread={clients_per_thread}'
+        - '--server-hostname={server_hostname}'
+        - '--server-memsize={server_memsize}'
+        - '--target-hit-ratio=0.9'
+        - '--tunning-factor=0.807'
+        - '--warmup-time=1200'
+        - '--test-time=360'
+        - '--real'
+      vars:
+        - 'server_hostname'
+        - 'server_memsize'
+        - 'clients_per_thread'
+
 - benchmark: memcached_bench
   name: memcached_bench_64g
   description:

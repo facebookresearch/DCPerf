@@ -126,6 +126,12 @@ def get_client_cmd(args, n_seconds):
         n_threads = multiprocessing.cpu_count() - 6
         if n_threads <= 0:
             n_threads = int(multiprocessing.cpu_count() * 0.8)
+    # clients
+    if args.clients_per_thread > 0:
+        n_clients = args.clients_per_thread
+    else:
+        n_clients = 380
+
     # mem size
     n_bytes_per_item = 434  # average from collected distribution
     mem_size_mb = int(args.server_memsize * 1024 * MEM_USAGE_FACTOR)
@@ -162,7 +168,7 @@ def get_client_cmd(args, n_seconds):
         f"--key-maximum={n_key_max}",
         "-t",
         str(n_threads),
-        "--clients=380",
+        f"--clients={n_clients}",
         "--threads-coherence=0",
         "--clients-coherence=3",
         "--key-bytes=220",
@@ -258,6 +264,12 @@ def init_parser():
         type=float,
         default=0.807,
         help="tuning factor for key range to get target hit ratio",
+    )
+    client_parser.add_argument(
+        "--clients-per-thread",
+        type=int,
+        default=380,
+        help="Number of clients per thread",
     )
     # for both server & client
     for x_parser in [server_parser, client_parser]:
