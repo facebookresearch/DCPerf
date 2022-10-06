@@ -59,12 +59,17 @@ def run_server(args):
             get_affinitize_nic_path(),
             "-f",
             "-a",
-            "-A",
-            "all-nodes",
-            "--max-cpus",
-            str(n_channels),
             "--xps",
         ]
+        if args.hard_binding:
+            cmd += [
+                "--cpu",  ' '.join(str(x) for x in range(n_channels)),
+            ]
+        else:
+            cmd += [
+                "-A", "all-nodes",
+                "--max-cpus", str(n_channels),
+            ]
         run_cmd(cmd)
     except Exception as e:
         print(f"Failed to set affinity: {str(e)}")
@@ -233,6 +238,11 @@ def init_parser():
         type=str,
         default="eth0",
         help="name of the NIC interface",
+    )
+    server_parser.add_argument(
+        "--hard-binding",
+        action="store_true",
+        help="hard bind NIC channels to cores",
     )
     # client-side arguments
     client_parser.add_argument(
