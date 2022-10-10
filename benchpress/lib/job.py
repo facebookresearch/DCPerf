@@ -114,14 +114,16 @@ class Job(object):
 
     def substitude_vars(self, role, role_input):
         var_list = self.role_args[role].get("vars", [])
-        if not role_input and var_list:
-            logger.error("this role must take user defined input")
-        elif role_input and not var_list:
-            logger.error("this role takes no user defined input")
         new_dict = {}
         for k in var_list:
+            if "=" in k:
+                kv = k.split("=", maxsplit=2)
+                k = kv[0]
+                new_dict[k] = kv[1]
             if k in role_input:
                 new_dict[k] = role_input[k]
+            if k not in new_dict:
+                logger.error(f"The role {role} needs user input parameter {k}")
         self.args = self.role_args[role].get("args", [])
         formatted_args = []
         for arg in self.args:
