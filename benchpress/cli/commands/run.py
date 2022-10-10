@@ -112,7 +112,8 @@ class RunCommand(BenchpressCommand):
             click.echo('Running "{}": {}'.format(job.name, job.description))
 
             if args.dry_run:
-                click.echo(f"Execution command: {' '.join(job.cmd)}")
+                job_cmd = job.dry_run(args.role, role_in)
+                click.echo(f"Execution command: {' '.join(job_cmd)}")
                 continue
 
             if args.disable_hooks:

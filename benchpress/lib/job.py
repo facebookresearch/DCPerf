@@ -170,6 +170,13 @@ class Job(object):
             logger.info("Running %s %s", hook, opts)
             hook.before_job(opts, self)
 
+    def dry_run(self, role=None, role_input=None):
+        """Just return the command line that will be used to run the
+        selected benchmark
+        """
+        self.check_role(role, role_input)
+        return get_safe_cmd([self.binary] + self.args)
+
     def run(self, role=None, role_input=None):
         """Run the benchmark and return the metrics that are reported.
         check if user type role correctly
