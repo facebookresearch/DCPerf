@@ -123,7 +123,7 @@
         - '--interface-name={interface_name}'
         - '--real'
       vars:
-        - 'interface_name'
+        - 'interface_name=eth0'
     client:
       args:
         - 'client'
@@ -152,10 +152,14 @@
         - '--dispatcher-to-fast-ratio=0.25'
         - '--slow-to-fast-ratio=3'
         - '--interface-name={interface_name}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
         - '--real'
       vars:
-        - 'interface_name'
-        - 'memsize'
+        - 'interface_name=eth0'
+        - 'memsize=64'
+        - 'warmup_time=1200'
+        - 'test_time=360'
     client:
       args:
         - 'client'
@@ -164,13 +168,15 @@
         - '--server-memsize={server_memsize}'
         - '--target-hit-ratio=0.9'
         - '--tunning-factor=0.807'
-        - '--warmup-time=1200'
-        - '--test-time=360'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
         - '--real'
       vars:
         - 'server_hostname'
-        - 'server_memsize'
-        - 'clients_per_thread'
+        - 'server_memsize=64'
+        - 'clients_per_thread=380'
+        - 'warmup_time=1200'
+        - 'test_time=360'
 
 - benchmark: memcached_bench
   name: memcached_bench_64g
