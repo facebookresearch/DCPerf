@@ -46,6 +46,7 @@ if ! [ -f "config.h.in" ]; then
 fi
 # Patch w/ Tao Bench changes
 patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/tao_bench_memcached_0001.diff"
+patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0002-tao_bench_memcached_oom_handling.diff"
 
 # Find the path to folly and fmt
 cd "$FOLLY_REPO_PATH"
