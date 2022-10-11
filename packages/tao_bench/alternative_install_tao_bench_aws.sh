@@ -1,7 +1,6 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# FIXME(cltorres): Copy/link bpkgs benchmark contents into the BP_TMP automatically.
 BPKGS_TAO_BENCH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_TAO_BENCH_ROOT/../..")"
 COMMON_DIR="${BENCHPRESS_ROOT}/packages/common"
@@ -84,6 +83,7 @@ patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/tao_bench_memcached_0001.diff"
 # Find the path to folly and fmt
 FOLLY_INSTALLED_PATH="${FOLLY_BUILD_ROOT}/installed/folly"
 FMT_INSTALLED_PATH="$(find "${FOLLY_BUILD_ROOT}/installed" -maxdepth 1 -name "fmt-*" | head -n1)"
+
 if ! [ -d "${FOLLY_INSTALLED_PATH}/lib64" ]; then
     ln -s -f "${FOLLY_INSTALLED_PATH}/lib" "${FOLLY_INSTALLED_PATH}/lib64"
 fi

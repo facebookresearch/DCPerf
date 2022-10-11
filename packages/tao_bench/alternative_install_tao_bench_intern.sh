@@ -1,7 +1,6 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# FIXME(cltorres): Copy/link bpkgs benchmark contents into the BP_TMP automatically.
 BPKGS_TAO_BENCH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_TAO_BENCH_ROOT/../..")"
 COMMON_DIR="${BENCHPRESS_ROOT}/packages/common"
