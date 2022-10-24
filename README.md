@@ -116,6 +116,9 @@ Once the tao_bench client finishes, benchpress will report the results in JSON f
 
 ```
 
+On the server machine, benchpress will generate a time-series QPS metrics CSV table
+at `benchmarks/tao_bench/server.csv` under the benchpress's folder.
+
 ## feedsim
 
 ### Install feedsim
