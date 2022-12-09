@@ -134,6 +134,8 @@ fi
 # Apply Memcache tuning
 cd "${OUT}/django-workload/django-workload/django_workload" || exit 1
 git apply --check "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch" && git apply "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch"
+# Apply db caching
+git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch"
 
 set +u
 deactivate

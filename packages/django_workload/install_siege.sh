@@ -3,7 +3,7 @@ set -e
 set -x
 
 SIEGE_GIT_REPO='https://github.com/JoeDog/siege.git'
-SIEGE_GIT_RELEASE_TAG='v4.0.4'
+SIEGE_GIT_RELEASE_TAG='v4.0.7'
 
 DJANGO_PKG_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "${DJANGO_PKG_ROOT}/../..")"
