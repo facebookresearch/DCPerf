@@ -28,7 +28,9 @@ Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-d duration of workload] 
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver or db, default is clientserver)
     -h          display this help and exit
-    -w          number of workers
+    -w          number of server workers (default NPROC)
+    -x          number of client workers (default 1.2*NPROC)
+    -y          number of cassandra concurrent writes (default 128)
     -d          duration of django-workload benchmark (e.g. 2M)
     -l          path to log siege output to
     -s          source or path to get urls from
@@ -40,8 +42,10 @@ EOF
 run_benchmark() {
   core_factor=1.2
   local _num_workers=$1
-  _num_workers=$(echo "scale=2; $(nproc)*$core_factor" | bc) # this do decimal times
-  _num_workers=$(echo "$_num_workers" | awk '{printf("%d\n",$1 + 0.5)}') # round to integer
+  if [ "$_num_workers" -le 0 ] || [ -z "$_num_workers" ]; then
+    _num_workers=$(echo "scale=2; $(nproc)*$core_factor" | bc) # this do decimal times
+    _num_workers=$(echo "$_num_workers" | awk '{printf("%d\n",$1 + 0.5)}') # round to integer
+  fi
   local _duration="$2"
   local _siege_logs_path="$3"
   local _urls_path="$4"
@@ -58,20 +62,27 @@ run_benchmark() {
 start_cassandra() {
   cd "${SCRIPT_ROOT}/.." || exit 1
   # Set the listening address
+  local cassandra_concur_writes="$1"
+  if [ "$cassandra_concur_writes" -le 0 ] || [ -z "$cassandra_concur_writes" ]; then
+    cassandra_concur_writes=128
+  fi
+
   CASSANDRA_YAML="./apache-cassandra/conf/cassandra.yaml"
   HOST_IP="$(hostname -i | awk '{print $1}')"
   sed "s/__HOST_IP__/${HOST_IP}/g" < ${CASSANDRA_YAML}.template > ${CASSANDRA_YAML}.tmp
-  mv -f "${CASSANDRA_YAML}.tmp" "${CASSANDRA_YAML}"
+  sed "s/__CONCUR_WRITES__/${cassandra_concur_writes}/g" < ${CASSANDRA_YAML}.tmp > ${CASSANDRA_YAML}.tmp2
+  mv -f "${CASSANDRA_YAML}.tmp2" "${CASSANDRA_YAML}"
   # Start Cassandra
   ./apache-cassandra/bin/cassandra -R -f -p cassandra.pid > cassandra.log 2>&1
 }
 
 start_clientserver() {
   local cassandra_addr=$1
-  local num_workers=$2
-  local duration=$3
-  local siege_logs_path=$4
-  local urls_path=$5
+  local num_server_workers=$2
+  local num_client_workers=$3
+  local duration=$4
+  local siege_logs_path=$5
+  local urls_path=$6
 
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -111,15 +122,21 @@ start_clientserver() {
     --ini uwsgi.ini \
     -H "${SCRIPT_ROOT}/../django-workload/django-workload/venv" \
     --safe-pidfile "${SCRIPT_ROOT}/../uwsgi.pid" \
-    --workers "$(nproc)" &
+    --workers "${num_server_workers}" &
 
-  echo "${num_workers}"
-  run_benchmark "${num_workers}" "${duration}" "${siege_logs_path}" "${urls_path}"
+  echo "Server workers: ${num_server_workers}; client workers: ${num_client_workers}"
+  run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}"
 }
 
 main() {
-  local num_workers
-  num_workers='144'
+  local num_server_workers
+  num_server_workers="${NPROC}"
+
+  local num_client_workers
+  num_client_workers="0"
+
+  local num_cassandra_writes
+  num_cassandra_writes="128"
 
   local duration
   duration='2M'
@@ -136,11 +153,17 @@ main() {
   local cassandra_addr
   cassandra_addr='::1'
 
-  while getopts 'w:d:l:s:r:c:' OPTION "${@}"; do
+  while getopts 'w:x:y:d:l:s:r:c:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
-        num_workers="${OPTARG}"
+        num_server_workers="${OPTARG}"
+        ;;
+      x)
+        num_client_workers="${OPTARG}"
+        ;;
+      y)
+        num_cassandra_writes="${OPTARG}"
         ;;
       d)
         duration="${OPTARG}"
@@ -171,7 +194,9 @@ main() {
   done
   shift "$((OPTIND - 1))"
 
-  readonly num_workers
+  readonly num_server_workers
+  readonly num_client_workers
+  readonly num_cassandra_writes
   readonly duration
   readonly siege_logs_path
   readonly urls_path
@@ -179,9 +204,9 @@ main() {
   readonly cassandra_addr
 
   if [ "$role" = "db" ]; then
-    start_cassandra;
+    start_cassandra "$num_cassandra_writes";
   elif [ "$role" = "clientserver" ]; then
-    start_clientserver "$cassandra_addr" "$num_workers" "$duration" "$siege_logs_path" "$urls_path";
+    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path";
   else
     echo "Role $role is invalid, it can only be 'db' or 'clientserver'";
     exit 1

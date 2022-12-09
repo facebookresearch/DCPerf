@@ -436,8 +436,8 @@ seed_provider:
 # number of "concurrent_writes" is dependent on the number of cores in
 # your system; (8 * number_of_cores) is a good rule of thumb.
 concurrent_reads: 64
-concurrent_writes: 128
-concurrent_counter_writes: 128
+concurrent_writes: __CONCUR_WRITES__
+concurrent_counter_writes: __CONCUR_WRITES__
 
 # For materialized view writes, as there is a read involved, so this should
 # be limited by the less of concurrent reads or concurrent writes.
