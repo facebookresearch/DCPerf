@@ -302,9 +302,8 @@ static int generate_random_seed()
     FILE* f = fopen("/dev/random", "r");
     if (f)
     {
-        size_t ignore = fread(&R, sizeof(R), 1, f);
+        std::ignore = fread(&R, sizeof(R), 1, f);
         fclose(f);
-        ignore++;//ignore warning
     }
 
     return (int)time(NULL)^getpid()^R;
