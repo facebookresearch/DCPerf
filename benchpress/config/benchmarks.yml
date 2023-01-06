@@ -1,8 +1,8 @@
 oss_performance_mediawiki:
   parser: json
-  install_script: install_oss_performance_mediawiki.sh
-  cleanup_script: cleanup_oss_performance_mediawiki.sh
-  path: ./templates/oss-performance-mediawiki/run.sh
+  install_script: ./packages/mediawiki/install_oss_performance_mediawiki.sh
+  cleanup_script: ./packages/mediawiki/cleanup_oss_performance_mediawiki.sh
+  path: ./packages/mediawiki/run.sh
   tags:
     scope:
       - app
