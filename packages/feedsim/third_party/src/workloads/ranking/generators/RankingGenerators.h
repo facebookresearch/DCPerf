@@ -41,9 +41,23 @@ inline uint64_t xor128() {
   return w = w ^ (w >> 19) ^ (t ^ (t >> 8));
 }
 
+inline std::string generateRandomString(size_t length) {
+  auto randchar = []() -> char {
+    const char charset[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
+    const size_t max_index = (sizeof(charset) - 1);
+    return charset[xor128() % max_index];
+  };
+  std::string str(length, 0);
+  std::generate_n(str.begin(), length, randchar);
+  return str;
+}
+
 inline ranking::Payload generateRandomPayload(size_t length) {
   ranking::Payload payload;
-  payload.message = RandomString(length);
+  payload.message = generateRandomString(length);
   return payload;
 }
 
@@ -150,7 +164,7 @@ generateRandomRankingResponse(size_t ranking_stories_length) {
                   ranking_stories_length,
                   std::bind(generateRandomRankingStory, 20));
   resp.objectCounts.reserve(ranking_stories_length);
-  resp.metadata = RandomString(200);
+  resp.metadata = generateRandomString(200);
   return resp;
 }
 

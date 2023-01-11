@@ -28,6 +28,8 @@
 
 #include "utils.h"
 
+#include "generators/RankingGenerators.h"
+
 static gengetopt_args_info args;
 
 const int kMaxRequestSize = 8192;
@@ -81,7 +83,7 @@ void ThreadStartup(oldisim::NodeThread &thread,
   ThreadData &this_thread = thread_data[thread.get_thread_num()];
 
   // Initialize random string with random bits
-  this_thread.random_string = RandomString(kMaxRequestSize);
+  this_thread.random_string = ranking::generators::generateRandomString(kMaxRequestSize);
 
   // Store pointer to test_driver
   this_thread.test_driver = &test_driver;
