@@ -26,12 +26,10 @@ die() {
   exit "$code"
 }
 
-
-dnf install -y cmake-3.14.5 ninja-build flex bison git texinfo binutils-devel \
+dnf install -y ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel-1.8.3 xz-devel snappy-devel libtool bzip2 openssl-devel \
     zlib-devel libdwarf libdwarf-devel libaio-devel libatomic-static patch
-
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -46,6 +44,23 @@ msg "Installing third-party dependencies..."
 cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party" "${FEEDSIM_ROOT_SRC}"
 mv "${FEEDSIM_THIRD_PARTY_SRC}/src" "${FEEDSIM_ROOT_SRC}/src"
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
+
+# Installing cmake-3.14.5
+
+if ! [ -d "cmake-3.14.5" ]; then
+    wget "https://github.com/Kitware/CMake/releases/download/v3.14.5/cmake-3.14.5.tar.gz"
+    tar -zxf "cmake-3.14.5.tar.gz"
+    cd "cmake-3.14.5"
+    mkdir staging
+    ./bootstrap --parallel=8 --prefix="$(pwd)/staging"
+    make -j8
+    make install
+    cd ../
+else
+    msg "[SKIPPED] cmake-3.14.5"
+fi
+
+export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-3.14.5/staging/bin:${PATH}"
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
