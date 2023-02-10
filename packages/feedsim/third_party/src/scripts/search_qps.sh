@@ -65,6 +65,8 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
     -w          amount of time to wait before starting next experiment. Default: 5 seconds
     -s          metric:target (in msec). Example: 99p:5.01. Allowable metrics
                 are avg, 50p, 90p, 95p, 99p, 99.9p
+    -q          number of qps to use. If this option is present, the program will execute
+                a fixed-qps experiment instead of searching. Optional
     -o          output filename to record samples as csv. Optional
 EOF
 }
@@ -167,9 +169,10 @@ latency_type=""
 latency_target=""
 load_test_retries=3
 output_csv_file=""
+fixed_qps=""
 
 OPTIND=1 # Reset is necessary if getopts was used previously in the script.  It is a good idea to make this local in a function.
-while getopts "ht:f:w:s:o:" opt; do
+while getopts "ht:f:w:s:q:o:" opt; do
   case "$opt" in
     h)
       show_help
@@ -188,6 +191,9 @@ while getopts "ht:f:w:s:o:" opt; do
       latency_type=$(echo $OPTARG | tr ':' ' ' | awk '{print $1}')
       latency_target=$(echo $OPTARG | tr ':' ' ' | awk '{print $2}')
       ;;
+    q)
+      fixed_qps=$OPTARG
+      ;;
     o)
       output_csv_file=$OPTARG
       ;;
@@ -203,7 +209,7 @@ shift "$((OPTIND-1))" # Shift off the options and optional --.
 command=$@
 
 # make sure latency_type and latency_target are specified
-if [[ $latency_type = "" ]] || [[ $latency_target = "" ]]; then
+if [[ -z "$fixed_qps" ]] && ( [[ $latency_type = "" ]] || [[ $latency_target = "" ]] ); then
   echo 'error: -s metric:target must be specified' >&2; exit 1
 fi
 
@@ -220,7 +226,7 @@ if ! [[ $experiment_time =~ ^[0-9]+$ ]] ; then
 fi
 
 # check to make sure latency_target is a float
-if ! [[ $latency_target =~ ^[0-9]+([.][0-9]+)?$ ]] ; then
+if [[ -z "$fixed_qps" ]] && ! [[ $latency_target =~ ^[0-9]+([.][0-9]+)?$ ]] ; then
  echo "error: latency_target ($latency_target) is not a float" >&2; exit 1
 fi
 
@@ -249,7 +255,11 @@ avg_ms,\
 fi
 
 # tell the user what we are doing
-echo "Searching for QPS where $latency_type latency <= $latency_target msec"
+if [[ -z "$fixed_qps" ]]; then
+  echo "Searching for QPS where $latency_type latency <= $latency_target msec"
+else
+  echo "Running an experiment with QPS fixed at $fixed_qps and returns $latency_type latency"
+fi
 
 # warm-up trials
 benchreps_tell_state "before warmup"
@@ -262,6 +272,12 @@ benchreps_tell_state "before peak_qps"
 run_loadtest peak_qps measured_latency
 printf "peak qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
 benchreps_tell_state "after peak_qps"
+
+if [[ -n "$fixed_qps" ]]; then
+  run_loadtest measured_qps measured_latency $fixed_qps
+  printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
+  exit 0
+fi
 
 # Pad peak QPS just to be safe
 peak_qps=$(echo "$peak_qps*1.8"|bc)
