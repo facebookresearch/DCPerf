@@ -1,0 +1,16 @@
+diff --git a/wangle/ssl/SSLUtil.h b/wangle/ssl/SSLUtil.h
+index 1636a35e..b64fb78a 100644
+--- a/wangle/ssl/SSLUtil.h
++++ b/wangle/ssl/SSLUtil.h
+@@ -106,11 +106,7 @@ class SSLUtil {
+   using ex_data_dup_from_arg_t = CRYPTO_EX_DATA*;
+ #endif
+ 
+-#ifdef OPENSSL_IS_BORINGSSL
+   using ex_data_dup_ptr_arg_t = void**;
+-#else
+-  using ex_data_dup_ptr_arg_t = void*;
+-#endif
+ 
+  public:
+   // ex data string dup func
