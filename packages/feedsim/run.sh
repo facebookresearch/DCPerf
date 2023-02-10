@@ -39,6 +39,8 @@ Usage: ${0##*/} [-h] [-t <thrift_threads>] [-c <ranking_cpu_threads>]
     -t Number of threads to use for thrift serving. Large dataset kept per thread. Default: $THRIFT_THREADS_DEFAULT
     -c Number of threads to use for fanout ranking work. Heavy CPU work. Default: $RANKING_THREADS_DEFAULT
     -s Number of threads to use for task-based serialization cpu work. Default: $SRV_IO_THREADS_DEFAULT
+    -a When searching for the optimal QPS, automatically adjust the number of cliient driver threads by
+       min(requested_qps / 4, $(nproc) / 5) in each iteration (experimental feature).
     -q Number of QPS to request. If this is present, feedsim will run a fixed-QPS experiment instead of searching
        for a QPS that meets latency target.
     -d Duration of each load testing experiment, in seconds. Default: 300
@@ -72,6 +74,9 @@ main() {
     local srv_io_threads
     srv_io_threads="$SRV_IO_THREADS_DEFAULT"
 
+    local auto_driver_threads
+    auto_driver_threads=""
+
     local fixed_qps
     fixed_qps=""
 
@@ -91,6 +96,9 @@ main() {
                 ;;
             -s)
                 srv_io_threads="$2"
+                ;;
+            -a)
+                auto_driver_threads="1"
                 ;;
             -q)
                 fixed_qps="$2"
@@ -156,13 +164,19 @@ main() {
     # when trying to create sockets for listening.
 
     # Start DriverNode
-    if [ -z "$fixed_qps" ]; then
+    if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
         scripts/search_qps.sh -w 15 -f 300 -s 95p:500 -o "${FEEDSIM_ROOT}/feedsim_results.txt" -- \
             build/workloads/ranking/DriverNodeRank \
                 --server 0.0.0.0:11222 \
                 --threads="${DRIVER_THREADS}" \
                 --connections=4
+        benchreps_tell_state "after search_qps"
+    elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
+        benchreps_tell_state "before search_qps"
+        scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 -o "${FEEDSIM_ROOT}/feedsim_results.txt" -- \
+            build/workloads/ranking/DriverNodeRank \
+                --server 0.0.0.0:11222
         benchreps_tell_state "after search_qps"
     else
         # Adjust the number of workers according to QPS

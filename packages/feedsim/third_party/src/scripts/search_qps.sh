@@ -67,6 +67,9 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
                 are avg, 50p, 90p, 95p, 99p, 99.9p
     -q          number of qps to use. If this option is present, the program will execute
                 a fixed-qps experiment instead of searching. Optional
+    -a          let ${0##*/} automatically adjust the number of driver's worker threads by
+                appending '--threads=T --connections=4' to the driver command during load
+                tests. T will be the lesser of requested_qps / 4 or $(nproc) / 5.
     -o          output filename to record samples as csv. Optional
 EOF
 }
@@ -77,16 +80,41 @@ run_loadtest() {
   local __output_qps=$1
   local __output_latency=$2
   local qps_arg=""
+  local threads_arg=""
 
   # check for optional QPS argument
   if [ $# -eq 3 ]; then
     qps_arg="--qps=$3"
   fi
 
+  # check if we want auto-adjusted worker thread counts
+  if [ "$auto_driver_threads" = "1" ]; then
+      local max_driver_threads=""
+      local req_qps="$3"
+      local num_connections=4
+      local num_threads=""
+      bc_max='define max (a, b) { if (a >= b) return (a); return (b); }'
+      max_driver_threads="$(echo "scale=2; $(nproc) / 5.0 + 0.5 " | bc )"
+      max_driver_threads="${max_driver_threads%.*}"
+      max_driver_threads="$(echo "${bc_max}; max(${max_driver_threads:-0}, 4)" | bc )" # At least 4 threads.
+
+      if [ -n "$qps_arg" ]; then
+          num_threads=$(echo "$req_qps / $num_connections" | bc)
+      else
+          num_threads=${max_driver_threads}
+      fi
+      if [ "$num_threads" -lt 1 ]; then
+          num_threads=1
+      elif [ "$num_threads" -gt "$max_driver_threads" ]; then
+          num_threads="$max_driver_threads"
+      fi
+      threads_arg="--threads=$num_threads --connections=4"
+  fi
+
   for r in $(seq 1 $load_test_retries); do
     # run the command, saving result to tmpfile
     local tmp_file=$(mktemp)
-    $command $qps_arg &>$tmp_file &
+    $command $threads_arg $qps_arg &>$tmp_file &
     LOADTEST_PID=$!
     sleep 7
     ps -p $LOADTEST_PID -o pid= > /dev/null && break
@@ -170,9 +198,10 @@ latency_target=""
 load_test_retries=3
 output_csv_file=""
 fixed_qps=""
+auto_driver_threads=""
 
 OPTIND=1 # Reset is necessary if getopts was used previously in the script.  It is a good idea to make this local in a function.
-while getopts "ht:f:w:s:q:o:" opt; do
+while getopts "ht:f:w:s:q:ao:" opt; do
   case "$opt" in
     h)
       show_help
@@ -193,6 +222,9 @@ while getopts "ht:f:w:s:q:o:" opt; do
       ;;
     q)
       fixed_qps=$OPTARG
+      ;;
+    a)
+      auto_driver_threads=1
       ;;
     o)
       output_csv_file=$OPTARG
