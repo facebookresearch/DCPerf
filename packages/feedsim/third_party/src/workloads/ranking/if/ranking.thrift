@@ -4,7 +4,7 @@ cpp_include "folly/small_vector.h"
 cpp_include "folly/container/F14Map.h"
 
 struct Payload {
-  1: string message
+  1: string message;
 }
 
 enum RankingStoryType {
@@ -33,7 +33,7 @@ enum RankingStoryType {
   STORY_TYPE_W = 22,
   STORY_TYPE_X = 23,
   STORY_TYPE_Y = 24,
-  STORY_TYPE_Z = 25
+  STORY_TYPE_Z = 25,
 }
 
 enum RankingObjectType {
@@ -62,43 +62,47 @@ enum RankingObjectType {
   OBJ_TYPE_W = 22,
   OBJ_TYPE_X = 23,
   OBJ_TYPE_Y = 24,
-  OBJ_TYPE_Z = 25
+  OBJ_TYPE_Z = 25,
 }
 
 struct Action {
-  1: i16 type,
-  2: i64 timeUsec,
-  3: i32 timeMsec,
-  4: i64 actorID
+  1: i16 type;
+  2: i64 timeUsec;
+  3: i32 timeMsec;
+  4: i64 actorID;
 }
 
 typedef list<i64> (cpp.type = "folly::small_vector<int64_t, 8>") SmallListI64
 typedef map<i16, i64> (cpp.template = "folly::F14FastMap") RankingPayloadIntMap
-typedef map<i16, string> (cpp.template = "folly::F14FastMap") RankingPayloadStringMap
-typedef map<i16, SmallListI64> (cpp.template = "folly::F14FastMap") RankingPayloadVecMap
+typedef map<i16, string> (
+  cpp.template = "folly::F14FastMap",
+) RankingPayloadStringMap
+typedef map<i16, SmallListI64> (
+  cpp.template = "folly::F14FastMap",
+) RankingPayloadVecMap
 
 struct RankingObject {
-  1: i64 objectID,
-  2: RankingObjectType objectType,
-  3: i64 actorID,
-  4: i64 createTime,
-  5: RankingPayloadIntMap  payloadIntMap,
-  6: RankingPayloadStringMap payloadStrMap,
-  7: RankingPayloadVecMap payloadVecMap,
-  8: list<Action> actions,
-  9: double weight
+  1: i64 objectID;
+  2: RankingObjectType objectType;
+  3: i64 actorID;
+  4: i64 createTime;
+  5: RankingPayloadIntMap payloadIntMap;
+  6: RankingPayloadStringMap payloadStrMap;
+  7: RankingPayloadVecMap payloadVecMap;
+  8: list<Action> actions;
+  9: double weight;
 }
 
 struct RankingStory {
-  1: i64 storyID,
-  2: list<RankingObject> objects,
-  3: double weight,
-  4: RankingStoryType storyType
+  1: i64 storyID;
+  2: list<RankingObject> objects;
+  3: double weight;
+  4: RankingStoryType storyType;
 }
 
 struct RankingResponse {
-  1: i64 queryID,
-  2: list<RankingStory> rankingStories,
-  3: list<i32> objectCounts,
-  4: string metadata
+  1: i64 queryID;
+  2: list<RankingStory> rankingStories;
+  3: list<i32> objectCounts;
+  4: string metadata;
 }
