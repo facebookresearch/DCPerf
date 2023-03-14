@@ -15,16 +15,19 @@ function benchreps_tell_state () {
 
 # Function for BC
 BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
+BC_MIN_FN='define min (a, b) { if (a <= b) return (a); return (b); }'
 
 # Constants
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 FEEDSIM_ROOT_SRC="${FEEDSIM_ROOT}/src"
 
-THRIFT_THREADS_DEFAULT="$(nproc)" # Scale with logial cpus
+# Thrift threads: scale with logical CPUs till 216. Having more than that
+# will risk running out of memory and getting killed
+THRIFT_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc), 216)" | bc)"
 RANKING_THREADS_DEFAULT="$(( $(nproc) * 7/20))"  # 7/20 is 0.35 cpu factor
 EVENTBASE_THREADS_DEFAULT=4  # 4 should suffice. Tune up if threads are saturated.
 SRV_THREADS_DEFAULT=8        # 8 should also suffice for most purposes
-SRV_IO_THREADS_DEFAULT="$(nproc)" # Scale with logical cpus
+SRV_IO_THREADS_DEFAULT="$(( $(nproc) * 7/20 ))" # 0.35 cpu factor
 DRIVER_THREADS="$(echo "scale=2; $(nproc) / 5.0 + 0.5 " | bc )"  # Driver threads, rounds nearest.
 DRIVER_THREADS="${DRIVER_THREADS%.*}"  # Truncate decimal fraction.
 DRIVER_THREADS="$(echo "${BC_MAX_FN}; max(${DRIVER_THREADS:-0}, 4)" | bc )" # At least 4 threads.
