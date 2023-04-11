@@ -82,6 +82,11 @@ def run_server(args):
     n_slow_threads = int(n_threads * args.slow_to_fast_ratio)
     # memory size
     n_mem = int(args.memsize * MEM_USAGE_FACTOR) * 1024
+    # port number
+    if args.port_number > 0:
+        port_num = args.port_number
+    else:
+        server_port_num = 11211
     print(
         f"Use {n_channels} NIC channels, {n_threads} fast threads and {n_mem} MB cache memory"
     )
@@ -115,6 +120,8 @@ def run_server(args):
         str(n_threads),
         "-B",
         "binary",
+        "-p",
+        str(port_num),
         "-I",
         "16m",
         "-Z",
@@ -139,6 +146,11 @@ def get_client_cmd(args, n_seconds):
         n_clients = args.clients_per_thread
     else:
         n_clients = 380
+    # server port number
+    if args.server_port_number > 0:
+        server_port_num = args.server_port_number
+    else:
+        server_port_num = 11211
 
     # mem size
     n_bytes_per_item = 434  # average from collected distribution
@@ -157,7 +169,7 @@ def get_client_cmd(args, n_seconds):
         "-s",
         s_host,
         "-p",
-        "11211",
+        str(server_port_num),
         "-P",
         "memcache_binary",
         f"--cert={s_cert}",
@@ -253,6 +265,12 @@ def init_parser():
         action="store_true",
         help="hard bind NIC channels to cores",
     )
+    server_parser.add_argument(
+        "--port-number",
+        type=int,
+        default=11211,
+        help="port number of server",
+    )
     # client-side arguments
     client_parser.add_argument(
         "--server-hostname", type=str, required=True, help="server hostname"
@@ -283,6 +301,12 @@ def init_parser():
         type=int,
         default=380,
         help="Number of clients per thread",
+    )
+    client_parser.add_argument(
+        "--server-port-number",
+        type=int,
+        default=11211,
+        help="port number of server",
     )
     # for both server & client
     for x_parser in [server_parser, client_parser]:
