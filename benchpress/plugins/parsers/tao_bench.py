@@ -22,14 +22,22 @@ class TaoBenchServerSnapshot:
                 self.valid = False
             return
         self.is_oom = False
-        self.valid = True
         items = line.split(",")
         for keyvalue in items:
-            key, value = keyvalue.split("=", maxsplit=2)
-            key = key.strip()
-            value = value.strip()
-            if key in self.KEYS:
-                setattr(self, key, float(value))
+            try:
+                key, value = keyvalue.split("=", maxsplit=2)
+                key = key.strip()
+                value = value.strip()
+                if key in self.KEYS:
+                    setattr(self, key, float(value))
+            except ValueError:
+                continue
+        # all keys must be present in order to be a valid datapoint
+        self.valid = True
+        for key in self.KEYS:
+            if not hasattr(self, key):
+                self.valid = False
+                break
 
     def get(self, key):
         if key in self.KEYS and not hasattr(self, key):
@@ -99,6 +107,8 @@ class TaoBenchParser(Parser):
         total_slow_pqs = 0
         num = 0
         for snapshot in reversed(server_snapshots):
+            if not snapshot.valid:
+                continue
             # Also filter out data points with low hit rate
             if (
                 snapshot.get("fast_qps") > 1
