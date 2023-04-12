@@ -45,7 +45,7 @@ def run_cmd(
 
 
 def run_server(args):
-    n_cores = multiprocessing.cpu_count()
+    n_cores = len(os.sched_getaffinity(0))
     n_channels = int(n_cores * args.nic_channel_ratio)
     # set # channels
     try:
@@ -131,9 +131,9 @@ def get_client_cmd(args, n_seconds):
     if args.num_threads > 0:
         n_threads = args.num_threads
     else:
-        n_threads = multiprocessing.cpu_count() - 6
+        n_threads = len(os.sched_getaffinity(0)) - 6
         if n_threads <= 0:
-            n_threads = int(multiprocessing.cpu_count() * 0.8)
+            n_threads = int(len(os.sched_getaffinity(0)) * 0.8)
     # clients
     if args.clients_per_thread > 0:
         n_clients = args.clients_per_thread
