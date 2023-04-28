@@ -6,6 +6,12 @@ BPKGS_TAO_BENCH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this 
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_TAO_BENCH_ROOT/../..")"
 COMMON_DIR="${BENCHPRESS_ROOT}/packages/common"
 
+# Use the alternative installer script on ARM platforms
+if [ "$(uname -p)" = "aarch64" ]; then
+    ${BPKGS_TAO_BENCH_ROOT}/install_tao_bench_aarch64.sh
+    exit $?
+fi
+
 # FIXME(cltorres): Remove once we make the BP_TMP the default working diretory
 cd "$BP_TMP" || exit 1
 

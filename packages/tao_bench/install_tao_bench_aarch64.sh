@@ -8,13 +8,14 @@ TAO_BENCH_ROOT="${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 TAO_BENCH_DEPS="${TAO_BENCH_ROOT}/build-deps"
 FOLLY_BUILD_ROOT="${TAO_BENCH_ROOT}/build-folly"
 
-sudo yum install -y cmake autoconf automake \
+sudo dnf install -y cmake autoconf automake \
     libevent-devel openssl openssl-devel \
     zlib-devel bzip2-devel xz-devel lz4-devel libzstd-devel \
     snappy-devel libaio-devel libunwind-devel patch \
     double-conversion-devel libsodium-devel \
-    gflags-devel fmt-devel
-sudo yum remove -y libdwarf-devel glog-devel
+    gflags-devel fmt-devel perl libtool pcre-devel \
+    git python3-devel
+sudo dnf remove -y libdwarf-devel glog-devel
 
 # Installing dependencies
 mkdir -p "${TAO_BENCH_DEPS}"
@@ -53,6 +54,20 @@ else
     echo "[SKIPPED] openssl_1_1_1b"
 fi
 
+# Install libevent
+if ! [ -d "libevent" ]; then
+    git clone --branch release-2.1.8-stable https://github.com/libevent/libevent
+    pushd libevent/
+    ./autogen.sh
+    ./configure --prefix="${TAO_BENCH_DEPS}" PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" \
+        LDFLAGS="-L${TAO_BENCH_DEPS}/lib" CPPFLAGS="-I${TAO_BENCH_DEPS}/include"
+    make -j"$(nproc)"
+    make install
+    popd
+else
+    echo "[SKIPPED] libevent-2.1.8"
+fi
+
 # Installing folly
 if ! [ -d "folly" ]; then
     git clone https://github.com/facebook/folly
@@ -60,6 +75,7 @@ else
     echo "[DOWNLOADED] folly"
 fi
 pushd folly
+git checkout v2023.02.27.00
 sed -i 's/FOLLY_ALWAYS_INLINE//g' "${TAO_BENCH_ROOT}/folly/folly/experimental/symbolizer/StackTrace.cpp"
 OPENSSL_ROOT_DIR="${TAO_BENCH_DEPS}" ./build/fbcode_builder/getdeps.py --allow-system-packages build \
     --extra-cmake-defines '{"CMAKE_LIBRARY_ARCHITECTURE": "aarch64"}' \
@@ -77,6 +93,8 @@ if ! [ -f "config.h.in" ]; then
 fi
 # Patch w/ Tao Bench changes
 patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/tao_bench_memcached_0001.diff"
+patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0002-tao_bench_memcached_oom_handling.diff"
+patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0003-tao_bench_thread_pool_naming.diff"
 
 # Find the path to folly and fmt
 FOLLY_INSTALLED_PATH="${FOLLY_BUILD_ROOT}/installed/folly"
@@ -123,7 +141,7 @@ pushd memtier_client
 
 # Build and install
 autoreconf --force --install
-./configure --enable-tls
+./configure --enable-tls PKG_CONFIG_PATH="${TAO_BENCH_DEPS}"/lib/pkgconfig
 make -j"$(nproc)" || ( automake --add-missing && make -j"$(nproc)" )
 cp memtier_benchmark "${TAO_BENCH_ROOT}/tao_bench_client"
 popd
