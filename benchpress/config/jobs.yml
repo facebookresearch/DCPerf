@@ -261,7 +261,7 @@
 - benchmark: tao_bench
   name: tao_bench_custom
   description:
-      Tao benchmark using custom amount of memory.
+      Tao benchmark using custom amount of memory and ports.
       MAKE SURE to start clients within 1 minute.
   roles:
     server:
@@ -273,12 +273,14 @@
         - '--dispatcher-to-fast-ratio=0.25'
         - '--slow-to-fast-ratio=3'
         - '--interface-name={interface_name}'
+        - '--port-number={port_number}'
         - '--warmup-time={warmup_time}'
         - '--test-time={test_time}'
         - '--real'
       vars:
         - 'interface_name=eth0'
         - 'memsize=64'
+        - 'port_number=11211'
         - 'warmup_time=1200'
         - 'test_time=360'
     client:
@@ -289,6 +291,7 @@
         - '--server-memsize={server_memsize}'
         - '--target-hit-ratio=0.9'
         - '--tunning-factor=0.807'
+        - '--server-port-number={server_port_number}'
         - '--warmup-time={warmup_time}'
         - '--test-time={test_time}'
         - '--real'
@@ -296,6 +299,7 @@
         - 'server_hostname'
         - 'server_memsize=64'
         - 'clients_per_thread=380'
+        - 'server_port_number=11211'
         - 'warmup_time=1200'
         - 'test_time=360'
 
