@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 
 import argparse
+import datetime
 import json
 import os
+import re
 import shutil
 import socket
 import time
 from os.path import join as joinpath
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from config_spark import (
     get_hardware_info,
@@ -142,6 +144,31 @@ def create(args) -> None:
         run_spark_sql(sql_file, database=None, for_real=args.real)
 
 
+def parse_per_stage_runtime(logfile: str) -> Dict[str, List[datetime.datetime]]:
+    loglines = []
+    with open(logfile, "r") as f:
+        loglines = f.readlines()
+
+    timelines = {}
+    for line in loglines:
+        parts = line.split(" ", maxsplit=2)
+        if len(parts) < 3:
+            continue
+        timestr = parts[0] + " " + parts[1]
+        try:
+            timestamp = datetime.datetime.strptime(timestr, "%y/%m/%d %H:%M:%S")
+        except ValueError:
+            continue
+        is_stage = re.search(r"stage (\d\.\d)", parts[2])
+        if is_stage:
+            stage = is_stage.group(1)
+            if stage in timelines:
+                timelines[stage][1] = timestamp
+            else:
+                timelines[stage] = [timestamp, timestamp]
+    return timelines
+
+
 def run(args) -> None:
     setup(args)
     sql_files = write_sql_tests(args)
@@ -179,7 +206,16 @@ def run(args) -> None:
                 test_name = os.path.basename(sql_file).split(".")[0]
                 print(f"Test {test_name} elapsed time: {test_elapsed_time:.1f} (s)")
                 if args.real:
+                    exec_logname = sql_file.replace(".sql", ".log")
+                    exec_logpath = joinpath(WORK_PATH, exec_logname)
+                    stages = parse_per_stage_runtime(exec_logpath)
                     fp.write(f"{' '*4}test-{test_name} : {test_elapsed_time:.1f}\n")
+                    for stage, timeline in stages.items():
+                        elapsed_time = timeline[1] - timeline[0]
+                        fp.write(
+                            f"{' '*4}test-{test_name}-stage-{stage} : "
+                            + f"{elapsed_time.total_seconds():.1f}\n"
+                        )
                 time.sleep(args.interval)
         total_elapsed_time = time.time() - start_time
         print(
