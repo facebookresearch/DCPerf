@@ -303,6 +303,22 @@
         - 'warmup_time=1200'
         - 'test_time=360'
 
+- benchmark: tao_bench_2x
+  name: tao_bench_2x
+  description:
+      Spawns two Tao benchmark servers, using a total of 256G
+      of memory and listening to port 11211 and 11212 respectively.
+      The warmup time is 2400s and test time is 720s.
+      MAKE SURE to start clients within 1 minute.
+  args:
+    - '--memsize=256'
+    - '--interface-name=eth0'
+    - '--port-number-inst1=11211'
+    - '--port-number-inst2=11212'
+    - '--warmup-time=2400'
+    - '--test-time=720'
+    - '--real'
+
 - benchmark: memcached_bench
   name: memcached_bench_64g
   description:

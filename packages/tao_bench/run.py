@@ -86,7 +86,7 @@ def run_server(args):
     if args.port_number > 0:
         port_num = args.port_number
     else:
-        server_port_num = 11211
+        port_num = 11211
     print(
         f"Use {n_channels} NIC channels, {n_threads} fast threads and {n_mem} MB cache memory"
     )

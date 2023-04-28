@@ -41,6 +41,20 @@ tao_bench:
     - server
     - client
 
+tao_bench_2x:
+  parser: tao_bench_2x
+  install_script: ./packages/tao_bench/install_tao_bench.sh
+  cleanup_script: ./packages/tao_bench/cleanup_tao_bench.sh
+  path: ./packages/tao_bench/run_2x.py
+  tags:
+    scope:
+      - app
+      - cache
+    component:
+      - cpu
+      - memory
+  metrics: []
+
 feedsim:
   parser: feedsim
   install_script: ./packages/feedsim/install_feedsim.sh
