@@ -35,4 +35,11 @@ cd ../../
 
 rm -rf build/
 
+# copy siege config file
+mkdir -p "${HOME}/.siege"
+if [ -f "${HOME}/.siege/siege.conf" ]; then
+  mv -f "${HOME}/.siege/siege.conf" "${HOME}/.siege/siege.conf.bak"
+fi
+cp "${DJANGO_PKG_ROOT}/templates/siege.conf" "${HOME}/.siege/siege.conf"
+
 echo "siege installed into ${SIEGE_INSTALLATION_PREFIX}"

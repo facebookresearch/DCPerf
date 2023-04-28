@@ -130,7 +130,7 @@ start_clientserver() {
 
 main() {
   local num_server_workers
-  num_server_workers="${NPROC}"
+  num_server_workers="$(nproc)"
 
   local num_client_workers
   num_client_workers="0"

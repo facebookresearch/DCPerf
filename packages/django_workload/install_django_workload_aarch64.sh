@@ -85,7 +85,9 @@ CASSANDRA_ROOT="${DJANGO_WORKLOAD_ROOT}/apache-cassandra"
 pushd "${CASSANDRA_ROOT}"
 
 # Set JVM Options
-mv conf/jvm.options conf/jvm.options.bkp || exit 1
+if [ -f "conf/jvm.options" ]; then
+    mv conf/jvm.options conf/jvm.options.bkp || exit 1
+fi
 cp "${TEMPLATES_DIR}/jvm.options" "${CASSANDRA_ROOT}/conf/jvm.options" || exit 1
 
 # Create data directories to use in configuring Cassandra
