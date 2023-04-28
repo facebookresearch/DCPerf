@@ -1,0 +1,22 @@
+diff --git a/django-workload/django_workload/middleware.py b/django-workload/django_workload/middleware.py
+index 0399a71..11baaa6 100644
+--- a/django-workload/django_workload/middleware.py
++++ b/django-workload/django_workload/middleware.py
+@@ -13,17 +13,6 @@ from django_statsd.middleware import (
+ # Used for sample-based profiling
+ SAMPLE_COUNT = 0
+ 
+-
+-# Update django_statsd middleware to newer Django requirements
+-class GraphiteMiddleware(MiddlewareMixin, GraphiteMiddleware):
+-    pass
+-
+-
+-class GraphiteRequestTimingMiddleware(
+-        MiddlewareMixin, GraphiteRequestTimingMiddleware):
+-    pass
+-
+-
+ # We need access to request metadata from within patched support code. Store
+ # the request in a thread global
+ def global_request_middleware(get_response):

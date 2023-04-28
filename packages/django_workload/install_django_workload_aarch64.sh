@@ -40,7 +40,7 @@ wget "https://files.pythonhosted.org/packages/49/49/178daa8725d29c475216259eb19e
 # django-cassandra-engine-1.5.5.tar.gz
 wget "https://files.pythonhosted.org/packages/8f/73/65eb1435e95eff569c6dc0f72fced0243e1bce94dc44dc7e3091d36143ca/django-cassandra-engine-1.5.5.tar.gz"
 # django-statsd-mozilla-0.3.16.tar.gz
-wget "https://files.pythonhosted.org/packages/62/27/1255179f763b5553f5b01f92942cfb275bf80575b6ca65211de1ac12d48e/django-statsd-mozilla-0.3.16.tar.gz"
+wget "https://files.pythonhosted.org/packages/ac/54/5fa99753dab7ced46129a4c95c777596a2e4094a8b0f65c8764d60d5cff4/django_statsd_mozilla-0.4.0-py3-none-any.whl"
 # numpy-1.19.5-cp36-cp36m-manylinux1_x86_64.whl
 wget "https://files.pythonhosted.org/packages/91/11/059ef2ef98f9eea49ece6d6046bc537c3050c575108a51a624a179c8e7e3/numpy-1.19.5-cp39-cp39-manylinux2014_aarch64.whl"
 # psutil-5.8.0.tar.gz
@@ -148,8 +148,17 @@ fi
 # Apply Memcache tuning
 pushd "${DJANGO_SERVER_ROOT}/django_workload"
 git apply --check "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch" && git apply "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch"
+# Apply db caching
+git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch"
+# Remove duplicate middleware classes
+git apply --check "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch" && git apply "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch"
 popd
 
 set +u
 deactivate
+popd
+
+# Install siege
+pushd "${DJANGO_PKG_ROOT}" || exit 1
+bash -x install_siege.sh
 popd

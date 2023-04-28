@@ -5,6 +5,11 @@ DJANGO_PKG_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "${DJANGO_PKG_ROOT}/../..")"
 TEMPLATES_DIR="${DJANGO_PKG_ROOT}/templates"
 
+if [ "$(uname -p)" = "aarch64" ]; then
+    "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64.sh
+    exit $?
+fi
+
 # FIXME(cltorres): Remove once we make the BP_TMP the default working diretory
 cd "$BP_TMP" || exit 1
 
