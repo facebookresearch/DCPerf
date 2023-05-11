@@ -3,8 +3,6 @@ namespace cpp2 ranking
 cpp_include "folly/small_vector.h"
 cpp_include "folly/container/F14Map.h"
 
-include "thrift/annotation/cpp.thrift"
-
 struct Payload {
   1: string message;
 }
@@ -74,14 +72,14 @@ struct Action {
   4: i64 actorID;
 }
 
-@cpp.Type{name = "folly::small_vector<int64_t, 8>"}
-typedef list<i64> SmallListI64
-@cpp.Type{template = "folly::F14FastMap"}
-typedef map<i16, i64> RankingPayloadIntMap
-@cpp.Type{template = "folly::F14FastMap"}
-typedef map<i16, string> RankingPayloadStringMap
-@cpp.Type{template = "folly::F14FastMap"}
-typedef map<i16, SmallListI64> RankingPayloadVecMap
+typedef list<i64> (cpp.type = "folly::small_vector<int64_t, 8>") SmallListI64
+typedef map<i16, i64> (cpp.template = "folly::F14FastMap") RankingPayloadIntMap
+typedef map<i16, string> (
+  cpp.template = "folly::F14FastMap",
+) RankingPayloadStringMap
+typedef map<i16, SmallListI64> (
+  cpp.template = "folly::F14FastMap",
+) RankingPayloadVecMap
 
 struct RankingObject {
   1: i64 objectID;

@@ -26,6 +26,12 @@ die() {
   exit "$code"
 }
 
+ARCH="$(uname -p)"
+if [ "$ARCH" = "aarch64" ]; then
+    "${FEEDSIM_ROOT}"/install_feedsim_aarch64.sh
+    exit $?
+fi
+
 dnf install -y ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \

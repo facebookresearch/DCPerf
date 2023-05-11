@@ -30,7 +30,7 @@ die() {
 dnf install -y cmake ninja-build flex bison git texinfo binutils-devel \
     libunwind-devel bzip2-devel libsodium-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool openssl-devel \
-    zlib-devel libdwarf-devel libaio-devel libatomic patch
+    zlib-devel libdwarf-devel libaio-devel libatomic patch perl
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -171,6 +171,20 @@ do
     fi
 
 done < "${FEEDSIM_ROOT}/submodules.txt"
+
+# If running on CentOS Stream 9, apply compatilibity patches to folly, rsocket and wangle
+# TODO: This is a temporary fix. In the long term we should seek to have feedsim
+# support the up-to-date version of these dependencies
+REPOS_TO_PATCH=(folly rsocket-cpp)
+#REPOS_TO_PATCH=(folly wangle rsocket-cpp)
+if grep -i 'centos stream release 9' /etc/*-release >/dev/null 2>&1; then
+    for repo in "${REPOS_TO_PATCH[@]}"; do
+        pushd "third_party/$repo" || exit 1
+        git apply --check "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff" && \
+            git apply "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff"
+        popd || exit 1
+    done
+fi
 
 mkdir -p build && cd build/
 
