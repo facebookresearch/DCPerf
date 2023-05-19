@@ -81,7 +81,7 @@ def run_server(args):
     n_dispatchers = int(n_threads * args.dispatcher_to_fast_ratio)
     n_slow_threads = int(n_threads * args.slow_to_fast_ratio)
     # memory size
-    n_mem = int(args.memsize * MEM_USAGE_FACTOR) * 1024
+    n_mem = int(args.memsize * 1024 * MEM_USAGE_FACTOR)
     # port number
     if args.port_number > 0:
         port_num = args.port_number
