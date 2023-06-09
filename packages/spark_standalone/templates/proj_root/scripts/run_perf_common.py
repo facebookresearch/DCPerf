@@ -45,7 +45,7 @@ def run_spark_sql(
         cmd.extend([k, v])
     for k, v in SPARK_CONFIGS.items():
         cmd.append("--conf")
-        value = '"{}"'.format(" ".join(v)) if type(v) is list else v
+        value = " ".join(v) if type(v) is list else v
         cmd.append(f"{k}={value}")
     cmd.extend(["-f", sql_file])
     if database:
