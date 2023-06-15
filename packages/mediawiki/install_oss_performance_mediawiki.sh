@@ -64,10 +64,13 @@ chmod 644 "$HOME/.siege/siege.conf"
 
 # 6. Install memcache
 if ! [ -d memcached-1.5.12 ]; then
-  git clone https://github.com/pkuwangh/memcached-1.5.12.git
-  # https://github.com/memcached/memcached/commit/8e5148ca5c32fafca948e43c2e966db28a50a5f4
+  git clone --branch 1.5.12 https://github.com/memcached/memcached memcached-1.5.12
   cd memcached-1.5.12 || { exit 1; }
-  autoreconf -f -i
+  git apply --check "${TEMPLATES_DIR}/0002-memcached-centos9-compat.diff" && \
+    git apply "${TEMPLATES_DIR}/0002-memcached-centos9-compat.diff"
+  git apply --check "${TEMPLATES_DIR}/0003-memcached-signal.diff" && \
+    git apply "${TEMPLATES_DIR}/0003-memcached-signal.diff"
+  ./autogen.sh
   ./configure --prefix=/usr/local/memcached
   make -j8
   make install
