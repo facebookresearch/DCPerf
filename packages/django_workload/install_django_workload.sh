@@ -10,6 +10,14 @@ if [ "$(uname -p)" = "aarch64" ]; then
     exit $?
 fi
 
+LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
+VERSION_ID="$(awk -F "=" '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '"')"
+
+if [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq "9" ]; then
+    "${DJANGO_PKG_ROOT}"/install_django_workload_x86_64_centos9.sh
+    exit $?
+fi
+
 # FIXME(cltorres): Remove once we make the BP_TMP the default working diretory
 cd "$BP_TMP" || exit 1
 
