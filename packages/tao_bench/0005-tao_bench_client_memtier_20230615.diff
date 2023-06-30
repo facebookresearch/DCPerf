@@ -1,0 +1,1053 @@
+diff --git a/Dockerfile b/Dockerfile
+index d0c243e..a054971 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -4,7 +4,7 @@ RUN \
+   DEBIAN_FRONTEND=noninteractive \
+   apt-get install -y \
+     build-essential autoconf automake libpcre3-dev libevent-dev \
+-    pkg-config zlib1g-dev libssl-dev libboost-all-dev cmake flex
++    pkg-config zlib1g-dev libssl-dev git libboost-all-dev cmake flex
+ COPY . /memtier_benchmark
+ WORKDIR /memtier_benchmark
+ RUN autoreconf -ivf && ./configure && make && make install
+diff --git a/README.md b/README.md
+index e5cba78..e9c4f66 100644
+--- a/README.md
++++ b/README.md
+@@ -61,8 +61,8 @@ $ sudo make install
+ $ popd
+ ```
+ 
+-The above steps will install into /usr/local so it does not confict with the 
+-distribution-bundled versions.  The last step is to set up the 
++The above steps will install into /usr/local so it does not confict with the
++distribution-bundled versions.  The last step is to set up the
+ PKG_CONFIG_PATH so configure can find the newly installed library.
+ 
+ ```
+diff --git a/VERSION b/VERSION
+new file mode 100644
+index 0000000..4ae184f
+--- /dev/null
++++ b/VERSION
+@@ -0,0 +1 @@
++Forked on 19 December 2019 from https://github.com/RedisLabs/memtier_benchmark
+diff --git a/client.cpp b/client.cpp
+index 979dcdd..d4d4a14 100755
+--- a/client.cpp
++++ b/client.cpp
+@@ -29,7 +29,6 @@
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include <string.h>
+-#include <errno.h>
+ #ifdef HAVE_SYS_SOCKET_H
+ #include <sys/socket.h>
+ #endif
+@@ -113,10 +112,12 @@ client::client(client_group* group) :
+ }
+ 
+ client::client(struct event_base *event_base, benchmark_config *config,
+-               abstract_protocol *protocol, object_generator *obj_gen) :
+-        m_event_base(NULL), m_initialized(false), m_end_set(false), m_config(NULL),
+-        m_obj_gen(NULL), m_stats(config), m_reqs_processed(0), m_reqs_generated(0),
+-        m_set_ratio_count(0), m_get_ratio_count(0),
++               abstract_protocol *protocol, object_generator *obj_gen,
++               bool sim_coherency) :
++        m_event_base(NULL), m_initialized(false), m_end_set(false),
++        m_simulates_tao_coherency(sim_coherency), m_config(NULL),
++        m_obj_gen(NULL), m_stats(config), m_reqs_processed(0),
++        m_reqs_generated(0), m_set_ratio_count(0), m_get_ratio_count(0),
+         m_arbitrary_command_ratio_count(0), m_executed_command_index(0),
+         m_tot_set_ops(0), m_tot_wait_ops(0), m_keylist(NULL)
+ {
+@@ -281,6 +282,27 @@ void client::create_arbitrary_request(const arbitrary_command* cmd, struct timev
+ // This function could use some urgent TLC -- but we need to do it without altering the behavior
+ void client::create_request(struct timeval timestamp, unsigned int conn_id)
+ {
++    // It this is a client that simulates Tao consistency protocol, then we just
++    // send a SET command
++
++    if (m_simulates_tao_coherency) {
++        // SET command
++        data_object *obj = m_obj_gen->get_object(obj_iter_type(m_config, 0));
++        unsigned int key_len;
++        const char *key = obj->get_key(&key_len);
++        unsigned int value_len;
++        const char *value = obj->get_value(&value_len);
++
++        m_connections[conn_id]->send_set_command(&timestamp, key, key_len,
++                                                 value, value_len, obj->get_expiry(),
++                                                 m_config->data_offset);
++        m_reqs_generated++;
++        m_set_ratio_count++;
++        m_tot_set_ops++;
++
++        return;
++    }
++
+     // are we using arbitrary command?
+     if (m_config->arbitrary_commands->is_defined()) {
+         const arbitrary_command* executed_command = m_config->arbitrary_commands->get_next_executed_command(m_arbitrary_command_ratio_count,
+@@ -391,6 +413,8 @@ void client::handle_response(unsigned int conn_id, struct timeval timestamp,
+                                   ts_diff(request->m_sent_time, timestamp),
+                                   response->get_hits(),
+                                   request->m_keys - response->get_hits());
++            // Vandrei: DEBUG
++            // response->print_n_value_bytes(3);
+             break;
+         case rt_set:
+             m_stats.update_set_op(&timestamp,
+@@ -420,7 +444,8 @@ void client::handle_response(unsigned int conn_id, struct timeval timestamp,
+ verify_client::verify_client(struct event_base *event_base,
+     benchmark_config *config,
+     abstract_protocol *protocol,
+-    object_generator *obj_gen) : client(event_base, config, protocol, obj_gen),
++    object_generator *obj_gen) :
++    client(event_base, config, protocol, obj_gen, false),
+     m_finished(false), m_verified_keys(0), m_errors(0)
+ {
+     MAIN_CONNECTION->get_protocol()->set_keep_value(true);
+@@ -550,15 +575,17 @@ client_group::~client_group(void)
+     m_base = NULL;
+ }
+ 
+-int client_group::create_clients(int num)
++int client_group::create_clients(int num, bool sim_coh)
+ {
+     for (int i = 0; i < num; i++) {
+         client* c;
+ 
+         if (m_config->cluster_mode)
+             c = new cluster_client(this);
+-        else
++        else {
+             c = new client(this);
++            c->set_sim_tao_coherency(sim_coh);
++        }
+ 
+         assert(c != NULL);
+ 
+diff --git a/client.h b/client.h
+index 06da93b..845709b 100755
+--- a/client.h
++++ b/client.h
+@@ -55,6 +55,7 @@ protected:
+     struct event_base* m_event_base;
+     bool m_initialized;
+     bool m_end_set;
++    bool m_simulates_tao_coherency;
+ 
+     // test related
+     benchmark_config* m_config;
+@@ -75,13 +76,23 @@ protected:
+ 
+ public:
+     client(client_group* group);
+-    client(struct event_base *event_base, benchmark_config *config, abstract_protocol *protocol, object_generator *obj_gen);
++
++    client(struct event_base *event_base,
++        benchmark_config *config,
++        abstract_protocol *protocol,
++        object_generator *obj_gen,
++        bool sim_coherency);
++
+     virtual ~client();
+     virtual bool setup_client(benchmark_config *config, abstract_protocol *protocol, object_generator *obj_gen);
+     virtual int prepare(void);
+ 
+     bool initialized(void);
+ 
++    inline void set_sim_tao_coherency(bool sim_coh) {
++        m_simulates_tao_coherency = sim_coh;
++    }
++
+     run_stats* get_stats(void) { return &m_stats; }
+ 
+     // client manager api's
+@@ -170,7 +181,7 @@ public:
+     client_group(benchmark_config *cfg, abstract_protocol *protocol, object_generator* obj_gen);
+     ~client_group();
+ 
+-    int create_clients(int count);
++    int create_clients(int count, bool sim_coherency);
+     int prepare(void);
+     void run(void);
+ 
+@@ -179,7 +190,7 @@ public:
+     struct event_base *get_event_base(void) { return m_base; }
+     benchmark_config *get_config(void) { return m_config; }
+     abstract_protocol* get_protocol(void) { return m_protocol; }
+-    object_generator* get_obj_gen(void) { return m_obj_gen; }    
++    object_generator* get_obj_gen(void) { return m_obj_gen; }
+ 
+     unsigned long int get_total_bytes(void);
+     unsigned long int get_total_ops(void);
+@@ -190,4 +201,4 @@ public:
+ };
+ 
+ 
+-#endif	/* _CLIENT_H */
++#endif /* _CLIENT_H */
+diff --git a/cluster_client.cpp b/cluster_client.cpp
+index 1333167..602ba55 100644
+--- a/cluster_client.cpp
++++ b/cluster_client.cpp
+@@ -29,7 +29,6 @@
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include <string.h>
+-#include <errno.h>
+ #ifdef HAVE_SYS_SOCKET_H
+ #include <sys/socket.h>
+ #endif
+@@ -37,7 +36,6 @@
+ #include <netinet/tcp.h>
+ #endif
+ #ifdef HAVE_LIMITS_H
+-#include <limits.h>
+ #endif
+ 
+ #ifdef HAVE_ASSERT_H
+@@ -479,4 +477,3 @@ void cluster_client::handle_response(unsigned int conn_id, struct timeval timest
+     // continue with base class
+     client::handle_response(conn_id, timestamp, request, response);
+ }
+-
+diff --git a/config_types.cpp b/config_types.cpp
+index 3e9f928..d306d94 100644
+--- a/config_types.cpp
++++ b/config_types.cpp
+@@ -24,7 +24,6 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <assert.h>
+-#include <errno.h>
+ 
+ #ifdef HAVE_SYS_TYPES_H
+ #include <sys/types.h>
+@@ -215,6 +214,11 @@ const char* config_weight_list::print(char *buf, int buf_len)
+     for (std::vector<weight_item>::iterator i = item_list.begin(); i != item_list.end(); i++) {
+         int n = snprintf(buf, buf_len, "%s%u:%u",
+                 i != item_list.begin() ? "," : "", i->size, i->weight);
++
++        if (n >= buf_len) {
++            n = buf_len;
++        }
++
+         buf += n;
+         buf_len -= n;
+         if (!buf_len)
+@@ -282,11 +286,12 @@ int server_addr::get_connect_info(struct connect_info *ci)
+         ci->ci_family = m_used_addr->ai_family;
+         ci->ci_socktype = m_used_addr->ai_socktype;
+         ci->ci_protocol = m_used_addr->ai_protocol;
+-        assert(m_used_addr->ai_addrlen <= sizeof(ci->addr_buf));
++        // assert(m_used_addr->ai_addrlen <= sizeof(ci->addr_buf)); - VAndrei: This disables IPv6 compatibility
+         memcpy(ci->addr_buf, m_used_addr->ai_addr, m_used_addr->ai_addrlen);
+         ci->ci_addr = (struct sockaddr *) ci->addr_buf;
+         ci->ci_addrlen = m_used_addr->ai_addrlen;
+     }
++
+     pthread_mutex_unlock(&m_mutex);
+     return m_last_error;
+ }
+diff --git a/connections_manager.h b/connections_manager.h
+index 1b7c5a3..dc572fa 100644
+--- a/connections_manager.h
++++ b/connections_manager.h
+@@ -39,7 +39,9 @@ public:
+ 
+     virtual int connect(void) = 0;
+     virtual void disconnect(void) = 0;
+-};
+ 
++    virtual ~connections_manager() {
++    }
++};
+ 
+ #endif //MEMTIER_BENCHMARK_CLIENT_DATA_MANAGER_H
+diff --git a/file_io.cpp b/file_io.cpp
+index 4990fb4..8650ecf 100644
+--- a/file_io.cpp
++++ b/file_io.cpp
+@@ -17,7 +17,6 @@
+  */
+ 
+ #ifdef HAVE_CONFIG_H
+-#include "config.h"
+ #endif
+ 
+ #include <string.h>
+diff --git a/item.cpp b/item.cpp
+index 67c9771..f37f82e 100644
+--- a/item.cpp
++++ b/item.cpp
+@@ -17,7 +17,6 @@
+  */
+ 
+ #ifdef HAVE_CONFIG_H
+-#include "config.h"
+ #endif
+ 
+ #include <stdlib.h>
+@@ -149,5 +148,3 @@ int memcache_item_ptr_cmp(memcache_item *a, memcache_item *b)
+ {
+     return (*a < *b);
+ }
+-
+-
+diff --git a/libmemcached_protocol/binary.h b/libmemcached_protocol/binary.h
+index 7cd313e..c486549 100644
+--- a/libmemcached_protocol/binary.h
++++ b/libmemcached_protocol/binary.h
+@@ -36,7 +36,8 @@
+ #ifndef PROTOCOL_BINARY_H
+ #define PROTOCOL_BINARY_H
+ 
+-#include "libmemcached_protocol/vbucket.h"
++// #include "libmemcached_protocol/vbucket.h"
++#include "vbucket.h"
+ 
+ /**
+  * \addtogroup Protocol
+diff --git a/libmemcached_protocol/vbucket.h b/libmemcached_protocol/vbucket.h
+index e2cc563..9e90a2b 100644
+--- a/libmemcached_protocol/vbucket.h
++++ b/libmemcached_protocol/vbucket.h
+@@ -1,5 +1,5 @@
+ /*  vim:expandtab:shiftwidth=2:tabstop=2:smarttab:
+- * 
++ *
+  *  Libmemcached library
+  *
+  *  Copyright (C) 2011 Data Differential, http://datadifferential.com/
+diff --git a/memtier_benchmark.cpp b/memtier_benchmark.cpp
+index ccb7a57..5009ee5 100755
+--- a/memtier_benchmark.cpp
++++ b/memtier_benchmark.cpp
+@@ -144,7 +144,11 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
+         "wait-ratio = %u:%u\n"
+         "num-slaves = %u-%u\n"
+         "wait-timeout = %u-%u\n"
+-        "json-out-file = %s\n",
++        "json-out-file = %s\n"
++        "num_threads_db = %u\n"
++        "num_threads_coherence = %u\n"
++        "num_clients_coherence = %u\n"
++        "key_bytes = %u\n",
+         cfg->server,
+         cfg->port,
+         cfg->unix_socket,
+@@ -193,7 +197,12 @@ static void config_print(FILE *file, struct benchmark_config *cfg)
+         cfg->wait_ratio.a, cfg->wait_ratio.b,
+         cfg->num_slaves.min, cfg->num_slaves.max,
+         cfg->wait_timeout.min, cfg->wait_timeout.max,
+-        cfg->json_out_file);
++        cfg->json_out_file,
++        cfg->num_threads_db,
++        cfg->num_threads_coherence,
++        cfg->num_clients_coherence,
++        cfg->key_bytes
++        );
+ }
+ 
+ static void config_print_to_json(json_handler * jsonhandler, struct benchmark_config *cfg)
+@@ -235,22 +244,25 @@ static void config_print_to_json(json_handler * jsonhandler, struct benchmark_co
+     jsonhandler->write_obj("data_import"       ,"\"%s\"",       cfg->data_import);
+     jsonhandler->write_obj("data_verify"       ,"\"%s\"",       cfg->data_verify ? "true" : "false");
+     jsonhandler->write_obj("verify_only"       ,"\"%s\"",       cfg->verify_only ? "true" : "false");
+-    jsonhandler->write_obj("generate_keys"     ,"\"%s\"",     	cfg->generate_keys ? "true" : "false");
++    jsonhandler->write_obj("generate_keys"     ,"\"%s\"",       cfg->generate_keys ? "true" : "false");
+     jsonhandler->write_obj("key_prefix"        ,"\"%s\"",       cfg->key_prefix);
+-    jsonhandler->write_obj("key_minimum"       ,"%11u",        	cfg->key_minimum);
+-    jsonhandler->write_obj("key_maximum"       ,"%11u",        	cfg->key_maximum);
++    jsonhandler->write_obj("key_minimum"       ,"%11u",         cfg->key_minimum);
++    jsonhandler->write_obj("key_maximum"       ,"%11u",         cfg->key_maximum);
+     jsonhandler->write_obj("key_pattern"       ,"\"%s\"",       cfg->key_pattern);
+     jsonhandler->write_obj("key_stddev"        ,"%f",           cfg->key_stddev);
+     jsonhandler->write_obj("key_median"        ,"%f",           cfg->key_median);
+-    jsonhandler->write_obj("reconnect_interval","%u",    		cfg->reconnect_interval);
+-    jsonhandler->write_obj("multi_key_get"     ,"%u",         	cfg->multi_key_get);
+-    jsonhandler->write_obj("authenticate"      ,"\"%s\"",      	cfg->authenticate ? cfg->authenticate : "");
++    jsonhandler->write_obj("reconnect_interval","%u",           cfg->reconnect_interval);
++    jsonhandler->write_obj("multi_key_get"     ,"%u",           cfg->multi_key_get);
++    jsonhandler->write_obj("authenticate"      ,"\"%s\"",       cfg->authenticate ? cfg->authenticate : "");
+     jsonhandler->write_obj("select-db"         ,"%d",           cfg->select_db);
+     jsonhandler->write_obj("no-expiry"         ,"\"%s\"",       cfg->no_expiry ? "true" : "false");
+     jsonhandler->write_obj("wait-ratio"        ,"\"%u:%u\"",    cfg->wait_ratio.a, cfg->wait_ratio.b);
+     jsonhandler->write_obj("num-slaves"        ,"\"%u:%u\"",    cfg->num_slaves.min, cfg->num_slaves.max);
+-    jsonhandler->write_obj("wait-timeout"      ,"\"%u-%u\"",   	cfg->wait_timeout.min, cfg->wait_timeout.max);
+-
++    jsonhandler->write_obj("wait-timeout"      ,"\"%u-%u\"",    cfg->wait_timeout.min, cfg->wait_timeout.max);
++    jsonhandler->write_obj("num-threads-db"         ,"%u",      cfg->num_threads_db);
++    jsonhandler->write_obj("num-threads-coherence"  ,"%u",      cfg->num_threads_coherence);
++    jsonhandler->write_obj("num-clients-coherence"  ,"%u",      cfg->num_clients_coherence);
++    jsonhandler->write_obj("key-bytes"              ,"%u",      cfg->key_bytes);
+     jsonhandler->close_nesting();
+ }
+ 
+@@ -292,6 +304,16 @@ static void config_init_defaults(struct benchmark_config *cfg)
+     }
+     if (!cfg->requests && !cfg->test_time)
+         cfg->requests = 10000;
++
++    if (!cfg->num_threads_db)
++        cfg->num_threads_db = 0;
++    if (!cfg->num_threads_coherence)
++        cfg->num_threads_coherence = 0;
++    if (!cfg->num_clients_coherence)
++        cfg->num_clients_coherence = 1;
++    if (!cfg->key_bytes)
++        cfg->key_bytes = 0;
++    cfg->generated_key = NULL;
+     if (!cfg->hdr_prefix)
+         cfg->hdr_prefix = "";
+     if (!cfg->print_percentiles.is_defined())
+@@ -304,9 +326,8 @@ static int generate_random_seed()
+     FILE* f = fopen("/dev/random", "r");
+     if (f)
+     {
+-        size_t ignore = fread(&R, sizeof(R), 1, f);
++        std::ignore = fread(&R, sizeof(R), 1, f);
+         fclose(f);
+-        ignore++;//ignore warning
+     }
+ 
+     return (int)time(NULL)^getpid()^R;
+@@ -407,6 +428,10 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
+         o_tls_cacert,
+         o_tls_skip_verify,
+         o_tls_sni,
++        o_tao_num_t_db,
++        o_tao_num_t_coherence,
++        o_tao_num_c_coherence,
++        o_tao_key_bytes,
+         o_hdr_file_prefix,
+         o_help
+     };
+@@ -475,6 +500,10 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
+         { "command",                    1, 0, o_command },
+         { "command-key-pattern",        1, 0, o_command_key_pattern },
+         { "command-ratio",              1, 0, o_command_ratio },
++        { "threads-db",                 1, 0, o_tao_num_t_db },
++        { "threads-coherence",          1, 0, o_tao_num_t_coherence},
++        { "clients-coherence",          1, 0, o_tao_num_c_coherence},
++        { "key-bytes",                  1, 0, o_tao_key_bytes},
+         { NULL,                         0, 0, 0 }
+     };
+ 
+@@ -867,6 +896,34 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
+                     cfg->tls_sni = optarg;
+                     break;
+ #endif
++                case o_tao_num_t_db:
++                    cfg->num_threads_db = (unsigned int) strtoul(optarg, &endptr, 10);
++                    if (!cfg->num_threads_db || !endptr || *endptr != '\0') {
++                        fprintf(stderr, "error: Number of db threads needs to be at least 0.\n");
++                        return -1;
++                    }
++                    break;
++                case o_tao_num_t_coherence:
++                    cfg->num_threads_coherence = (unsigned int) strtoul(optarg, &endptr, 10);
++                    if (!(cfg->num_threads_coherence >= 0) || !endptr || *endptr != '\0') {
++                        fprintf(stderr, "error: Number of coherence threads needs to be at least 0.\n");
++                        return -1;
++                    }
++                    break;
++                case o_tao_num_c_coherence:
++                    cfg->num_clients_coherence = (unsigned int) strtoul(optarg, &endptr, 10);
++                    if (!(cfg->num_clients_coherence > 0) || !endptr || *endptr != '\0') {
++                        fprintf(stderr, "error: Number of coherence clients needs to be at least 1.\n");
++                        return -1;
++                    }
++                    break;
++                case o_tao_key_bytes:
++                    cfg->key_bytes = (unsigned int) strtoul(optarg, &endptr, 10);
++                    if (!(cfg->key_bytes > 0) || !endptr || *endptr != '\0') {
++                        fprintf(stderr, "error: Number of bytes in the keys.\n");
++                        return -1;
++                    }
++                    break;
+             default:
+                     return -1;
+                     break;
+@@ -926,6 +983,10 @@ void usage() {
+             "                                 use 'allkeys' to run on the entire key-range\n"
+             "  -c, --clients=NUMBER           Number of clients per thread (default: 50)\n"
+             "  -t, --threads=NUMBER           Number of threads (default: 4)\n"
++            "      --threads-db=NUMBER        Number of threads used for simulating tao db access (default: 0)\n"
++            "      --threads-coherence=NUMBER Number of threads used for simulating tao consistency traffic (default: 0)\n"
++            "      --clients-coherence=NUMBER Number of clients per thread for simulating tao consistency (default: 1)\n"
++            "      --key-bytes=NUMBER         Number of bytes in the key (default: 0 - that means prefix would be 'memtier-')\n"
+             "      --test-time=SECS           Number of seconds to run the test\n"
+             "      --ratio=RATIO              Set:Get ratio (default: 1:10)\n"
+             "      --pipeline=NUMBER          Number of concurrent pipelined requests (default: 1)\n"
+@@ -1004,9 +1065,19 @@ struct cg_thread {
+     abstract_protocol* m_protocol;
+     pthread_t m_thread;
+     bool m_finished;
+-
+-    cg_thread(unsigned int id, benchmark_config* config, object_generator* obj_gen) :
+-        m_thread_id(id), m_config(config), m_obj_gen(obj_gen), m_cg(NULL), m_protocol(NULL), m_finished(false)
++    bool m_simulates_coherency;
++
++    cg_thread(unsigned int id,
++        benchmark_config* config,
++        object_generator* obj_gen,
++        bool is_coherence_client) :
++        m_thread_id(id),
++        m_config(config),
++        m_obj_gen(obj_gen),
++        m_cg(NULL),
++        m_protocol(NULL),
++        m_finished(false),
++        m_simulates_coherency(is_coherence_client)
+     {
+         m_protocol = protocol_factory(m_config->protocol);
+         assert(m_protocol != NULL);
+@@ -1026,13 +1097,26 @@ struct cg_thread {
+ 
+     int prepare(void)
+     {
+-        if (m_cg->create_clients(m_config->clients) < (int) m_config->clients)
+-            return -1;
++        if (m_simulates_coherency == false) {
++            if (m_cg->create_clients(m_config->clients, false) < (int) m_config->clients)
++                return -1;
++        }
++        else {
++            int n_clients = (int)m_config->num_clients_coherence;
++            if (m_cg->create_clients(n_clients, true) < n_clients)
++                return -1;
++        }
++
+         return m_cg->prepare();
+     }
+ 
+     int start(void)
+     {
++        if (!m_simulates_coherency)
++            fprintf(stderr, "thread create: regular load generator thread.\n");
++        else
++            fprintf(stderr, "thread create: Tao coherency simulation thread.\n");
++
+         return pthread_create(&m_thread, NULL, cg_thread_start, (void *)this);
+     }
+ 
+@@ -1072,12 +1156,12 @@ void size_to_str(unsigned long int size, char *buf, int buf_len)
+ 
+ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj_gen)
+ {
+-    fprintf(stderr, "[RUN #%u] Preparing benchmark client...\n", run_id);
++    fprintf(stderr, "[RUN #%u] Preparing regular request generator clients...\n", run_id);
+ 
+-    // prepare threads data
++    // Prepare the threads that generate normal memcache requests (gets and sets)
+     std::vector<cg_thread*> threads;
+     for (unsigned int i = 0; i < cfg->threads; i++) {
+-        cg_thread* t = new cg_thread(i, cfg, obj_gen);
++        cg_thread* t = new cg_thread(i, cfg, obj_gen, false);
+         assert(t != NULL);
+ 
+         if (t->prepare() < 0) {
+@@ -1087,7 +1171,23 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
+         threads.push_back(t);
+     }
+ 
+-    // launch threads
++    // Prepare the threads that simulate tao coherency
++    if (cfg->num_threads_coherence > 0) {
++        fprintf(stderr, "[RUN #%u] Preparing clients that simulate tao coherency...\n", run_id);
++
++        for (unsigned int i = cfg->threads; i < cfg->threads + cfg->num_threads_coherence; ++i) {
++            cg_thread* t = new cg_thread(i, cfg, obj_gen, true);
++            assert(t != NULL);
++
++            if (t->prepare() < 0) {
++                benchmark_error_log("error: failed to prepare coherency thread %u for test.\n", i);
++                exit(1);
++            }
++            threads.push_back(t);
++        }
++    }
++
++    // Launch both groups of threads
+     fprintf(stderr, "[RUN #%u] Launching threads now...\n", run_id);
+     for (std::vector<cg_thread*>::iterator i = threads.begin(); i != threads.end(); i++) {
+         (*i)->start();
+@@ -1116,12 +1216,14 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
+             if (!(*i)->m_finished)
+                 active_threads++;
+ 
+-            total_ops += (*i)->m_cg->get_total_ops();
+-            total_bytes += (*i)->m_cg->get_total_bytes();
+-            total_latency += (*i)->m_cg->get_total_latency();
+-            thread_counter++;
+-            float factor = ((float)(thread_counter - 1) / thread_counter);
+-            duration =  factor * duration +  (float)(*i)->m_cg->get_duration_usec() / thread_counter ;
++            if (!(*i)->m_simulates_coherency) {
++                total_ops += (*i)->m_cg->get_total_ops();
++                total_bytes += (*i)->m_cg->get_total_bytes();
++                total_latency += (*i)->m_cg->get_total_latency();
++                thread_counter++;
++                float factor = ((float)(thread_counter - 1) / thread_counter);
++                duration =  factor * duration +  (float)(*i)->m_cg->get_duration_usec() / thread_counter;
++            }
+         }
+ 
+         unsigned long int cur_ops = total_ops-prev_ops;
+@@ -1141,7 +1243,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
+             bytes_sec = (long)( (double)total_bytes / duration * 1000000);
+             avg_latency = ((double) total_latency / 1000 / total_ops) ;
+         }
+-        if (cur_duration > 1 && active_threads == cfg->threads) {
++        if (cur_duration > 1 && active_threads == cfg->threads && cur_ops > 0) {
+             cur_ops_sec = (long)( (double)cur_ops / cur_duration * 1000000);
+             cur_bytes_sec = (long)( (double)cur_bytes / cur_duration * 1000000);
+             cur_latency = ((double) cur_total_latency / 1000 / cur_ops) ;
+@@ -1401,7 +1503,7 @@ int main(int argc, char *argv[])
+         }
+         assert(obj_gen != NULL);
+     } else {
+-        // check paramters
++        // check parameters
+         if (cfg.data_size ||
+             cfg.data_size_list.is_defined() ||
+             cfg.data_size_range.is_defined()) {
+@@ -1493,7 +1595,17 @@ int main(int argc, char *argv[])
+     }
+ 
+     if (!cfg.data_import || cfg.generate_keys) {
+-        obj_gen->set_key_prefix(cfg.key_prefix);
++        if (cfg.key_bytes == 0)
++            obj_gen->set_key_prefix(cfg.key_prefix);
++        else {
++            cfg.generated_key = (char*)malloc(sizeof(char) * cfg.key_bytes);
++            srand(6122020); // Use same seed for repeatability
++            for (unsigned i = 0; i < cfg.key_bytes - 1; ++i) {
++                cfg.generated_key[i] = static_cast<char>((rand() % 26) + 97);
++            }
++            obj_gen->set_key_prefix(cfg.generated_key);
++        }
++
+         obj_gen->set_key_range(cfg.key_minimum, cfg.key_maximum);
+     }
+     if (cfg.key_stddev>0 || cfg.key_median>0) {
+@@ -1631,6 +1743,11 @@ int main(int argc, char *argv[])
+         cfg.server_addr = NULL;
+     }
+ 
++    if (cfg.generated_key) {
++        free(cfg.generated_key);
++        cfg.generated_key = NULL;
++    }
++
+     if (jsonhandler != NULL) {
+         // closing the JSON
+         delete jsonhandler;
+diff --git a/memtier_benchmark.h b/memtier_benchmark.h
+index c2f83f4..42f0a0a 100644
+--- a/memtier_benchmark.h
++++ b/memtier_benchmark.h
+@@ -113,6 +113,11 @@ struct benchmark_config {
+     const char *tls_sni;
+     SSL_CTX *openssl_ctx;
+ #endif
++    unsigned int num_threads_db;
++    unsigned int num_threads_coherence;
++    unsigned int num_clients_coherence;
++    unsigned int key_bytes;
++    char* generated_key;
+ };
+ 
+ 
+diff --git a/obj_gen.cpp b/obj_gen.cpp
+index d5a02b4..af223b5 100644
+--- a/obj_gen.cpp
++++ b/obj_gen.cpp
+@@ -48,6 +48,7 @@ void random_generator::set_seed(int seed)
+ 
+     int ret = initstate_r(seed, m_state_array, sizeof(m_state_array), &m_data_blob);
+     assert(ret == 0);
++
+ #elif (defined HAVE_DRAND48)
+     memset(&m_data_blob, 0, sizeof(m_data_blob));
+     size_t seed_size = sizeof(seed); //get MIN size between seed and m_data_blob
+@@ -101,7 +102,7 @@ unsigned long long random_generator::get_random_max() const
+ //returns a value surrounding 0
+ double gaussian_noise::gaussian_distribution(const double &stddev)
+ {
+-    // Box–Muller transform (Marsaglia polar method)
++    // BoxMuller transform (Marsaglia polar method)
+     if (m_hasSpare) {
+         m_hasSpare = false;
+         return stddev * m_spare;
+@@ -607,8 +608,10 @@ import_object_generator::import_object_generator(const import_object_generator&
+         m_key_min = 1;
+     }
+     if (from.m_reader_opened) {
+-        bool r = m_reader.open_file();
+-        assert(r == true);
++        if (m_reader.open_file() != true) {
++            fprintf(stderr, "Cannot open file for object generator!");
++            exit(-1);
++        }
+     }
+ }
+ 
+@@ -670,4 +673,3 @@ data_object* import_object_generator::get_object(int iter)
+ 
+     return &m_object;
+ }
+-
+diff --git a/obj_gen.h b/obj_gen.h
+index e1c1cc0..aac6f25 100644
+--- a/obj_gen.h
++++ b/obj_gen.h
+@@ -47,7 +47,7 @@ public:
+ private:
+     double gaussian_distribution(const double &stddev);
+     bool m_hasSpare;
+-	double m_spare;
++    double m_spare;
+ };
+ 
+ class data_object {
+diff --git a/protocol.cpp b/protocol.cpp
+index 7a1575e..2976bf6 100644
+--- a/protocol.cpp
++++ b/protocol.cpp
+@@ -29,7 +29,7 @@
+ 
+ #include "protocol.h"
+ #include "memtier_benchmark.h"
+-#include "libmemcached_protocol/binary.h"
++#include "libmemcached_protocol/binary.h" // @manual
+ 
+ /////////////////////////////////////////////////////////////////////////
+ 
+@@ -152,6 +152,19 @@ mbulk_size_el* protocol_response::get_mbulk_value() {
+     return m_mbulk_value;
+ }
+ 
++void protocol_response::print_n_value_bytes(uint32_t n_bytes) {
++    if (m_value_len > 0) {
++        printf("Received values: ");
++        for (uint32_t i = 0; i < n_bytes; ++i) {
++            printf("[%d] ", m_value[i]);
++        }
++        printf("\n");
++    }
++    else {
++        printf("Value length is 0.\n");
++    }
++}
++
+ /////////////////////////////////////////////////////////////////////////
+ 
+ class redis_protocol : public abstract_protocol {
+@@ -354,6 +367,7 @@ int redis_protocol::write_command_multi_get(const keylist *keylist)
+ {
+     fprintf(stderr, "error: multi get not implemented for redis yet!\n");
+     assert(0);
++    return -1;
+ }
+ 
+ int redis_protocol::write_command_get(const char *key, int key_len, unsigned int offset)
+@@ -472,6 +486,7 @@ int redis_protocol::parse_response(void)
+ {
+     char *line;
+     size_t res_len;
++    int ret = -1;
+ 
+     while (true) {
+         switch (m_response_state) {
+@@ -663,8 +678,9 @@ int redis_protocol::parse_response(void)
+                     }
+                 } else {
+                     // just drain the buffer, include the CRLF
+-                    if (m_bulk_len >= 0) {
+-                        int ret = evbuffer_drain(m_read_buf, m_bulk_len + 2);
++                    if (m_bulk_len > 0) {
++                        // Compiler warning with @mode/opt
++                        ret = evbuffer_drain(m_read_buf, m_bulk_len + 2);
+                         assert(ret != -1);
+                     }
+                 }
+@@ -780,11 +796,13 @@ public:
+ int memcache_text_protocol::select_db(int db)
+ {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_text_protocol::authenticate(const char *credentials)
+ {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_text_protocol::configure_protocol(enum PROTOCOL_TYPE type)
+@@ -795,6 +813,7 @@ int memcache_text_protocol::configure_protocol(enum PROTOCOL_TYPE type)
+ int memcache_text_protocol::write_command_cluster_slots()
+ {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_text_protocol::write_command_set(const char *key, int key_len, const char *value, int value_len, int expiry, unsigned int offset)
+@@ -864,6 +883,7 @@ int memcache_text_protocol::write_command_wait(unsigned int num_slaves, unsigned
+ {
+     fprintf(stderr, "error: WAIT command not implemented for memcache!\n");
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_text_protocol::parse_response(void)
+@@ -930,12 +950,14 @@ int memcache_text_protocol::parse_response(void)
+ 
+                         m_last_response.set_value(value, m_value_len);
+                     } else {
++                        // Compiler warning with @mode/opt
+                         int ret = evbuffer_drain(m_read_buf, m_value_len);
+-                        assert((unsigned int) ret == 0);
++                        assert(ret == 0);
+                     }
+ 
++                    // Compiler warning with @mode/opt
+                     int ret = evbuffer_drain(m_read_buf, 2);
+-                    assert((unsigned int) ret == 0);
++                    assert(ret == 0);
+ 
+                     m_last_response.incr_hits();
+                     m_response_len += m_value_len + 2;
+@@ -959,14 +981,17 @@ int memcache_text_protocol::parse_response(void)
+ 
+ bool memcache_text_protocol::format_arbitrary_command(arbitrary_command& cmd) {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_text_protocol::write_arbitrary_command(const command_arg *arg) {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_text_protocol::write_arbitrary_command(const char *val, int val_len) {
+     assert(0);
++    return -1;
+ }
+ 
+ /////////////////////////////////////////////////////////////////////////
+@@ -1001,6 +1026,7 @@ public:
+ int memcache_binary_protocol::select_db(int db)
+ {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_binary_protocol::authenticate(const char *credentials)
+@@ -1047,6 +1073,7 @@ int memcache_binary_protocol::configure_protocol(enum PROTOCOL_TYPE type) {
+ int memcache_binary_protocol::write_command_cluster_slots()
+ {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_binary_protocol::write_command_set(const char *key, int key_len, const char *value, int value_len, int expiry, unsigned int offset)
+@@ -1099,6 +1126,7 @@ int memcache_binary_protocol::write_command_multi_get(const keylist *keylist)
+ {
+     fprintf(stderr, "error: multi get not implemented for binary memcache yet!\n");
+     assert(0);
++    return -1;
+ }
+ 
+ const char* memcache_binary_protocol::status_text(void)
+@@ -1144,6 +1172,7 @@ int memcache_binary_protocol::write_command_wait(unsigned int num_slaves, unsign
+ {
+     fprintf(stderr, "error: WAIT command not implemented for memcache!\n");
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_binary_protocol::parse_response(void)
+@@ -1205,11 +1234,16 @@ int memcache_binary_protocol::parse_response(void)
+                     if (m_keep_value) {
+                         char *value = (char *) malloc(actual_body_len);
+                         assert(value != NULL);
++
++                        // Compiler warning with @mode/opt
+                         ret = evbuffer_remove(m_read_buf, value, actual_body_len);
++                        assert(ret);
++
+                         m_last_response.set_value(value, actual_body_len);
+                     } else {
+-                        int ret = evbuffer_drain(m_read_buf, actual_body_len);
+-                        assert((unsigned int) ret == 0);
++                        // Compiler warning with @mode/opt
++                        ret = evbuffer_drain(m_read_buf, actual_body_len);
++                        assert(ret == 0);
+                     }
+ 
+                     if (m_response_hdr.message.header.response.status == PROTOCOL_BINARY_RESPONSE_SUCCESS)
+@@ -1234,14 +1268,17 @@ int memcache_binary_protocol::parse_response(void)
+ 
+ bool memcache_binary_protocol::format_arbitrary_command(arbitrary_command& cmd) {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_binary_protocol::write_arbitrary_command(const command_arg *arg) {
+     assert(0);
++    return -1;
+ }
+ 
+ int memcache_binary_protocol::write_arbitrary_command(const char *val, int val_len) {
+     assert(0);
++    return -1;
+ }
+ 
+ /////////////////////////////////////////////////////////////////////////
+@@ -1338,4 +1375,3 @@ void keylist::clear(void)
+     m_keys_count = 0;
+     m_buffer_ptr = m_buffer;
+ }
+-
+diff --git a/protocol.h b/protocol.h
+index 05b53bf..7171eb0 100644
+--- a/protocol.h
++++ b/protocol.h
+@@ -61,6 +61,7 @@ public:
+ 
+     virtual bulk_el* as_bulk() {
+         assert(0);
++        return NULL;
+     }
+ 
+     void add_new_element(mbulk_element* new_el) {
+@@ -101,6 +102,7 @@ public:
+ 
+     virtual mbulk_size_el* as_mbulk_size() {
+         assert(0);
++        return NULL;
+     }
+ 
+     char* value;
+@@ -140,6 +142,9 @@ public:
+ 
+     void set_mbulk_value(mbulk_size_el* element);
+     mbulk_size_el* get_mbulk_value();
++
++    // DEBUG
++    void print_n_value_bytes(uint32_t n_bytes);
+ };
+ 
+ class keylist {
+diff --git a/run_memtier.sh b/run_memtier.sh
+new file mode 100755
+index 0000000..5615478
+--- /dev/null
++++ b/run_memtier.sh
+@@ -0,0 +1,35 @@
++#!/bin/bash
++gets=5
++sets=1
++reqs=2000000
++threads=8
++threads_db=1
++threads_coh=0
++clients=10
++clients_coh=1
++kmin=1
++kmax=1457025
++kbytes=32
++server=localhost #rtptest51075.frc2
++cert='/home/vandrei/work/benchmarking/dev_tao_bench/certs_client/01-memtier.pem'
++key='/home/vandrei/work/benchmarking/dev_tao_bench/certs_client/01-memtier.key'
++run_cmd='buck run @mode/opt-lto :memtier_client_bench --'
++#run_cmd='./memtier-benchmark-12182019/memtier_benchmark'
++
++$run_cmd --show-config -s $server -p 11211 -P memcache_binary --cert="$cert" --key="$key" \
++--tls --tls-skip-verify --key-pattern=R:R --distinct-client-seed --randomize -R --hide-histogram \
++--expiry-range=1800-10800 --data-size-range=128-1024 --ratio=$sets:$gets --key-minimum=$kmin \
++--key-bytes=$kbytes --key-maximum=$kmax -t $threads --clients=$clients -n $reqs \
++--threads-db=$threads_db --threads-coherence=$threads_coh --clients-coherence=$clients_coh
++
++#buck run memtier-benchmark-12182019:memtier_client_tao_bench -- --show-config -s localhost -p 11211 \
++#-P memcache_binary --key-pattern=R:R --distinct-client-seed --randomize -R --hide-histogram \
++#--expiry-range=1800-10800 --data-size-range=64-704 --ratio=$sets:$gets --key-minimum=$kmin \
++#--key-maximum=$kmax -t $threads --clients=1 -n $reqs
++
++# --show-config -s localhost -p 11211 -P memcache_binary
++# --cert="/home/vandrei/work/benchmarking/dev_tao_bench/certs_client/01-memtier.pem"
++# --key="/home/vandrei/work/benchmarking/dev_tao_bench/certs_client/01-memtier.key"
++# --tls --tls-skip-verify --key-pattern=R:R --distinct-client-seed --randomize -R
++# --hide-histogram --expiry-range=1800-10800 --data-size-range=64-704 --ratio=1:1
++# --key-minimum=1 --key-maximum=1000 -t 1 --clients=1 -n 100 --threads-db=1 --threads-coherence=1
+diff --git a/run_stats.cpp b/run_stats.cpp
+index a848a84..0b9f005 100644
+--- a/run_stats.cpp
++++ b/run_stats.cpp
+@@ -23,7 +23,6 @@
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include <string.h>
+-#include <errno.h>
+ #include <sys/time.h>
+ #include <math.h>
+ #include <algorithm>
+diff --git a/shard_connection.cpp b/shard_connection.cpp
+index 7f289aa..9cd4ba4 100644
+--- a/shard_connection.cpp
++++ b/shard_connection.cpp
+@@ -37,7 +37,6 @@
+ #include <netinet/tcp.h>
+ #endif
+ #ifdef HAVE_LIMITS_H
+-#include <limits.h>
+ #endif
+ 
+ #ifdef HAVE_ASSERT_H
+@@ -48,12 +47,12 @@
+ #include "obj_gen.h"
+ #include "memtier_benchmark.h"
+ #include "connections_manager.h"
+-#include "event2/bufferevent.h"
++#include <event2/bufferevent.h>
+ 
+ #ifdef USE_TLS
+ #include <openssl/ssl.h>
+ #include <openssl/err.h>
+-#include "event2/bufferevent_ssl.h"
++#include <event2/bufferevent_ssl.h>
+ #endif
+ 
+ void cluster_client_read_handler(bufferevent *bev, void *ctx)
+@@ -270,12 +269,22 @@ int shard_connection::connect(struct connect_info* addr) {
+ 
+     // call connect
+     m_connection_state = conn_in_progress;
++    int ret_connect = 0;
+ 
+-    if (bufferevent_socket_connect(m_bev,
++    if (addr->ci_family == AF_INET) {
++        ret_connect = bufferevent_socket_connect(m_bev,
+                   m_unix_sockaddr ? (struct sockaddr *) m_unix_sockaddr : addr->ci_addr,
+-                  m_unix_sockaddr ? sizeof(struct sockaddr_un) : addr->ci_addrlen) == -1) {
+-        disconnect();
++                  m_unix_sockaddr ? sizeof(struct sockaddr_un) : addr->ci_addrlen);
++    }
++    else {
++        // TODO: Check if ipv6 needs to be treated differently
++        ret_connect = bufferevent_socket_connect(m_bev,
++                  m_unix_sockaddr ? (struct sockaddr *) m_unix_sockaddr : addr->ci_addr,
++                  m_unix_sockaddr ? sizeof(struct sockaddr_un) : addr->ci_addrlen);
++    }
+ 
++    if (ret_connect == -1) {
++        disconnect();
+         benchmark_error_log("connect failed, error = %s\n", strerror(errno));
+         return -1;
+     }

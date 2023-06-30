@@ -54,8 +54,8 @@ def run_server(args):
     n_cores = len(os.sched_getaffinity(0))
     part = n_cores // 4
     # Pin each instance to physical cpu core and corresponding vcpu
-    cores_range_1 = f"0-{part - 1}, {part * 2}-{part *2 + part -1}"
-    cores_range_2 = f"{part}-{part * 2 - 1}, {part *2 + part}-{n_cores - 1}"
+    cores_range_1 = f"0-{part - 1},{part * 2}-{part *2 + part -1}"
+    cores_range_2 = f"{part}-{part * 2 - 1},{part *2 + part}-{n_cores - 1}"
     # memory size - split in half for each server
     n_mem = int(args.memsize)
     mem_per_inst = n_mem // 2

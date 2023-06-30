@@ -8,14 +8,26 @@ TAO_BENCH_ROOT="${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 TAO_BENCH_DEPS="${TAO_BENCH_ROOT}/build-deps"
 FOLLY_BUILD_ROOT="${TAO_BENCH_ROOT}/build-folly"
 
+# Determine OS version
+LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
+VERSION_ID="$(awk -F "=" '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '"')"
+GLOG_NAME="glog-devel"
+
+if [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq 8 ]; then
+    GLOG_NAME="glog-devel-0.3.5-5.el8"
+elif [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq 9 ]; then
+    GLOG_NAME="glog-devel-0.3.5-15.el9"
+else
+    echo "Warning: unsupported platform ${LINUX_DIST_ID}-${LINUX_DIST_ID}"
+fi
+
 sudo dnf install -y cmake autoconf automake \
     libevent-devel openssl openssl-devel \
     zlib-devel bzip2-devel xz-devel lz4-devel libzstd-devel \
     snappy-devel libaio-devel libunwind-devel patch \
     double-conversion-devel libsodium-devel \
-    gflags-devel fmt-devel perl libtool pcre-devel \
-    git python3-devel
-sudo dnf remove -y libdwarf-devel glog-devel
+    gflags-devel-2.2.2 fmt-devel perl libtool pcre-devel \
+    git python3-devel ${GLOG_NAME}
 
 # Installing dependencies
 mkdir -p "${TAO_BENCH_DEPS}"
@@ -23,23 +35,6 @@ pushd "${TAO_BENCH_ROOT}"
 
 if ! [ -f "/usr/local/bin/cmake" ]; then
     sudo ln -s /usr/bin/cmake3 /usr/local/bin/cmake
-fi
-
-# Install glog
-if ! [ -d "glog-0.4.0" ]; then
-    wget "https://github.com/google/glog/archive/refs/tags/v0.4.0.tar.gz" -O "glog-0.4.0.tar.gz"
-    tar -xzf "glog-0.4.0.tar.gz"
-    mkdir -p "glog-0.4.0/build"
-    pushd "glog-0.4.0/build"
-    cmake ../ \
-        -DBUILD_SHARED_LIBS=ON \
-        -DBUILD_TESTING=OFF \
-        -DCMAKE_BUILD_TYPE=Release
-    make -j"$(nproc)"
-    sudo make install
-    popd
-else
-    echo "[SKIPPED] glog-0.4.0"
 fi
 
 # Install openssl
@@ -82,16 +77,18 @@ OPENSSL_ROOT_DIR="${TAO_BENCH_DEPS}" ./build/fbcode_builder/getdeps.py --allow-s
 popd
 
 # === Build and install memcached (tao_bench_server) ===
-rm -rf memcached
-git clone --branch 1.6.21 https://github.com/memcached/memcached
-pushd memcached
+rm -rf memcached-1.6.5
+curl http://www.memcached.org/files/memcached-1.6.5.tar.gz > memcached-1.6.5.tar.gz
+tar -zxf memcached-1.6.5.tar.gz
+pushd memcached-1.6.5
 # We'll need to run autogen.sh if config.h.in does not exist in memcached's source
 if ! [ -f "config.h.in" ]; then
     ./autogen.sh
 fi
 # Patch w/ Tao Bench changes
-git apply --check "${BPKGS_TAO_BENCH_ROOT}/0004-tao_bench_memcached_1.6.21.diff" && \
-    git apply "${BPKGS_TAO_BENCH_ROOT}/0004-tao_bench_memcached_1.6.21.diff"
+patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/tao_bench_memcached_0001.diff"
+patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0002-tao_bench_memcached_oom_handling.diff"
+patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0003-tao_bench_thread_pool_naming.diff"
 
 # Find the path to folly and fmt
 FOLLY_INSTALLED_PATH="${FOLLY_BUILD_ROOT}/installed/folly"
@@ -131,17 +128,23 @@ cp -r "${COMMON_DIR}/affinitize" "${TAO_BENCH_ROOT}/"
 popd
 
 # === Build and install memtier_client (tao_bench_client) ===
-# Copy memtier_client source
-rm -rf "${TAO_BENCH_ROOT}/memtier_client"
-cp -r "${COMMON_DIR}/memtier_client" "${TAO_BENCH_ROOT}/"
+pushd "${TAO_BENCH_ROOT}"
+# Download memtier benchmark
+rm -rf memtier_client
+git clone https://github.com/RedisLabs/memtier_benchmark memtier_client
 pushd memtier_client
-
+# Latest commit as of 06/15/2023
+git checkout 7bea7c63c5e95fea061366b95494bf730c5ca0d4
+# Apply the patch
+git apply --check "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_20230615.diff" && \
+    git apply "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_20230615.diff"
 # Build and install
 autoreconf --force --install
-./configure --enable-tls PKG_CONFIG_PATH="${TAO_BENCH_DEPS}"/lib/pkgconfig
+./configure --enable-tls
 make -j"$(nproc)" || ( automake --add-missing && make -j"$(nproc)" )
 cp memtier_benchmark "${TAO_BENCH_ROOT}/tao_bench_client"
-popd
+popd # memtier_client
+popd # $TAO_BENCH_ROOT
 
 # Extract certificates
 tar -zxf "${COMMON_DIR}/certs.tar.gz" -C "${TAO_BENCH_ROOT}/"

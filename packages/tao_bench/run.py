@@ -128,7 +128,7 @@ def run_server(args):
         "-o",
         ",".join(extended_options),
     ]
-    timeout = args.warmup_time + args.test_time + 120
+    timeout = args.warmup_time + args.test_time + 180
     stdout = run_cmd(server_cmd, timeout, args.real)
     print(stdout)
 
@@ -200,13 +200,13 @@ def get_client_cmd(args, n_seconds):
 def run_client(args):
     print("warm up phase ...")
     cmd = get_client_cmd(args, n_seconds=args.warmup_time)
-    stdout = run_cmd(cmd, timeout=0, for_real=args.real)
+    stdout = run_cmd(cmd, timeout=args.warmup_time + 30, for_real=args.real)
     print(stdout)
     if args.real:
         time.sleep(5)
     print("execution phase ...")
     cmd = get_client_cmd(args, n_seconds=args.test_time)
-    stdout = run_cmd(cmd, timeout=0, for_real=args.real)
+    stdout = run_cmd(cmd, timeout=args.test_time + 30, for_real=args.real)
     print(stdout)
 
 
