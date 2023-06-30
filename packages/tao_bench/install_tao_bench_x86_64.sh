@@ -82,18 +82,16 @@ OPENSSL_ROOT_DIR="${TAO_BENCH_DEPS}" ./build/fbcode_builder/getdeps.py --allow-s
 popd
 
 # === Build and install memcached (tao_bench_server) ===
-rm -rf memcached-1.6.5
-curl http://www.memcached.org/files/memcached-1.6.5.tar.gz > memcached-1.6.5.tar.gz
-tar -zxf memcached-1.6.5.tar.gz
-pushd memcached-1.6.5
+rm -rf memcached
+git clone --branch 1.6.21 https://github.com/memcached/memcached
+pushd memcached
 # We'll need to run autogen.sh if config.h.in does not exist in memcached's source
 if ! [ -f "config.h.in" ]; then
     ./autogen.sh
 fi
 # Patch w/ Tao Bench changes
-patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/tao_bench_memcached_0001.diff"
-patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0002-tao_bench_memcached_oom_handling.diff"
-patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0003-tao_bench_thread_pool_naming.diff"
+git apply --check "${BPKGS_TAO_BENCH_ROOT}/0004-tao_bench_memcached_1.6.21.diff" && \
+    git apply "${BPKGS_TAO_BENCH_ROOT}/0004-tao_bench_memcached_1.6.21.diff"
 
 # Find the path to folly and fmt
 FOLLY_INSTALLED_PATH="${FOLLY_BUILD_ROOT}/installed/folly"
