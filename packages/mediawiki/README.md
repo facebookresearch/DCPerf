@@ -1,308 +1,132 @@
-# Building HHVM from source in CentOS 7 and CentOS 8
+# Mediawiki
 
-```
-# Assuming we are in the home directory
-mkdir hhvm-build && cd hhvm-build
-mkdir build-deps
-```
+## Compatibility
 
-Clone HHVM repository, and its submodules, with the HHVM 3.30.12 tag, this is the last version to support PHP
+Currently Mediawiki supports these platforms:
+* CentOS 8 - x86_64
+* CentOS 9 - x86_64
+* CentOS 9 - aarch64
 
-```
-git clone --branch HHVM-3.30.12 --depth 1 https://github.com/facebook/hhvm.git
+## Installing HHVM
 
+Mediawiki benchmarks requires HHVM-3.30, which is the last version of HHVM that
+supports PHP. You can download the binary package of HHVM-3.30
+[here](https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary.tar.xz)
+and then upload it to the machine on which you would like to experiment, then
+install HHVM:
+
+```bash
+tar -Jxf hhvm-3.30-multplatform-binary.tar.xz
 cd hhvm
-git submodule update --init --recursive # (although this command fails, it is important to run it)
+sudo ./pour-hhvm.sh
 ```
 
-**NOTE**: The above submodule update command fails because of some broken links - [See Issue](https://issues.guix.gnu.org/42162).
+`pour-hhvm.sh` should detect your platform, install dependent system packages
+and copy the right version of hhvm binaries into `/opt/local/hhvm-3.30/`. It
+should also create symlinks of hhvm to `/usr/local/bin/hhvm` and
+`/usr/local/hphpi/legacy/bin/hhvm`.
 
-
-1. Update the broken submodule links for cudf and dose with the respective links:
-    1. https://gitlab.com/irill/cudf
-        1. Find all references of https://scm.gforge.inria.fr/anonscm/git/cudf/cudf.git in the hhvm directory cloned earlier
-            1. `grep -nr https://scm.gforge.inria.fr/anonscm/git/cudf/cudf.git .`
-            2. Edit the files from the command above and replace the links with `https://gitlab.com/irill/cudf.git` (Alternatively you can use sed)
-            3. `grep -nr https://gforge.inria.fr/git/cudf/cudf.git .`
-            4. Edit the files from the command above and replace the links with `https://gitlab.com/irill/cudf.git` (Alternatively you can use sed)
-    2. https://gitlab.com/irill/dose3
-        1. Find all references of https://scm.gforge.inria.fr/anonscm/git/dose/dose.git in the hhvm directory as follows:
-            1. `grep -nr https://scm.gforge.inria.fr/anonscm/git/dose/dose.git .`
-            2. Edit the files from the command above and replace the links with `https://gitlab.com/irill/dose3.git`
-2. Re-run `git submodule update --init --recursive` (It should still fail because the link https://gforge.inria.fr/git/dose-testdata/dose-testdata.git is broken). A workaround is as follows:
-    1. Copy does3's tests folder
-    ```
-    cd $HOME
-    git clone https://gitlab.com/irill/dose3.git
-    mv $HOME/dose3/tests/* $HOME/hhvm-build/hhvm/third_party/ocaml/opam_deps/dose/tests/
-    rm -rf $HOME/dose3
-    ```
-    2. Run `grep -nr https://gforge.inria.fr/git/dose-testdata/dose-testdata.git .`
-        1. Remove all references to the test submodule from the files listed in the result of the preceeding grep command
-    3. Running `git submodule update --init --recursive` should still result in the following errors but we can now proceed to installing the other components
-        ```
-        fatal: No url found for submodule path 'third-party/ocaml/opam_deps/dose/tests' in .gitmodules
-        Failed to recurse into submodule path 'third-party/ocaml/opam_deps/dose'
-        Failed to recurse into submodule path 'third-party'
-        ```
-
-Install system packages
-
-## CentOS 7 Deps
-
-```
-yum install \
- curl-devel libxml2-devel libicu-devel devtoolset-7-toolchain \
- readline-devel patch libtool libtool-ltdl-devel oniguruma-devel \
- libdwarf-devel elfutils-libelf-devel libedit-devel libcap-devel \
- gperf bzip2-devel expat-devel fribidi-devel freetype-devel \
- libjpeg-devel libvpx-devel gmp-devel ImageMagick-devel \
- libmcrypt-devel libmemcached-devel libsodium-devel snappy-devel \
- libxslt-devel numactl-libs devtoolset-7-libatomic-devel \
- numactl-devel openldap-devel glib-devel
+If executing `hhvm` complains about missing libgflags with the following
+message, please install gflags-devel-2.1.2.
+```log
+hhvm: error while loading shared libraries:
+libgflags.so.2.1: cannot open shared object file: No such file or directory
 ```
 
-```
-scl enable devtoolset-7 bash
-```
+## Installing Mediawiki
 
-## Centos 8 Deps
-
-Dependencies: 
-
-```
-dnf install \
-gcc gcc-c++ libstdc++ libstdc++-static libatomic \
- curl-devel libxml2-devel libicu-devel \
- readline-devel patch libtool libtool-ltdl-devel oniguruma-devel \
- libdwarf-devel elfutils-libelf-devel libedit-devel libcap-devel \
- gperf bzip2-devel expat-devel fribidi-devel freetype-devel \
- libjpeg-devel libvpx-devel gmp-devel ImageMagick-devel \
- libmcrypt-devel libmemcached-devel libsodium-devel snappy-devel \
- libxslt-devel numactl-libs \
-numactl-devel openldap-devel glib2-devel \
-perl krb5-devel
+To install Mediawiki, simply run the following benchpress command under the OSS
+DCPerf directory:
+```bash
+./benchpress_cli.py install oss_performance_mediawiki_mlp
 ```
 
-Development Tools:
+If the installation process complains about missing json extension in PHP with
+the following message, please install `php-json` with dnf and install Mediawiki
+again using `./benchpress_cli.py install -f oss_performance_mediawiki_mlp`.
 
-```
-sudo dnf -y group install "Development Tools"
-```
+```log
++ mv installer composer-setup.php
++ php composer-setup.php --2.2
+Some settings on your machine make Composer unable to work properly.
+Make sure that you fix the issues listed below and run this script again:
 
-## Building dependencies
-
-Download and Install CMake 3.9.4
-
-```
-cd ${HOME}/hhvm-build
-wget -q https://cmake.org/files/v3.9/cmake-3.9.4.tar.gz
-tar -xzvf cmake-3.9.4.tar.gz
-cd cmake-3.9.4
-
-LDFLAGS=-pthread ./bootstrap \
-    --prefix=${HOME}/hhvm-build/build-deps \
-    --parallel=16
-make -j12
-make install
-
-# Verify it
-${HOME}/hhvm-build/build-deps/bin/cmake --version
-  cmake version 3.9.4
+The json extension is missing.
+Install it or recompile php without --disable-json
 ```
 
+## Running Mediawiki
 
+### Prerequisites
 
-Download and Install Boost 1.67
+1. Disable SELinux - If SELinux is enabled, HHVM will run into segfault when
+running Mediawiki benchmark. To check if SELinux is turned off, run `getenforce`
+command and see if the output is `Disabled`.
 
-```
-cd ${HOME}/hhvm-build
-wget -q https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.bz2
-tar -jxvf boost_1_67_0.tar.bz2
-cd boost_1_67_0/
+2. Start MariaDB service: `systemctl restart mariadb`
 
-./bootstrap.sh \
-   --without-libraries=python \
-   --prefix=${HOME}/hhvm-build/build-deps
+3. Enable TCP TIME_WAIT reuse: `echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse`
 
-./b2 variant=release threading=multi --layout=tagged -j12
-./b2 variant=release threading=multi --layout=tagged -j12 install
-```
+The installer script has done 2 and 3 so you don't need to repeat them if you
+run Mediawiki benchmark right after installing, but otherwise you will need to
+run them manually.
 
+### Run the benchmark
 
-Download and Install jemalloc 4.5.0
-
-
-```
-cd ${HOME}/hhvm-build/
-git clone --branch 4.5.0 --depth 1 https://github.com/jemalloc/jemalloc.git
-cd jemalloc
-
-./autogen.sh
-./configure --prefix=${HOME}/hhvm-build/build-deps --enable-static
-make -j12
-make install
-# might need to remove "install_doc" from target "install".
+```bash
+./benchpress_cli.py run oss_performance_mediawiki_mlp
 ```
 
-Download and Install libevent 2.1.8-stable
+### Scale-up variants (for CPUs with large core counts)
 
+For machines equipped with high-TDP CPUs, such as AMD Bergamo (88c) and anything
+larger, the default Mediawiki workload may not fully utilize the CPU. To fully
+scale up on these platforms, we provided two scale-up Mediawiki workloads
+`oss_performance_mediawiki_mlp_2x` and `oss_performance_mediawiki_mlp_4x` which
+use two and four HHVM server instances respectively during the benchmark.
+Generally `oss_performance_mediawiki_mlp_2x` should be sufficient for the
+currently available high-core-count CPUs and the 4x version are not likely to
+provide additional advantages.
 
+## Troubleshooting
+
+### Siege hanging
+
+In some rare cases the load generator Siege may run into deadlock and hang. This
+a known issue discussed in [Siege's
+repo](https://github.com/JoeDog/siege/issues/4) and it may happen more
+frequently on high core count CPU with boost off. If you observe near-zero CPU
+utilization and the benchmark won't finish, that's probably the case. The only
+thing you can do now is to kill Siege with `kill -9 $(pgrep siege)`, stop the
+benchmark and run it again.
+
+### Unable to open `http://localhost:9092/check-health`
+
+1. Disable proxy by unsetting `http_proxy` and `https_proxy` in your shell
+2. Use `--delay-check-health` option by running Mediawiki directly using the
+   following command:
+```bash
+./packages/mediawiki/run.sh \
+    -r/usr/local/hphpi/legacy/bin/hhvm \
+    -nnginx -ssiege -c300 -- --mediawiki-mlp \
+    --siege-duration=10M --siege-timeout=11m \
+    --run-as-root --scale-out=1 --delay-health-check=30 \
+    --i-am-not-benchmarking
 ```
-cd ${HOME}/hhvm-build
-git clone --branch release-2.1.8-stable --depth 1 \
-    https://github.com/libevent/libevent.git
-cd libevent/
+(Replace `--scale-out=1` with `--scale-out=N` if you would like to use
+N-instance HHVM scale-up setup)
 
-./autogen.sh
-./configure --prefix=${HOME}/hhvm-build/build-deps
-make -j12
-make install
-```
+### Too many open files
 
+If you see error messages like `accept4(): Too many open files` on some platforms, please
+increase the file descriptor limit on your system in the following way:
 
-Download and Install glog v0.3.5
-
-
-```
-cd ${HOME}/hhvm-build
-git clone --branch v0.3.5 --depth 1 https://github.com/google/glog.git
-cd glog/
-    
-autoreconf -vfi
-./configure --prefix=${HOME}/hhvm-build/build-deps
-make -j12
-make install
-```
-
-
-Download and Install TBB
-
-
-```
-cd ${HOME}/hhvm-build
-git clone --branch 2018_U6 --depth 1 https://github.com/intel/tbb.git
-cd tbb/
-
-make -j12
-cp -r include/tbb ${HOME}/hhvm-build/build-deps/include/
-cp -r build/linux_intel64_gcc_cc8_libc2.28_kernel4.18.0_release/libtbb* \
-    ${HOME}/hhvm-build/build-deps/lib/
-```
-
-Download  and Install OpenSSL 1.1.1b
-
-
-```
-cd ${HOME}/hhvm-build
-git clone --branch OpenSSL_1_1_1b --depth 1 https://github.com/openssl/openssl.git
-cd openssl/
-
-./config --prefix=${HOME}/hhvm-build/build-deps
-make -j12
-make install
-```
-
-
-Download and Install MariaDB server
-
-
-```
-sudo dnf -y install mariadb-server
-sudo systemctl start mysqld
-sudo systemctl enable mysqld
-```
-
-Secure MariaDB
-
-
-```
-sudo mysql_secure_installation 
-```
-
-
-Use system Openssl (on Centos 8 stream - Openssl 1.1.1k) (this may not be necessary)
-
-```
-1. Remove libssl.so and libcrypto.so from $HOME/hhvm-build/build-deps/lib
-    1. cd $HOME/hhvm-build/build-deps/lib
-    2. mkdir ../lib-backup
-    3. mv libssl.* libcrypto.* ../lib-backup
-2. Create symbolic links in $HOME/hhvm-build/build-deps/lib to /lib64/libssl.so.1.1.1k and /lib64/libcrypto.so.1.1
-    1. cd $HOME/hhvm-build/build-deps/lib
-    2. ln -s /lib64/libssl.so.1.1.1k libssl.so
-    3. ln -s /lib64/libcrypto.so.1.1 libcrypto.so
-```
-
-## Install GCC 7.5.0
-
-The version of HHVM used in this benchmark is not compatible with GCC 8 that
-is shipped with CentOS Stream 8. If building with GCC 8, hhvm will exit with
-segmentation fault when running Mediawiki benchmark. To get a good hhvm we need
-to build with GCC 7 using the following steps:
-
-1. Download gcc-builder
-```
-git clone https://github.com/BobSteagall/gcc-builder
-cd gcc-builder
-git checkout gcc7
-```
-
-2. Open gcc-build-vars.sh and replace line 13 `export GCC_VERSION=7.X.0` with `export GCC_VERSION=7.5.0`
-
-3. Run `./build-gcc.sh` and it will automatically download and compile gcc
-
-4. Run `./stage-gcc.sh` to "install" gcc
-
-5. GCC should be installed to `dist/usr/local/gcc/7.5.0` under gcc-builder. Run `./dist/usr/local/gcc/7.5.0/bin/gcc --version` to confirm installation:
-```
-gcc (KEWB Computing Build) 7.5.0
-Copyright (C) 2017 Free Software Foundation, Inc.
-This is free software; see the source for copying conditions.  There is NO
-warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-```
-
-## Configure and compile HHVM
-
-Build HHVM with gcc-7.5 under ~/hhvm-build/hhvm/build:
-
-```
-cd ${HOME}/hhvm-build
-cd hhvm/
-mkdir build && cd build/
-
-$HOME/hhvm-build/build-deps/bin/cmake ../ -G 'Unix Makefiles'  \
-  -Wno-dev \
-  -DCMAKE_PREFIX_PATH=${HOME}/hhvm-build/build-deps  \
-  -DSTATIC_CXX_LIB=On \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_C_COMPILER=${HOME}/gcc-builder/dist/usr/local/gcc/7.5.0/bin/gcc \
-  -DCMAKE_CXX_COMPILER=${HOME}/gcc-builder/dist/usr/local/gcc/7.5.0/bin/g++
-
-make -j26
-sudo make install
-sudo ln -sf /usr/local/bin/hhvm /usr/local/hphpi/legacy/bin/hhvm
-```
-
-Run hhvm
-
-```
-hhvm --version
-```
-
-You should see the following output:
-
-```
-HipHop VM 3.30.12 (rel)
-Compiler: tags/HHVM-3.30.12-0-gabe9500970b23bc9c385bf18a15bd38e830859a6
-Repo schema: 14ae18005e6fed538bd2ad7bb443dc811e53c4a1
-```
-
-# Installing and Running Mediawiki
-Ref to scripts at [install\_mediawiki\_extern.sh](install_mediawiki_extern.sh) and/or [install\_mediawiki\_intern.sh](install_mediawiki_intern.sh) for installing Medaiwiki.
-
-An example command to run Mediawiki directly
-```
-./packages/mediawiki/run.sh -c200 -m8 -- --mediawiki-mlp \
-  --siege-duration=10M --siege-timeout=11m --run-as-root --i-am-not-benchmarking
-```
+1. Edit `/etc/security/limits.conf` to modify the **nofile** limit of your current user
+   (typically root) to a sufficiently high number (e.g. 10485760):
+   ```
+    root            hard            nofile          10485760
+    root            soft            nofile          10485760
+   ```
+2. Reboot your system
+3. Run `ulimit -n` to check the file descriptor limit, it should increase to the desired
+   amount.
