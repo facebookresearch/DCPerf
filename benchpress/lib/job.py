@@ -95,6 +95,7 @@ class Job(object):
         # roles are client/server or none
         self.roles = benchmark_config.get("roles", [])
         self.args = self.arg_list(job_config.get("args", []))
+        self.vars = self.arg_list(job_config.get("vars", []))
         self.role_args = job_config.get("roles", {})
 
         self.toolchains = toolchain_config
@@ -113,7 +114,12 @@ class Job(object):
         return l
 
     def substitude_vars(self, role, role_input):
-        var_list = self.role_args[role].get("vars", [])
+        if len(self.role_args) > 0:
+            var_list = self.role_args[role].get("vars", [])
+        else:
+            var_list = self.vars
+        if role_input is None:
+            role_input = []
         new_dict = {}
         for k in var_list:
             if "=" in k:
@@ -122,9 +128,14 @@ class Job(object):
                 new_dict[k] = kv[1]
             if k in role_input:
                 new_dict[k] = role_input[k]
+                del role_input[k]
             if k not in new_dict:
-                logger.error(f"The role {role} needs user input parameter {k}")
-        self.args = self.role_args[role].get("args", [])
+                logger.error(f"The role '{role}' needs user input parameter '{k}'")
+                exit(1)
+        for k in role_input:
+            logger.warning(f"Unrecognized user input parameter '{k}' for role '{role}'")
+        if len(self.role_args) > 0:
+            self.args = self.role_args[role].get("args", [])
         formatted_args = []
         for arg in self.args:
             formatted_args.append(arg.format(**new_dict))
@@ -132,16 +143,18 @@ class Job(object):
 
     def check_role(self, role, role_input):
         """move complex if else for role check here"""
-        if len(self.roles) == 1 and role != "":
-            logger.error("the job {} is a single role job".format(self.name))
+        if len(self.role_args) == 0 and role != "":
+            logger.error("the job {} does not have roles".format(self.name))
             exit(1)
-        if role == "" and len(self.roles) > 1:
+        elif len(self.role_args) == 0 and role == "":
+            self.substitude_vars(role, role_input)
+        elif len(self.role_args) > 0 and role == "":
             logger.error("you must select a role in {} job".format(self.name))
             exit(1)
-        if role != "":
+        elif len(self.role_args) > 0 and role != "":
             if role not in self.role_args:
                 logger.error("must type correct role, current roles are:")
-                logger.error("{}".format(self.role_args))
+                logger.error("{}".format(", ".join(self.role_args.keys())))
                 exit(1)
             self.substitude_vars(role, role_input)
 

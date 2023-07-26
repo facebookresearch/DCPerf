@@ -18,4 +18,5 @@ def create_logger():
     root = logging.getLogger()
     root.setLevel(os.environ.get("LOGLEVEL", "INFO"))
     root.addHandler(handler)
+    root.addHandler(logging.StreamHandler())
     return root
