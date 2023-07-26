@@ -311,13 +311,18 @@
       The warmup time is 2400s and test time is 720s.
       MAKE SURE to start clients within 1 minute.
   args:
-    - '--memsize=256'
-    - '--interface-name=eth0'
+    - '--memsize={memsize}'
+    - '--interface-name={interface_name}'
     - '--port-number-inst1=11211'
     - '--port-number-inst2=11212'
-    - '--warmup-time=2400'
-    - '--test-time=720'
+    - '--warmup-time={warmup_time}'
+    - '--test-time={test_time}'
     - '--real'
+  vars:
+    - 'memsize=256'
+    - 'interface_name=eth0'
+    - 'warmup_time=2400'
+    - 'test_time=720'
 
 - benchmark: memcached_bench
   name: memcached_bench_64g
