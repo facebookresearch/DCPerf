@@ -38,6 +38,34 @@ CONFIG_NVME_TCP=m
 
 We need to first export the data SSDs on the storage nodes.
 
+In general, the command to export the data SSDs is as follow:
+
+```
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n <N> -s <START> -p <PARTITION> --real
+```
+
+N is the number of data drives you would like to export. START is the starting index of the NVMe
+device you would like to export. PARTITION is the partition index of the partition on the drive
+you would like to export. Usually PARTITION is 1.
+
+For example, if your `lsblk` shows the following:
+```
+NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
+nvme0n1     259:0    0 238.5G  0 disk
+├─nvme0n1p1 259:1    0   243M  0 part /boot/efi
+├─nvme0n1p2 259:2    0   488M  0 part /boot
+├─nvme0n1p3 259:3    0   1.9G  0 part [SWAP]
+└─nvme0n1p4 259:4    0 235.9G  0 part /
+nvme2n1     259:5    0   1.7T  0 disk
+└─nvme2n1p1 259:6    0   1.7T  0 part
+nvme1n1     259:7    0   1.7T  0 disk
+└─nvme1n1p1 259:8    0   1.7T  0 part
+nvme3n1     259:9    0   1.7T  0 disk
+└─nvme3n1p1 259:10   0   1.7T  0 part
+```
+and you want to export nvme1n1p1, nvme2n1p1 and nvme3n1p1, then your N would be 3, START
+would be 1 and PARTITION would be 1.
+
 If you have a single storage node that can provide 3 or more spare data SSDs,
 run the following:
 
@@ -97,6 +125,10 @@ over network.
 ```
 ./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py importer mount -n 3 -s 1 --real
 ```
+
+If you want to import other number of drives, change 3 to the number you desire.
+
+If `/flash23` exists in your system, please remove this folder first.
 
 Then you should see remote SSDs mounted at `/flash23`:
 
