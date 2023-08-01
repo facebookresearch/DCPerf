@@ -10,6 +10,8 @@ import errno
 import logging
 import subprocess
 import sys
+import tempfile
+import threading
 import typing
 from subprocess import CalledProcessError
 
@@ -24,6 +26,15 @@ logger = logging.getLogger(__name__)
 
 # Number of lines to output for stderr and stdout summary
 TRIM_OUTPUT_LINES = 50
+
+
+def output_catcher(reader, writer=None, loglevel=logging.INFO):
+    for line in iter(reader.readline, ""):
+        if not line:
+            continue
+        logger.log(loglevel, line.rstrip(), extra={"raw": True})
+        if writer is not None:
+            writer.write(line)
 
 
 class Job(object):
@@ -201,19 +212,56 @@ class Job(object):
             cmd = get_safe_cmd([self.binary] + self.args)
             click.echo("Job execution command: {}".format(cmd))
             process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-            stdout, stderr = process.communicate(timeout=self.timeout)
+            stdout_storage = tempfile.TemporaryFile(
+                mode="w+",
+                encoding="utf-8",
+                prefix=f"benchpress-job-{process.pid}-stdout",
+            )
+            stderr_storage = tempfile.TemporaryFile(
+                mode="w+",
+                encoding="utf-8",
+                prefix=f"benchpress-job-{process.pid}-stderr",
+            )
+            stdout_catcher = threading.Thread(
+                target=output_catcher,
+                name="stdout-catcher",
+                args=(process.stdout, stdout_storage, logging.INFO),
+            )
+            stderr_catcher = threading.Thread(
+                target=output_catcher,
+                name="stderr-catcher",
+                args=(process.stderr, stderr_storage, logging.INFO),
+            )
+
+            stdout_catcher.start()
+            stderr_catcher.start()
+
+            try:
+                process.wait(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+            stdout_catcher.join()
+            stderr_catcher.join()
+
+            stdout_storage.seek(0)
+            stdout = stdout_storage.read()
+            stdout_storage.close()
+            stderr_storage.seek(0)
+            stderr = stderr_storage.read()
+            stderr_storage.close()
 
             if self.stdout:
                 with open(self.stdout, "r") as metrics_file:
                     stdout = metrics_file.read()
-            else:
-                stdout = stdout.decode("utf-8", "ignore")
-            stderr = stderr.decode("utf-8", "ignore")
             self._print_output_summary(stdout, stderr)
-            logger.info(f"fd=stdout output={stdout}")
-            logger.info(f"fd=stderr output={stderr}")
+            logger.info(f"stderr output: {stderr}")
             returncode = process.returncode
             if self.check_returncode and returncode != 0:
                 logger.error(

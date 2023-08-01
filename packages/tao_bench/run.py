@@ -25,23 +25,20 @@ def get_affinitize_nic_path():
 
 def run_cmd(
     cmd: List[str],
-    timeout=0,
+    timeout=None,
     for_real=True,
 ) -> str:
     print(" ".join(cmd))
     if for_real:
         proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-        if timeout > 0:
-            time.sleep(timeout)
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
             proc.terminate()
-        (stdout, _) = proc.communicate()
-        return stdout.decode("utf-8")
-    else:
-        return ""
+            proc.wait()
 
 
 def run_server(args):
@@ -129,8 +126,7 @@ def run_server(args):
         ",".join(extended_options),
     ]
     timeout = args.warmup_time + args.test_time + 180
-    stdout = run_cmd(server_cmd, timeout, args.real)
-    print(stdout)
+    run_cmd(server_cmd, timeout, args.real)
 
 
 def get_client_cmd(args, n_seconds):
@@ -200,14 +196,12 @@ def get_client_cmd(args, n_seconds):
 def run_client(args):
     print("warm up phase ...")
     cmd = get_client_cmd(args, n_seconds=args.warmup_time)
-    stdout = run_cmd(cmd, timeout=args.warmup_time + 30, for_real=args.real)
-    print(stdout)
+    run_cmd(cmd, timeout=args.warmup_time + 30, for_real=args.real)
     if args.real:
         time.sleep(5)
     print("execution phase ...")
     cmd = get_client_cmd(args, n_seconds=args.test_time)
-    stdout = run_cmd(cmd, timeout=args.test_time + 30, for_real=args.real)
-    print(stdout)
+    run_cmd(cmd, timeout=args.test_time + 30, for_real=args.real)
 
 
 def init_parser():

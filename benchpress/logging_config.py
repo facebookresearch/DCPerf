@@ -9,14 +9,27 @@ import logging.handlers
 import os
 
 
+class ConditionalFormatter(logging.Formatter):
+    def format(self, record):
+        if hasattr(record, "raw") and record.raw:
+            return record.getMessage()
+        else:
+            return logging.Formatter.format(self, record)
+
+
 handler = logging.handlers.WatchedFileHandler("benchpress.log")
-formatter = logging.Formatter("[%(asctime)s] %(name)-12s %(levelname)-8s: %(message)s")
+formatter = ConditionalFormatter(
+    "[%(asctime)s] %(name)-12s %(levelname)-8s: %(message)s"
+)
 handler.setFormatter(formatter)
+
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.WARNING)
 
 
 def create_logger():
     root = logging.getLogger()
     root.setLevel(os.environ.get("LOGLEVEL", "INFO"))
     root.addHandler(handler)
-    root.addHandler(logging.StreamHandler())
+    root.addHandler(stream_handler)
     return root
