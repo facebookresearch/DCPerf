@@ -113,7 +113,7 @@ duration_secs,total_queries,requested_qps,achieved_qps,total_bytes_rx,total_byte
 
 ### install mediawiki
 
-Use the instructions provided under packages/mediawiki/README.md
+Please refer to the detailed instruction at [packages/mediawiki/README.md](packages/mediawiki/README.md) regarding how to prepare, install and run Mediawiki.
 
 ### run mediawiki
 
