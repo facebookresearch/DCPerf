@@ -13,7 +13,7 @@ import os
 logger = logging.getLogger(__name__)
 
 
-class HistoryEntry(object):
+class HistoryEntry:
     """Results from a historical run of a job
 
     Attributes:
@@ -35,7 +35,7 @@ class HistoryEntry(object):
         self.metrics = record["metrics"]
 
 
-class History(object):
+class History:
     """Interface to save/load benchmark results to/from disk.
     Benchmark results will be saved at paths like follows:
         <path>/<job_name>/<timestamp>.json

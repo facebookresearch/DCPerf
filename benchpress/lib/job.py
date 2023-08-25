@@ -37,7 +37,7 @@ def output_catcher(reader, writer=None, loglevel=logging.INFO):
             writer.write(line)
 
 
-class Job(object):
+class Job:
     """Holds the run configuration for an individual job.
     A Job starts it's default config based on the benchmark configuration that
     it references. The binary defined in the benchmark is run according to the

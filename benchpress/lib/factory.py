@@ -7,7 +7,7 @@
 # of patent rights can be found in the PATENTS file in the same directory.
 
 
-class BaseFactory(object):
+class BaseFactory:
     """Factory to construct instances of classes based on name.
 
     Attributes:
