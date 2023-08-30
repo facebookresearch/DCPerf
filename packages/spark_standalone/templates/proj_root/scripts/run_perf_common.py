@@ -144,7 +144,9 @@ def create(args) -> None:
         run_spark_sql(sql_file, database=None, for_real=args.real)
 
 
-def parse_per_stage_runtime(logfile: str) -> Dict[str, List[datetime.datetime]]:
+def parse_per_stage_runtime(
+    logfile: str, worker_cores: int
+) -> Dict[str, List[datetime.datetime]]:
     loglines = []
     with open(logfile, "r") as f:
         loglines = f.readlines()
@@ -166,6 +168,13 @@ def parse_per_stage_runtime(logfile: str) -> Dict[str, List[datetime.datetime]]:
                 timelines[stage][1] = timestamp
             else:
                 timelines[stage] = [timestamp, timestamp]
+            if stage == "2.0":
+                if "2.0-fullbatch" not in timelines:
+                    timelines["2.0-fullbatch"] = [timestamp, timestamp]
+                finish_line = re.search(r"\((\d+)/(\d+)\)", parts[2])
+                if finish_line and int(finish_line.group(1)) <= worker_cores:
+                    timelines["2.0-fullbatch"][1] = timestamp
+
     return timelines
 
 
@@ -208,7 +217,7 @@ def run(args) -> None:
                 if args.real:
                     exec_logname = sql_file.replace(".sql", ".log")
                     exec_logpath = joinpath(WORK_PATH, exec_logname)
-                    stages = parse_per_stage_runtime(exec_logpath)
+                    stages = parse_per_stage_runtime(exec_logpath, sum(worker_cores))
                     fp.write(f"{' '*4}test-{test_name} : {test_elapsed_time:.1f}\n")
                     for stage, timeline in stages.items():
                         elapsed_time = timeline[1] - timeline[0]
