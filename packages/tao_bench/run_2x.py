@@ -11,6 +11,7 @@ from datetime import datetime
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "packages", "tao_bench")
+TAO_BENCH_BM_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
 
 
 # Import Benchpress's tao_bench result parser
@@ -105,17 +106,28 @@ def run_server(args):
         "total_qps": 0,
         "num_data_points": 0,
     }
+    server_csv = ""
     with open(logpath1, "r") as log1:
         parser = TaoBenchParser()
         res = parser.parse(log1, None, 0)
         if "role" in res and res["role"] == "server":
             results.append(res)
+            server_csv += "Server Instance 1:\n"
+            with open(TAO_BENCH_BM_DIR + "/server.csv", "r") as f:
+                server_csv += f.read()
 
     with open(logpath2, "r") as log2:
         parser = TaoBenchParser()
         res = parser.parse(log2, None, 0)
         if "role" in res and res["role"] == "server":
             results.append(res)
+            server_csv += "\nServer Instance 2:\n"
+            with open(TAO_BENCH_BM_DIR + "/server.csv", "r") as f:
+                server_csv += f.read()
+
+    if len(results) > 0:
+        with open(TAO_BENCH_BM_DIR + "/server.csv", "w") as f:
+            f.write(server_csv)
 
     for res in results:
         overall["fast_qps"] += res["fast_qps"]

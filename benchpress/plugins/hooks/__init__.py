@@ -6,6 +6,7 @@
 # LICENSE file in the root directory of this source tree. An additional grant
 # of patent rights can be found in the PATENTS file in the same directory.
 
+from .copy import CopyMoveHook
 from .cpu_limit import CpuLimit
 from .cpu_mpstat import CpuMpstat
 from .emon import Emon
@@ -18,6 +19,7 @@ from .user_script import UserScript
 
 
 def register_hooks(factory):
+    factory.register("copymove", CopyMoveHook)
     factory.register("cpu-limit", CpuLimit)
     factory.register("cpu-mpstat", CpuMpstat)
     factory.register("emon", Emon)

@@ -192,6 +192,12 @@
         args:
           - '-u'   # utilization
           - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results.txt'
+
 
 - benchmark: spark_standalone
   name: spark_standalone_local
@@ -199,6 +205,12 @@
   args:
     - 'run'
     - '--real'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
 
 - benchmark: spark_standalone
   name: spark_standalone_remote_setup
@@ -215,6 +227,12 @@
     - '--warehouse-dir /flash23/warehouse'
     - '--shuffle-dir /flash23/spark_local_dir'
     - '--real'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
 
 - benchmark: spark_standalone
   name: spark_standalone_remote_compute
@@ -226,6 +244,12 @@
     - '--shuffle-dir /flash23/spark_local_dir'
     - '--aggressive 1'
     - '--real'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
 
 - benchmark: tao_bench
   name: tao_bench_64g
@@ -257,6 +281,12 @@
         - '--real'
       vars:
         - 'server_hostname'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server.csv'
 
 - benchmark: tao_bench
   name: tao_bench_custom
@@ -302,6 +332,12 @@
         - 'server_port_number=11211'
         - 'warmup_time=1200'
         - 'test_time=360'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server.csv'
 
 - benchmark: tao_bench_2x
   name: tao_bench_2x
@@ -323,6 +359,13 @@
     - 'interface_name=eth0'
     - 'warmup_time=2400'
     - 'test_time=720'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server.csv'
+          - 'tao-bench-server-*.log'
 
 - benchmark: memcached_bench
   name: memcached_bench_64g
