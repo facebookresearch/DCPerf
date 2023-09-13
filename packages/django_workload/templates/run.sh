@@ -26,7 +26,7 @@ show_help() {
 cat <<EOF
 Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-d duration of workload] [-l siege logfile path] [-s urls path] [-c cassandra host ip]
 Proxy shell script to executes django-workload benchmark
-    -r          role (clientserver or db, default is clientserver)
+    -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
     -w          number of server workers (default NPROC)
     -x          number of client workers (default 1.2*NPROC)
@@ -34,7 +34,8 @@ Proxy shell script to executes django-workload benchmark
     -d          duration of django-workload benchmark (e.g. 2M)
     -l          path to log siege output to
     -s          source or path to get urls from
-    -c          ip address of the cassandra server
+    -c          ip address of the cassandra server (required when role is 'server' or 'clientserver')
+    -z          ip address of the django server (required when role is 'client', default is ::1)
 
 EOF
 }
@@ -76,13 +77,9 @@ start_cassandra() {
   ./apache-cassandra/bin/cassandra -R -f -p cassandra.pid > cassandra.log 2>&1
 }
 
-start_clientserver() {
+start_django_server() {
   local cassandra_addr=$1
   local num_server_workers=$2
-  local num_client_workers=$3
-  local duration=$4
-  local siege_logs_path=$5
-  local urls_path=$6
 
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -93,7 +90,8 @@ start_clientserver() {
   # Set the cassandra ip in django config file
   cd "${SCRIPT_ROOT}/../django-workload/django-workload" || exit 1
   CLUSTER_SETTING="cluster_settings.py"
-  sed "s/__CASSANDRA_DB_ADDR__/${cassandra_addr}/g" < ${CLUSTER_SETTING}.template > ${CLUSTER_SETTING}.tmp
+  sed -e "s/__CASSANDRA_DB_ADDR__/${cassandra_addr}/g" \
+      < ${CLUSTER_SETTING}.template > ${CLUSTER_SETTING}.tmp
   mv -f "${CLUSTER_SETTING}.tmp" "${CLUSTER_SETTING}"
 
   # shellcheck disable=SC1090,SC1091
@@ -118,14 +116,56 @@ start_clientserver() {
   DJANGO_SETTINGS_MODULE=cluster_settings ./venv/bin/django-admin flush
   DJANGO_SETTINGS_MODULE=cluster_settings ./venv/bin/django-admin setup
 
+  echo "Running django server with ${num_server_workers} uWSGI workers"
+
   venv/bin/uwsgi \
     --ini uwsgi.ini \
     -H "${SCRIPT_ROOT}/../django-workload/django-workload/venv" \
     --safe-pidfile "${SCRIPT_ROOT}/../uwsgi.pid" \
-    --workers "${num_server_workers}" &
+    --workers "${num_server_workers}"
+}
 
-  echo "Server workers: ${num_server_workers}; client workers: ${num_client_workers}"
+start_client() {
+  local num_client_workers=$1
+  local duration=$2
+  local siege_logs_path=$3
+  local urls_path=$4
+  local server_addr=$5
+
+  # Replace the host in url template to the actual server addr
+  CLIENTS_DIR="${SCRIPT_ROOT}/../django-workload/client"
+  URLS_TEMPLATE="${CLIENTS_DIR}/urls_template.txt"
+  sed -e "s/\/\/.*:8000/\/\/${server_addr}:8000/g" \
+      < "${URLS_TEMPLATE}" > "${URLS_TEMPLATE}.tmp"
+  mv -f "${URLS_TEMPLATE}.tmp" "${URLS_TEMPLATE}"
+
+  # shellcheck disable=SC1090,SC1091
+  source "${SCRIPT_ROOT}/../django-workload/django-workload/venv/bin/activate"
+
   run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}"
+}
+
+start_clientserver() {
+  local cassandra_addr=$1
+  local num_server_workers=$2
+  local num_client_workers=$3
+  local duration=$4
+  local siege_logs_path=$5
+  local urls_path=$6
+
+  start_django_server "${cassandra_addr}" "${num_server_workers}" &
+
+  # Wait for the server to start
+  local retries=150
+  while ! nc -z localhost 8000; do
+      sleep 1
+      retries=$((retries-1))
+      if [[ "$retries" -le 0 ]]; then
+          echo "Django server could not start within 150s"
+          exit 1
+      fi
+  done
+  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" localhost
 }
 
 main() {
@@ -153,7 +193,10 @@ main() {
   local cassandra_addr
   cassandra_addr='::1'
 
-  while getopts 'w:x:y:d:l:s:r:c:' OPTION "${@}"; do
+  local server_addr
+  server_addr='::1'
+
+  while getopts 'w:x:y:d:l:s:r:c:z:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -186,6 +229,9 @@ main() {
       c)
         cassandra_addr="${OPTARG}"
         ;;
+      z)
+        server_addr="${OPTARG}"
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -202,11 +248,16 @@ main() {
   readonly urls_path
   readonly role
   readonly cassandra_addr
+  readonly server_addr
 
   if [ "$role" = "db" ]; then
     start_cassandra "$num_cassandra_writes";
   elif [ "$role" = "clientserver" ]; then
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path";
+  elif [ "$role" = "client" ]; then
+    start_client "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$server_addr";
+  elif [ "$role" = "server" ]; then
+    start_django_server "$cassandra_addr" "$num_server_workers";
   else
     echo "Role $role is invalid, it can only be 'db' or 'clientserver'";
     exit 1
