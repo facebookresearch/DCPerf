@@ -16,7 +16,7 @@
  * along with memtier_benchmark.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdio.h>
+#include <cstdio>
 
 #include "run_stats_types.h"
 

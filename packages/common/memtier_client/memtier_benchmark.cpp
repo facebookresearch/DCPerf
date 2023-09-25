@@ -20,18 +20,18 @@
 #include "config.h"
 #endif
 
-#include <pthread.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdarg.h>
-#include <limits.h>
+#include <cassert>
+#include <cerrno>
+#include <climits>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <getopt.h>
-#include <assert.h>
-#include <errno.h>
-#include <sys/time.h>
+#include <pthread.h>
 #include <sys/resource.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #ifdef USE_TLS
 #include <openssl/ssl.h>
@@ -50,8 +50,9 @@
 static int log_level = 0;
 void benchmark_log_file_line(int level, const char *filename, unsigned int line, const char *fmt, ...)
 {
-    if (level > log_level)
+    if (level > log_level) {
         return;
+}
 
     va_list args;
     char fmtbuf[1024];
@@ -66,8 +67,9 @@ void benchmark_log_file_line(int level, const char *filename, unsigned int line,
 
 void benchmark_log(int level, const char *fmt, ...)
 {
-    if (level > log_level)
+    if (level > log_level) {
         return;
+}
 
     va_list args;
 
@@ -248,52 +250,71 @@ static void config_print_to_json(json_handler * jsonhandler, struct benchmark_co
 
 static void config_init_defaults(struct benchmark_config *cfg)
 {
-    if (!cfg->server && !cfg->unix_socket)
+    if (!cfg->server && !cfg->unix_socket) {
         cfg->server = "localhost";
-    if (!cfg->port && !cfg->unix_socket)
+}
+    if (!cfg->port && !cfg->unix_socket) {
         cfg->port = 6379;
-    if (!cfg->protocol)
+}
+    if (!cfg->protocol) {
         cfg->protocol = "redis";
-    if (!cfg->run_count)
+}
+    if (!cfg->run_count) {
         cfg->run_count = 1;
-    if (!cfg->clients)
+}
+    if (!cfg->clients) {
         cfg->clients = 50;
-    if (!cfg->threads)
+}
+    if (!cfg->threads) {
         cfg->threads = 4;
-    if (!cfg->ratio.is_defined())
+}
+    if (!cfg->ratio.is_defined()) {
         cfg->ratio = config_ratio("1:10");
-    if (!cfg->pipeline)
+}
+    if (!cfg->pipeline) {
         cfg->pipeline = 1;
-    if (!cfg->data_size && !cfg->data_size_list.is_defined() && !cfg->data_size_range.is_defined() && !cfg->data_import)
+}
+    if (!cfg->data_size && !cfg->data_size_list.is_defined() && !cfg->data_size_range.is_defined() && !cfg->data_import) {
         cfg->data_size = 32;
+}
     if (cfg->generate_keys || !cfg->data_import) {
-        if (!cfg->key_prefix)
+        if (!cfg->key_prefix) {
             cfg->key_prefix = "memtier-";
-        if (!cfg->key_maximum)
+}
+        if (!cfg->key_maximum) {
             cfg->key_maximum = 10000000;
+}
     }
-    if (!cfg->key_pattern)
+    if (!cfg->key_pattern) {
         cfg->key_pattern = "R:R";
-    if (!cfg->data_size_pattern)
+}
+    if (!cfg->data_size_pattern) {
         cfg->data_size_pattern = "R";
+}
     if (cfg->requests == (unsigned long long)-1) {
         cfg->requests = cfg->key_maximum - cfg->key_minimum;
-        if (strcmp(cfg->key_pattern, "P:P")==0)
+        if (strcmp(cfg->key_pattern, "P:P")==0) {
             cfg->requests = cfg->requests / (cfg->clients * cfg->threads) + 1;
+}
         printf("setting requests to %llu\n", cfg->requests);
     }
-    if (!cfg->requests && !cfg->test_time)
+    if (!cfg->requests && !cfg->test_time) {
         cfg->requests = 10000;
+}
 
-    if (!cfg->num_threads_db)
+    if (!cfg->num_threads_db) {
         cfg->num_threads_db = 0;
-    if (!cfg->num_threads_coherence)
+}
+    if (!cfg->num_threads_coherence) {
         cfg->num_threads_coherence = 0;
-    if (!cfg->num_clients_coherence)
+}
+    if (!cfg->num_clients_coherence) {
         cfg->num_clients_coherence = 1;
-    if (!cfg->key_bytes)
+}
+    if (!cfg->key_bytes) {
         cfg->key_bytes = 0;
-    cfg->generated_key = NULL;
+}
+    cfg->generated_key = nullptr;
 }
 
 static int generate_random_seed()
@@ -306,7 +327,7 @@ static int generate_random_seed()
         fclose(f);
     }
 
-    return (int)time(NULL)^getpid()^R;
+    return (int)time(nullptr)^getpid()^R;
 }
 
 static bool verify_cluster_option(struct benchmark_config *cfg) {
@@ -409,68 +430,68 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
     };
 
     static struct option long_options[] = {
-        { "server",                     1, 0, 's' },
-        { "port",                       1, 0, 'p' },
-        { "unix-socket",                1, 0, 'S' },
-        { "protocol",                   1, 0, 'P' },
+        { "server",                     1, nullptr, 's' },
+        { "port",                       1, nullptr, 'p' },
+        { "unix-socket",                1, nullptr, 'S' },
+        { "protocol",                   1, nullptr, 'P' },
 #ifdef USE_TLS
-        { "tls",                        0, 0, o_tls },
-        { "cert",                       1, 0, o_tls_cert },
-        { "key",                        1, 0, o_tls_key },
-        { "cacert",                     1, 0, o_tls_cacert },
-        { "tls-skip-verify",            0, 0, o_tls_skip_verify },
+        { "tls",                        0, nullptr, o_tls },
+        { "cert",                       1, nullptr, o_tls_cert },
+        { "key",                        1, nullptr, o_tls_key },
+        { "cacert",                     1, nullptr, o_tls_cacert },
+        { "tls-skip-verify",            0, nullptr, o_tls_skip_verify },
 #endif
-        { "out-file",                   1, 0, 'o' },
-        { "client-stats",               1, 0, o_client_stats },
-        { "run-count",                  1, 0, 'x' },
-        { "debug",                      0, 0, 'D' },
-        { "show-config",                0, 0, o_show_config },
-        { "hide-histogram",             0, 0, o_hide_histogram },
-        { "distinct-client-seed",       0, 0, o_distinct_client_seed },
-        { "randomize",                  0, 0, o_randomize },
-        { "requests",                   1, 0, 'n' },
-        { "clients",                    1, 0, 'c' },
-        { "threads",                    1, 0, 't' },
-        { "test-time",                  1, 0, o_test_time },
-        { "ratio",                      1, 0, o_ratio },
-        { "pipeline",                   1, 0, o_pipeline },
-        { "data-size",                  1, 0, 'd' },
-        { "data-offset",                1, 0, o_data_offset },
-        { "random-data",                0, 0, 'R' },
-        { "data-size-range",            1, 0, o_data_size_range },
-        { "data-size-list",             1, 0, o_data_size_list },
-        { "data-size-pattern",          1, 0, o_data_size_pattern },
-        { "expiry-range",               1, 0, o_expiry_range },
-        { "data-import",                1, 0, o_data_import },
-        { "data-verify",                0, 0, o_data_verify },
-        { "verify-only",                0, 0, o_verify_only },
-        { "generate-keys",              0, 0, o_generate_keys },
-        { "key-prefix",                 1, 0, o_key_prefix },
-        { "key-minimum",                1, 0, o_key_minimum },
-        { "key-maximum",                1, 0, o_key_maximum },
-        { "key-pattern",                1, 0, o_key_pattern },
-        { "key-stddev",                 1, 0, o_key_stddev },
-        { "key-median",                 1, 0, o_key_median },
-        { "reconnect-interval",         1, 0, o_reconnect_interval },
-        { "multi-key-get",              1, 0, o_multi_key_get },
-        { "authenticate",               1, 0, 'a' },
-        { "select-db",                  1, 0, o_select_db },
-        { "no-expiry",                  0, 0, o_no_expiry },
-        { "wait-ratio",                 1, 0, o_wait_ratio },
-        { "num-slaves",                 1, 0, o_num_slaves },
-        { "wait-timeout",               1, 0, o_wait_timeout },
-        { "json-out-file",              1, 0, o_json_out_file },
-        { "cluster-mode",               0, 0, o_cluster_mode },
-        { "help",                       0, 0, 'h' },
-        { "version",                    0, 0, 'v' },
-        { "command",                    1, 0, o_command },
-        { "command-key-pattern",        1, 0, o_command_key_pattern },
-        { "command-ratio",              1, 0, o_command_ratio },
-        { "threads-db",                 1, 0, o_tao_num_t_db },
-        { "threads-coherence",          1, 0, o_tao_num_t_coherence},
-        { "clients-coherence",          1, 0, o_tao_num_c_coherence},
-        { "key-bytes",                  1, 0, o_tao_key_bytes},
-        { NULL,                         0, 0, 0 }
+        { "out-file",                   1, nullptr, 'o' },
+        { "client-stats",               1, nullptr, o_client_stats },
+        { "run-count",                  1, nullptr, 'x' },
+        { "debug",                      0, nullptr, 'D' },
+        { "show-config",                0, nullptr, o_show_config },
+        { "hide-histogram",             0, nullptr, o_hide_histogram },
+        { "distinct-client-seed",       0, nullptr, o_distinct_client_seed },
+        { "randomize",                  0, nullptr, o_randomize },
+        { "requests",                   1, nullptr, 'n' },
+        { "clients",                    1, nullptr, 'c' },
+        { "threads",                    1, nullptr, 't' },
+        { "test-time",                  1, nullptr, o_test_time },
+        { "ratio",                      1, nullptr, o_ratio },
+        { "pipeline",                   1, nullptr, o_pipeline },
+        { "data-size",                  1, nullptr, 'd' },
+        { "data-offset",                1, nullptr, o_data_offset },
+        { "random-data",                0, nullptr, 'R' },
+        { "data-size-range",            1, nullptr, o_data_size_range },
+        { "data-size-list",             1, nullptr, o_data_size_list },
+        { "data-size-pattern",          1, nullptr, o_data_size_pattern },
+        { "expiry-range",               1, nullptr, o_expiry_range },
+        { "data-import",                1, nullptr, o_data_import },
+        { "data-verify",                0, nullptr, o_data_verify },
+        { "verify-only",                0, nullptr, o_verify_only },
+        { "generate-keys",              0, nullptr, o_generate_keys },
+        { "key-prefix",                 1, nullptr, o_key_prefix },
+        { "key-minimum",                1, nullptr, o_key_minimum },
+        { "key-maximum",                1, nullptr, o_key_maximum },
+        { "key-pattern",                1, nullptr, o_key_pattern },
+        { "key-stddev",                 1, nullptr, o_key_stddev },
+        { "key-median",                 1, nullptr, o_key_median },
+        { "reconnect-interval",         1, nullptr, o_reconnect_interval },
+        { "multi-key-get",              1, nullptr, o_multi_key_get },
+        { "authenticate",               1, nullptr, 'a' },
+        { "select-db",                  1, nullptr, o_select_db },
+        { "no-expiry",                  0, nullptr, o_no_expiry },
+        { "wait-ratio",                 1, nullptr, o_wait_ratio },
+        { "num-slaves",                 1, nullptr, o_num_slaves },
+        { "wait-timeout",               1, nullptr, o_wait_timeout },
+        { "json-out-file",              1, nullptr, o_json_out_file },
+        { "cluster-mode",               0, nullptr, o_cluster_mode },
+        { "help",                       0, nullptr, 'h' },
+        { "version",                    0, nullptr, 'v' },
+        { "command",                    1, nullptr, o_command },
+        { "command-key-pattern",        1, nullptr, o_command_key_pattern },
+        { "command-ratio",              1, nullptr, o_command_ratio },
+        { "threads-db",                 1, nullptr, o_tao_num_t_db },
+        { "threads-coherence",          1, nullptr, o_tao_num_t_coherence},
+        { "clients-coherence",          1, nullptr, o_tao_num_c_coherence},
+        { "key-bytes",                  1, nullptr, o_tao_key_bytes},
+        { nullptr,                         0, nullptr, 0 }
     };
 
     int option_index;
@@ -498,7 +519,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->unix_socket = optarg;
                     break;
                 case 'p':
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->port = (unsigned short) strtoul(optarg, &endptr, 10);
                     if (!cfg->port || cfg->port > 65535 || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: port must be a number in the range [1-65535].\n");
@@ -521,7 +542,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->client_stats = optarg;
                     break;
                 case 'x':
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->run_count = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (!cfg->run_count || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: run count must be greater than zero.\n");
@@ -545,10 +566,10 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->randomize = random();
                     break;
                 case 'n':
-                    endptr = NULL;
-                    if (strcmp(optarg, "allkeys")==0)
+                    endptr = nullptr;
+                    if (strcmp(optarg, "allkeys")==0) {
                         cfg->requests = -1;
-                    else {
+                    } else {
                         cfg->requests = (unsigned long long) strtoull(optarg, &endptr, 10);
                         if (!cfg->requests || !endptr || *endptr != '\0') {
                             fprintf(stderr, "error: requests must be greater than zero.\n");
@@ -561,7 +582,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case 'c':
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->clients = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (!cfg->clients || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: clients must be greater than zero.\n");
@@ -569,7 +590,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case 't':
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->threads = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (!cfg->threads || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: threads must be greater than zero.\n");
@@ -577,7 +598,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case o_test_time:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->test_time = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (!cfg->test_time || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: test time must be greater than zero.\n");
@@ -596,7 +617,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case o_pipeline:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->pipeline = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (!cfg->pipeline || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: pipeline must be greater than zero.\n");
@@ -604,7 +625,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case 'd':
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->data_size = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (!cfg->data_size || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: data-size must be greater than zero.\n");
@@ -615,7 +636,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->random_data = true;
                     break;
                 case o_data_offset:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->data_offset = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (!endptr || *endptr != '\0') {
                         fprintf(stderr, "error: data-offset must be greater than or equal to zero.\n");
@@ -665,7 +686,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->key_prefix = optarg;
                     break;
                 case o_key_minimum:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->key_minimum = strtoull(optarg, &endptr, 10);
                     if (cfg->key_minimum < 1 || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: key-minimum must be greater than zero.\n");
@@ -673,7 +694,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case o_key_maximum:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->key_maximum = strtoull(optarg, &endptr, 10);
                     if (cfg->key_maximum< 1 || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: key-maximum must be greater than zero.\n");
@@ -681,7 +702,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case o_key_stddev:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->key_stddev = (unsigned int) strtof(optarg, &endptr);
                     if (cfg->key_stddev<= 0 || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: key-stddev must be greater than zero.\n");
@@ -689,7 +710,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case o_key_median:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->key_median = (unsigned int) strtof(optarg, &endptr);
                     if (cfg->key_median<= 0 || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: key-median must be greater than zero.\n");
@@ -721,7 +742,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     }
                     break;
                 case o_reconnect_interval:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->reconnect_interval = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (!cfg->reconnect_interval || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: reconnect-interval must be greater than zero.\n");
@@ -732,7 +753,7 @@ static int config_parse_args(int argc, char *argv[], struct benchmark_config *cf
                     cfg->generate_keys = 1;
                     break;
                 case o_multi_key_get:
-                    endptr = NULL;
+                    endptr = nullptr;
                     cfg->multi_key_get = (unsigned int) strtoul(optarg, &endptr, 10);
                     if (cfg->multi_key_get <= 0 || !endptr || *endptr != '\0') {
                         fprintf(stderr, "error: multi-key-get must be greater than zero.\n");
@@ -1005,53 +1026,56 @@ struct cg_thread {
         m_thread_id(id),
         m_config(config),
         m_obj_gen(obj_gen),
-        m_cg(NULL),
-        m_protocol(NULL),
+        m_cg(nullptr),
+        m_protocol(nullptr),
         m_finished(false),
         m_simulates_coherency(is_coherence_client)
     {
         m_protocol = protocol_factory(m_config->protocol);
-        assert(m_protocol != NULL);
+        assert(m_protocol != nullptr);
 
         m_cg = new client_group(m_config, m_protocol, m_obj_gen);
     }
 
     ~cg_thread()
     {
-        if (m_cg != NULL) {
+        if (m_cg != nullptr) {
             delete m_cg;
         }
-        if (m_protocol != NULL) {
+        if (m_protocol != nullptr) {
             delete m_protocol;
         }
     }
 
-    int prepare(void)
+    int prepare()
     {
         if (m_simulates_coherency == false) {
-            if (m_cg->create_clients(m_config->clients, false) < (int) m_config->clients)
+            if (m_cg->create_clients(m_config->clients, false) < (int) m_config->clients) {
                 return -1;
+}
         }
         else {
             int n_clients = (int)m_config->num_clients_coherence;
-            if (m_cg->create_clients(n_clients, true) < n_clients)
+            if (m_cg->create_clients(n_clients, true) < n_clients) {
                 return -1;
+}
         }
 
         return m_cg->prepare();
     }
 
-    int start(void)
+    int start()
     {
-        if (!m_simulates_coherency)
+        if (!m_simulates_coherency) {
             fprintf(stderr, "thread create: regular load generator thread.\n");
-        else
+        } else {
             fprintf(stderr, "thread create: Tao coherency simulation thread.\n");
+}
 
-        return pthread_create(&m_thread, NULL, cg_thread_start, (void *)this);
+        return pthread_create(&m_thread, nullptr, cg_thread_start, (void *)this);
     }
 
-    void join(void)
+    void join()
     {
         int* retval;
         int ret;
@@ -1093,7 +1117,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
     std::vector<cg_thread*> threads;
     for (unsigned int i = 0; i < cfg->threads; i++) {
         cg_thread* t = new cg_thread(i, cfg, obj_gen, false);
-        assert(t != NULL);
+        assert(t != nullptr);
 
         if (t->prepare() < 0) {
             benchmark_error_log("error: failed to prepare thread %u for test.\n", i);
@@ -1108,7 +1132,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 
         for (unsigned int i = cfg->threads; i < cfg->threads + cfg->num_threads_coherence; ++i) {
             cg_thread* t = new cg_thread(i, cfg, obj_gen, true);
-            assert(t != NULL);
+            assert(t != nullptr);
 
             if (t->prepare() < 0) {
                 benchmark_error_log("error: failed to prepare coherency thread %u for test.\n", i);
@@ -1144,8 +1168,9 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
         unsigned long int total_latency = 0;
 
         for (std::vector<cg_thread*>::iterator i = threads.begin(); i != threads.end(); i++) {
-            if (!(*i)->m_finished)
+            if (!(*i)->m_finished) {
                 active_threads++;
+}
 
             if (!(*i)->m_simulates_coherency) {
                 total_ops += (*i)->m_cg->get_total_ops();
@@ -1185,10 +1210,11 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
         size_to_str(cur_bytes_sec, cur_bytes_str, sizeof(cur_bytes_str)-1);
 
         double progress = 0;
-        if(cfg->requests)
+        if(cfg->requests) {
             progress = 100.0 * total_ops / ((double)cfg->requests*cfg->clients*cfg->threads);
-        else
+        } else {
             progress = 100.0 * (duration / 1000000.0)/cfg->test_time;
+}
 
         fprintf(stderr, "[RUN #%u %.0f%%, %3u secs] %2u threads: %11lu ops, %7lu (avg: %7lu) ops/sec, %s/sec (avg: %s/sec), %5.2f (avg: %5.2f) msec latency\r",
             run_id, progress, (unsigned int) (duration / 1000000), active_threads, total_ops, cur_ops_sec, ops_sec, cur_bytes_str, bytes_str, cur_latency, avg_latency);
@@ -1205,7 +1231,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
     }
 
     // Do we need to produce client stats?
-    if (cfg->client_stats != NULL) {
+    if (cfg->client_stats != nullptr) {
         unsigned int cg_id = 0;
         fprintf(stderr, "[RUN %u] Writing client stats files...\n", run_id);
         for (std::vector<cg_thread*>::iterator i = threads.begin(); i != threads.end(); i++) {
@@ -1218,7 +1244,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 
     // clean up all client_groups.  the main value of this is to be able to
     // properly look for leaks...
-    while (threads.size() > 0) {
+    while (!threads.empty()) {
         cg_thread* t = *threads.begin();
         threads.erase(threads.begin());
         delete t;
@@ -1228,7 +1254,7 @@ run_stats run_benchmark(int run_id, benchmark_config* cfg, object_generator* obj
 }
 
 #ifdef USE_TLS
-static void init_openssl(void)
+static void init_openssl()
 {
     SSL_library_init();
     SSL_load_error_strings();
@@ -1261,7 +1287,7 @@ int main(int argc, char *argv[])
     // if user configure arbitrary commands, format and prepare it
     for (unsigned int i=0; i<cfg.arbitrary_commands->size(); i++) {
         abstract_protocol* tmp_protocol = protocol_factory(cfg.protocol);
-        assert(tmp_protocol != NULL);
+        assert(tmp_protocol != nullptr);
 
         if (!tmp_protocol->format_arbitrary_command(cfg.arbitrary_commands->at(i))) {
             exit(1);
@@ -1296,7 +1322,7 @@ int main(int argc, char *argv[])
         }
         if (cfg.tls_cacert) {
             if (!SSL_CTX_load_verify_locations(cfg.openssl_ctx, cfg.tls_cacert,
-                        NULL)) {
+                        nullptr)) {
                 ERR_print_errors_fp(stderr);
                 fprintf(stderr, "Error: Failed to load CA certificate file.\n");
                 exit(1);
@@ -1304,13 +1330,13 @@ int main(int argc, char *argv[])
         }
         SSL_CTX_set_verify(cfg.openssl_ctx,
                 cfg.tls_skip_verify ? SSL_VERIFY_NONE : SSL_VERIFY_PEER,
-                NULL);
+                nullptr);
     }
 #endif
 
     // JSON file initiation
-    json_handler *jsonhandler = NULL;
-    if (cfg.json_out_file != NULL){
+    json_handler *jsonhandler = nullptr;
+    if (cfg.json_out_file != nullptr){
         jsonhandler = new json_handler((const char *)cfg.json_out_file);
         // We allways print the configuration to the JSON file
         config_print_to_json(jsonhandler,&cfg);
@@ -1322,13 +1348,13 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    if (cfg.unix_socket != NULL &&
-        (cfg.server != NULL || cfg.port > 0)) {
+    if (cfg.unix_socket != nullptr &&
+        (cfg.server != nullptr || cfg.port > 0)) {
         benchmark_error_log("error: UNIX domain socket and TCP cannot be used together.\n");
         exit(1);
     }
 
-    if (cfg.server != NULL && cfg.port > 0) {
+    if (cfg.server != nullptr && cfg.port > 0) {
         try {
             cfg.server_addr = new server_addr(cfg.server, cfg.port);
         } catch (std::runtime_error& e) {
@@ -1353,8 +1379,8 @@ int main(int argc, char *argv[])
     }
 
     // create and configure object generator
-    object_generator* obj_gen = NULL;
-    imported_keylist* keylist = NULL;
+    object_generator* obj_gen = nullptr;
+    imported_keylist* keylist = nullptr;
     if (!cfg.data_import) {
         if (cfg.data_verify) {
             fprintf(stderr, "error: use data-verify only with data-import\n");
@@ -1370,7 +1396,7 @@ int main(int argc, char *argv[])
         } else {
             obj_gen = new object_generator();
         }
-        assert(obj_gen != NULL);
+        assert(obj_gen != nullptr);
     } else {
         // check parameters
         if (cfg.data_size ||
@@ -1395,7 +1421,7 @@ int main(int argc, char *argv[])
             // read keys
             fprintf(stderr, "Reading keys from %s...", cfg.data_import);
             keylist = new imported_keylist(cfg.data_import);
-            assert(keylist != NULL);
+            assert(keylist != nullptr);
 
             if (!keylist->read_keys()) {
                 fprintf(stderr, "\nerror: failed to read keys.\n");
@@ -1406,7 +1432,7 @@ int main(int argc, char *argv[])
         }
 
         obj_gen = new import_object_generator(cfg.data_import, keylist, cfg.no_expiry);
-        assert(obj_gen != NULL);
+        assert(obj_gen != nullptr);
 
         if (dynamic_cast<import_object_generator*>(obj_gen)->open_file() != true) {
             fprintf(stderr, "error: %s: failed to open.\n", cfg.data_import);
@@ -1421,7 +1447,7 @@ int main(int argc, char *argv[])
                 usage();
         }
         if (strcmp(cfg.protocol, "memcache_binary") == 0 &&
-            strchr(cfg.authenticate, ':') == NULL) {
+            strchr(cfg.authenticate, ':') == nullptr) {
                 fprintf(stderr, "error: binary_memcache credentials must be in the form of USER:PASSWORD.\n");
                 usage();
         }
@@ -1465,9 +1491,9 @@ int main(int argc, char *argv[])
     }
 
     if (!cfg.data_import || cfg.generate_keys) {
-        if (cfg.key_bytes == 0)
+        if (cfg.key_bytes == 0) {
             obj_gen->set_key_prefix(cfg.key_prefix);
-        else {
+        } else {
             cfg.generated_key = (char*)malloc(sizeof(char) * cfg.key_bytes);
             srand(6122020); // Use same seed for repeatability
             for (unsigned i = 0; i < cfg.key_bytes - 1; ++i) {
@@ -1493,7 +1519,7 @@ int main(int argc, char *argv[])
 
     // Prepare output file
     FILE *outfile;
-    if (cfg.out_file != NULL) {
+    if (cfg.out_file != nullptr) {
         fprintf(stderr, "Writing results to %s...\n", cfg.out_file);
         outfile = fopen(cfg.out_file, "w");
         if (!outfile) {
@@ -1508,8 +1534,9 @@ int main(int argc, char *argv[])
         all_stats.reserve(cfg.run_count);
 
         for (unsigned int run_id = 1; run_id <= cfg.run_count; run_id++) {
-            if (run_id > 1)
+            if (run_id > 1) {
                 sleep(1);   // let connections settle
+}
 
             run_stats stats = run_benchmark(run_id, &cfg, obj_gen);
             all_stats.push_back(stats);
@@ -1524,7 +1551,7 @@ int main(int argc, char *argv[])
                (unsigned long long)(cfg.requests > 0 ? cfg.requests : cfg.test_time),
                cfg.requests > 0 ? "Requests per client"  : "Seconds");
 
-        if (jsonhandler != NULL){
+        if (jsonhandler != nullptr){
             jsonhandler->open_nesting("run information");
             jsonhandler->write_obj("Threads","%u",cfg.threads);
             jsonhandler->write_obj("Connections per thread","%u",cfg.clients);
@@ -1538,16 +1565,16 @@ int main(int argc, char *argv[])
         if (cfg.run_count > 1) {
             unsigned int min_ops_sec = (unsigned int) -1;
             unsigned int max_ops_sec = 0;
-            run_stats* worst = NULL;
-            run_stats* best = NULL;
+            run_stats* worst = nullptr;
+            run_stats* best = nullptr;
             for (std::vector<run_stats>::iterator i = all_stats.begin(); i != all_stats.end(); i++) {
                 unsigned long usecs = i->get_duration_usec();
                 unsigned int ops_sec = (int)(((double)i->get_total_ops() / (usecs > 0 ? usecs : 1)) * 1000000);
-                if (ops_sec < min_ops_sec || worst == NULL) {
+                if (ops_sec < min_ops_sec || worst == nullptr) {
                     min_ops_sec = ops_sec;
                     worst = &(*i);
                 }
-                if (ops_sec > max_ops_sec || best == NULL) {
+                if (ops_sec > max_ops_sec || best == nullptr) {
                     max_ops_sec = ops_sec;
                     best = &(*i);
                 }
@@ -1586,7 +1613,7 @@ int main(int argc, char *argv[])
                         client->get_verified_keys(),
                         client->get_errors());
 
-        if (jsonhandler != NULL){
+        if (jsonhandler != nullptr){
             jsonhandler->open_nesting("client verifications results");
             jsonhandler->write_obj("keys verified successfuly", "%-10llu",  client->get_verified_keys());
             jsonhandler->write_obj("keys failed", "%-10llu",  client->get_errors());
@@ -1605,31 +1632,32 @@ int main(int argc, char *argv[])
 
     if (cfg.server_addr) {
         delete cfg.server_addr;
-        cfg.server_addr = NULL;
+        cfg.server_addr = nullptr;
     }
 
     if (cfg.generated_key) {
         free(cfg.generated_key);
-        cfg.generated_key = NULL;
+        cfg.generated_key = nullptr;
     }
 
-    if (jsonhandler != NULL) {
+    if (jsonhandler != nullptr) {
         // closing the JSON
         delete jsonhandler;
     }
 
     delete obj_gen;
-    if (keylist != NULL)
+    if (keylist != nullptr) {
         delete keylist;
+}
 
-    if (cfg.arbitrary_commands != NULL) {
+    if (cfg.arbitrary_commands != nullptr) {
         delete cfg.arbitrary_commands;
     }
 
 #ifdef USE_TLS
     if (cfg.openssl_ctx) {
         SSL_CTX_free(cfg.openssl_ctx);
-        cfg.openssl_ctx = NULL;
+        cfg.openssl_ctx = nullptr;
     }
 #endif
 }

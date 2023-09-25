@@ -26,10 +26,10 @@
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
@@ -40,7 +40,7 @@
 #endif
 
 #ifdef HAVE_ASSERT_H
-#include <assert.h>
+#include <cassert>
 #endif
 
 #include "shard_connection.h"
@@ -58,7 +58,7 @@
 void cluster_client_read_handler(bufferevent *bev, void *ctx)
 {
     shard_connection *sc = (shard_connection *) ctx;
-    assert(sc != NULL);
+    assert(sc != nullptr);
 
     sc->process_response();
 }
@@ -67,17 +67,17 @@ void cluster_client_event_handler(bufferevent *bev, short events, void *ctx)
 {
     shard_connection *sc = (shard_connection *) ctx;
 
-    assert(sc != NULL);
+    assert(sc != nullptr);
     sc->handle_event(events);
 }
 
 request::request(request_type type, unsigned int size, struct timeval* sent_time, unsigned int keys)
         : m_type(type), m_size(size), m_keys(keys)
 {
-    if (sent_time != NULL)
+    if (sent_time != nullptr) {
         m_sent_time = *sent_time;
-    else {
-        gettimeofday(&m_sent_time, NULL);
+    } else {
+        gettimeofday(&m_sent_time, nullptr);
     }
 }
 
@@ -96,8 +96,8 @@ verify_request::verify_request(request_type type,
                                const char *value,
                                unsigned int value_len) :
         request(type, size, sent_time, keys),
-        m_key(NULL), m_key_len(0),
-        m_value(NULL), m_value_len(0)
+        m_key(nullptr), m_key_len(0),
+        m_value(nullptr), m_value_len(0)
 {
     m_key_len = key_len;
     m_key = (char *)malloc(key_len);
@@ -108,22 +108,22 @@ verify_request::verify_request(request_type type,
     memcpy(m_value, value, m_value_len);
 }
 
-verify_request::~verify_request(void)
+verify_request::~verify_request()
 {
-    if (m_key != NULL) {
+    if (m_key != nullptr) {
         free((void *) m_key);
-        m_key = NULL;
+        m_key = nullptr;
     }
-    if (m_value != NULL) {
+    if (m_value != nullptr) {
         free((void *) m_value);
-        m_value = NULL;
+        m_value = nullptr;
     }
 }
 
 shard_connection::shard_connection(unsigned int id, connections_manager* conns_man, benchmark_config* config,
                                    struct event_base* event_base, abstract_protocol* abs_protocol) :
-        m_address(NULL), m_port(NULL), m_unix_sockaddr(NULL),
-        m_bev(NULL), m_pending_resp(0), m_connection_state(conn_disconnected),
+        m_address(nullptr), m_port(nullptr), m_unix_sockaddr(nullptr),
+        m_bev(nullptr), m_pending_resp(0), m_connection_state(conn_disconnected),
         m_authentication(auth_done), m_db_selection(select_done), m_cluster_slots(slots_done) {
     m_id = id;
     m_conns_manager = conns_man;
@@ -132,7 +132,7 @@ shard_connection::shard_connection(unsigned int id, connections_manager* conns_m
 
     if (m_config->unix_socket) {
         m_unix_sockaddr = (struct sockaddr_un *) malloc(sizeof(struct sockaddr_un));
-        assert(m_unix_sockaddr != NULL);
+        assert(m_unix_sockaddr != nullptr);
 
         m_unix_sockaddr->sun_family = AF_UNIX;
         strncpy(m_unix_sockaddr->sun_path, m_config->unix_socket, sizeof(m_unix_sockaddr->sun_path)-1);
@@ -140,41 +140,41 @@ shard_connection::shard_connection(unsigned int id, connections_manager* conns_m
     }
 
     m_protocol = abs_protocol->clone();
-    assert(m_protocol != NULL);
+    assert(m_protocol != nullptr);
 
     m_pipeline = new std::queue<request *>;
-    assert(m_pipeline != NULL);
+    assert(m_pipeline != nullptr);
 }
 
 shard_connection::~shard_connection() {
-    if (m_address != NULL) {
+    if (m_address != nullptr) {
         free(m_address);
-        m_address = NULL;
+        m_address = nullptr;
     }
 
-    if (m_port != NULL) {
+    if (m_port != nullptr) {
         free(m_port);
-        m_port = NULL;
+        m_port = nullptr;
     }
 
-    if (m_unix_sockaddr != NULL) {
+    if (m_unix_sockaddr != nullptr) {
         free(m_unix_sockaddr);
-        m_unix_sockaddr = NULL;
+        m_unix_sockaddr = nullptr;
     }
 
-    if (m_bev != NULL) {
+    if (m_bev != nullptr) {
         bufferevent_free(m_bev);
-        m_bev = NULL;
+        m_bev = nullptr;
     }
 
-    if (m_protocol != NULL) {
+    if (m_protocol != nullptr) {
         delete m_protocol;
-        m_protocol = NULL;
+        m_protocol = nullptr;
     }
 
-    if (m_pipeline != NULL) {
+    if (m_pipeline != nullptr) {
         delete m_pipeline;
-        m_pipeline = NULL;
+        m_pipeline = nullptr;
     }
 }
 
@@ -186,7 +186,7 @@ void shard_connection::setup_event(int sockfd) {
 #ifdef USE_TLS
     if (m_config->openssl_ctx) {
         SSL *ctx = SSL_new(m_config->openssl_ctx);
-        assert(ctx != NULL);
+        assert(ctx != nullptr);
         m_bev = bufferevent_openssl_socket_new(m_event_base,
                 sockfd, ctx, BUFFEREVENT_SSL_CONNECTING, BEV_OPT_CLOSE_ON_FREE);
     } else {
@@ -196,9 +196,9 @@ void shard_connection::setup_event(int sockfd) {
     }
 #endif
 
-    assert(m_bev != NULL);
+    assert(m_bev != nullptr);
     bufferevent_setcb(m_bev, cluster_client_read_handler,
-        NULL, cluster_client_event_handler, (void *)this);
+        nullptr, cluster_client_event_handler, (void *)this);
     m_protocol->set_buffers(bufferevent_get_input(m_bev), bufferevent_get_output(m_bev));
 }
 
@@ -206,7 +206,7 @@ int shard_connection::setup_socket(struct connect_info* addr) {
     int flags;
     int sockfd;
 
-    if (m_unix_sockaddr != NULL) {
+    if (m_unix_sockaddr != nullptr) {
         sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (sockfd < 0) {
             return -1;
@@ -289,7 +289,7 @@ void shard_connection::disconnect() {
     if (m_bev) {
         bufferevent_free(m_bev);
     }
-    m_bev = NULL;
+    m_bev = nullptr;
 
     m_connection_state = conn_disconnected;
 
@@ -300,19 +300,19 @@ void shard_connection::disconnect() {
 }
 
 void shard_connection::set_address_port(const char* address, const char* port) {
-    if (m_address != NULL) {
+    if (m_address != nullptr) {
         free(m_address);
     }
     m_address = strdup(address);
 
-    if (m_port != NULL) {
+    if (m_port != nullptr) {
         free(m_port);
     }
     m_port = strdup(port);
 }
 
 void shard_connection::set_readable_id() {
-    if (m_unix_sockaddr != NULL) {
+    if (m_unix_sockaddr != nullptr) {
         m_readable_id.assign(m_config->unix_socket);
     } else {
         m_readable_id.assign(m_address);
@@ -372,13 +372,13 @@ void shard_connection::send_conn_setup_commands(struct timeval timestamp) {
     }
 }
 
-void shard_connection::process_response(void)
+void shard_connection::process_response()
 {
     int ret;
     bool responses_handled = false;
 
     struct timeval now;
-    gettimeofday(&now, NULL);
+    gettimeofday(&now, nullptr);
 
     while ((ret = m_protocol->parse_response()) > 0) {
         bool error = false;
@@ -403,7 +403,7 @@ void shard_connection::process_response(void)
                 m_db_selection = select_done;
             }
         } else if (req->m_type == rt_cluster_slots) {
-            if (r->get_mbulk_value() == NULL || r->get_mbulk_value()->mbulks_elements.size() == 0) {
+            if (r->get_mbulk_value() == nullptr || r->get_mbulk_value()->mbulks_elements.empty()) {
                 benchmark_error_log("cluster slot failed.\n");
                 error = true;
             } else {
@@ -437,7 +437,7 @@ void shard_connection::process_response(void)
 
     if (m_config->reconnect_interval > 0 && responses_handled) {
         if ((m_conns_manager->get_reqs_processed() % m_config->reconnect_interval) == 0) {
-            assert(m_pipeline->size() == 0);
+            assert(m_pipeline->empty());
             benchmark_debug_log("reconnecting, m_reqs_processed = %u\n", m_conns_manager->get_reqs_processed());
 
             // client manage connection & disconnection of shard
@@ -462,10 +462,10 @@ void shard_connection::process_first_request() {
     fill_pipeline();
 }
 
-void shard_connection::fill_pipeline(void)
+void shard_connection::fill_pipeline()
 {
     struct timeval now;
-    gettimeofday(&now, NULL);
+    gettimeofday(&now, nullptr);
 
     while (!m_conns_manager->finished() && m_pipeline->size() < m_config->pipeline) {
         if (!is_conn_setup_done()) {

@@ -19,9 +19,9 @@
 #ifdef HAVE_CONFIG_H
 #endif
 
-#include <string.h>
-#include <stdlib.h>
 #include "file_io.h"
+#include <cstdlib>
+#include <cstring>
 
 /** largest support line length */
 #define MAX_LINE_BUFFER     1024
@@ -30,7 +30,7 @@
  * \param filename name of file to open.
  */
 file_reader::file_reader(const char *filename) :
-    m_filename(filename), m_file(NULL),
+    m_filename(filename), m_file(nullptr),
     m_line(2)
 {
 }
@@ -39,13 +39,13 @@ file_reader::file_reader(const char *filename) :
  */
 file_reader::~file_reader()
 {
-    if (m_file != NULL) {
+    if (m_file != nullptr) {
         fclose(m_file);
     }
 }
 
 file_reader::file_reader(const file_reader& from) :
-    m_filename(from.m_filename), m_file(NULL), m_line(2)
+    m_filename(from.m_filename), m_file(nullptr), m_line(2)
 {
 }
 
@@ -55,15 +55,17 @@ file_reader::file_reader(const file_reader& from) :
  * \return true for success, false for error.
  */
 
-bool file_reader::open_file(void)
+bool file_reader::open_file()
 {
     char header_line[80];
     const char expected_header_line[] = "dumpflags, time, exptime";
-    if (!m_filename)
+    if (!m_filename) {
         return false;
+}
 
-    if (m_file != NULL)
+    if (m_file != nullptr) {
         fclose(m_file);
+}
 
     m_file = fopen(m_filename, "r");
     if (!m_file) {
@@ -71,7 +73,7 @@ bool file_reader::open_file(void)
         return false;
     }
 
-    if (fgets(header_line, sizeof(header_line) - 1, m_file) == NULL) {
+    if (fgets(header_line, sizeof(header_line) - 1, m_file) == nullptr) {
         perror(m_filename);
         return false;
     }
@@ -106,7 +108,7 @@ char* file_reader::read_string(unsigned int len,
     unsigned int alloc_len,
     unsigned int* actual_len)
 {
-    char *dest_str = NULL;
+    char *dest_str = nullptr;
     char *d;
     bool skip_quote = false;
     bool first_byte = true;
@@ -128,7 +130,7 @@ char* file_reader::read_string(unsigned int len,
         if (c == EOF) {
             fprintf(stderr, "%s:%d: premature end of file.\n", m_filename, m_line);
             free(dest_str);
-            return NULL;
+            return nullptr;
         }
 
         if (skip_quote && c != '"') {
@@ -184,8 +186,9 @@ char* file_reader::read_string(unsigned int len,
         }
     }
 
-    if (actual_len != NULL)
+    if (actual_len != nullptr) {
         *actual_len = (d - dest_str);
+}
 
     return dest_str;
 }
@@ -193,7 +196,7 @@ char* file_reader::read_string(unsigned int len,
 /** \brief determine if end of file has been reached.
  * \return true on EOF, false otherwise.
  */
-bool file_reader::is_eof(void)
+bool file_reader::is_eof()
 {
     return (feof(m_file) != 0);
 }
@@ -202,7 +205,7 @@ bool file_reader::is_eof(void)
  * \return pointer to heap-allocated object, or NULL if error/no more items in file.
  */
 
-memcache_item* file_reader::read_item(void)
+memcache_item* file_reader::read_item()
 {
     // parse next line
     unsigned int s_dumpflags = 0;
@@ -225,12 +228,13 @@ memcache_item* file_reader::read_item(void)
         &s_clsid,
         &s_nkey) < 8) {
 
-        if (is_eof())
-            return NULL;
+        if (is_eof()) {
+            return nullptr;
+}
 
         fprintf(stderr, "%s:%u: error parsing item values.\n",
             m_filename, m_line);
-        return NULL;
+        return nullptr;
     }
 
     // read key
@@ -248,7 +252,7 @@ memcache_item* file_reader::read_item(void)
         fprintf(stderr, "%s:%u: error parsing csv file, got '%c' instead of delmiter.\n",
             m_filename, m_line, c);
         free(key);
-        return NULL;
+        return nullptr;
     }
     fgetc(m_file);
 
@@ -259,7 +263,7 @@ memcache_item* file_reader::read_item(void)
             m_filename, m_line, data_actlen, s_nbytes);
         free(key);
         free(data);
-        return NULL;
+        return nullptr;
     }
     data[s_nbytes - 2] = '\r';
     data[s_nbytes - 1] = '\n';
@@ -292,7 +296,7 @@ memcache_item* file_reader::read_item(void)
  */
 
 file_writer::file_writer(const char *filename) :
-    m_filename(filename), m_file(NULL)
+    m_filename(filename), m_file(nullptr)
 {
 }
 
@@ -304,8 +308,9 @@ file_writer::file_writer(const char *filename) :
 
 file_writer::~file_writer()
 {
-    if (m_file != NULL)
+    if (m_file != nullptr) {
         fclose(m_file);
+}
 }
 
 /** \brief open file and prepare to write items.
@@ -314,10 +319,10 @@ file_writer::~file_writer()
  * \return true for success, false for error.
  */
 
-bool file_writer::open_file(void)
+bool file_writer::open_file()
 {
     m_file = fopen(m_filename, "w");
-    if (m_file == NULL) {
+    if (m_file == nullptr) {
         perror(m_filename);
         return false;
     }
@@ -348,7 +353,7 @@ char* file_writer::get_quoted_str(char* str, int str_len, int* new_str_len)
     *new_str_len = str_len;
 
     // is it necessary?
-    if (memchr(str, '"', str_len) == NULL) {
+    if (memchr(str, '"', str_len) == nullptr) {
         return str;
     }
 
@@ -407,10 +412,12 @@ bool file_writer::write_item(memcache_item *item)
         return false;
     }
 
-    if (quoted_key != item->get_key())
+    if (quoted_key != item->get_key()) {
         free(quoted_key);
-    if (quoted_data != item->get_data())
+}
+    if (quoted_data != item->get_data()) {
         free(quoted_data);
+}
 
     return true;
 }

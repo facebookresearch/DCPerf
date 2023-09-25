@@ -16,8 +16,8 @@
  * along with memtier_benchmark.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 
 #include "JSON_handler.h"
 
@@ -28,7 +28,7 @@
  * Opens the file named jsonfilename and sets the first nesting as NESTED_GENERAL
  * In case of failure to create the file, will state the error perror
  */
-json_handler::json_handler(const char * jsonfilename) : m_json_file(NULL)
+json_handler::json_handler(const char * jsonfilename) : m_json_file(nullptr)
 {
     // Try to open a file and add the first level
     m_json_file = fopen(jsonfilename, "w");
@@ -51,7 +51,8 @@ json_handler::~json_handler()
 {
     if (m_json_file){
         // close nesting...
-        while (close_nesting());
+        while (close_nesting()) {;
+}
         fclose(m_json_file);
         fprintf(stderr, "Json file closed.\n");
     }
@@ -81,7 +82,7 @@ void json_handler::write_obj(const char * objectname, const char * format, ...)
 void json_handler::open_nesting(const char * objectname,eJSON_NESTED_TYPE type /*= NESTED_GENERAL*/)
 {
     const char * nestStart = (type == NESTED_GENERAL) ? "{" : "[";
-    if (objectname != NULL){
+    if (objectname != nullptr){
         fprintf(m_json_file, "\"%s\":", objectname);
     }
     fprintf(m_json_file, "%s", nestStart);

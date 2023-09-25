@@ -20,15 +20,15 @@
 #include "config.h"
 #endif
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
-#include <math.h>
+#include <unistd.h>
 
 #ifdef HAVE_ASSERT_H
-#include <assert.h>
+#include <cassert>
 #endif
 
 #include "obj_gen.h"
@@ -124,16 +124,19 @@ double gaussian_noise::gaussian_distribution(const double &stddev)
 
 unsigned long long gaussian_noise::gaussian_distribution_range(double stddev, double median, unsigned long long min, unsigned long long max)
 {
-    if (min==max)
+    if (min==max) {
         return min;
+}
 
     unsigned long long len = max-min;
 
     double val;
-    if (median == 0)
+    if (median == 0) {
         median = len / 2.0 + min + 0.5;
-    if (stddev == 0)
+}
+    if (stddev == 0) {
         stddev = len / 6.0;
+}
     assert(median > min && median < max);
     do {
         val = gaussian_distribution(stddev) + median;
@@ -143,23 +146,23 @@ unsigned long long gaussian_noise::gaussian_distribution_range(double stddev, do
 
 object_generator::object_generator(size_t n_key_iterators/*= OBJECT_GENERATOR_KEY_ITERATORS*/) :
     m_data_size_type(data_size_unknown),
-    m_data_size_pattern(NULL),
+    m_data_size_pattern(nullptr),
     m_random_data(false),
     m_expiry_min(0),
     m_expiry_max(0),
-    m_key_prefix(NULL),
+    m_key_prefix(nullptr),
     m_key_min(0),
     m_key_max(0),
     m_key_stddev(0),
     m_key_median(0),
-    m_value_buffer(NULL),
+    m_value_buffer(nullptr),
     m_random_fd(-1),
     m_value_buffer_size(0),
     m_value_buffer_mutation_pos(0)
 {
     m_next_key.resize(n_key_iterators, 0);
 
-    m_data_size.size_list = NULL;
+    m_data_size.size_list = nullptr;
 }
 
 object_generator::object_generator(const object_generator& copy) :
@@ -174,13 +177,13 @@ object_generator::object_generator(const object_generator& copy) :
     m_key_max(copy.m_key_max),
     m_key_stddev(copy.m_key_stddev),
     m_key_median(copy.m_key_median),
-    m_value_buffer(NULL),
+    m_value_buffer(nullptr),
     m_random_fd(-1),
     m_value_buffer_size(0),
     m_value_buffer_mutation_pos(0)
 {
     if (m_data_size_type == data_size_weighted &&
-        m_data_size.size_list != NULL) {
+        m_data_size.size_list != nullptr) {
         m_data_size.size_list = new config_weight_list(*m_data_size.size_list);
     }
     alloc_value_buffer(copy.m_value_buffer);
@@ -190,10 +193,11 @@ object_generator::object_generator(const object_generator& copy) :
 
 object_generator::~object_generator()
 {
-    if (m_value_buffer != NULL)
+    if (m_value_buffer != nullptr) {
         free(m_value_buffer);
+}
     if (m_data_size_type == data_size_weighted &&
-        m_data_size.size_list != NULL) {
+        m_data_size.size_list != nullptr) {
         delete m_data_size.size_list;
     }
     if (m_random_fd != -1) {
@@ -202,7 +206,7 @@ object_generator::~object_generator()
     }
 }
 
-object_generator* object_generator::clone(void)
+object_generator* object_generator::clone()
 {
     return new object_generator(*this);
 }
@@ -212,25 +216,26 @@ void object_generator::set_random_seed(int seed)
     m_random.set_seed(seed);
 }
 
-void object_generator::alloc_value_buffer(void)
+void object_generator::alloc_value_buffer()
 {
     unsigned int size = 0;
 
-    if (m_value_buffer != NULL)
-        free(m_value_buffer), m_value_buffer = NULL;
+    if (m_value_buffer != nullptr) {
+        free(m_value_buffer), m_value_buffer = nullptr;
+}
 
-    if (m_data_size_type == data_size_fixed)
+    if (m_data_size_type == data_size_fixed) {
         size = m_data_size.size_fixed;
-    else if (m_data_size_type == data_size_range)
+    } else if (m_data_size_type == data_size_range) {
         size = m_data_size.size_range.size_max;
-    else if (m_data_size_type == data_size_weighted) {
+    } else if (m_data_size_type == data_size_weighted) {
         size = m_data_size.size_list->largest();
     }
 
     m_value_buffer_size = size;
     if (size > 0) {
         m_value_buffer = (char*) malloc(size);
-        assert(m_value_buffer != NULL);
+        assert(m_value_buffer != nullptr);
         if (!m_random_data) {
             memset(m_value_buffer, 'x', size);
         } else {
@@ -257,20 +262,22 @@ void object_generator::alloc_value_buffer(const char* copy_from)
 {
     unsigned int size = 0;
 
-    if (m_value_buffer != NULL)
-        free(m_value_buffer), m_value_buffer = NULL;
+    if (m_value_buffer != nullptr) {
+        free(m_value_buffer), m_value_buffer = nullptr;
+}
 
-    if (m_data_size_type == data_size_fixed)
+    if (m_data_size_type == data_size_fixed) {
         size = m_data_size.size_fixed;
-    else if (m_data_size_type == data_size_range)
+    } else if (m_data_size_type == data_size_range) {
         size = m_data_size.size_range.size_max;
-    else if (m_data_size_type == data_size_weighted)
+    } else if (m_data_size_type == data_size_weighted) {
         size = m_data_size.size_list->largest();
+}
 
     m_value_buffer_size = size;
     if (size > 0) {
         m_value_buffer = (char*) malloc(size);
-        assert(m_value_buffer != NULL);
+        assert(m_value_buffer != nullptr);
         memcpy(m_value_buffer, copy_from, size);
     }
 }
@@ -297,7 +304,7 @@ void object_generator::set_data_size_range(unsigned int size_min, unsigned int s
 
 void object_generator::set_data_size_list(config_weight_list* size_list)
 {
-    if (m_data_size_type == data_size_weighted && m_data_size.size_list != NULL) {
+    if (m_data_size_type == data_size_weighted && m_data_size.size_list != nullptr) {
         delete m_data_size.size_list;
     }
     m_data_size_type = data_size_weighted;
@@ -356,13 +363,15 @@ unsigned long long object_generator::get_key_index(int iter)
     } else if(iter==OBJECT_GENERATOR_KEY_GAUSSIAN) {
         k = normal_distribution(m_key_min, m_key_max, m_key_stddev, m_key_median);
     } else {
-        if (m_next_key[iter] < m_key_min)
+        if (m_next_key[iter] < m_key_min) {
             m_next_key[iter] = m_key_min;
+}
         k = m_next_key[iter];
 
         m_next_key[iter]++;
-        if (m_next_key[iter] > m_key_max)
+        if (m_next_key[iter] > m_key_max) {
             m_next_key[iter] = m_key_min;
+}
     }
     return k;
 }
@@ -375,7 +384,8 @@ const char* object_generator::get_key(int iter, unsigned int *len)
     // format key
     l = snprintf(m_key_buffer, sizeof(m_key_buffer)-1,
         "%s%llu", m_key_prefix, m_key_index);
-    if (len != NULL) *len = l;
+    if (len != nullptr) { *len = l;
+}
 
     return m_key_buffer;
 }
@@ -383,7 +393,7 @@ const char* object_generator::get_key(int iter, unsigned int *len)
 data_object* object_generator::get_object(int iter)
 {
     // compute key
-    (void) get_key(iter, NULL);
+    (void) get_key(iter, nullptr);
 
     // compute value
     unsigned int new_size = 0;
@@ -426,8 +436,9 @@ const char* object_generator::get_value(unsigned long long key_index, unsigned i
     // modify object content in case of random data
     if (m_random_data) {
         m_value_buffer[m_value_buffer_mutation_pos++]++;
-        if (m_value_buffer_mutation_pos >= m_value_buffer_size)
+        if (m_value_buffer_mutation_pos >= m_value_buffer_size) {
             m_value_buffer_mutation_pos = 0;
+}
     }
 
     *len = new_size;
@@ -447,8 +458,8 @@ unsigned int object_generator::get_expiry() {
 ///////////////////////////////////////////////////////////////////////////
 
 data_object::data_object() :
-    m_key(NULL), m_key_len(0),
-    m_value(NULL), m_value_len(0),
+    m_key(nullptr), m_key_len(0),
+    m_value(nullptr), m_value_len(0),
     m_expiry(0)
 {
 }
@@ -458,11 +469,11 @@ data_object::~data_object()
     clear();
 }
 
-void data_object::clear(void)
+void data_object::clear()
 {
-    m_key = NULL;
+    m_key = nullptr;
     m_key_len = 0;
-    m_value = NULL;
+    m_value = nullptr;
     m_value_len = 0;
     m_expiry = 0;
 }
@@ -475,7 +486,7 @@ void data_object::set_key(const char* key, unsigned int key_len)
 
 const char* data_object::get_key(unsigned int* key_len)
 {
-    assert(key_len != NULL);
+    assert(key_len != nullptr);
     *key_len = m_key_len;
 
     return m_key;
@@ -489,7 +500,7 @@ void data_object::set_value(const char* value, unsigned int value_len)
 
 const char* data_object::get_value(unsigned int *value_len)
 {
-    assert(value_len != NULL);
+    assert(value_len != nullptr);
     *value_len = m_value_len;
 
     return m_value;
@@ -500,7 +511,7 @@ void data_object::set_expiry(unsigned int expiry)
     m_expiry = expiry;
 }
 
-unsigned int data_object::get_expiry(void)
+unsigned int data_object::get_expiry()
 {
     return m_expiry;
 }
@@ -520,18 +531,19 @@ imported_keylist::~imported_keylist()
     }
 }
 
-bool imported_keylist::read_keys(void)
+bool imported_keylist::read_keys()
 {
     file_reader f(m_filename);
 
-    if (!f.open_file())
+    if (!f.open_file()) {
         return false;
+}
     while (!f.is_eof()) {
         memcache_item *i = f.read_item();
 
-        if (i != NULL) {
+        if (i != nullptr) {
             key* k = (key*) malloc(i->get_nkey() + sizeof(key) + 1);
-            assert(k != NULL);
+            assert(k != nullptr);
             k->key_len = i->get_nkey();
             memcpy(k->key_data, i->get_key(), i->get_nkey());
             delete i;
@@ -543,18 +555,20 @@ bool imported_keylist::read_keys(void)
     return true;
 }
 
-unsigned int imported_keylist::size(void)
+unsigned int imported_keylist::size()
 {
     return m_keys.size();
 }
 
 const char* imported_keylist::get(unsigned int pos, unsigned int *len)
 {
-    if (pos >= m_keys.size())
-        return NULL;
+    if (pos >= m_keys.size()) {
+        return nullptr;
+}
 
     key* k = m_keys[pos];
-    if (len != NULL) *len = k->key_len;
+    if (len != nullptr) { *len = k->key_len;
+}
 
     return k->key_data;
 }
@@ -564,11 +578,11 @@ const char* imported_keylist::get(unsigned int pos, unsigned int *len)
 import_object_generator::import_object_generator(const char *filename, imported_keylist *keys, bool no_expiry) :
     m_keys(keys),
     m_reader(filename),
-    m_cur_item(NULL),
+    m_cur_item(nullptr),
     m_reader_opened(false),
     m_no_expiry(no_expiry)
 {
-    if (m_keys != NULL) {
+    if (m_keys != nullptr) {
         m_key_max = m_keys->size();
         m_key_min = 1;
     }
@@ -576,18 +590,19 @@ import_object_generator::import_object_generator(const char *filename, imported_
 
 import_object_generator::~import_object_generator()
 {
-    if (m_cur_item != NULL)
+    if (m_cur_item != nullptr) {
         delete m_cur_item;
+}
 }
 
 import_object_generator::import_object_generator(const import_object_generator& from) :
     object_generator(from),
     m_keys(from.m_keys),
     m_reader(from.m_reader),
-    m_cur_item(NULL),
+    m_cur_item(nullptr),
     m_no_expiry(from.m_no_expiry)
 {
-    if (m_keys != NULL) {
+    if (m_keys != nullptr) {
         m_key_max = m_keys->size();
         m_key_min = 1;
     }
@@ -599,20 +614,20 @@ import_object_generator::import_object_generator(const import_object_generator& 
     }
 }
 
-bool import_object_generator::open_file(void)
+bool import_object_generator::open_file()
 {
     m_reader_opened = true;
     return m_reader.open_file();
 }
 
-import_object_generator* import_object_generator::clone(void)
+import_object_generator* import_object_generator::clone()
 {
     return new import_object_generator(*this);
 }
 
 const char* import_object_generator::get_key(int iter, unsigned int *len)
 {
-    if (m_keys == NULL) {
+    if (m_keys == nullptr) {
         return object_generator::get_key(iter, len);
     } else {
         unsigned int k = get_key_index(iter) - 1;
@@ -624,19 +639,19 @@ data_object* import_object_generator::get_object(int iter)
 {
     memcache_item *i = m_reader.read_item();
 
-    if (i == NULL && m_reader.is_eof()) {
+    if (i == nullptr && m_reader.is_eof()) {
         m_reader.open_file();
         i = m_reader.read_item();
     }
 
-    assert(i != NULL);
-    if (m_cur_item != NULL) {
+    assert(i != nullptr);
+    if (m_cur_item != nullptr) {
         delete m_cur_item;
     }
     m_cur_item = i;
 
     m_object.set_value(m_cur_item->get_data(), m_cur_item->get_nbytes() - 2);
-    if (m_keys != NULL) {
+    if (m_keys != nullptr) {
         m_object.set_key(m_cur_item->get_key(), m_cur_item->get_nkey());
     } else {
         unsigned int tmplen;

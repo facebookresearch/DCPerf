@@ -19,8 +19,8 @@
 #ifdef HAVE_CONFIG_H
 #endif
 
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 
 #include "item.h"
 
@@ -33,16 +33,18 @@ memcache_item::memcache_item(unsigned int dumpflags, time_t time,
     m_flags(flags), m_nsuffix(nsuffix), m_clsid(clsid),
     m_version(0)
 {
-    m_key = NULL;
-    m_data = NULL;
+    m_key = nullptr;
+    m_data = nullptr;
 }
 
 memcache_item::~memcache_item()
 {
-    if (m_key != NULL)
+    if (m_key != nullptr) {
         free(m_key);
-    if (m_data != NULL)
+}
+    if (m_data != nullptr) {
         free(m_data);
+}
 }
 
 /** \brief set a memcache_item's key.
@@ -52,8 +54,9 @@ memcache_item::~memcache_item()
 
 void memcache_item::set_key(char *key, unsigned int nkey)
 {
-    if (m_key != NULL)
+    if (m_key != nullptr) {
         free(m_key);
+}
     m_nkey = nkey;
     m_key = key;
 }
@@ -65,28 +68,29 @@ void memcache_item::set_key(char *key, unsigned int nkey)
 
 void memcache_item::set_data(char *data, unsigned int nbytes)
 {
-    if (m_data != NULL)
+    if (m_data != nullptr) {
         free(m_data);
+}
     m_nbytes = nbytes;
     m_data = data;
 }
 
-char* memcache_item::get_key(void)
+char* memcache_item::get_key()
 {
     return m_key;
 }
 
-unsigned int memcache_item::get_nkey(void)
+unsigned int memcache_item::get_nkey()
 {
     return m_nkey;
 }
 
-char* memcache_item::get_data(void)
+char* memcache_item::get_data()
 {
     return m_data;
 }
 
-unsigned int memcache_item::get_nbytes(void)
+unsigned int memcache_item::get_nbytes()
 {
     return m_nbytes;
 }
@@ -96,52 +100,53 @@ void memcache_item::set_version(unsigned long int version)
     m_version = version;
 }
 
-unsigned long int memcache_item::get_version(void)
+unsigned long int memcache_item::get_version()
 {
     return m_version;
 }
 
-time_t memcache_item::get_time(void)
+time_t memcache_item::get_time()
 {
     return m_time;
 }
 
-time_t memcache_item::get_exptime(void)
+time_t memcache_item::get_exptime()
 {
     return m_exptime;
 }
 
-unsigned int memcache_item::get_dumpflags(void)
+unsigned int memcache_item::get_dumpflags()
 {
     return m_dumpflags;
 }
 
-unsigned short memcache_item::get_flags(void)
+unsigned short memcache_item::get_flags()
 {
     return m_flags;
 }
 
-unsigned int memcache_item::get_nsuffix(void)
+unsigned int memcache_item::get_nsuffix()
 {
     return m_nsuffix;
 }
 
-unsigned int memcache_item::get_clsid(void)
+unsigned int memcache_item::get_clsid()
 {
     return m_clsid;
 }
 
-bool memcache_item::is_expired(void)
+bool memcache_item::is_expired()
 {
     return ((m_dumpflags & ITEM_DUMPFLAGS_EXPIRED) == ITEM_DUMPFLAGS_EXPIRED);
 }
 
 int memcache_item::operator<(const memcache_item& a)
 {
-    if (this->m_time < a.m_time)
+    if (this->m_time < a.m_time) {
         return 1;
-    else
+    } else {
         return 0;
+}
 }
 
 int memcache_item_ptr_cmp(memcache_item *a, memcache_item *b)

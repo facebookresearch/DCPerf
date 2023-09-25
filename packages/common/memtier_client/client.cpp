@@ -26,9 +26,9 @@
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
+#include <cstdlib>
+#include <cstring>
 #include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
@@ -36,16 +36,16 @@
 #include <netinet/tcp.h>
 #endif
 #ifdef HAVE_LIMITS_H
-#include <limits.h>
+#include <climits>
 #endif
 
 #ifdef HAVE_ASSERT_H
-#include <assert.h>
+#include <cassert>
 #endif
 
-#include <math.h>
 #include <algorithm>
 #include <arpa/inet.h>
+#include <cmath>
 
 #include "client.h"
 #include "cluster_client.h"
@@ -54,21 +54,22 @@
 bool client::setup_client(benchmark_config *config, abstract_protocol *protocol, object_generator *objgen)
 {
     m_config = config;
-    assert(m_config != NULL);
+    assert(m_config != nullptr);
 
     // create main connection
     shard_connection* conn = new shard_connection(m_connections.size(), this, m_config, m_event_base, protocol);
     m_connections.push_back(conn);
 
     m_obj_gen = objgen->clone();
-    assert(m_obj_gen != NULL);
+    assert(m_obj_gen != nullptr);
 
-    if (config->distinct_client_seed && config->randomize)
+    if (config->distinct_client_seed && config->randomize) {
         m_obj_gen->set_random_seed(config->randomize + config->next_client_idx);
-    else if (config->randomize)
+    } else if (config->randomize) {
         m_obj_gen->set_random_seed(config->randomize);
-    else if (config->distinct_client_seed)
+    } else if (config->distinct_client_seed) {
         m_obj_gen->set_random_seed(config->next_client_idx);
+}
 
     // Parallel key-pattern determined according to the first command
     if ((config->arbitrary_commands->is_defined() && config->arbitrary_commands->at(0).key_pattern == 'P') ||
@@ -89,14 +90,14 @@ bool client::setup_client(benchmark_config *config, abstract_protocol *protocol,
     config->next_client_idx++;
 
     m_keylist = new keylist(m_config->multi_key_get + 1);
-    assert(m_keylist != NULL);
+    assert(m_keylist != nullptr);
 
     return true;
 }
 
 client::client(client_group* group) :
-        m_event_base(NULL), m_initialized(false), m_end_set(false), m_config(NULL),
-        m_obj_gen(NULL), m_stats(group->get_config()), m_reqs_processed(0), m_reqs_generated(0),
+        m_event_base(nullptr), m_initialized(false), m_end_set(false), m_config(nullptr),
+        m_obj_gen(nullptr), m_stats(group->get_config()), m_reqs_processed(0), m_reqs_generated(0),
         m_set_ratio_count(0), m_get_ratio_count(0),
         m_arbitrary_command_ratio_count(0), m_executed_command_index(0),
         m_tot_set_ops(0), m_tot_wait_ops(0)
@@ -114,12 +115,12 @@ client::client(client_group* group) :
 client::client(struct event_base *event_base, benchmark_config *config,
                abstract_protocol *protocol, object_generator *obj_gen,
                bool sim_coherency) :
-        m_event_base(NULL), m_initialized(false), m_end_set(false),
-        m_simulates_tao_coherency(sim_coherency), m_config(NULL),
-        m_obj_gen(NULL), m_stats(config), m_reqs_processed(0),
+        m_event_base(nullptr), m_initialized(false), m_end_set(false),
+        m_simulates_tao_coherency(sim_coherency), m_config(nullptr),
+        m_obj_gen(nullptr), m_stats(config), m_reqs_processed(0),
         m_reqs_generated(0), m_set_ratio_count(0), m_get_ratio_count(0),
         m_arbitrary_command_ratio_count(0), m_executed_command_index(0),
-        m_tot_set_ops(0), m_tot_wait_ops(0), m_keylist(NULL)
+        m_tot_set_ops(0), m_tot_wait_ops(0), m_keylist(nullptr)
 {
     m_event_base = event_base;
 
@@ -139,40 +140,40 @@ client::~client()
     }
     m_connections.clear();
 
-    if (m_obj_gen != NULL) {
+    if (m_obj_gen != nullptr) {
         delete m_obj_gen;
-        m_obj_gen = NULL;
+        m_obj_gen = nullptr;
     }
 
-    if (m_keylist != NULL) {
+    if (m_keylist != nullptr) {
         delete m_keylist;
-        m_keylist = NULL;
+        m_keylist = nullptr;
     }
 }
 
-bool client::initialized(void)
+bool client::initialized()
 {
     return m_initialized;
 }
 
-void client::disconnect(void)
+void client::disconnect()
 {
     shard_connection* sc = MAIN_CONNECTION;
-    assert(sc != NULL);
+    assert(sc != nullptr);
 
     sc->disconnect();
 }
 
-int client::connect(void)
+int client::connect()
 {
     struct connect_info addr;
 
     // get primary connection
     shard_connection* sc = MAIN_CONNECTION;
-    assert(sc != NULL);
+    assert(sc != nullptr);
 
     // get address information
-    if (m_config->unix_socket == NULL) {
+    if (m_config->unix_socket == nullptr) {
         if (m_config->server_addr->get_connect_info(&addr) != 0) {
             benchmark_error_log("connect: resolve error: %s\n", m_config->server_addr->get_last_error());
             return -1;
@@ -198,25 +199,28 @@ int client::connect(void)
 
     // call connect
     int ret = sc->connect(&addr);
-    if (ret)
+    if (ret) {
         return ret;
+}
 
     return 0;
 }
 
-bool client::finished(void)
+bool client::finished()
 {
-    if (m_config->requests > 0 && m_reqs_processed >= m_config->requests)
+    if (m_config->requests > 0 && m_reqs_processed >= m_config->requests) {
         return true;
-    if (m_config->test_time > 0 && m_stats.get_duration() >= m_config->test_time)
+}
+    if (m_config->test_time > 0 && m_stats.get_duration() >= m_config->test_time) {
         return true;
+}
     return false;
 }
 
 void client::set_start_time() {
     struct timeval now;
 
-    gettimeofday(&now, NULL);
+    gettimeofday(&now, nullptr);
     m_stats.set_start_time(&now);
 }
 
@@ -225,7 +229,7 @@ void client::set_end_time() {
     if (!m_end_set) {
         benchmark_debug_log("nothing else to do, test is finished.\n");
 
-        m_stats.set_end_time(NULL);
+        m_stats.set_end_time(nullptr);
         m_end_set = true;
     }
 }
@@ -233,14 +237,16 @@ void client::set_end_time() {
 bool client::hold_pipeline(unsigned int conn_id) {
     // don't exceed requests
     if (m_config->requests) {
-        if (m_reqs_generated >= m_config->requests)
+        if (m_reqs_generated >= m_config->requests) {
             return true;
+}
     }
 
     // if we have reconnect_interval stop enlarging the pipeline on time
     if (m_config->reconnect_interval) {
-        if ((m_reqs_processed % m_config->reconnect_interval) + (m_reqs_generated - m_reqs_processed) >= m_config->reconnect_interval)
+        if ((m_reqs_processed % m_config->reconnect_interval) + (m_reqs_generated - m_reqs_processed) >= m_config->reconnect_interval) {
             return true;
+}
     }
 
     return false;
@@ -261,7 +267,7 @@ void client::create_arbitrary_request(const arbitrary_command* cmd, struct timev
             unsigned int key_len;
             const char *key = m_obj_gen->get_key(iter, &key_len);
 
-            assert(key != NULL);
+            assert(key != nullptr);
             assert(key_len > 0);
 
             cmd_size += m_connections[conn_id]->send_arbitrary_command(arg, key, key_len);
@@ -269,7 +275,7 @@ void client::create_arbitrary_request(const arbitrary_command* cmd, struct timev
             unsigned int value_len;
             const char *value = m_obj_gen->get_value(0, &value_len);
 
-            assert(value != NULL);
+            assert(value != nullptr);
             assert(value_len > 0);
 
             cmd_size += m_connections[conn_id]->send_arbitrary_command(arg, value, value_len);
@@ -351,15 +357,16 @@ void client::create_request(struct timeval timestamp, unsigned int conn_id)
             unsigned int keys_count;
 
             keys_count = m_config->ratio.b - m_get_ratio_count;
-            if ((int)keys_count > m_config->multi_key_get)
+            if ((int)keys_count > m_config->multi_key_get) {
                 keys_count = m_config->multi_key_get;
+}
 
             m_keylist->clear();
             while (m_keylist->get_keys_count() < keys_count) {
                 unsigned int keylen;
                 const char *key = m_obj_gen->get_key(iter, &keylen);
 
-                assert(key != NULL);
+                assert(key != nullptr);
                 assert(keylen > 0);
 
                 m_keylist->add_key(key, keylen);
@@ -371,7 +378,7 @@ void client::create_request(struct timeval timestamp, unsigned int conn_id)
         } else {
             unsigned int keylen;
             const char *key = m_obj_gen->get_key(iter, &keylen);
-            assert(key != NULL);
+            assert(key != nullptr);
             assert(keylen > 0);
 
             m_connections[conn_id]->send_get_command(&timestamp, key, keylen, m_config->data_offset);
@@ -384,10 +391,11 @@ void client::create_request(struct timeval timestamp, unsigned int conn_id)
     }
 }
 
-int client::prepare(void)
+int client::prepare()
 {
-    if (MAIN_CONNECTION == NULL)
+    if (MAIN_CONNECTION == nullptr) {
         return -1;
+}
 
     int ret = this->connect();
     if (ret < 0) {
@@ -452,12 +460,12 @@ verify_client::verify_client(struct event_base *event_base,
     MAIN_CONNECTION->get_protocol()->set_keep_value(true);
 }
 
-unsigned long long int verify_client::get_verified_keys(void)
+unsigned long long int verify_client::get_verified_keys()
 {
     return m_verified_keys;
 }
 
-unsigned long long int verify_client::get_errors(void)
+unsigned long long int verify_client::get_errors()
 {
     return m_errors;
 }
@@ -488,14 +496,15 @@ void verify_client::create_request(struct timeval timestamp, unsigned int conn_i
             unsigned int keys_count;
 
             keys_count = m_config->ratio.b - m_get_ratio_count;
-            if ((int)keys_count > m_config->multi_key_get)
+            if ((int)keys_count > m_config->multi_key_get) {
                 keys_count = m_config->multi_key_get;
+}
             m_keylist->clear();
             while (m_keylist->get_keys_count() < keys_count) {
                 unsigned int keylen;
                 const char *key = m_obj_gen->get_key(iter, &keylen);
 
-                assert(key != NULL);
+                assert(key != nullptr);
                 assert(keylen > 0);
 
                 m_keylist->add_key(key, keylen);
@@ -542,28 +551,30 @@ void verify_client::handle_response(unsigned int conn_id, struct timeval timesta
     }
 }
 
-bool verify_client::finished(void)
+bool verify_client::finished()
 {
-    if (m_finished)
+    if (m_finished) {
         return true;
-    if (m_config->requests > 0 && m_reqs_processed >= m_config->requests)
+}
+    if (m_config->requests > 0 && m_reqs_processed >= m_config->requests) {
         return true;
+}
     return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////
 
 client_group::client_group(benchmark_config* config, abstract_protocol *protocol, object_generator* obj_gen) :
-    m_base(NULL), m_config(config), m_protocol(protocol), m_obj_gen(obj_gen)
+    m_base(nullptr), m_config(config), m_protocol(protocol), m_obj_gen(obj_gen)
 {
     m_base = event_base_new();
-    assert(m_base != NULL);
+    assert(m_base != nullptr);
 
-    assert(protocol != NULL);
-    assert(obj_gen != NULL);
+    assert(protocol != nullptr);
+    assert(obj_gen != nullptr);
 }
 
-client_group::~client_group(void)
+client_group::~client_group()
 {
     for (std::vector<client*>::iterator i = m_clients.begin(); i != m_clients.end(); i++) {
         client* c = *i;
@@ -571,9 +582,10 @@ client_group::~client_group(void)
     }
     m_clients.clear();
 
-    if (m_base != NULL)
+    if (m_base != nullptr) {
         event_base_free(m_base);
-    m_base = NULL;
+}
+    m_base = nullptr;
 }
 
 int client_group::create_clients(int num, bool sim_coh)
@@ -581,14 +593,14 @@ int client_group::create_clients(int num, bool sim_coh)
     for (int i = 0; i < num; i++) {
         client* c;
 
-        if (m_config->cluster_mode)
+        if (m_config->cluster_mode) {
             c = new cluster_client(this);
-        else {
+        } else {
             c = new client(this);
             c->set_sim_tao_coherency(sim_coh);
         }
 
-        assert(c != NULL);
+        assert(c != nullptr);
 
         if (!c->initialized()) {
             delete c;
@@ -601,7 +613,7 @@ int client_group::create_clients(int num, bool sim_coh)
     return num;
 }
 
-int client_group::prepare(void)
+int client_group::prepare()
 {
    for (std::vector<client*>::iterator i = m_clients.begin(); i != m_clients.end(); i++) {
         client* c = *i;
@@ -615,12 +627,12 @@ int client_group::prepare(void)
    return 0;
 }
 
-void client_group::run(void)
+void client_group::run()
 {
     event_base_dispatch(m_base);
 }
 
-unsigned long int client_group::get_total_bytes(void)
+unsigned long int client_group::get_total_bytes()
 {
     unsigned long int total_bytes = 0;
     for (std::vector<client*>::iterator i = m_clients.begin(); i != m_clients.end(); i++) {
@@ -630,7 +642,7 @@ unsigned long int client_group::get_total_bytes(void)
     return total_bytes;
 }
 
-unsigned long int client_group::get_total_ops(void)
+unsigned long int client_group::get_total_ops()
 {
     unsigned long int total_ops = 0;
     for (std::vector<client*>::iterator i = m_clients.begin(); i != m_clients.end(); i++) {
@@ -640,7 +652,7 @@ unsigned long int client_group::get_total_ops(void)
     return total_ops;
 }
 
-unsigned long int client_group::get_total_latency(void)
+unsigned long int client_group::get_total_latency()
 {
     unsigned long int total_latency = 0;
     for (std::vector<client*>::iterator i = m_clients.begin(); i != m_clients.end(); i++) {
@@ -650,7 +662,7 @@ unsigned long int client_group::get_total_latency(void)
     return total_latency;
 }
 
-unsigned long int client_group::get_duration_usec(void)
+unsigned long int client_group::get_duration_usec()
 {
     unsigned long int duration = 0;
     unsigned int thread_counter = 1;
@@ -664,7 +676,7 @@ unsigned long int client_group::get_duration_usec(void)
 
 void client_group::merge_run_stats(run_stats* target)
 {
-    assert(target != NULL);
+    assert(target != nullptr);
     unsigned int iteration_counter = 1;
     for (std::vector<client*>::iterator i = m_clients.begin(); i != m_clients.end(); i++) {
         target->merge(*(*i)->get_stats(), iteration_counter++);

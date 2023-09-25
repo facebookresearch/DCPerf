@@ -20,10 +20,10 @@
 #include "config.h"
 #endif
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <assert.h>
+#include <cassert>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
@@ -43,16 +43,16 @@
 config_range::config_range(const char *range_str) :
     min(0), max(0)
 {
-    assert(range_str != NULL);
+    assert(range_str != nullptr);
 
-    char *p = NULL;
+    char *p = nullptr;
     min = strtoul(range_str, &p, 10);
     if (!p || *p != '-') {
         min = max = 0;
         return;
     }
 
-    char *q = NULL;
+    char *q = nullptr;
     max = strtoul(p + 1, &q, 10);
     if (!q || *q != '\0') {
         min = max = 0;
@@ -69,16 +69,16 @@ config_range::config_range(const char *range_str) :
 config_ratio::config_ratio(const char *ratio_str) :
     a(0), b(0)
 {
-    assert(ratio_str != NULL);
+    assert(ratio_str != nullptr);
 
-    char *p = NULL;
+    char *p = nullptr;
     a = strtoul(ratio_str, &p, 10);
     if (!p || *p != ':') {
         a = b = 0;
         return;
     }
 
-    char *q = NULL;
+    char *q = nullptr;
     b = strtoul(p + 1, &q, 10);
     if (!q || *q != '\0') {
         a = b = 0;
@@ -103,8 +103,9 @@ config_weight_list::config_weight_list(const config_weight_list& copy) :
 
 config_weight_list& config_weight_list::operator=(const config_weight_list& rhs)
 {
-    if (this == &rhs)
+    if (this == &rhs) {
         return *this;
+}
 
     next_size_weight = rhs.next_size_weight;
     for (std::vector<weight_item>::const_iterator i = rhs.item_list.begin(); i != rhs.item_list.end(); i++) {
@@ -118,11 +119,11 @@ config_weight_list& config_weight_list::operator=(const config_weight_list& rhs)
 config_weight_list::config_weight_list(const char *str) :
     next_size_weight(0)
 {
-    assert(str != NULL);
+    assert(str != nullptr);
 
     do {
         struct weight_item w;
-        char *p = NULL;
+        char *p = nullptr;
         w.size = strtoul(str, &p, 10);
         if (!p || *p != ':') {
             item_list.clear();
@@ -137,32 +138,35 @@ config_weight_list::config_weight_list(const char *str) :
         }
 
         str = p;
-        if (*str) str++;
+        if (*str) { str++;
+}
         item_list.push_back(w);
     } while (*str);
 
     next_size_iter = item_list.begin();
 }
 
-bool config_weight_list::is_defined(void)
+bool config_weight_list::is_defined()
 {
-    if (item_list.size() > 0)
+    if (!item_list.empty()) {
         return true;
+}
     return false;
 }
 
-unsigned int config_weight_list::largest(void)
+unsigned int config_weight_list::largest()
 {
     unsigned int largest = 0;
     for (std::vector<weight_item>::iterator i = item_list.begin(); i != item_list.end(); i++) {
-        if (i->size > largest)
+        if (i->size > largest) {
             largest = i->size;
+}
     }
 
     return largest;
 }
 
-unsigned int config_weight_list::get_next_size(void)
+unsigned int config_weight_list::get_next_size()
 {
     while (next_size_weight >= next_size_iter->weight) {
         next_size_iter++;
@@ -179,7 +183,7 @@ unsigned int config_weight_list::get_next_size(void)
 const char* config_weight_list::print(char *buf, int buf_len)
 {
     const char* start = buf;
-    assert(buf != NULL && buf_len > 0);
+    assert(buf != nullptr && buf_len > 0);
 
     *buf = '\0';
     for (std::vector<weight_item>::iterator i = item_list.begin(); i != item_list.end(); i++) {
@@ -192,8 +196,9 @@ const char* config_weight_list::print(char *buf, int buf_len)
 
         buf += n;
         buf_len -= n;
-        if (!buf_len)
-            return NULL;
+        if (!buf_len) {
+            return nullptr;
+}
     }
 
     return start;
@@ -201,27 +206,28 @@ const char* config_weight_list::print(char *buf, int buf_len)
 
 
 server_addr::server_addr(const char *hostname, int port) :
-    m_hostname(hostname), m_port(port), m_server_addr(NULL), m_used_addr(NULL), m_last_error(0)
+    m_hostname(hostname), m_port(port), m_server_addr(nullptr), m_used_addr(nullptr), m_last_error(0)
 {
     int error = resolve();
 
-    if (error != 0)
+    if (error != 0) {
         throw std::runtime_error(std::string(gai_strerror(error)));
+}
 
-    pthread_mutex_init(&m_mutex, NULL);
+    pthread_mutex_init(&m_mutex, nullptr);
 }
 
 server_addr::~server_addr()
 {
     if (m_server_addr) {
         freeaddrinfo(m_server_addr);
-        m_server_addr = NULL;
+        m_server_addr = nullptr;
     }
 
     pthread_mutex_destroy(&m_mutex);
 }
 
-int server_addr::resolve(void)
+int server_addr::resolve()
 {
     char port_str[20];
     struct addrinfo hints;
@@ -239,17 +245,18 @@ int server_addr::resolve(void)
 int server_addr::get_connect_info(struct connect_info *ci)
 {
     pthread_mutex_lock(&m_mutex);
-    if (m_used_addr)
+    if (m_used_addr) {
         m_used_addr = m_used_addr->ai_next;
+}
     if (!m_used_addr) {
         if (m_server_addr) {
             freeaddrinfo(m_server_addr);
-            m_server_addr = NULL;
+            m_server_addr = nullptr;
         }
         if (resolve() == 0) {
             m_used_addr = m_server_addr;
         } else {
-            m_used_addr = NULL;
+            m_used_addr = nullptr;
         }
     }
 
@@ -267,7 +274,7 @@ int server_addr::get_connect_info(struct connect_info *ci)
     return m_last_error;
 }
 
-const char* server_addr::get_last_error(void) const
+const char* server_addr::get_last_error() const
 {
     return gai_strerror(m_last_error);
 }
@@ -286,7 +293,7 @@ static int hex_digit_to_int(char c) {
 
 arbitrary_command::arbitrary_command(const char* cmd) : command(cmd), key_pattern('R'), ratio(1) {
     // command name is the first word in the command
-    size_t pos = command.find(" ");
+    size_t pos = command.find(' ');
     if (pos == std::string::npos) {
         pos = command.size();
     }
@@ -313,7 +320,7 @@ bool arbitrary_command::set_key_pattern(const char* pattern_str) {
 }
 
 bool arbitrary_command::set_ratio(const char* ratio_str) {
-    char *q = NULL;
+    char *q = nullptr;
     ratio = strtoul(ratio_str, &q, 10);
     if (!q || *q != '\0') {
         return false;
@@ -329,7 +336,7 @@ bool arbitrary_command::split_command_to_args() {
     char buffer[command_len];
     unsigned int buffer_len = 0;
 
-    while (1) {
+    while (true) {
         /* skip blanks */
         while (*p && isspace(*p)) {
             p++;
@@ -337,9 +344,9 @@ bool arbitrary_command::split_command_to_args() {
 
         if (*p) {
             /* get a token */
-            bool in_quotes = 0; /* set to 1 if we are in "quotes" */
-            bool in_single_quotes = 0; /* set to 1 if we are in 'single quotes' */
-            bool done = 0;
+            bool in_quotes = false; /* set to 1 if we are in "quotes" */
+            bool in_single_quotes = false; /* set to 1 if we are in 'single quotes' */
+            bool done = false;
             buffer_len = 0;
             //current = p;
 
@@ -395,7 +402,7 @@ bool arbitrary_command::split_command_to_args() {
                             goto err;
                         }
 
-                        done = 1;
+                        done = true;
                     } else if (!*p) {
                         /* unterminated quotes */
                         goto err;
@@ -415,7 +422,7 @@ bool arbitrary_command::split_command_to_args() {
                             goto err;
                         }
 
-                        done = 1;
+                        done = true;
                     } else if (!*p) {
                         /* unterminated quotes */
                         goto err;
@@ -430,15 +437,15 @@ bool arbitrary_command::split_command_to_args() {
                         case '\r':
                         case '\t':
                         case '\0':
-                            done = 1;
+                            done = true;
                             break;
 
                         case '"':
-                            in_quotes = 1;
+                            in_quotes = true;
                             break;
 
                         case '\'':
-                            in_single_quotes = 1;
+                            in_single_quotes = true;
                             break;
 
                         default:

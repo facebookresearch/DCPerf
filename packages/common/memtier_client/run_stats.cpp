@@ -20,15 +20,15 @@
 #include "config.h"
 #endif
 
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/time.h>
-#include <math.h>
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <sys/time.h>
+#include <unistd.h>
 
 #ifdef HAVE_ASSERT_H
-#include <assert.h>
+#include <cassert>
 
 #endif
 
@@ -43,8 +43,9 @@ void output_table::add_column(table_column& col) {
 }
 
 void output_table::print_header(FILE *out, const char * header) {
-    if (header == NULL)
+    if (header == nullptr) {
         return;
+}
 
     fprintf(out, "\n\n");
     fprintf(out, "%s\n", header);
@@ -102,7 +103,7 @@ inline unsigned long int ts_diff_now(struct timeval a)
 {
     struct timeval b;
 
-    gettimeofday(&b, NULL);
+    gettimeofday(&b, nullptr);
     unsigned long long aval = a.tv_sec * 1000000 + a.tv_usec;
     unsigned long long bval = b.tv_sec * 1000000 + b.tv_usec;
 
@@ -141,7 +142,7 @@ void run_stats::set_start_time(struct timeval* start_time)
 {
     struct timeval tv;
     if (!start_time) {
-        gettimeofday(&tv, NULL);
+        gettimeofday(&tv, nullptr);
         start_time = &tv;
     }
 
@@ -152,7 +153,7 @@ void run_stats::set_end_time(struct timeval* end_time)
 {
     struct timeval tv;
     if (!end_time) {
-        gettimeofday(&tv, NULL);
+        gettimeofday(&tv, nullptr);
         end_time = &tv;
     }
     m_end_time = *end_time;
@@ -249,15 +250,16 @@ void run_stats::update_arbitrary_op(struct timeval *ts, unsigned int bytes,
     map[get_2_meaningful_digits((float)latency/1000)]++;
 }
 
-unsigned int run_stats::get_duration(void)
+unsigned int run_stats::get_duration()
 {
     return m_cur_stats.m_second;
 }
 
-unsigned long int run_stats::get_duration_usec(void)
+unsigned long int run_stats::get_duration_usec()
 {
-    if (!m_start_time.tv_sec)
+    if (!m_start_time.tv_sec) {
         return 0;
+}
     if (m_end_time.tv_sec > 0) {
         return ts_diff(m_start_time, m_end_time);
     } else {
@@ -265,17 +267,17 @@ unsigned long int run_stats::get_duration_usec(void)
     }
 }
 
-unsigned long int run_stats::get_total_bytes(void)
+unsigned long int run_stats::get_total_bytes()
 {
     return m_totals.m_bytes;
 }
 
-unsigned long int run_stats::get_total_ops(void)
+unsigned long int run_stats::get_total_ops()
 {
     return m_totals.m_ops;
 }
 
-unsigned long int run_stats::get_total_latency(void)
+unsigned long int run_stats::get_total_latency()
 {
     return m_totals.m_latency;
 }
@@ -453,7 +455,7 @@ bool run_stats::save_csv(const char *filename, benchmark_config *config)
     return true;
 }
 
-void run_stats::debug_dump(void)
+void run_stats::debug_dump()
 {
     benchmark_debug_log("run_stats: start_time={%u,%u} end_time={%u,%u}\n",
                         m_start_time.tv_sec, m_start_time.tv_usec,
@@ -479,16 +481,19 @@ void run_stats::debug_dump(void)
 
 
     for( latency_map_itr it = m_get_latency_map.begin() ; it != m_get_latency_map.end() ; it++) {
-        if (it->second)
+        if (it->second) {
             benchmark_debug_log("  GET <= %u msec: %u\n", it->first, it->second);
+}
     }
     for(  latency_map_itr it = m_set_latency_map.begin() ; it != m_set_latency_map.end() ; it++) {
-        if (it->second)
+        if (it->second) {
             benchmark_debug_log("  SET <= %u msec: %u\n", it->first, it->second);
+}
     }
     for(  latency_map_itr it = m_wait_latency_map.begin() ; it != m_wait_latency_map.end() ; it++) {
-        if (it->second)
+        if (it->second) {
             benchmark_debug_log("  WAIT <= %u msec: %u\n", it->first, it->second);
+}
     }
 }
 
@@ -648,17 +653,19 @@ void run_stats::summarize(totals& result) const
 void result_print_to_json(json_handler * jsonhandler, const char * type, double ops,
                           double hits, double miss, double moved, double ask, double latency, double kbs)
 {
-    if (jsonhandler != NULL){ // Added for double verification in case someone accidently send NULL.
+    if (jsonhandler != nullptr){ // Added for double verification in case someone accidently send NULL.
         jsonhandler->open_nesting(type);
         jsonhandler->write_obj("Ops/sec","%.2f", ops);
         jsonhandler->write_obj("Hits/sec","%.2f", hits);
         jsonhandler->write_obj("Misses/sec","%.2f", miss);
 
-        if (moved >= 0)
+        if (moved >= 0) {
             jsonhandler->write_obj("MOVED/sec","%.2f", moved);
+}
 
-        if (ask >= 0)
+        if (ask >= 0) {
             jsonhandler->write_obj("ASK/sec","%.2f", ask);
+}
 
         jsonhandler->write_obj("Latency","%.2f", latency);
         jsonhandler->write_obj("KB/sec","%.2f", kbs);
@@ -669,8 +676,8 @@ void result_print_to_json(json_handler * jsonhandler, const char * type, double 
 void histogram_print(FILE * out, json_handler * jsonhandler, const char * type, float msec, float percent)
 {
     fprintf(out, "%-6s %8.3f %12.2f\n", type, msec, percent);
-    if (jsonhandler != NULL){
-        jsonhandler->open_nesting(NULL);
+    if (jsonhandler != nullptr){
+        jsonhandler->open_nesting(nullptr);
         jsonhandler->write_obj("<=msec","%.3f", msec);
         jsonhandler->write_obj("percent","%.2f", percent);
         jsonhandler->close_nesting();
@@ -904,7 +911,7 @@ void run_stats::print_histogram(FILE *out, json_handler *jsonhandler, arbitrary_
             total_count = 0;
             std::string command_name = command_list[i].command_name;
 
-            if (jsonhandler != NULL) { jsonhandler->open_nesting(command_name.c_str(), NESTED_ARRAY); }
+            if (jsonhandler != nullptr) { jsonhandler->open_nesting(command_name.c_str(), NESTED_ARRAY); }
 
             latency_map arbitrary_command_latency_map = m_ar_commands_latency_maps.at(i);
             for (latency_map_itr_const it = arbitrary_command_latency_map.begin();
@@ -914,38 +921,38 @@ void run_stats::print_histogram(FILE *out, json_handler *jsonhandler, arbitrary_
                                 (double) total_count / m_totals.m_ar_commands.at(i).m_ops * 100);
             }
 
-            if (jsonhandler != NULL) { jsonhandler->close_nesting(); }
+            if (jsonhandler != nullptr) { jsonhandler->close_nesting(); }
             fprintf(out, "---\n");
         }
     } else {
         // SETs
         // ----
-        if (jsonhandler != NULL){ jsonhandler->open_nesting("SET",NESTED_ARRAY);}
+        if (jsonhandler != nullptr){ jsonhandler->open_nesting("SET",NESTED_ARRAY);}
         for( latency_map_itr_const it = m_set_latency_map.begin() ; it != m_set_latency_map.end() ; it++) {
             total_count += it->second;
             histogram_print(out, jsonhandler, "SET",it->first,(double) total_count / m_totals.m_set_cmd.m_ops * 100);
         }
-        if (jsonhandler != NULL){ jsonhandler->close_nesting();}
+        if (jsonhandler != nullptr){ jsonhandler->close_nesting();}
         fprintf(out, "---\n");
         // GETs
         // ----
         total_count = 0;
-        if (jsonhandler != NULL){ jsonhandler->open_nesting("GET",NESTED_ARRAY);}
+        if (jsonhandler != nullptr){ jsonhandler->open_nesting("GET",NESTED_ARRAY);}
         for( latency_map_itr_const it = m_get_latency_map.begin() ; it != m_get_latency_map.end() ; it++) {
             total_count += it->second;
             histogram_print(out, jsonhandler, "GET",it->first,(double) total_count / m_totals.m_get_cmd.m_ops * 100);
         }
-        if (jsonhandler != NULL){ jsonhandler->close_nesting();}
+        if (jsonhandler != nullptr){ jsonhandler->close_nesting();}
         fprintf(out, "---\n");
         // WAITs
         // ----
         total_count = 0;
-        if (jsonhandler != NULL){ jsonhandler->open_nesting("WAIT",NESTED_ARRAY);}
+        if (jsonhandler != nullptr){ jsonhandler->open_nesting("WAIT",NESTED_ARRAY);}
         for( latency_map_itr_const it = m_wait_latency_map.begin() ; it != m_wait_latency_map.end() ; it++) {
             total_count += it->second;
             histogram_print(out, jsonhandler, "WAIT",it->first,(double) total_count / m_totals.m_wait_cmd.m_ops * 100);
         }
-        if (jsonhandler != NULL){ jsonhandler->close_nesting();}
+        if (jsonhandler != nullptr){ jsonhandler->close_nesting();}
     }
 }
 
@@ -955,7 +962,7 @@ void run_stats::print(FILE *out, benchmark_config *config,
     // aggregate all one_second_stats; we do this only if we have
     // one_second_stats, otherwise it means we're probably printing previously
     // aggregated data
-    if (m_stats.size() > 0) {
+    if (!m_stats.empty()) {
         summarize(m_totals);
     }
 
@@ -995,9 +1002,9 @@ void run_stats::print(FILE *out, benchmark_config *config,
     ////////////////////////////////////////
     // JSON print handling
     // ------------------
-    if (jsonhandler != NULL) {
+    if (jsonhandler != nullptr) {
 
-        if (header != NULL) {
+        if (header != nullptr) {
             jsonhandler->open_nesting(header);
         } else {
             jsonhandler->open_nesting("UNKNOWN STATS");
@@ -1014,5 +1021,5 @@ void run_stats::print(FILE *out, benchmark_config *config,
     //      jsonhandler->open_nesting(header); or
     //      jsonhandler->open_nesting("UNKNOWN STATS");
     //      From the top (beginning of function).
-    if (jsonhandler != NULL){ jsonhandler->close_nesting();}
+    if (jsonhandler != nullptr){ jsonhandler->close_nesting();}
 }

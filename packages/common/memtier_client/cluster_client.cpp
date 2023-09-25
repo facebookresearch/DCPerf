@@ -26,9 +26,9 @@
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
+#include <cstdlib>
+#include <cstring>
 #include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
 #endif
@@ -39,7 +39,7 @@
 #endif
 
 #ifdef HAVE_ASSERT_H
-#include <assert.h>
+#include <cassert>
 #endif
 
 #include "cluster_client.h"
@@ -93,8 +93,9 @@ static const uint16_t crc16tab[256]= {
 static inline uint16_t crc16(const char *buf, size_t len) {
     size_t counter;
     uint16_t crc = 0;
-    for (counter = 0; counter < len; counter++)
+    for (counter = 0; counter < len; counter++) {
         crc = (crc<<8) ^ crc16tab[((crc>>8) ^ *buf++)&0x00FF];
+}
     return crc;
 }
 
@@ -118,10 +119,10 @@ cluster_client::~cluster_client() {
     m_key_index_pools.clear();
 }
 
-int cluster_client::connect(void) {
+int cluster_client::connect() {
     // get main connection
     shard_connection* sc = MAIN_CONNECTION;
-    assert(sc != NULL);
+    assert(sc != nullptr);
 
     // set main connection to send 'CLUSTER SLOTS' command
     sc->set_cluster_slots();
@@ -137,7 +138,7 @@ int cluster_client::connect(void) {
     return 0;
 }
 
-void cluster_client::disconnect(void)
+void cluster_client::disconnect()
 {
     unsigned int conn_size = m_connections.size();
     unsigned int i;
@@ -160,13 +161,13 @@ shard_connection* cluster_client::create_shard_connection(abstract_protocol* abs
     shard_connection* sc = new shard_connection(m_connections.size(), this,
                                                 m_config, m_event_base,
                                                 abs_protocol);
-    assert(sc != NULL);
+    assert(sc != nullptr);
 
     m_connections.push_back(sc);
 
     // create key index pool
     key_index_pool* key_idx_pool = new key_index_pool;
-    assert(key_idx_pool != NULL);
+    assert(key_idx_pool != nullptr);
 
     m_key_index_pools.push_back(key_idx_pool);
     assert(m_connections.size() == m_key_index_pools.size());
@@ -176,7 +177,7 @@ shard_connection* cluster_client::create_shard_connection(abstract_protocol* abs
 
 bool cluster_client::connect_shard_connection(shard_connection* sc, char* address, char* port) {
     // empty key index queue
-    if (m_key_index_pools[sc->get_id()]->size()) {
+    if (!m_key_index_pools[sc->get_id()]->empty()) {
         key_index_pool empty_queue;
         std::swap(*m_key_index_pools[sc->get_id()], empty_queue);
     }
@@ -227,8 +228,8 @@ void cluster_client::handle_cluster_slots(protocol_response *r) {
         // create connection
         mbulk_size_el* shard = r->get_mbulk_value()->mbulks_elements[i]->as_mbulk_size();
 
-        int min_slot = strtol(shard->mbulks_elements[0]->as_bulk()->value + 1, NULL, 10);
-        int max_slot = strtol(shard->mbulks_elements[1]->as_bulk()->value + 1, NULL, 10);
+        int min_slot = strtol(shard->mbulks_elements[0]->as_bulk()->value + 1, nullptr, 10);
+        int max_slot = strtol(shard->mbulks_elements[1]->as_bulk()->value + 1, nullptr, 10);
 
         // hostname/ip
         bulk_el* mbulk_addr_el = shard->mbulks_elements[2]->as_mbulk_size()->mbulks_elements[0]->as_bulk();
@@ -243,7 +244,7 @@ void cluster_client::handle_cluster_slots(protocol_response *r) {
         port[mbulk_port_el->value_len] = '\0';
 
         // check if connection already exist
-        shard_connection* sc = NULL;
+        shard_connection* sc = nullptr;
         unsigned int j;
 
         for (j = 0; j < m_connections.size(); j++) {
@@ -252,8 +253,9 @@ void cluster_client::handle_cluster_slots(protocol_response *r) {
                 sc = m_connections[j];
 
                 // mark not to close this connection
-                if (j < prev_connections_size)
+                if (j < prev_connections_size) {
                     close_sc[j] = false;
+}
 
                 // if connection disconnected, try to reconnect
                 if (sc->get_connection_state() == conn_disconnected) {
@@ -265,7 +267,7 @@ void cluster_client::handle_cluster_slots(protocol_response *r) {
         }
 
         // if connection doesn't exist, add it
-        if (sc == NULL) {
+        if (sc == nullptr) {
             sc = create_shard_connection(MAIN_CONNECTION->get_protocol());
             connect_shard_connection(sc, addr, port);
         }
@@ -339,8 +341,9 @@ bool cluster_client::get_key_for_conn(unsigned int conn_id, int iter, unsigned l
         }
 
         // in case connection is during cluster slots command, his slots mapping not relevant
-        if (m_connections[other_conn_id]->get_cluster_slots_state() != slots_done)
+        if (m_connections[other_conn_id]->get_cluster_slots_state() != slots_done) {
             continue;
+}
 
         // store key for other connection, if queue is not full
         key_index_pool* key_idx_pool = m_key_index_pools[other_conn_id];
@@ -350,8 +353,9 @@ bool cluster_client::get_key_for_conn(unsigned int conn_id, int iter, unsigned l
         }
 
         // don't exceed requests
-        if (m_config->requests > 0 && m_reqs_generated >= m_config->requests)
+        if (m_config->requests > 0 && m_reqs_generated >= m_config->requests) {
             return false;
+}
     }
 }
 
@@ -426,8 +430,9 @@ void cluster_client::handle_moved(unsigned int conn_id, struct timeval timestamp
     }
 
     // connection already issued 'cluster slots' command, wait for slots mapping to be updated
-    if (m_connections[conn_id]->get_cluster_slots_state() != slots_done)
+    if (m_connections[conn_id]->get_cluster_slots_state() != slots_done) {
         return;
+}
 
     // queue may stored uncorrected mapping indexes, empty them
     key_index_pool empty_queue;
