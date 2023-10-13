@@ -24,18 +24,27 @@ trap 'cleanup' ERR EXIT SIGINT SIGTERM
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-d duration of workload] [-l siege logfile path] [-s urls path] [-c cassandra host ip]
+Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] [-d duration of workload] [-p number of repetitions] [-l siege logfile path] [-s urls path] [-c cassandra host ip]
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
+For role "server", "clientserver":
     -w          number of server workers (default NPROC)
+    -c          ip address of the cassandra server (required)
+For role "client", "clientserver":
     -x          number of client workers (default 1.2*NPROC)
-    -y          number of cassandra concurrent writes (default 128)
+    -i          number of iterations (default 7)
+    -p          run each iteration of benchmark for fixed repetitions rather
+                than certain amount of time. If this is set to a positive
+                number, it will override "-d"
     -d          duration of django-workload benchmark (e.g. 2M)
     -l          path to log siege output to
     -s          source or path to get urls from
-    -c          ip address of the cassandra server (required when role is 'server' or 'clientserver')
+For role "client":
     -z          ip address of the django server (required when role is 'client', default is ::1)
+For role "db":
+    -y          number of cassandra concurrent writes (default 128)
+    -b          ip address that cassandra will bind to (default to the output of `hostname -i`)
 
 EOF
 }
@@ -50,6 +59,8 @@ run_benchmark() {
   local _duration="$2"
   local _siege_logs_path="$3"
   local _urls_path="$4"
+  local iterations="$5"
+  local reps="$6"
 
   cd "${SCRIPT_ROOT}/../django-workload/client" || exit
   ./gen-urls-file
@@ -57,19 +68,24 @@ run_benchmark() {
   DURATION="$_duration" \
   LOG="$_siege_logs_path" \
   SOURCE="$_urls_path" \
-  python3 ./run-siege
+  python3 ./run-siege -i "${iterations}" -r "${reps}"
 }
 
 start_cassandra() {
   cd "${SCRIPT_ROOT}/.." || exit 1
   # Set the listening address
   local cassandra_concur_writes="$1"
+  local cassandra_bind_addr="$2"
   if [ "$cassandra_concur_writes" -le 0 ] || [ -z "$cassandra_concur_writes" ]; then
     cassandra_concur_writes=128
   fi
 
   CASSANDRA_YAML="./apache-cassandra/conf/cassandra.yaml"
-  HOST_IP="$(hostname -i | awk '{print $1}')"
+  if [ -z "$cassandra_bind_addr" ]; then
+    HOST_IP="$(hostname -i | awk '{print $1}')"
+  else
+    HOST_IP="$cassandra_bind_addr"
+  fi
   sed "s/__HOST_IP__/${HOST_IP}/g" < ${CASSANDRA_YAML}.template > ${CASSANDRA_YAML}.tmp
   sed "s/__CONCUR_WRITES__/${cassandra_concur_writes}/g" < ${CASSANDRA_YAML}.tmp > ${CASSANDRA_YAML}.tmp2
   mv -f "${CASSANDRA_YAML}.tmp2" "${CASSANDRA_YAML}"
@@ -131,6 +147,8 @@ start_client() {
   local siege_logs_path=$3
   local urls_path=$4
   local server_addr=$5
+  local iterations="$6"
+  local reps="$7"
 
   # Replace the host in url template to the actual server addr
   CLIENTS_DIR="${SCRIPT_ROOT}/../django-workload/client"
@@ -142,7 +160,7 @@ start_client() {
   # shellcheck disable=SC1090,SC1091
   source "${SCRIPT_ROOT}/../django-workload/django-workload/venv/bin/activate"
 
-  run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}"
+  run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "${iterations}" "${reps}"
 }
 
 start_clientserver() {
@@ -152,6 +170,8 @@ start_clientserver() {
   local duration=$4
   local siege_logs_path=$5
   local urls_path=$6
+  local iterations="$7"
+  local reps="$8"
 
   start_django_server "${cassandra_addr}" "${num_server_workers}" &
 
@@ -165,7 +185,7 @@ start_clientserver() {
           exit 1
       fi
   done
-  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" localhost
+  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" localhost "${iterations}" "${reps}"
 }
 
 main() {
@@ -177,6 +197,12 @@ main() {
 
   local num_cassandra_writes
   num_cassandra_writes="128"
+
+  local iterations
+  iterations="7"
+
+  local reps
+  reps="0"
 
   local duration
   duration='2M'
@@ -196,7 +222,10 @@ main() {
   local server_addr
   server_addr='::1'
 
-  while getopts 'w:x:y:d:l:s:r:c:z:' OPTION "${@}"; do
+  local cassandra_bind_addr
+  cassandra_bind_addr=''
+
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -207,6 +236,12 @@ main() {
         ;;
       y)
         num_cassandra_writes="${OPTARG}"
+        ;;
+      i)
+        iterations="${OPTARG}"
+        ;;
+      p)
+        reps="${OPTARG}"
         ;;
       d)
         duration="${OPTARG}"
@@ -232,6 +267,9 @@ main() {
       z)
         server_addr="${OPTARG}"
         ;;
+      b)
+        cassandra_bind_addr="${OPTARG}"
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -243,19 +281,22 @@ main() {
   readonly num_server_workers
   readonly num_client_workers
   readonly num_cassandra_writes
+  readonly iterations
+  readonly reps
   readonly duration
   readonly siege_logs_path
   readonly urls_path
   readonly role
   readonly cassandra_addr
   readonly server_addr
+  readonly cassandra_bind_addr
 
   if [ "$role" = "db" ]; then
-    start_cassandra "$num_cassandra_writes";
+    start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
   elif [ "$role" = "clientserver" ]; then
-    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path";
+    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps";
   elif [ "$role" = "client" ]; then
-    start_client "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$server_addr";
+    start_client "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
     start_django_server "$cassandra_addr" "$num_server_workers";
   else

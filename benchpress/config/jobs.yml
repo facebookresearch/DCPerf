@@ -144,12 +144,17 @@
     clientserver:
       args:
         - '-r clientserver'
-        - '-d 5M'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c {db_addr}'
       vars:
         - 'db_addr'
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
     db:
       args:
         - '-r db'
@@ -163,6 +168,8 @@
       args:
         - '-r clientserver'
         - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c {db_addr}'
@@ -170,6 +177,8 @@
         - '-x {client_workers}'
       vars:
         - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
         - 'db_addr'
         - 'server_workers'
         - 'client_workers'
@@ -177,12 +186,16 @@
       args:
         - '-r client'
         - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-x {client_workers}'
         - '-z {server_addr}'
       vars:
         - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
         - 'client_workers'
         - 'server_addr'
     server:

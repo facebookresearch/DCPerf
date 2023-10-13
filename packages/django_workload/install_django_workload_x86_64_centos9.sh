@@ -127,6 +127,9 @@ cp "${TEMPLATES_DIR}/cluster_settings.py" "${DJANGO_SERVER_ROOT}/cluster_setting
 cp "${TEMPLATES_DIR}/uwsgi.ini" "${DJANGO_SERVER_ROOT}/uwsgi.ini" || exit 1
 cp "${TEMPLATES_DIR}/urls_template.txt" "${DJANGO_REPO_ROOT}/client/urls_template.txt" || exit 1
 
+# Install the modified run-siege script
+cp "${TEMPLATES_DIR}/run-siege" "${DJANGO_REPO_ROOT}/client/run-siege" || exit 1
+
 # Patch for MLP and icache buster
 # cltorres: Disable MLP patch. MLP implemented in Python does not work as intented due to bytecode abstraction
 # git apply --check "${TEMPLATES_DIR}/django_mlp.patch" && git apply "${TEMPLATES_DIR}/django_mlp.patch"
@@ -134,17 +137,22 @@ git apply --check "${TEMPLATES_DIR}/django_genurl.patch" && git apply "${TEMPLAT
 git apply --check "${TEMPLATES_DIR}/django_libib.patch" && git apply "${TEMPLATES_DIR}/django_libib.patch"
 
 # Build oldisim icache buster library
-if [ ! -f "${DJANGO_SERVER_ROOT}/libicachebuster.so" ]; then
-    pushd "${TEMPLATES_DIR}"
+set +u
+if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
+    if [ -z "${IBCC}" ]; then
+        IBCC="/bin/c++"
+    fi
+    cd "${TEMPLATES_DIR}" || exit 1
     mkdir build
-    pushd build
+    cd build || exit 1
     python3 ../gen_icache_buster.py --num_methods=100000 --num_splits=24 --output_dir ./
-    /bin/c++ -Wall -Wextra -fPIC -shared -c ./ICacheBuster*.cc
-    /bin/c++ -Wall -Wextra -fPIC -shared -Wl,-soname,libicachebuster.so -o libicachebuster.so ./*.o
-    cp libicachebuster.so "${DJANGO_SERVER_ROOT}/libicachebuster.so" || exit 1
-    popd
+    # shellcheck disable=SC2086
+    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -c ./ICacheBuster*.cc
+    # shellcheck disable=SC2086
+    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -Wl,-soname,libicachebuster.so -o libicachebuster.so ./*.o
+    cp libicachebuster.so "${OUT}/django-workload/django-workload/libicachebuster.so" || exit 1
+    cd ../ || exit 1
     rm -rfv build/
-    popd
 fi
 
 # Apply Memcache tuning
@@ -156,7 +164,6 @@ git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply
 git apply --check "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch" && git apply "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch"
 popd
 
-set +u
 deactivate
 popd
 
