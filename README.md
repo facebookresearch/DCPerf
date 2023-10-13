@@ -2,7 +2,8 @@
 
 ## Environment
 
-- OS: CentOS Stream 8 or 9
+- OS: On x86-64 platform we support CentOS Stream 8 or 9. On ARM platform,
+  CentOS 9 is required.
 - Running as the root user
 - Have access to the internet
 
@@ -34,139 +35,13 @@ Install click, pyyaml and tabulate using DNF:
 dnf install -y python3-click python3-pyyaml python3-tabulate
 ```
 
-## TaoBench
+## Benchmarks
 
-Please refer to the detailed instruction at [packages/tao_bench/README.md](packages/tao_bench/README.md)
-regarding how to prepare, install and run TaoBench.
+DCPerf currently includes the following benchmarks, please click on the links
+to view the instructions on setting up and running the benchmarks:
 
-## Feedsim
-
-Please refer to the instruction at [packages/feedsim/README.md](packages/feedsim/README.md).
-
-## mediawiki
-
-### install mediawiki
-
-Use the instructions provided under packages/mediawiki/README.md
-
-### run mediawiki
-
-```
-./benchpress_cli.py run oss_performance_mediawiki_mlp
-```
-
-### Reporting
-
-Once the run finishes,benchpress will report results in JSON format below
-
-```
-{
-    "Combined": {
-        "Siege requests": 69942,
-        "Siege wall sec": 0.17,
-        "Siege RPS": 1167.84,
-        "Siege successful requests": 66431,
-        "Siege failed requests": 0,
-        "Nginx hits": 70141,
-        "Nginx avg bytes": 191484.28321524,
-        "Nginx avg time": 0.16001578249526,
-        "Nginx P50 time": 0.158,
-        "Nginx P90 time": 0.212,
-        "Nginx P95 time": 0.234,
-        "Nginx P99 time": 0.28,
-        "Nginx 200": 66564,
-        "Nginx 499": 29,
-        "Nginx 404": 3548,
-        "canonical": 1
-    }
-}
-```
-
-## django
-
-Django workload requires two machine: one for running Cassandra DB server (DB server machine),
-the other for running the django server and client (benchmarking machine).
-
-### Install django workload
-
-On both of the machines:
-
-```
-./benchpress_cli.py install django_workload_default
-```
-
-### Run django workload
-
-On the Cassandra DB server machine:
-
-```
-./benchpress_cli.py run django_workload_default -r db
-```
-
-On the django benchmarking machine (where the django server and client are run):
-
-```
-./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>"}'
-```
-
-### Reporting
-
-Once the benchmark finishes on the django benchmarking machine, benchpress will
-report the results in JSON format like the following:
-
-```
-{
-  "benchmark_args": [],
-  "benchmark_desc": "Default run for django-workload",
-  "benchmark_hooks": [],
-  "benchmark_name": "django_workload_default",
-  "machines": [
-    {
-      "cpu_architecture": "x86_64",
-      "cpu_model": "Intel(R) Xeon(R) Platinum 8321HC CPU @ 1.40GHz",
-      "hostname": "<hostname>",
-      "kernel_version": "5.6.13-0_fbk19_6064_gabfd136bb69a",
-      "mem_total_kib": "65386044 KiB",
-      "num_logical_cpus": "52",
-      "os_distro": "centos",
-      "os_release_name": "CentOS Stream 8"
-    }
-  ],
-  "metadata": {
-    "L1d cache": "32K",
-    "L1i cache": "32K",
-    "L2 cache": "1024K",
-    "L3 cache": "36608K"
-  },
-  "metrics": {
-    "Availability_%": 100.0,
-    "Concurrency": 61.90999999999999,
-    "Data transferred_MB": 474.424,
-    "Elapsed time_secs": 299.22400000000005,
-    "Failed transactions": 0.0,
-    "Longest transaction": 0.244,
-    "P50_secs": 0.07,
-    "P90_secs": 0.11000000000000001,
-    "P95_secs": 0.12,
-    "P99_secs": 0.14,
-    "Response time_secs": 0.07,
-    "Shortest transaction": 0.03,
-    "Successful transactions": 251285.2,
-    "Throughput_MB/sec": 1.5879999999999999,
-    "Transaction rate_trans/sec": 839.7880000000001,
-    "Transactions_hits": 251285.0,
-    "URL_hit_percentages_/bundle_tray": 15.013,
-    "URL_hit_percentages_/feed_timeline": 29.988,
-    "URL_hit_percentages_/inbox": 20.019,
-    "URL_hit_percentages_/seen": 4.991,
-    "URL_hit_percentages_/timeline": 29.988
-  },
-  "run_id": "5b0b9b15",
-  "timestamp": 1651108577
-}
-```
-
-## spark_standalone
-
-Please refer to the detailed instruction at [packages/spark_standalone/README.md](packages/spark_standalone/README.md)
-regarding how to prepare, install and run spark_standalone benchmark.
+* [TaoBench](packages/tao_bench/README.md)
+* [Feedsim](packages/feedsim/README.md).
+* [Mediawiki](packages/mediawiki/README.md).
+* [DjangoWorkload](packages/django_workload//README.md).
+* [SparkBench](packages/spark_standalone/README.md).

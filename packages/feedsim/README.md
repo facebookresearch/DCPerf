@@ -69,7 +69,7 @@ JSON format:
 ```
 
 Feedsim will also generate a detailed metrics report at
-`benchmarks/feedsim/feedsim_results.txt` in CSV format:
+`benchmark_metrics_<run_id>/feedsim_results.txt` in CSV format like the following:
 
 ```
 duration_secs,total_queries,requested_qps,achieved_qps,total_bytes_rx,total_bytes_tx,rx_MBps,tx_MBps,min_ms,avg_ms,50p_ms,90p_ms,95p_ms,99p_ms,99.9p_ms

@@ -1,8 +1,11 @@
-# Preparing and running spark_standalone benchmark
+# Spark benchmark
 
-This benchmarks requires one machine to run the main Spark workload (the compute
-node) and one or more machines to provide a total of 3 NVMe SSDs (the storage
-nodes) for the compute node to connect as backend storage.
+Spark benchmark evaluates the Data Warehouse performance of a set of machines
+using Spark and a synthetic dataset of reduced size (relative to prod-level).
+This benchmark stresses CPU, memory (capacity and bandwidth), network as well
+as storage I/O.
+
+# System requirements
 
 ## Kernel support
 
@@ -23,29 +26,109 @@ CONFIG_NVME_TARGET_TCP=m
 CONFIG_NVME_TCP=m
 ```
 
-## Note
+## Machine and hardware configurations
 
-- There is no need to install non-default version of Python on storage nodes
+Spark benchmark will require one compute node and one or more storage nodes. The
+compute node will execute the workload and is the machine to be measured, whereas
+the storage nodes provide storage for the testing dataset and I/O bandwidth for
+the workload execution.
+
+Although the storage nodes and the network configuration between the nodes are
+not directly measured during the benchmark, they __do__ have an impact on the
+final benchmark performance and may become an bottleneck if the compute node
+is very powerful. When comparing performance among different compute node
+hardware, it is very important to **keep the network configuration and storage
+node setups the same**, or at least use the same type of storage nodes and the
+number of them can vary depending on the computing power of the compute node.
+
+Here are some guidance on hardware configurations to run Spark benchmark:
+
+### Network
+
+We recommend the ping latency between the nodes to be in the range of 0.1~0.15
+ms. That means it's highly recommended to place these machines within the same
+network to minimize latency. We also suggest having at least 50Gbps of total
+bandwidth between the compute node and the storage nodes.
+
+### Data nodes
+
+* Storage: We recommend NVMe SSDs on PCIe 3.0 or newer. Each data node needs to
+have at least one spare drive or spare partition to export to the compute node.
+All data nodes need to provide at least 500GB of free space in total.
+
+* CPU & Memory: We recommend using CPU of 26 cores or more and at least 64GB
+of memory.
+
+* Network: 25Gbps NIC or higher
+
+### Number of data nodes
+
+Generally we suggest using at least 3 data nodes, each
+of which exporting one NVMe SSD to the compute node. However, if your compute
+node has large amount of CPU cores (e.g. more than 72 logical cores), 4-8 data nodes
+may be needed. There is no definitive formula on how many data nodes to use
+because it highly depends on the relative performance between the compute node
+and the storage nodes: if your storage nodes are significantly weaker than the
+compute node, you will probably need more storage nodes, and vice versa.
+
+The bottom line is, if you see the average CPU IOWait% being high (>= 10%)
+throughout the benchmark, you should consider adding more data nodes because
+the I/O now becomes a bottleneck.
+
+### Environment
+
+* IOMMU: If IOMMU is enabled in your system, make sure you have IOMMU passthrough
+set in your kernel boot parameter (`iommu=pt` for x86_64 or `iommu.passthrough=1`
+for ARM).
+
+* Hostname: if the hostname of your compute node machine is not resolvable by
+your local DNS, please change it to `localhost`
+
+* Network: Spark benchmark is designed to work with IPv6, so it is recommended
+to run your systems exclusively with IPv6. We will provide a switch to have
+this benchmark work with IPv4 in the near future.
+
+* `JAVA_HOME`: You may need to manually set the environment variable `JAVA_HOME`
+to be the path of the JDK if Spark benchmark fails.
+
+## Also Note
+
+- CentOS 8: There is no need to install non-default version of Python on storage nodes
   because we don't need to run Benchpress CLI on them.
 
-- When running scripts under ./packages/spark_standalone/templates/nvme_tcp,
+- If running on CentOS 8: When running scripts under ./packages/spark_standalone/templates/nvme_tcp,
   please use `alternatives --config python3` to switch Python3 back to the
   system default one, because the approach the scripts installing dependencies
   (e.g. `dnf install python3-*` and `./setup.py install`) will pour the packages
   into the system default Python's library.
 
+# Set up and run Spark benchmark
+
 ## On the storage nodes
 
-We need to first export the data SSDs on the storage nodes.
+We need to first export the data SSDs on the storage nodes. The exportation command is as follows:
 
-If you have a single storage node that can provide 3 or more spare data SSDs,
+```
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n <N> -s <S> -p <P> --real
+```
+
+- `N` is the number of SSDs you would like to export.
+- `S` is the starting device number. If you would like to export devices starting from `/dev/nvme1n1`,
+  `N` will be 1; if starting from `/dev/nvme3n1`, `N` will be 3.
+- `P` is the starting partition number. Usually this is 1, but if you would like to export the
+  particular partition `/dev/nvme2n1p3`, `P` will be 3.
+
+Here are some example usages:
+
+If you have a single storage node that can provide 3 spare data SSDs (`/dev/nvme1n1`, `/dev/nvme2n1`
+and `/dev/nvme3n1`),
 run the following:
 
 ```
 ./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n 3 -s 1 -p 1 --real
 ```
 
-If you have 3 storage nodes and each of them has one spare data SSD, run the
+If you have 3 storage nodes and each of them has one spare data SSD (`/dev/nvme1n1`), run the
 following command on all the three machines:
 
 ```
@@ -60,10 +143,13 @@ the partition instead:
 ./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n 1 -s 0 -p X --real
 ```
 
-When running the commands, it will execute `fdisk` to ask you create partitions.
+When running the commands, it will execute `fdisk` to ask you to create partitions.
 If the data SSDs are uninitialized, you will need to create a partition in
-order for `setup_nvmet.py` to use. If you have already created a partition, you
-can skip the step by quitting fdisk.
+order for `setup_nvmet.py` to use. The recommended way is to create one single primary partition
+that uses the entire drive by pressing `n`->`ENTER`->`p`->`ENTER` all the way till the main prompt->
+`w`->`ENTER`. If you have already created a partition, you
+can skip the step by quitting fdisk with `q`->`ENTER`, or prepend the exporter command with
+`yes q | ` to automatically skip fdisk.
 
 After each of above command finishes, `setup_nvmet.py` will print out a command
 at the end of the output like the following:
@@ -92,25 +178,57 @@ over network.
    nvme3n1     259:10   0   1.8T  0 disk
    ```
 
-3. Create a RAID-0 array and mount it. Suppose you have 3 SSDs imported now, starting from nvme1n1:
+3. Mounting the remote NVMe drives:
 
-```
-./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py importer mount -n 3 -s 1 --real
-```
+    3.1. If you setup Spark for the first time, create a RAID-0 array and mount it.
+    Suppose you have 3 SSDs imported now, starting from `nvme1n1`:
 
-Then you should see remote SSDs mounted at `/flash23`:
+    ```
+    ./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py importer mount -n 3 -s 1 --real
+    ```
+    If you would like to use other number of drives and/or the starting device number
+    is not 1, please change `-n` and/or `-s` accordingly.
 
-```
-[root@compute-node ~/DCPerf]# df -h
-Filesystem       Size  Used Avail Use% Mounted on
-devtmpfs          32G     0   32G   0% /dev
-tmpfs             32G  1.8M   32G   1% /dev/shm
-tmpfs             13G   15M   13G   1% /run
-/dev/nvme0n1p4   236G   38G  195G  17% /
-/dev/nvme0n1p2   465M   90M  347M  21% /boot
-/dev/nvme0n1p1   243M  4.4M  239M   2% /boot/efi
-/dev/md127       5.3T  261G  5.0T   5% /flash23
-```
+    Then you should see remote SSDs mounted at `/flash23`:
+
+    ```
+    [root@compute-node ~/DCPerf]# df -h
+    Filesystem       Size  Used Avail Use% Mounted on
+    devtmpfs          32G     0   32G   0% /dev
+    tmpfs             32G  1.8M   32G   1% /dev/shm
+    tmpfs             13G   15M   13G   1% /run
+    /dev/nvme0n1p4   236G   38G  195G  17% /
+    /dev/nvme0n1p2   465M   90M  347M  21% /boot
+    /dev/nvme0n1p1   243M  4.4M  239M   2% /boot/efi
+    /dev/md127       5.3T  261G  5.0T   5% /flash23
+    ```
+
+    3.2. If you have already set up before, after importing the NVMe drives you will
+    see each of the drives has a soft RAID device attached like the following:
+
+    ```
+    NAME        MAJ:MIN RM   SIZE RO TYPE  MOUNTPOINTS
+    nvme0n1     259:0    0 763.1G  0 disk
+    ├─nvme0n1p1 259:1    0   243M  0 part  /boot/efi
+    ├─nvme0n1p2 259:2    0   488M  0 part  /boot
+    ├─nvme0n1p3 259:3    0   1.9G  0 part  [SWAP]
+    └─nvme0n1p4 259:4    0 760.5G  0 part  /
+    nvme1n1     259:6    0   1.7T  0 disk
+    └─md127       9:127  0     7T  0 raid0
+    nvme2n1     259:8    0   1.7T  0 disk
+    └─md127       9:127  0     7T  0 raid0
+    nvme3n1     259:10   0   1.7T  0 disk
+    └─md127       9:127  0     7T  0 raid0
+    nvme4n1     259:12   0   1.7T  0 disk
+    └─md127       9:127  0     7T  0 raid0
+    ```
+    In this case, simply mount the RAID device with `mount -t xfs /dev/md127 /flash23`
+
+    3.3. If you have set up before but would like to change the setup of
+    data nodes (adding more or reducing data nodes), after importing all remote
+    NVMe drives please run `mdadm --manage --stop /dev/mdXXX` to stop the
+    RAID device, remove `/flash23` folder and then do step 3.1 to recreate a
+    RAID device and mount it.
 
 4. Download dataset
 
@@ -138,7 +256,7 @@ to access the data in it. Below lists the steps to download the dataset:
 
 5. Install and run Spark benchmark
 
-Note: please use `alternatives --config python3` to switch python3 to the newer
+Note on CentOS 8: please use `alternatives --config python3` to switch python3 to the newer
 version you installed for Benchpress
 
 Run the following command on the compute node to install and run
@@ -149,7 +267,7 @@ spark_standalone benchmark
 ./benchpress_cli.py run spark_standalone_remote
 ```
 
-### Reporting
+## Reporting
 
 After the benchmark finishing on the compute node, benchpress will output the
 results in JSON format like the following:
@@ -168,12 +286,12 @@ results in JSON format like the following:
   "benchmark_name": "spark_standalone_remote",
   "machines": [
     {
-      "cpu_architecture": "x86_64",
-      "cpu_model": "Intel(R) Xeon(R) Platinum 8321HC CPU @ 1.40GHz",
+      "cpu_architecture": "<x86_64 or aarch64>",
+      "cpu_model": "<CPU-model-name>,
       "hostname": "<compute-node-hostname>",
       "kernel_version": "5.6.13-05010-g10741cbf0a08",
-      "mem_total_kib": "65387096 KiB",
-      "num_logical_cpus": "52",
+      "mem_total_kib": "<memory-size-kb>",
+      "num_logical_cpus": "256",
       "os_distro": "centos",
       "os_release_name": "CentOS Stream 8"
     }
@@ -185,13 +303,24 @@ results in JSON format like the following:
     "L3 cache": "36608K"
   },
   "metrics": {
-    "execution_time_test_93586": 1089.5,
-    "worker_cores": 36,
-    "worker_memory": "42GB"
+    "execution_time_test_93586": 288.3,
+    "execution_time_test_93586-stage-0.0": 10.0,
+    "execution_time_test_93586-stage-1.0": 67.0,
+    "execution_time_test_93586-stage-2.0": 205.0,
+    "execution_time_test_93586-stage-2.0-fullbatch": 181.0,
+    "worker_cores": 172,
+    "worker_memory": "201GB"
   },
   "run_id": "7e287f2d",
   "timestamp": 1658971035
 }
 ```
 
-`metrics.test_XXXXX` is the benchmark metric we care about. It represents the execution time.
+In the reported metrics, `execution_time_test_93586` is the overall execution time,
+`execution_time_test_93586-stage-2.0` is the execution time of Spark's
+compute-intensive phase.
+
+Spark benchmark will also put its runtime logs into `benchmark_metrics_<run_id>/work` folder.
+
+If the benchmark finishes in less than 100 seconds, it has probably failed. Please check
+the logs under `benchmark_metrics_<run_id>/work` folder to check if there's any error occurred.

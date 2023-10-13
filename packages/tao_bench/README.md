@@ -9,20 +9,23 @@ configuration from the server.
 
 To avoid bottleneck in network I/O, it is highly recommended to place the server
 and client machines in the same network. We recommend the ping latency between
-the machines to be no greater than 0.15ms and the network bandwidth to be at
-least 10Gbps for small to medium core count CPUs (<= 72 logical cores) or 20Gbps
-for high core count ones (>72 logical cores).
+the machines to be in the range of 0.1ms and 0.15ms and the network bandwidth to
+be at least 10Gbps for small to medium core count CPUs (<= 72 logical cores) or
+20Gbps for high core count ones (>72 logical cores). The maximum NIC bandwidth we
+recommend is 50Gbps.
 
 ## Operating System
 
-Currently TaoBench server can be run on CentOS Stream 8 or 9. Besides, please
-make sure you have `iommu=pt` parameter present in the kernel boot cmdline,
+Currently TaoBench server can be run on CentOS Stream 8 or 9. If IOMMU is enabled
+in your system, please make sure you have IOMMU passthrough set in the
+kernel boot cmdline (`iommu=pt` for x86_64 and `iommu.passthrough=1` for ARM),
 otherwise the system will be soft locked up in network I/O when running
 TaoBench.
 
 CentOS 9 support in the clients is still work in progress. If you run clients on
-CentOS 9, the hit ratio may be slightly lower than the expected 0.9 and
-therefore the final reported result will be zero.
+CentOS 9, the hit ratio may be slightly lower than the expected 0.89 and
+therefore the result parser would think there is no valid data points and reports
+zero as the final aggregated result.
 
 # Installation
 
@@ -35,6 +38,11 @@ as root and you have internet access):
 
 This should automatically build and install all dependencies as well as TaoBench
 server and client binaries.
+
+**NOTE**: TaoBench requires gflags-devel-2.2.2. If you happen to have installed
+an older version of gflags to support other software or benchmarks (e.g. Mediawiki)
+after installing TaoBench, please reinstall gflags-devel-2.2.2 by running
+`dnf install -y gflags-devel-2.2.2` before running TaoBench.
 
 # Running TaoBench
 
@@ -65,8 +73,10 @@ On client machines:
 ```
 
 **NOTE**: If the number of logical cores multiplied by 380 is greater than 32K on the
-client machines, you will need to adjust `clients_per_thread` parameter when running
-TaoBench client program. Please refer to `tao_bench_custom` below.
+client machines, you will need to adjust `clients_per_thread` parameter on the client side
+such that clients_per_thread * (NPROC - 6) is less than 32768 (NPROC is the number of
+logical cores). In this case you will need to use `tao_bench_custom` job on the clients.
+Please refer to `tao_bench_custom` below.
 
 ### Reporting
 
@@ -114,9 +124,7 @@ on the server machine, like the following:
 It is not a reference score of any paticular machine)
 
 On the server machine, benchpress will generate a time-series QPS metrics CSV table
-at `benchmarks/tao_bench/server.csv` under the benchpress's folder. If you need the
-time-series result, please copy this file out after running the benchmark, otherwise
-it will be overwritten in the next run.
+at `benchmark_metrics_<run_id>/server.csv` under benchpress's folder.
 
 
 ## Advanced job: `tao_bench_custom`
@@ -140,12 +148,15 @@ to customize TaoBench runs. It has the following roles and parameters:
     - `clients_per_thread` - Number of client workers to launch per logical CPU core.
     Optional, default is 380. **NOTE**: If `clients_per_thread * (nproc - 6)` is
     greater than 32K, please adjust this parameter to bring down the total client
-    workers.
+    connections. For example, if the client machine has 176 logical cores, the maximum
+    `clients_per_thread` will be 32768 / (176 - 6) = 192.
     - `server_port_number` - The port to connect to the server. Optional, default
     is 11211
     - `warmup_time` - Time to warm up TaoBench server, in seconds. Optional,
     default is 1200
     - `test_time` - Time to stress TaoBench server and measure performance, in seconds.
+    Please make sure `warmup_time` and `test_time` are consistent to what have been
+    set on the server side.
 
 For example, if your server machine has 128GB of memory, the NIC name is "enp0s10", and
 you want to set the warmup time to 1800s and test time to 540s, the commands will be:
@@ -168,14 +179,15 @@ server machine to fully
 scale TaoBench up. `tao_bench_2x` is a job that spawns two TaoBench server
 instances, each of which uses half of the CPU cores and memory capacity on the
 server machine
-and listens to separate ports. This jobs also doubles warmup and test time
+and listens to separate ports. This job also doubles warmup and test time
 (2400s and 720s) to make sure the system will reach the steady state.
 
-This job is only for the server so it does not have separate roles. It has the following
+This job is only for the server so it does not have separate roles. For clients we use
+the `client` role in the job `tao_bench_custom`. `tao_bench_2x` has the following
 parameters:
 
 - `memsize` - Memory capacity in GB. Optional, default is 256. Please change this if
-   the memory capacity on your machine is not 256GB
+   the memory capacity on your server machine is not 256GB
 - `interface_name` - The name of the NIC that connects with the clients. Optional,
    default is `eth0`. Please change this if the NIC is not `eth0`.
 - `warmup_time` - Time to warm up TaoBench server, in seconds. Optional,
@@ -205,8 +217,9 @@ On the client machine 2, run the following command:
 ./benchpress_cli.py run tao_bench_custom -r client -i '{"server_hostname": "<server-hostname>", "server_memsize": 128, "warmup_time": 2400, "test_time": 720, "server_port_number": 11212}'
 ```
 
-On the clients you will need to set `server_memsize` to be half of the server memory
-capacity.
+Note that on the clients you will need to set `server_memsize` to be half of the server's memory
+capacity, because in `tao_bench_2x` job there are two TaoBench server instances equally sharing
+the server machine.
 
 ### Reporting
 
@@ -261,5 +274,5 @@ is 720s. MAKE SURE to start clients within 1 minute.",
 ```
 
 Besides, this benchmark will also leave two detailed logs of the two TaoBench
-server instances under the DCPerf folder.
+server instances under the `benchmark_metrics_<run_id>` folder.
 They are named `tao-bench-server-1-<yymmdd_HHMMSS>.log` and `tao-bench-server-2-<yymmdd_HHMMSS>.log` respectively.
