@@ -67,7 +67,7 @@ unsigned long long random_generator::get_random()
     // max is RAND_MAX, which is usually 2^31-1 (although can be as low as 2^16-1, which we ignore now)
     // this is fine, especially considering that random_r is a nonstandard glibc extension
     // it returns a positive int32_t, so either way the MSB is off
-    int ret = random_r(&m_data_blob, &rn);
+    [[maybe_unused]] int ret = random_r(&m_data_blob, &rn);
     assert(ret == 0);
     llrn = rn;
     llrn = llrn << 31;

@@ -1078,7 +1078,7 @@ struct cg_thread {
     void join()
     {
         int* retval;
-        int ret;
+        [[maybe_unused]] int ret;
 
         ret = pthread_join(m_thread, (void **)&retval);
         assert(ret == 0);
