@@ -25,6 +25,14 @@ alternatives --set python3 /usr/bin/python3.8
 pip-3.8 install click pyyaml tabulate
 ```
 
+Enable EPEL and PowerTools repos:
+
+```bash
+dnf install epel-release
+dnf install 'dnf-command(config-manager)'
+dnf config-manager --set-enabled PowerTools
+```
+
 After that, try running `./benchpress_cli.py` under the benchpress directory.
 
 ### On CentOS 9
@@ -33,6 +41,13 @@ Install click, pyyaml and tabulate using DNF:
 
 ```bash
 dnf install -y python3-click python3-pyyaml python3-tabulate
+```
+
+Enable EPEL and PowerTools/CRB repos:
+```bash
+dnf install epel-release
+dnf install 'dnf-command(config-manager)'
+dnf config-manager --set-enabled CRB
 ```
 
 ## Benchmarks
