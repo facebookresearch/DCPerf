@@ -130,3 +130,35 @@ increase the file descriptor limit on your system in the following way:
 2. Reboot your system
 3. Run `ulimit -n` to check the file descriptor limit, it should increase to the desired
    amount.
+
+### Long warmup on ARM platform
+
+Mediawiki benchmark may be stuck in warm-up phase on ARM platform for several hours.
+In this case, you can see the CPU utilization is near 100% and benchpress.log keeps
+saying "Extending warmup, server is not done warming up". If you are stuck with the
+extremely long warmup, you can run the two following alternative experiments with
+commands provided:
+
+#### Non-MLP benchmark
+
+```
+./benchpress_cli.py run oss_performance_mediawiki
+```
+#### Disable JIT
+
+```
+./packages/mediawiki/run.sh \
+   -r/usr/local/hphpi/legacy/bin/hhvm \
+   -nnginx \
+   -ssiege \
+   -c300 \
+   -- \
+   --mediawiki-mlp \
+   --siege-duration=10M \
+   --siege-timeout=11m \
+   --run-as-root \
+   --no-jit \
+   --scale-out=2 \
+   --delay-check-health=30 \
+   --i-am-not-benchmarking
+```
