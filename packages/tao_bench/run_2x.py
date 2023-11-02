@@ -53,10 +53,16 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number):
 def run_server(args):
     # core ranges for each server instance
     n_cores = len(os.sched_getaffinity(0))
+    core_list = list(os.sched_getaffinity(0))
     part = n_cores // 4
     # Pin each instance to physical cpu core and corresponding vcpu
-    cores_range_1 = f"0-{part - 1},{part * 2}-{part *2 + part -1}"
-    cores_range_2 = f"{part}-{part * 2 - 1},{part *2 + part}-{n_cores - 1}"
+    cores_range_1 = ",".join(
+        [str(i) for i in (core_list[:part] + core_list[part * 2 : part * 3])]
+    )
+    cores_range_2 = ",".join(
+        [str(i) for i in (core_list[part : part * 2] + core_list[part * 3 : part * 4])]
+    )
+
     # memory size - split in half for each server
     n_mem = int(args.memsize)
     mem_per_inst = n_mem // 2
