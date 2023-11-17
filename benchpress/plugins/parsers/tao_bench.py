@@ -49,7 +49,7 @@ class TaoBenchParser(Parser):
 
     # Minimum hit rate for a server data point to be considered in
     # result qps calculation
-    MIN_HIT_RATE = 0.89
+    MIN_HIT_RATE = 0.88
 
     def parse(self, stdout, stderr, returncode):
         """Extracts TAO bench results from stdout."""
