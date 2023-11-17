@@ -219,7 +219,10 @@
     Aggregator like workload. Latency sensitive.
     Finds maximum QPS that system can sustain while keeping
     95th percentile latency <= 500 msecs.
-  args: []
+  args:
+    - '-p {port}'
+  vars:
+    - 'port=11222'
   hooks:
     - hook: cpu-mpstat
       options:

@@ -47,6 +47,7 @@ Usage: ${0##*/} [-h] [-t <thrift_threads>] [-c <ranking_cpu_threads>]
     -q Number of QPS to request. If this is present, feedsim will run a fixed-QPS experiment instead of searching
        for a QPS that meets latency target.
     -d Duration of each load testing experiment, in seconds. Default: 300
+    -p Port to use by the LeafNodeRank server and the load drievrs. Default: 11222
 EOF
 }
 
@@ -86,6 +87,9 @@ main() {
     local fixed_qps_duration
     fixed_qps_duration="300"
 
+    local port
+    port="11222"
+
     echo > $BREPS_LFILE
     benchreps_tell_state "start"
 
@@ -109,16 +113,20 @@ main() {
             -d)
                 fixed_qps_duration="$2"
                 ;;
+            -p)
+                port="$2"
+                ;;
             -h)
                 show_help >&2
                 exit 1
                 ;;
             *)  # end of input
+                echo "Unsupported arg $1"
                 break
         esac
 
         case $1 in
-            -t|-c|-s|-d)
+            -t|-c|-s|-d|-p)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -139,7 +147,10 @@ main() {
     cd "${FEEDSIM_ROOT_SRC}"
 
     # Starting leaf node service
+    monitor_port=$((port-1000))
     MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
+        --port="$port" \
+        --monitor_port="$monitor_port" \
         --graph_scale=21 \
         --graph_subset=2000000 \
         --threads="$thrift_threads" \
@@ -167,11 +178,13 @@ main() {
     # when trying to create sockets for listening.
 
     # Start DriverNode
+    client_monitor_port="$((monitor_port-1000))"
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
         scripts/search_qps.sh -w 15 -f 300 -s 95p:500 -o "${FEEDSIM_ROOT}/feedsim_results.txt" -- \
             build/workloads/ranking/DriverNodeRank \
-                --server 0.0.0.0:11222 \
+                --server "0.0.0.0:$port" \
+                --monitor_port "$client_monitor_port" \
                 --threads="${DRIVER_THREADS}" \
                 --connections=4
         benchreps_tell_state "after search_qps"
@@ -179,7 +192,8 @@ main() {
         benchreps_tell_state "before search_qps"
         scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 -o "${FEEDSIM_ROOT}/feedsim_results.txt" -- \
             build/workloads/ranking/DriverNodeRank \
-                --server 0.0.0.0:11222
+                --monitor_port "$client_monitor_port" \
+                --server "0.0.0.0:$port"
         benchreps_tell_state "after search_qps"
     else
         # Adjust the number of workers according to QPS
@@ -195,7 +209,8 @@ main() {
         benchreps_tell_state "before fixed_qps_exp"
         scripts/search_qps.sh -s 95p -t "$fixed_qps_duration" -q "$fixed_qps" -o "${FEEDSIM_ROOT}/feedsim_results.txt" -- \
             build/workloads/ranking/DriverNodeRank \
-                --server 0.0.0.0:11222 \
+                --server "0.0.0.0:$port" \
+                --monitor_port "$client_monitor_port" \
                 --threads="${num_workers}" \
                 --connections="${num_connections}"
         benchreps_tell_state "after fixed_qps_exp"
