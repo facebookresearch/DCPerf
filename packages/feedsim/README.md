@@ -23,9 +23,10 @@ converge and yield very low result.
 When feedsim finds the optimal QPS that meets the SLA of <=500ms p95 latency, it
 will execute a final run of 5 minutes using the optimal QPS. Therefore, if you
 would like to collect system and microarch metrics for performance analysis,
-collect those during the last 5 minutes of the benchmark.
+collect those during the last 5 minutes of the benchmark. We expect the CPU
+utilization during this period to be in the range of 60%~75%.
 
-## Reporting
+## Reporting and Measurement
 
 After the feedsim benchmark finishing, benchpress will report the results in
 JSON format:
@@ -67,6 +68,10 @@ JSON format:
   "timestamp": 1650388812
 }
 ```
+
+`final_achieved_qps` is the metric that measures the performance, measuring
+the max QPS FeedSim could achieve with the contraint of p95 latency being
+less than 500ms.
 
 Feedsim will also generate a detailed metrics report at
 `benchmark_metrics_<run_id>/feedsim_results.txt` in CSV format like the following:

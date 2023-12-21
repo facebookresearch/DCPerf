@@ -88,6 +88,16 @@ Generally `oss_performance_mediawiki_mlp_2x` should be sufficient for the
 currently available high-core-count CPUs and the 4x version are not likely to
 provide additional advantages.
 
+### Reporting
+
+After the benchmark finishes, benchpress will report the benchmark results in the
+following format. We expect the CPU utilization of the last 10 minutes to be at
+least 90%.
+
+```
+
+```
+
 ## Troubleshooting
 
 ### Siege hanging

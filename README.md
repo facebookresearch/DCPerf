@@ -60,3 +60,69 @@ to view the instructions on setting up and running the benchmarks:
 * [Mediawiki](packages/mediawiki/README.md).
 * [DjangoWorkload](packages/django_workload//README.md).
 * [SparkBench](packages/spark_standalone/README.md).
+
+## Expected CPU Utilization
+
+Below is a table of our expectation on CPU utilization of these benchmarks.
+They can be used as a reference to see if a benchmark has run successfully and
+sufficiently stressed the system.
+
+<table>
+  <tr>
+   <td>Benchmark
+   </td>
+   <td>Criteria
+   </td>
+   <td>CPU Utilization Target
+   </td>
+  </tr>
+  <tr>
+   <td>TaoBench
+   </td>
+   <td>Last 5~10 minutes (determined by `test_time` parameter)
+   </td>
+   <td>70~80% overall, 15~20% user
+   </td>
+  </tr>
+  <tr>
+   <td>FeedSim
+   </td>
+   <td>Last 5 minutes
+   </td>
+   <td>60~75%
+   </td>
+  </tr>
+  <tr>
+   <td>DjangoWorkload
+   </td>
+   <td>Entire benchmark
+   </td>
+   <td>~95%
+   </td>
+  </tr>
+  <tr>
+   <td>Mediawiki
+   </td>
+   <td>Last 10 minutes
+   </td>
+   <td>90~100%
+   </td>
+  </tr>
+  <tr>
+   <td>SparkBench
+   </td>
+   <td>Entire benchmark
+   </td>
+   <td>55~75%
+   </td>
+  </tr>
+  <tr>
+   <td>SparkBench
+   </td>
+   <td>Stage 2.0 full batch period
+   </td>
+   <td>90~100%
+   </td>
+  </tr>
+</table>
+

@@ -270,7 +270,12 @@ spark_standalone benchmark
 ## Reporting
 
 After the benchmark finishing on the compute node, benchpress will output the
-results in JSON format like the following:
+results in JSON format like the following. `execution_time_test_93586` is the
+metric that measures overall performance. For CPU performance analysis, it is
+also helpful to use `execution_time_test_93586-stage-2.0` because Stage 2.0
+is a compute intensive phase and is much less influenced by I/O. We expect the
+average CPU utilization during the entire benchmark to be around 55~75%. The
+CPU utilization during Stage 2.0 full batch period could reach nearly 100%.
 
 ```
 {

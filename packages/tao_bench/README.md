@@ -78,7 +78,7 @@ such that clients_per_thread * (NPROC - 6) is less than 32768 (NPROC is the numb
 logical cores). In this case you will need to use `tao_bench_custom` job on the clients.
 Please refer to `tao_bench_custom` below.
 
-### Reporting
+### Reporting and Measurement
 
 Once the tao_bench benchmark finishes, benchpress will report the results in JSON format
 on the server machine, like the following:
@@ -119,6 +119,12 @@ on the server machine, like the following:
 }
 
 ```
+
+The metric `total_qps` measures TaoBench performance and is the one we care
+about the most. `hit_ratio` is expected to be in the range of 0.88 and 0.9,
+and there should be 58 valid data points. We expect the CPU utilization of
+this benchmark to be roughly between 70% and 80%, of which the user utilization
+ranges between 15% and 30%.
 
 (The result above is only an example that shows the format of the result report.
 It is not a reference score of any paticular machine)
@@ -221,7 +227,7 @@ Note that on the clients you will need to set `server_memsize` to be half of the
 capacity, because in `tao_bench_2x` job there are two TaoBench server instances equally sharing
 the server machine.
 
-### Reporting
+### Reporting and Measurement
 
 Once the job `tao_bench_2x` finishes on the server, benchpress will report the results
 in JSON format on the server machine, like the following:
@@ -272,6 +278,12 @@ is 720s. MAKE SURE to start clients within 1 minute.",
   "timestamp": 1689114084
 }
 ```
+
+The metric `total_qps` measures TaoBench performance and is the one we care
+about the most. `hit_ratio` is expected to be in the range of 0.88 and 0.9,
+and there should be 116 valid data points. We expect the CPU utilization of
+this benchmark to be roughly between 70% and 80%, of which the user utilization
+ranges between 15% and 30%.
 
 Besides, this benchmark will also leave two detailed logs of the two TaoBench
 server instances under the `benchmark_metrics_<run_id>` folder.

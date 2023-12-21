@@ -40,7 +40,8 @@ On the django benchmarking machine (where the django server and client are run):
 ## Reporting
 
 Once the benchmark finishes on the django benchmarking machine, benchpress will
-report the results in JSON format like the following:
+report the results in JSON format like the following. `Transaction rate_trans/sec`
+is the metric that measures performance.:
 
 ```
 {
