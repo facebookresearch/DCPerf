@@ -70,11 +70,29 @@ feedsim:
   metrics:
     - target_percentile
     - target_latency_msec
-    - peak_qps
-    - peak_latency_msec
     - final_requested_qps
     - final_achieved_qps
     - final_latency_msec
+
+feedsim_autoscale:
+  parser: feedsim_autoscale
+  install_script: ./packages/feedsim/install_feedsim.sh
+  cleanup_script: ./packages/feedsim/cleanup_feedsim.sh
+  path: ./benchmarks/feedsim/run-feedsim-multi.sh
+  tags:
+    scope:
+      - app
+      - feed
+    component:
+      - cpu
+      - memory
+  metrics:
+    - target_percentile
+    - target_latency_msec
+    - final_requested_qps
+    - final_achieved_qps
+    - final_latency_msec
+
 
 spark_standalone:
   parser: spark_standalone

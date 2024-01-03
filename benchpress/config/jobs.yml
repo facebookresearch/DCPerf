@@ -221,8 +221,10 @@
     95th percentile latency <= 500 msecs.
   args:
     - '-p {port}'
+    - '-o {output}'
   vars:
     - 'port=11222'
+    - 'output=feedsim_results.txt'
   hooks:
     - hook: cpu-mpstat
       options:
@@ -234,6 +236,33 @@
         is_move: true
         after:
           - 'benchmarks/feedsim/feedsim_results.txt'
+
+- name: feedsim_autoscale
+  benchmark: feedsim_autoscale
+  description: >
+    Aggregator like workload. Latency sensitive.
+    Finds maximum QPS that system can sustain while keeping
+    95th percentile latency <= 500 msecs. Automatically
+    spawns multiple workload instances at 100 cores per
+    instance (rounded up).
+  args:
+    - '{num_instances}'
+    - '{extra_args}'
+  vars:
+    - 'num_instances='
+    - 'extra_args='
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
 
 
 - benchmark: spark_standalone

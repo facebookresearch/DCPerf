@@ -38,8 +38,10 @@ cd "${BENCHPRESS_ROOT}/benchmarks"
 
 # Copy run.sh template (overwrite)
 cp "${BENCHPRESS_ROOT}/packages/feedsim/run.sh" "${FEEDSIM_ROOT_SRC}/run.sh"
+cp "${BENCHPRESS_ROOT}/packages/feedsim/run-feedsim-multi.sh" "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 # Set as executable
 chmod u+x "${FEEDSIM_ROOT_SRC}/run.sh"
+chmod u+x "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 
 msg "Installing third-party dependencies..."
 mkdir -p "${FEEDSIM_THIRD_PARTY_SRC}"

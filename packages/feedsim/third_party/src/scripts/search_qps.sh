@@ -307,7 +307,7 @@ benchreps_tell_state "after peak_qps"
 
 if [[ -n "$fixed_qps" ]]; then
   run_loadtest measured_qps measured_latency $fixed_qps
-  printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
+  printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
   exit 0
 fi
 
