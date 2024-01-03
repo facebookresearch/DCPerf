@@ -2,10 +2,12 @@
 declare OLD_CWD
 OLD_CWD="$( pwd )"
 
-# Constants
-SERVER_THREADS=$(echo "(2.8 * $(nproc)) / 1" | bc)  # Divides by integer 1 to truncate decimal
-CLIENT_THREADS=200
-MEMCACHE_THREADS=8
+BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
+NPROC="$(nproc)"
+HHVM_SERVERS="$(( (NPROC + 99) / 100 ))"
+SERVER_THREADS=$(echo "${BC_MAX_FN}; max(200, (2.8 * $(nproc)) / ${HHVM_SERVERS})" | bc)  # Divides by integer 1 to truncate decimal
+CLIENT_THREADS=$(( 150 * HHVM_SERVERS ))
+MEMCACHE_THREADS=$(( 8 * HHVM_SERVERS ))
 
 function show_help() {
 cat <<EOF
@@ -16,9 +18,11 @@ Proxy shell script to executes oss-performance benchmark
     -n          path to nginx binary (default: 'nginx')
     -r          path to hhvm binary (default: 'hhvm')
     -s          path to siege binary (default: 'siege')
-    -t          number of server threads. Default: floor(2.8 * logical cpus)
-    -c          number of client threads. Default: 200
-    -m          number of memcache threads. Default: 8
+(For the next three parameters, 0 implies using default)
+    -R          number of HHVM server instances. Default: ceil(logical cpus / 100) (=${HHVM_SERVERS})
+    -t          number of server threads for each HHVM. Default: floor(2.8 * logical cpus / number of HHVM servers) (=${SERVER_THREADS})
+    -c          number of siege client threads. Default: 200 or 150 * number of HHVM, whichever is higher (=${CLIENT_THREADS})
+    -m          number of memcache threads. Default: 8 * number of HHVM (=${MEMCACHE_THREADS})
 
 Any other options that oss-performance perf.php script could accept can be
 passed in as extra arguments appending two hyphens '--' followed by the
@@ -69,7 +73,7 @@ function run_benchmark() {
   fi
   cd "${OLD_CWD}/oss-performance" || exit
   # shellcheck disable=2086
-  "$_hhvm_path" \
+  HHVM_DISABLE_NUMA=1 "$_hhvm_path" \
     -vEval.ProfileHWEnable=0 \
     perf.php \
     --nginx "$_nginx_path" \
@@ -82,6 +86,7 @@ function run_benchmark() {
     --memcached-threads "$MEMCACHE_THREADS" \
     --client-threads "$CLIENT_THREADS" \
     --server-threads "$SERVER_THREADS" \
+    --scale-out "${HHVM_SERVERS}" \
     --hhvm-extra-arguments='-vEval.ProfileHWEnable=0' \
     ${extra_args}
   cd "${OLD_CWD}" || exit
@@ -100,7 +105,7 @@ function main() {
   local siege_path
   siege_path='siege'
 
-  while getopts 'H:n:r:s:t:c:m:' OPTION "${@}"; do
+  while getopts 'H:n:r:s:R:t:c:m:' OPTION "${@}"; do
     case "$OPTION" in
       H)
         db_host="${OPTARG}"
@@ -124,11 +129,20 @@ function main() {
           siege_path="$(readlink -f "$siege_path")"
         fi
         ;;
+      R)
+        if [[ "${OPTARG}" -gt 0 ]]; then
+          HHVM_SERVERS="${OPTARG}"
+        fi
+        ;;
       t)
-        SERVER_THREADS="${OPTARG}"
+        if [[ "${OPTARG}" -gt 0 ]]; then
+          SERVER_THREADS="${OPTARG}"
+        fi
         ;;
       c)
-        CLIENT_THREADS="${OPTARG}"
+        if [[ "${OPTARG}" -gt 0 ]]; then
+          CLIENT_THREADS="${OPTARG}"
+        fi
         ;;
       m)
         MEMCACHE_THREADS="${OPTARG}"
@@ -150,7 +164,10 @@ function main() {
   readonly nginx_path
   readonly siege_path
 
+  echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
+
   if [[ "$db_host" = "" ]]; then
+    systemctl restart mariadb
     _check_local_db_running || return
     run_benchmark "${hhvm_path}" "${nginx_path}" "${siege_path}"
   else

@@ -63,13 +63,16 @@ Install it or recompile php without --disable-json
 running Mediawiki benchmark. To check if SELinux is turned off, run `getenforce`
 command and see if the output is `Disabled`.
 
-2. Start MariaDB service: `systemctl restart mariadb`
+The following two steps have been integrated to Mediawiki's runner script so
+there is no need to do them manually anymore
 
-3. Enable TCP TIME_WAIT reuse: `echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse`
-
-The installer script has done 2 and 3 so you don't need to repeat them if you
-run Mediawiki benchmark right after installing, but otherwise you will need to
-run them manually.
+> 2. Start MariaDB service: `systemctl restart mariadb`
+>
+> 3. Enable TCP TIME_WAIT reuse: `echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse`
+>
+> The installer script has done 2 and 3 so you don't need to repeat them if you
+> run Mediawiki benchmark right after installing, but otherwise you will need to
+> run them manually.
 
 ### Run the benchmark
 
@@ -77,24 +80,94 @@ run them manually.
 ./benchpress_cli.py run oss_performance_mediawiki_mlp
 ```
 
-### Scale-up variants (for CPUs with large core counts)
+### Scale-up on CPUs with large core counts
 
-For machines equipped with high-TDP CPUs, such as AMD Bergamo (88c) and anything
-larger, the default Mediawiki workload may not fully utilize the CPU. To fully
-scale up on these platforms, we provided two scale-up Mediawiki workloads
-`oss_performance_mediawiki_mlp_2x` and `oss_performance_mediawiki_mlp_4x` which
-use two and four HHVM server instances respectively during the benchmark.
-Generally `oss_performance_mediawiki_mlp_2x` should be sufficient for the
-currently available high-core-count CPUs and the 4x version are not likely to
-provide additional advantages.
+For machines equipped with high-TDP CPUs that have more than 100 logical cores,
+Mediawiki will automatically launch multiple HHVM server instances during the benchmark.
+The number of HHVM instances equals to the number of CPU logical cores in the system
+divided by 100, rounded up. Meanwhile, the benchmark will scale Siege (the load tester)
+concurrency by the number of HHVM instances.
+
+### Optional parameters
+
+We provide the following optional parameters for `oss_performance_mediawiki_mlp` job:
+  - `scale_out`: The number of HHVM instances to spawn. This can be used if you are not
+  satistfied with the benchmark's automatic scaling and want to specify how many HHVMs
+  to start on your own.
+  - `siege_concurrent`: The number of Siege concurrency. Can be used for manually
+  specifying how many Siege client threads to launch if you don't want the benchmark
+  to automatically scale.
+
+For example, if you want to run with three HHVM instances regardless CPU core count,
+you can run the following:
+
+```bash
+./benchpress_cli.py run oss_performance_mediawiki_mlp -i '{"scale_out": 3}'
+```
 
 ### Reporting
 
 After the benchmark finishes, benchpress will report the benchmark results in the
 following format. We expect the CPU utilization of the last 10 minutes to be at
-least 90%.
+least 90%. `Siege RPS` in `metrics.Combined` section is the metric that measures
+Mediawiki benchmark performance.
 
-```
+```json
+{
+  "benchmark_args": [
+    "-r/usr/local/hphpi/legacy/bin/hhvm",
+    "-nnginx",
+    "-ssiege",
+    "--",
+    "--mediawiki-mlp",
+    "--siege-duration=10M",
+    "--siege-timeout=11m",
+    "--run-as-root",
+    "--i-am-not-benchmarking"
+  ],
+  "benchmark_desc": "Tuned +MLP run for oss_performance_mediawiki",
+  "benchmark_hooks": [],
+  "benchmark_name": "oss_performance_mediawiki_mlp",
+  "machines": [
+    {
+      "cpu_architecture": "x86_64",
+      "cpu_model": "<CPU name>",
+      "hostname": "<server-hostname>",
+      "kernel_version": "5.19.0-0_xxxxxx",
+      "mem_total_kib": "2377504144 KiB",
+      "num_logical_cpus": "380",
+      "os_distro": "centos",
+      "os_release_name": "CentOS Stream 9"
+    }
+  ],
+  "metadata": {
+    "L1d cache": "6 MiB (192 instances)",
+    "L1i cache": "6 MiB (192 instances)",
+    "L2 cache": "192 MiB (192 instances)",
+    "L3 cache": "768 MiB (24 instances)"
+  },
+  "metrics": {
+    "Combined": {
+      "Nginx 200": 8374159,
+      "Nginx 404": 363874,
+      "Nginx P50 time": 0.03,
+      "Nginx P90 time": 0.056,
+      "Nginx P95 time": 0.062,
+      "Nginx P99 time": 0.079,
+      "Nginx avg bytes": 158805.64830391,
+      "Nginx avg time": 0.032921501326598,
+      "Nginx hits": 8738033,
+      "Siege RPS": 14566.1,
+      "Siege failed requests": 0,
+      "Siege requests": 8737475,
+      "Siege successful requests": 8373635,
+      "Siege wall sec": 0.04,
+      "canonical": 0
+    }
+  },
+  "run_id": "4d12a075",
+  "timestamp": 1702336331
+}
 
 ```
 
