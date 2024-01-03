@@ -11,7 +11,7 @@ import json
 from benchpress.lib.parser import Parser
 
 
-class TaoBenchDualInstanceParser(Parser):
+class TaoBenchAutoscaleParser(Parser):
     def parse(self, stdout, stderr, returncode):
         """Extracts TAO bench results from stdout."""
         metrics = {}

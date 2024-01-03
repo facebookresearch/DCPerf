@@ -314,32 +314,38 @@
         after:
           - 'benchmarks/tao_bench/server.csv'
 
-- benchmark: tao_bench_2x
-  name: tao_bench_2x
+- benchmark: tao_bench_autoscale
+  name: tao_bench_autoscale
   description:
-      Spawns two Tao benchmark servers, using a total of 256G
-      of memory and listening to port 11211 and 11212 respectively.
-      The warmup time is 2400s and test time is 720s.
+      Spawns multiple Tao benchmark servers depending on the CPU
+      core count. After executing this job, please see the tail
+      of benchpress.log for instructions on starting clients.
       MAKE SURE to start clients within 1 minute.
   args:
+    - '--num-servers={num_servers}'
     - '--memsize={memsize}'
     - '--interface-name={interface_name}'
-    - '--port-number-inst1=11211'
-    - '--port-number-inst2=11212'
+    - '--port-number-start=11211'
     - '--warmup-time={warmup_time}'
     - '--test-time={test_time}'
+    - '--server-hostname={server_hostname}'
+    - '--num-clients={num_clients}'
     - '--real'
   vars:
-    - 'memsize=256'
+    - 'num_servers=0'
+    - 'memsize=0'
     - 'interface_name=eth0'
-    - 'warmup_time=2400'
+    - 'warmup_time=0'
     - 'test_time=720'
+    - 'server_hostname='
+    - 'num_clients=2'
   hooks:
+    - hook: tao_instruction
     - hook: copymove
       options:
         is_move: true
         after:
-          - 'benchmarks/tao_bench/server.csv'
+          - 'benchmarks/tao_bench/server*.csv'
           - 'tao-bench-server-*.log'
 
 - benchmark: memcached_bench

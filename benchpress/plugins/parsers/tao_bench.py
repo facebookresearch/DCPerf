@@ -51,6 +51,9 @@ class TaoBenchParser(Parser):
     # result qps calculation
     MIN_HIT_RATE = 0.88
 
+    def __init__(self, server_csv_name="server.csv"):
+        self.server_csv_name = server_csv_name
+
     def parse(self, stdout, stderr, returncode):
         """Extracts TAO bench results from stdout."""
         metrics = {"role": "unknown"}
@@ -98,7 +101,7 @@ class TaoBenchParser(Parser):
             )
             seq += 1
 
-        with open("benchmarks/tao_bench/server.csv", "w") as table:
+        with open(f"benchmarks/tao_bench/{self.server_csv_name}", "w") as table:
             table.writelines(lines)
 
     def process_server_snapshots(self, metrics, server_snapshots):

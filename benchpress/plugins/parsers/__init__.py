@@ -42,7 +42,7 @@ from .spec_cpu2006 import SPECCPU2006Parser
 from .stream import StreamParser
 from .tailbench import TailBenchParser
 from .tao_bench import TaoBenchParser
-from .tao_bench_2x import TaoBenchDualInstanceParser
+from .tao_bench_autoscale import TaoBenchAutoscaleParser
 
 
 def register_parsers(factory):
@@ -74,7 +74,7 @@ def register_parsers(factory):
     factory.register("memcached_bench", MemcachedBenchParser)
     factory.register("cachebench", CacheBenchParser)
     factory.register("tao_bench", TaoBenchParser)
-    factory.register("tao_bench_2x", TaoBenchDualInstanceParser)
+    factory.register("tao_bench_autoscale", TaoBenchAutoscaleParser)
     factory.register("speccpu2006", SPECCPU2006Parser)
     factory.register("stream", StreamParser)
     factory.register("mlc", MlcParser)

@@ -14,6 +14,7 @@ from .file import FileHook
 from .perf import Perf
 from .result import ResultHook
 from .shell import ShellHook
+from .tao_instruction import TaoInstructionHook
 from .toplev import Toplev
 from .user_script import UserScript
 
@@ -27,5 +28,6 @@ def register_hooks(factory):
     factory.register("perf", Perf)
     factory.register("result", ResultHook)
     factory.register("shell", ShellHook)
+    factory.register("tao_instruction", TaoInstructionHook)
     factory.register("toplev", Toplev)
     factory.register("user-script", UserScript)

@@ -13,6 +13,7 @@ BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
 
 MEM_USAGE_FACTOR = 0.75  # not really matter
+MAX_CLIENT_CONN = 32768
 
 
 def get_affinitize_nic_path():
@@ -21,6 +22,12 @@ def get_affinitize_nic_path():
         return default_path
     else:
         return os.path.join(TAO_BENCH_DIR, "affinitize/affinitize_nic.py")
+
+
+def sanitize_clients_per_thread(val=380):
+    ncores = len(os.sched_getaffinity(0))
+    max_clients_per_thread = MAX_CLIENT_CONN // ncores
+    return min(val, max_clients_per_thread)
 
 
 def run_cmd(
@@ -139,9 +146,9 @@ def get_client_cmd(args, n_seconds):
             n_threads = int(len(os.sched_getaffinity(0)) * 0.8)
     # clients
     if args.clients_per_thread > 0:
-        n_clients = args.clients_per_thread
+        n_clients = sanitize_clients_per_thread(args.clients_per_thread)
     else:
-        n_clients = 380
+        n_clients = sanitize_clients_per_thread(380)
     # server port number
     if args.server_port_number > 0:
         server_port_num = args.server_port_number
@@ -293,7 +300,7 @@ def init_parser():
     client_parser.add_argument(
         "--clients-per-thread",
         type=int,
-        default=380,
+        default=sanitize_clients_per_thread(380),
         help="Number of clients per thread",
     )
     client_parser.add_argument(

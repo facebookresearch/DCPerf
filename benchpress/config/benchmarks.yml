@@ -41,11 +41,11 @@ tao_bench:
     - server
     - client
 
-tao_bench_2x:
-  parser: tao_bench_2x
+tao_bench_autoscale:
+  parser: tao_bench_autoscale
   install_script: ./packages/tao_bench/install_tao_bench.sh
   cleanup_script: ./packages/tao_bench/cleanup_tao_bench.sh
-  path: ./packages/tao_bench/run_2x.py
+  path: ./packages/tao_bench/run_autoscale.py
   tags:
     scope:
       - app
