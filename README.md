@@ -16,13 +16,14 @@ Install Python (>= 3.7) and the following packages:
 - click
 - pyyaml
 - tabulate
+- pandas
 
 The commands are:
 
 ```bash
-dnf install -y python38
+dnf install -y python38 python38-pip
 alternatives --set python3 /usr/bin/python3.8
-pip-3.8 install click pyyaml tabulate
+pip-3.8 install click pyyaml tabulate pandas
 ```
 
 Enable EPEL and PowerTools repos:
@@ -40,7 +41,8 @@ After that, try running `./benchpress_cli.py` under the benchpress directory.
 Install click, pyyaml and tabulate using DNF:
 
 ```bash
-dnf install -y python3-click python3-pyyaml python3-tabulate
+dnf install -y python3-click python3-pyyaml python3-tabulate python3-pip
+pip-3.9 install pandas
 ```
 
 Enable EPEL and PowerTools/CRB repos:

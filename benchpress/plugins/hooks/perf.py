@@ -6,60 +6,62 @@
 # LICENSE file in the root directory of this source tree. An additional grant
 # of patent rights can be found in the PATENTS file in the same directory.
 
-import logging
 import os
+import sys
 
-from benchpress.lib import util
 from benchpress.lib.hook import Hook
 
+from .perf_monitors import cpufreq, memstat, mpstat, netstat, perfstat, topdown
 
-logger = logging.getLogger(__name__)
+BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
 
+DEFAULT_OPTIONS = {
+    "mpstat": {
+        "interval": 5,
+    },
+    "cpufreq": {
+        "interval": 5,
+    },
+    "perfstat": {"interval": 5, "additional_events": []},
+    "netstat": {"interval": 5, "additional_counters": []},
+    "memstat": {"interval": 5, "additional_counters": []},
+    "topdown": {},
+}
 
-DEFAULT_BACKGROUND_DURATION_SECS = "60"
-DEFAULT_OPTIONS = ["-e", "cycles,instructions,cache-references,cache-misses,bus-cycles"]
-DEFAULT_PATH = "perf.real stat"
+AVAIL_MONITORS = {
+    "mpstat": mpstat.MPStat,
+    "cpufreq": cpufreq.CPUFreq,
+    "perfstat": perfstat.PerfStat,
+    "netstat": netstat.NetStat,
+    "memstat": memstat.MemStat,
+    "topdown": topdown.TopDown,
+}
 
 
 class Perf(Hook):
     def before_job(self, opts, job):
-        if not opts:
-            opts = {"args": DEFAULT_OPTIONS}
-        if "args" not in opts:
-            opts["args"] = DEFAULT_OPTIONS
+        self.opts = DEFAULT_OPTIONS
+        for key in DEFAULT_OPTIONS.keys():
+            if not isinstance(opts, dict):
+                break
+            if key in opts:
+                self.opts[key].update(opts[key])
 
-        benchmark_metrics_dir = util.create_benchmark_metrics_dir(job.uuid)
-        job_name = job.name.replace(" ", "_")
-        iteration_num = job.iteration_num
-        self.default_stdout_path = os.path.join(
-            benchmark_metrics_dir,
-            "{}_perf_hook_output_{}".format(job_name, iteration_num),
-        )
+        self.benchmark_metrics_dir = BP_BASEPATH + f"/benchmark_metrics_{job.uuid}"
+        if not os.path.isdir(self.benchmark_metrics_dir):
+            os.mkdir(self.benchmark_metrics_dir)
 
-        self.background_mode = False
-        if "background_mode" in opts and opts["background_mode"]:
-            self.background_mode = True
-            self.bg_perf_proc = self._start_background_perf(opts)
-        else:
-            binary_path = job.binary
-            job.args = opts["args"] + ["--", binary_path] + job.args
-            job.binary = opts.get("binary_path", DEFAULT_PATH)
+        self.monitors = []
+        for mon_name in AVAIL_MONITORS.keys():
+            MonitorClass = AVAIL_MONITORS[mon_name]
+            init_args = self.opts[mon_name]
+            self.monitors.append(MonitorClass(job_uuid=job.uuid, **init_args))
+
+        for monitor in self.monitors:
+            monitor.run()
 
     def after_job(self, opts, job):
-        if self.background_mode:
-            if self.bg_perf_proc and self.bg_perf_proc.poll() is None:
-                self.bg_perf_proc.terminate()
-                self.stdout.close()
-
-    def _start_background_perf(self, opts):
-        bg_opts = opts["background_mode"]
-        duration = bg_opts.get("duration", DEFAULT_BACKGROUND_DURATION_SECS)
-        stdout_path = bg_opts.get("stdout_path", self.default_stdout_path)
-        self.stdout = open(stdout_path, "w", encoding="utf-8")  # noqa P201
-
-        cmd = opts.get("binary_path", DEFAULT_PATH).split()
-        cmd += opts["args"]
-        cmd += ["-I", "1000", "-a", "sleep", str(duration)]
-        logging.info(f"Starting background 'perf' hook: {' '.join(cmd)}")
-
-        return util.issue_background_command(cmd, self.stdout, self.stdout)
+        for monitor in self.monitors:
+            monitor.terminate()
+        for monitor in self.monitors:
+            monitor.write_csv()

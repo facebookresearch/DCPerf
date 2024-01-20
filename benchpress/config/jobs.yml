@@ -67,6 +67,15 @@
     db:
       args:
         - '-r db'
+  hooks:
+    - hook: perf
+      options:
+        mpstat:
+          interval: 5
+        cpufreq:
+          interval: 30
+        perfstat:
+          interval: 30
 
 - benchmark: django_workload
   name: django_workload_custom
