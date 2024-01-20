@@ -9,7 +9,7 @@
 import subprocess
 import time
 
-from . import Monitor
+from . import logger, Monitor
 
 
 class SoftReadOnlyList:
@@ -44,7 +44,7 @@ class PerfStat(Monitor):
         self.events = ["instructions", "cycles"] + list(additional_events)
         self.delim = delim
 
-    def process_output(self, line):
+    def _process_output(self, line):
         obj = unpack_perf_stat_line(line, self.delim)
         event_name = obj["event"]
         event_value = obj["counter-value"]
@@ -63,10 +63,21 @@ class PerfStat(Monitor):
             self.res[-1][event_name] = event_value
         # Calculate IPC if both "instructions" and "cycles" exist
         if "instructions" in self.res[-1] and "cycles" in self.res[-1]:
-            instructions = float(self.res[-1]["instructions"])
-            cycles = float(self.res[-1]["cycles"])
-            ipc = instructions / cycles
+            instructions = self.res[-1]["instructions"]
+            cycles = self.res[-1]["cycles"]
+            try:
+                ipc = float(instructions) / float(cycles)
+            except (ValueError, TypeError, ZeroDivisionError):
+                ipc = 0
             self.res[-1]["instructions_per_cycle"] = ipc
+
+    def process_output(self, line):
+        try:
+            self._process_output(line)
+        except Exception as e:
+            logger.warning(
+                "PerfStat encountered an exception while processing output: " + str(e)
+            )
 
     def run(self):
         args = [

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import benchpress.lib.sys_specs as sys_specs
 import click
 from benchpress.lib.history import History
+from benchpress.lib.hook_factory import HookFactory
 from benchpress.lib.job import get_target_jobs
 from benchpress.lib.reporter_factory import ReporterFactory
 
@@ -45,6 +46,19 @@ class RunCommand(BenchpressCommand):
             "--dry-run",
             action="store_true",
             help="Dry run to check commands to run",
+        )
+        parser.add_argument(
+            "-k",
+            "--hooks",
+            default=[],
+            nargs="+",
+            help="Additional hooks to apply, e.g. --hooks hook1 hook2 hook3 ...",
+        )
+        parser.add_argument(
+            "-a",
+            "--hook-args",
+            default="{}",
+            help='Hook arguments in JSON format, e.g. \'{"hook1": {"key": <value>, ...}, "hook2": {...}, ...}\'',
         )
 
     def run(self, args, jobs) -> None:
@@ -115,6 +129,21 @@ class RunCommand(BenchpressCommand):
                 job_cmd = job.dry_run(args.role, role_in)
                 click.echo(f"Execution command: {' '.join(job_cmd)}")
                 continue
+
+            try:
+                additional_hook_args = json.loads(args.hook_args)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Could not parse hook args - please make sure it's in valid JSON format"
+                )
+                additional_hook_args = {}
+
+            additional_hooks = args.hooks
+            for hook in additional_hooks:
+                hook_opts = None
+                if hook in additional_hook_args:
+                    hook_opts = additional_hook_args[hook]
+                job.hooks.append((hook, HookFactory.create(hook), hook_opts))
 
             if args.disable_hooks:
                 click.echo("Hooks globally disabled as requested")

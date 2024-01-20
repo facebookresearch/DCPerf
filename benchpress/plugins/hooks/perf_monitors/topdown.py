@@ -140,7 +140,13 @@ class IntelPerfSpect(Monitor):
     def terminate(self):
         if not self.supported:
             return
-        os.kill(self.proc.pid, signal.SIGINT)
+        pk = subprocess.Popen(
+            ["killall", "-s", "SIGINT", "perf-collect"],
+            stdout=self.logfile,
+            stderr=self.logfile,
+            encoding="utf-8",
+        )
+        pk.wait()
         exitcode = self.proc.wait()
         if exitcode != 0:
             logger.warning(f"perf-collect failed with exit code {exitcode}")
