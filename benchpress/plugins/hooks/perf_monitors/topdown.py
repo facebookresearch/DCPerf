@@ -8,7 +8,6 @@
 
 import os
 import re
-import signal
 import subprocess
 
 from . import BP_BASEPATH, logger, Monitor
@@ -250,7 +249,14 @@ class AMDPerfUtil:
         self.cpu_vendor = get_cpu_vendor(self.cpuinfo)
         if self.cpu_vendor != "amd":
             raise Exception("Not an AMD processor!")
-        self.is_zen4 = get_amd_zen_generation(self.cpuinfo) >= 4
+        if get_amd_zen_generation(self.cpuinfo) >= 4:
+            self.is_zen4 = True
+        # Provide an user option to override the default behavior of detecting Zen4
+        # This is to support engineering sample CPUs who don't have formal CPU model names
+        elif "is_zen4" in kwargs and kwargs["is_zen4"]:
+            self.is_zen4 = True
+        else:
+            self.is_zen4 = False
         self.perfutil = BasePerfUtil(
             job_uuid,
             "amd-perf-collector",
