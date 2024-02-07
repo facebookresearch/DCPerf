@@ -63,6 +63,15 @@ to view the instructions on setting up and running the benchmarks:
 * [DjangoWorkload](packages/django_workload//README.md).
 * [SparkBench](packages/spark_standalone/README.md).
 
+## Monitoring system performance metrics
+
+Benchpress provides a hook called `perf` that can help you monitor system performance
+metrics such as CPU utilization, memory usage, CPU frequency, network bandwidth and
+some micro-architecture telemetries while running DCPerf benchmarks.
+
+Regarding how to use this hook and what functionalities it can provide, please refer
+to this [README](benchpress/plugins/hooks/perf_monitors/README.md).
+
 ## Expected CPU Utilization
 
 Below is a table of our expectation on CPU utilization of these benchmarks.
@@ -127,4 +136,3 @@ sufficiently stressed the system.
    </td>
   </tr>
 </table>
-
