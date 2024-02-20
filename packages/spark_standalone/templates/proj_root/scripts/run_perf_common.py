@@ -172,9 +172,12 @@ def parse_per_stage_runtime(
                 if "2.0-fullbatch" not in timelines:
                     timelines["2.0-fullbatch"] = [timestamp, timestamp]
                 finish_line = re.search(r"\((\d+)/(\d+)\)", parts[2])
-                if finish_line and int(finish_line.group(1)) <= worker_cores:
-                    timelines["2.0-fullbatch"][1] = timestamp
-
+                if finish_line:
+                    task_id = int(finish_line.group(1))
+                    total_tasks = int(finish_line.group(2))
+                    full_batch = max(total_tasks // worker_cores, 1) * worker_cores
+                    if task_id <= full_batch:
+                        timelines["2.0-fullbatch"][1] = timestamp
     return timelines
 
 
