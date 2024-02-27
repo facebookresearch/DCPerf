@@ -42,6 +42,21 @@ def read_csv(amd_perf_csv_file):
     return df
 
 
+def get_num_sockets(group):
+    socket_series = group.socket
+    return len(socket_series.reset_index().groupby("socket").index)
+
+
+def get_duration_series(group):
+    ts_series = group.timestamp
+    num_sockets = get_num_sockets(group)
+    prev_ts_series = pd.Series(
+        [0.0] * num_sockets + list(ts_series.iloc[:-num_sockets])
+    )
+    prev_ts_series.index = ts_series.index
+    return ts_series.sub(prev_ts_series)
+
+
 @skip_if_missing
 def timestamp(grouped_df):
     ts_series = grouped_df.get_group("cycles").timestamp
@@ -51,7 +66,12 @@ def timestamp(grouped_df):
 @skip_if_missing
 def mips(grouped_df):
     inst_series = grouped_df.get_group("instructions").counter_value
-    return {"name": "Avg. MIPS (total)", "series": inst_series, "prefix": 10**-6}
+    duration_series = get_duration_series(grouped_df.get_group("instructions"))
+    return {
+        "name": "Avg. MIPS (total)",
+        "series": inst_series.astype("float").div(duration_series),
+        "prefix": 10**-6,
+    }
 
 
 @skip_if_missing
@@ -463,6 +483,7 @@ def mem_read_bw_MBps(grouped_df):
     umc_g_read_requests = grouped_df.get_group("umc_g_read_requests").counter_value
     umc_c_cancels_issued = grouped_df.get_group("umc_c_cancels_issued").counter_value
     umc_g_cancels_issued = grouped_df.get_group("umc_g_cancels_issued").counter_value
+    duration_series = get_duration_series(grouped_df.get_group("umc_c_read_requests"))
 
     umc_g_read_requests.index = umc_c_read_requests.index
     umc_c_cancels_issued.index = umc_c_read_requests.index
@@ -473,7 +494,7 @@ def mem_read_bw_MBps(grouped_df):
     total_umc_reads = umc_c_read_traffic + umc_g_read_traffic
     return {
         "name": "Total Memory Read BW (MB/s)",
-        "series": total_umc_reads,
+        "series": total_umc_reads.div(duration_series),
         "prefix": 10**-6,
     }
 
@@ -484,6 +505,7 @@ def mem_write_bw_MBps(grouped_df):
     umc_d_write_requests = grouped_df.get_group("umc_d_write_requests").counter_value
     umc_g_write_requests = grouped_df.get_group("umc_g_write_requests").counter_value
     umc_h_write_requests = grouped_df.get_group("umc_h_write_requests").counter_value
+    duration_series = get_duration_series(grouped_df.get_group("umc_c_write_requests"))
 
     umc_d_write_requests.index = umc_c_write_requests.index
     umc_g_write_requests.index = umc_c_write_requests.index
@@ -497,7 +519,7 @@ def mem_write_bw_MBps(grouped_df):
     )
     return {
         "name": "Total Memory Write BW (MB/s)",
-        "series": total_umc_writes,
+        "series": total_umc_writes.div(duration_series),
         "prefix": 10**-6,
     }
 
@@ -516,6 +538,7 @@ def zen4_mem_read_bw_MBps(grouped_df):
     umc_j_read_requests = grouped_df.get_group("umc_j_read_requests").counter_value
     umc_k_read_requests = grouped_df.get_group("umc_k_read_requests").counter_value
     umc_l_read_requests = grouped_df.get_group("umc_l_read_requests").counter_value
+    duration_series = get_duration_series(grouped_df.get_group("umc_a_read_requests"))
 
     umc_b_read_requests.index = umc_a_read_requests.index
     umc_c_read_requests.index = umc_a_read_requests.index
@@ -546,7 +569,7 @@ def zen4_mem_read_bw_MBps(grouped_df):
 
     return {
         "name": "Total Memory Read BW (MB/s)",
-        "series": total_umc_reads,
+        "series": total_umc_reads.div(duration_series),
         "prefix": 10**-6,
     }
 
@@ -565,6 +588,7 @@ def zen4_mem_write_bw_MBps(grouped_df):
     umc_j_write_requests = grouped_df.get_group("umc_j_write_requests").counter_value
     umc_k_write_requests = grouped_df.get_group("umc_k_write_requests").counter_value
     umc_l_write_requests = grouped_df.get_group("umc_l_write_requests").counter_value
+    duration_series = get_duration_series(grouped_df.get_group("umc_a_write_requests"))
 
     umc_b_write_requests.index = umc_a_write_requests.index
     umc_c_write_requests.index = umc_a_write_requests.index
@@ -595,7 +619,7 @@ def zen4_mem_write_bw_MBps(grouped_df):
 
     return {
         "name": "Total Memory Write BW (MB/s)",
-        "series": total_umc_writes,
+        "series": total_umc_writes.div(duration_series),
         "prefix": 10**-6,
     }
 
