@@ -161,7 +161,6 @@ class RunCommand(BenchpressCommand):
             # Hooks structured as: hook_name: hook_options
             job_hooks = ["{}: {}".format(hook[0], hook[2]) for hook in job.hooks]
             final_metrics["benchmark_hooks"] = job_hooks
-            final_metrics["benchmark_args"] = job.args
 
             try:
                 metrics = job.run(args.role, role_in)
@@ -169,6 +168,9 @@ class RunCommand(BenchpressCommand):
                 # Continue to propagate exception up the stack
                 raise
             finally:
+                # Fill benchmark_args after running to make sure
+                # variables are substituted
+                final_metrics["benchmark_args"] = job.args
                 # Make sure hooks are stopped, even if job failed
                 if not args.disable_hooks:
                     job.stop_hooks()
