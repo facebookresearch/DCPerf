@@ -18,17 +18,18 @@ class FeedSimAutoscaleParser(Parser):
         """Parse FeedSim AutoScale metrics."""
         output = ""
         json_started = False
-        for line in stdout:
-            if line.strip().startswith("{"):
+        for line in reversed(stdout):
+            if line.startswith("{"):
+                output = "{" + output
+                break
+            elif line.startswith("}"):
                 json_started = True
-            elif line.strip().endswith("}"):
-                json_started = False
-                output += "}"
             if json_started:
-                output += line
+                output = line + output
 
         try:
             metrics = json.loads(output)
             return metrics
         except json.JSONDecodeError as e:
             logger.warning("Couldn't parse feedsim_autoscale output: " + str(e))
+            logger.warning("Collected output: " + output)
