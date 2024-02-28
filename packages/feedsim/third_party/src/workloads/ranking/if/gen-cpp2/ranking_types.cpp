@@ -79,9 +79,9 @@ namespace thrift {
 namespace detail {
 
 void TccStructTraits<::ranking::Payload>::translateFieldName(
-    FOLLY_MAYBE_UNUSED folly::StringPiece _fname,
-    FOLLY_MAYBE_UNUSED int16_t& fid,
-    FOLLY_MAYBE_UNUSED apache::thrift::protocol::TType& _ftype) {
+    [[maybe_unused]] folly::StringPiece _fname,
+    [[maybe_unused]] int16_t& fid,
+    [[maybe_unused]] apache::thrift::protocol::TType& _ftype) {
   if (false) {}
   else if (_fname == "message") {
     fid = 1;
@@ -89,9 +89,9 @@ void TccStructTraits<::ranking::Payload>::translateFieldName(
   }
 }
 void TccStructTraits<::ranking::Action>::translateFieldName(
-    FOLLY_MAYBE_UNUSED folly::StringPiece _fname,
-    FOLLY_MAYBE_UNUSED int16_t& fid,
-    FOLLY_MAYBE_UNUSED apache::thrift::protocol::TType& _ftype) {
+    [[maybe_unused]] folly::StringPiece _fname,
+    [[maybe_unused]] int16_t& fid,
+    [[maybe_unused]] apache::thrift::protocol::TType& _ftype) {
   if (false) {}
   else if (_fname == "type") {
     fid = 1;
@@ -111,9 +111,9 @@ void TccStructTraits<::ranking::Action>::translateFieldName(
   }
 }
 void TccStructTraits<::ranking::RankingObject>::translateFieldName(
-    FOLLY_MAYBE_UNUSED folly::StringPiece _fname,
-    FOLLY_MAYBE_UNUSED int16_t& fid,
-    FOLLY_MAYBE_UNUSED apache::thrift::protocol::TType& _ftype) {
+    [[maybe_unused]] folly::StringPiece _fname,
+    [[maybe_unused]] int16_t& fid,
+    [[maybe_unused]] apache::thrift::protocol::TType& _ftype) {
   if (false) {}
   else if (_fname == "objectID") {
     fid = 1;
@@ -153,9 +153,9 @@ void TccStructTraits<::ranking::RankingObject>::translateFieldName(
   }
 }
 void TccStructTraits<::ranking::RankingStory>::translateFieldName(
-    FOLLY_MAYBE_UNUSED folly::StringPiece _fname,
-    FOLLY_MAYBE_UNUSED int16_t& fid,
-    FOLLY_MAYBE_UNUSED apache::thrift::protocol::TType& _ftype) {
+    [[maybe_unused]] folly::StringPiece _fname,
+    [[maybe_unused]] int16_t& fid,
+    [[maybe_unused]] apache::thrift::protocol::TType& _ftype) {
   if (false) {}
   else if (_fname == "storyID") {
     fid = 1;
@@ -175,9 +175,9 @@ void TccStructTraits<::ranking::RankingStory>::translateFieldName(
   }
 }
 void TccStructTraits<::ranking::RankingResponse>::translateFieldName(
-    FOLLY_MAYBE_UNUSED folly::StringPiece _fname,
-    FOLLY_MAYBE_UNUSED int16_t& fid,
-    FOLLY_MAYBE_UNUSED apache::thrift::protocol::TType& _ftype) {
+    [[maybe_unused]] folly::StringPiece _fname,
+    [[maybe_unused]] int16_t& fid,
+    [[maybe_unused]] apache::thrift::protocol::TType& _ftype) {
   if (false) {}
   else if (_fname == "queryID") {
     fid = 1;
