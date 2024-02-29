@@ -23,15 +23,23 @@ FEEDSIM_ROOT_SRC="${FEEDSIM_ROOT}/src"
 
 # Thrift threads: scale with logical CPUs till 216. Having more than that
 # will risk running out of memory and getting killed
+IS_SMT_ON="$(cat /sys/devices/system/cpu/smt/active)"
 THRIFT_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc), 216)" | bc)"
-RANKING_THREADS_DEFAULT="$(( $(nproc) * 7/20))"  # 7/20 is 0.35 cpu factor
 EVENTBASE_THREADS_DEFAULT=4  # 4 should suffice. Tune up if threads are saturated.
 SRV_THREADS_DEFAULT=8        # 8 should also suffice for most purposes
-SRV_IO_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc) * 7/20, 55)" | bc)" # 0.35 cpu factor, max 55
-DRIVER_THREADS="$(echo "scale=2; $(nproc) / 5.0 + 0.5 " | bc )"  # Driver threads, rounds nearest.
-DRIVER_THREADS="${DRIVER_THREADS%.*}"  # Truncate decimal fraction.
-DRIVER_THREADS="$(echo "${BC_MAX_FN}; max(${DRIVER_THREADS:-0}, 4)" | bc )" # At least 4 threads.
-
+if [[ "$IS_SMT_ON" = 1 ]]; then
+  RANKING_THREADS_DEFAULT="$(( $(nproc) * 7/20))"  # 7/20 is 0.35 cpu factor
+  SRV_IO_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc) * 7/20, 55)" | bc)" # 0.35 cpu factor, max 55
+  DRIVER_THREADS="$(echo "scale=2; $(nproc) / 5.0 + 0.5 " | bc )"  # Driver threads, rounds nearest.
+  DRIVER_THREADS="${DRIVER_THREADS%.*}"  # Truncate decimal fraction.
+  DRIVER_THREADS="$(echo "${BC_MAX_FN}; max(${DRIVER_THREADS:-0}, 4)" | bc )" # At least 4 threads.
+else
+  RANKING_THREADS_DEFAULT="$(( $(nproc) * 15/20))"  # 15/20 is 0.75 cpu factor
+  SRV_IO_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc) * 11/20, 55)" | bc)" # 0.55 cpu factor, max 55
+  DRIVER_THREADS="$(echo "scale=2; $(nproc) / 4.0 + 0.5 " | bc )"  # Driver threads, rounds nearest.
+  DRIVER_THREADS="${DRIVER_THREADS%.*}"  # Truncate decimal fraction.
+  DRIVER_THREADS="$(echo "${BC_MAX_FN}; max(${DRIVER_THREADS:-0}, 4)" | bc )" # At least 4 threads.
+fi
 
 show_help() {
 cat <<EOF
