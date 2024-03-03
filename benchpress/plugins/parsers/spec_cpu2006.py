@@ -20,7 +20,7 @@ class SPECCPU2006Parser(Parser):
         output = "\n".join(stdout)
         metrics = {}
         matches = re.findall(SPECCPU_RAWFORMAT_MATCHER, output)
-        for (k, v) in matches:
+        for k, v in matches:
             if (
                 k.endswith(".base_copies")
                 or k.endswith(".base_threads")

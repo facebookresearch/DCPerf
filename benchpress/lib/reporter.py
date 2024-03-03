@@ -54,7 +54,6 @@ class StdoutReporter(Reporter):
 
 
 class JSONFileReporter(Reporter):
-
     """Reporter implementation to log job suite metrics to JSON file"""
 
     def report(self, job, metrics):
