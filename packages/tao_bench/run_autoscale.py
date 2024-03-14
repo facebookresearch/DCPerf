@@ -148,14 +148,25 @@ def distribute_cores(n_parts):
         phy_core_list = core_list[: n_cores // 2]
         smt_core_list = core_list[n_cores // 2 :]
         portion = n_cores // n_parts // 2
+        remaining_cores = n_cores - portion * 2 * n_parts
     else:
         phy_core_list = core_list
         portion = n_cores // n_parts
+        remaining_cores = n_cores - portion * n_parts
     # Pin each instance to physical cpu core and corresponding vcpu
+    core_start_idx = 0
     for i in range(n_parts):
-        cores_to_alloc = phy_core_list[i * portion : (i + 1) * portion]
+        extra = 1 if remaining_cores > 0 else 0
+        cores_to_alloc = phy_core_list[
+            core_start_idx : core_start_idx + portion + extra
+        ]
+        remaining_cores -= extra
         if is_smt_active:
-            cores_to_alloc += smt_core_list[i * portion : (i + 1) * portion]
+            cores_to_alloc += smt_core_list[
+                core_start_idx : core_start_idx + portion + extra
+            ]
+            remaining_cores -= extra
+        core_start_idx += portion + extra
         core_ranges.append(list2ranges(cores_to_alloc))
     return core_ranges
 

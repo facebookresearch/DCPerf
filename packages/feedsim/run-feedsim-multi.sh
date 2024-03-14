@@ -34,14 +34,24 @@ function get_cpu_range() {
         NCORES="$NPROC"
     fi
     CORES_PER_INST="$((NCORES / total_instances))"
+    REMAINING_CORES="$((NCORES - CORES_PER_INST * total_instances))"
+    EXTRA_CORE=0
+    OFFSET=0
+    if [ "$inst_id" -lt "$REMAINING_CORES" ]; then
+        EXTRA_CORE=1
+        OFFSET="$inst_id"
+    else
+        EXTRA_CORE=0
+        OFFSET="$REMAINING_CORES"
+    fi
 
-    PHY_CORE_BASE="$((CORES_PER_INST * inst_id))"
-    PHY_CORE_END="$((PHY_CORE_BASE + CORES_PER_INST - 1))"
+    PHY_CORE_BASE="$((CORES_PER_INST * inst_id + OFFSET))"
+    PHY_CORE_END="$((PHY_CORE_BASE + CORES_PER_INST + EXTRA_CORE - 1))"
 
     RES="${PHY_CORE_BASE}-${PHY_CORE_END}"
     if [ "$has_smt" -eq 1 ]; then
-        SMT_BASE="$((NPROC / 2 + CORES_PER_INST * inst_id))"
-        SMT_END="$((SMT_BASE + CORES_PER_INST - 1))"
+        SMT_BASE="$((NPROC / 2 + CORES_PER_INST * inst_id + OFFSET))"
+        SMT_END="$((SMT_BASE + CORES_PER_INST + EXTRA_CORE - 1))"
         RES="${RES},${SMT_BASE}-${SMT_END}"
     fi
 

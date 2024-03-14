@@ -175,7 +175,7 @@ index ccfcd35..c9ca871 100644
  
      // Validates that one was defined
 diff --git a/base/PerfRunner.php b/base/PerfRunner.php
-index 9d62c13..a6d11c9 100644
+index 9d62c13..a261bc8 100644
 --- a/base/PerfRunner.php
 +++ b/base/PerfRunner.php
 @@ -11,12 +11,17 @@
@@ -198,7 +198,7 @@ index 9d62c13..a6d11c9 100644
      // If we exit cleanly, Process::__destruct() gets called, but it doesn't
      // if we're killed by Ctrl-C. This tends to leak php-cgi or hhvm processes -
      // trap the signal so we can clean them up.
-@@ -28,35 +33,73 @@ final class PerfRunner {
+@@ -28,35 +33,78 @@ final class PerfRunner {
        },
      );
  
@@ -213,25 +213,30 @@ index 9d62c13..a6d11c9 100644
 -      $php_engine = new HHVMDaemon($options);
 +      $is_smt_active = file_get_contents('/sys/devices/system/cpu/smt/active');
 +      if ($is_smt_active !== false) {
-+      	$is_smt_active = trim($is_smt_active);
++        $is_smt_active = trim($is_smt_active);
 +      }
 +      self::PrintProgress('CPU SMT Active: ' . strval($is_smt_active));
 +      $nproc = cpu_get_count();
++      $physical_cores = $nproc;
 +      $core_start = 0;
 +      if ($is_smt_active === '1') {
++        $physical_cores = (int)($physical_cores / 2);
 +        $smt_start = $nproc / 2;
-+        $cores_per_daemon = $nproc / $options->scaleOut / 2;
++        $cores_per_daemon = (int)($nproc / $options->scaleOut / 2);
 +      } else {
-+        $cores_per_daemon = $nproc / $options->scaleOut;
++        $cores_per_daemon = (int)($nproc / $options->scaleOut);
 +      }
++      $remaining_cores = $physical_cores - $cores_per_daemon * $options->scaleOut;
 +      for ($i = 0; $i < $options->scaleOut; $i++) {
 +        $coreRange = Vector {};
 +        if ($options->scaleOut > 1) {
-+          $coreRange->add(Pair {$core_start, $core_start + $cores_per_daemon - 1});
-+          $core_start = $core_start + $cores_per_daemon;
++          $extra = ($remaining_cores > 0) ? 1 : 0;
++          $coreRange->add(Pair {$core_start, $core_start + $cores_per_daemon + $extra - 1});
++          $core_start = $core_start + $cores_per_daemon + $extra;
++          $remaining_cores = $remaining_cores - $extra;
 +          if ($is_smt_active === '1') {
-+            $coreRange->add(Pair {$smt_start, $smt_start + $cores_per_daemon - 1});
-+            $smt_start = $smt_start + $cores_per_daemon;
++            $coreRange->add(Pair {$smt_start, $smt_start + $cores_per_daemon + $extra - 1});
++            $smt_start = $smt_start + $cores_per_daemon + $extra;
 +          }
 +        }
 +        $hhvm_daemon = new HHVMDaemon($options_list->get($i), PerfSettings::BackendPorts($i), PerfSettings::BackendAdminPorts($i), $coreRange);
@@ -290,7 +295,7 @@ index 9d62c13..a6d11c9 100644
  
      if ($options->setUpTest != null) {
        $command =
-@@ -86,15 +129,22 @@ final class PerfRunner {
+@@ -86,15 +134,22 @@ final class PerfRunner {
        $memcached->start();
      }
  
@@ -322,7 +327,7 @@ index 9d62c13..a6d11c9 100644
      if ($target->needsUnfreeze()) {
        self::PrintProgress('Unfreezing framework');
        $target->unfreeze($options);
-@@ -120,11 +170,16 @@ final class PerfRunner {
+@@ -120,11 +175,16 @@ final class PerfRunner {
        $siege->wait();
  
        invariant(!$siege->isRunning(), 'Siege is still running :/');
@@ -344,7 +349,7 @@ index 9d62c13..a6d11c9 100644
      } else {
        self::PrintProgress('Skipping single request warmup');
      }
-@@ -137,16 +192,21 @@ final class PerfRunner {
+@@ -137,16 +197,21 @@ final class PerfRunner {
        $siege->wait();
  
        invariant(!$siege->isRunning(), 'Siege is still running :/');
@@ -372,7 +377,7 @@ index 9d62c13..a6d11c9 100644
        self::PrintProgress('Extending warmup, server is not done warming up.');
        sleep(3);
        $siege = new Siege($options, $target, RequestModes::WARMUP_MULTI, '10s');
-@@ -155,15 +215,19 @@ final class PerfRunner {
+@@ -155,15 +220,19 @@ final class PerfRunner {
        $siege->wait();
  
        invariant(!$siege->isRunning(), 'Siege is still running :/');
@@ -398,7 +403,7 @@ index 9d62c13..a6d11c9 100644
        self::PrintProgress('Server warmed, waiting for queue to drain.');
        sleep(10);
      }
-@@ -228,13 +292,16 @@ final class PerfRunner {
+@@ -228,13 +297,16 @@ final class PerfRunner {
        (int) !$options->notBenchmarking;
  
      self::PrintProgress('Collecting TC/PCRE data');
@@ -418,7 +423,7 @@ index 9d62c13..a6d11c9 100644
  
      if ($options->tearDownTest != null) {
        $command =
-@@ -253,6 +320,24 @@ final class PerfRunner {
+@@ -253,6 +325,24 @@ final class PerfRunner {
      return $combined_stats;
    }
  
