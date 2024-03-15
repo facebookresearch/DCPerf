@@ -299,17 +299,17 @@ run_loadtest peak_qps measured_latency
 printf "warmup qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
 benchreps_tell_state "after warmup"
 
-# find peak QPS
-benchreps_tell_state "before peak_qps"
-run_loadtest peak_qps measured_latency
-printf "peak qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
-benchreps_tell_state "after peak_qps"
-
 if [[ -n "$fixed_qps" ]]; then
   run_loadtest measured_qps measured_latency $fixed_qps
   printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
   exit 0
 fi
+
+# find peak QPS
+benchreps_tell_state "before peak_qps"
+run_loadtest peak_qps measured_latency
+printf "peak qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
+benchreps_tell_state "after peak_qps"
 
 # Pad peak QPS just to be safe
 peak_qps=$(echo "$peak_qps*1.8"|bc)
