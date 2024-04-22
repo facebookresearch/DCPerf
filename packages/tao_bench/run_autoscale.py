@@ -20,6 +20,44 @@ sys.path.insert(0, str(BENCHPRESS_ROOT))
 from benchpress.plugins.parsers.tao_bench import TaoBenchParser
 
 
+def find_numa_nodes():
+    numa_nodes = {}
+    for node_dir in os.listdir("/sys/devices/system/node"):
+        if node_dir.startswith("node"):
+            node_id = node_dir[4]
+            with open(f"/sys/devices/system/node/{node_dir}/cpulist", "r") as f:
+                numa_nodes[node_id] = f.read().strip()
+    return numa_nodes
+
+
+NUMA_NODES = find_numa_nodes()
+
+
+def check_nodes_of_cpu_range(cpu_ranges, numa_nodes):
+    def get_start_end(cpu_range):
+        start_end = cpu_range.split("-")
+        if len(start_end) < 2:
+            return int(start_end[0]), int(start_end[0])
+        else:
+            return int(start_end[0]), int(start_end[1])
+
+    def is_in_range(node_cpu_ranges, input_cpu_range):
+        input_start, input_end = get_start_end(input_cpu_range)
+        for node_range in node_cpu_ranges.split(","):
+            node_start, node_end = get_start_end(node_range)
+            if input_start > node_end or input_end < node_start:
+                continue
+            return True
+
+    matched_nodes = set()
+    for node_id, node_cpu_ranges in numa_nodes.items():
+        for cpu_range in cpu_ranges.split(","):
+            if is_in_range(node_cpu_ranges, cpu_range):
+                matched_nodes.add(node_id)
+
+    return list(matched_nodes)
+
+
 def compose_server_cmd(args, cpu_core_range, memsize, port_number):
     cmd = [
         "taskset",
@@ -50,6 +88,10 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number):
         "--test-time",
         str(args.test_time),
     ]
+    if len(NUMA_NODES) > 1:
+        numa_nodes_belong_to = check_nodes_of_cpu_range(cpu_core_range, NUMA_NODES)
+        nodelist = ",".join(numa_nodes_belong_to)
+        cmd = ["numactl", "--cpubind", nodelist, "--membind", nodelist] + cmd
     if args.real:
         cmd.append("--real")
     return cmd
