@@ -9,6 +9,7 @@
 import json
 import logging
 import os
+import shlex
 import subprocess
 
 from benchpress.lib import dmidecode
@@ -42,6 +43,14 @@ def get_os_kernel():
         "version": version,
         "machine": machine,
     }
+
+
+def get_kernel_cmdline():
+    if not os.path.exists("/proc/cmdline"):
+        return []
+    with open("/proc/cmdline", "r") as f:
+        kern_cmdline = f.read()
+    return shlex.split(kern_cmdline)
 
 
 def get_dmidecode_data():

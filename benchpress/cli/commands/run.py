@@ -73,6 +73,7 @@ class RunCommand(BenchpressCommand):
 
         cpu_topology = sys_specs.get_cpu_topology()
         os_kernel_data = sys_specs.get_os_kernel()
+        kernel_cmdline = sys_specs.get_kernel_cmdline()
         dmidecode_data = sys_specs.get_dmidecode_data()
         rpm_packages = sys_specs.get_rpm_packages()
         kernel_params = sys_specs.get_sysctl_data()
@@ -83,6 +84,7 @@ class RunCommand(BenchpressCommand):
         sys_specs_dict = {}
         sys_specs_dict["cpu_topology"] = cpu_topology
         sys_specs_dict["os_kernel"] = os_kernel_data
+        sys_specs_dict["kernel_cmdline"] = kernel_cmdline
         sys_specs_dict["dmidecode"] = dmidecode_data
         sys_specs_dict["rpm_packages"] = rpm_packages
         sys_specs_dict["kernel_params"] = kernel_params
