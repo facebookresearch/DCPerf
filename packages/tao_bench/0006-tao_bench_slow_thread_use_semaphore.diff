@@ -1,0 +1,375 @@
+diff --git a/Makefile.am b/Makefile.am
+index 301d16c..50aa669 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -4,7 +4,7 @@ noinst_PROGRAMS = memcached-debug sizes testapp timedrun
+ 
+ BUILT_SOURCES=
+ 
+-testapp_SOURCES = testapp.c util.c util.h stats_prefix.c stats_prefix.h jenkins_hash.c murmur3_hash.c hash.h cache.c named_thread.c
++testapp_SOURCES = testapp.c util.c util.h stats_prefix.c stats_prefix.h jenkins_hash.c murmur3_hash.c hash.h cache.c named_thread.c thread_pin.c
+ 
+ timedrun_SOURCES = timedrun.c
+ 
+@@ -28,7 +28,8 @@ memcached_SOURCES = memcached.c memcached.h \
+                     slab_automove.c slab_automove.h \
+                     authfile.c authfile.h \
+                     restart.c restart.h \
+-					named_thread.c named_thread.h
++					named_thread.c named_thread.h \
++					thread_pin.c thread_pin.h
+ 
+ if BUILD_SOLARIS_PRIVS
+ memcached_SOURCES += solaris_priv.c
+diff --git a/db_provider.c b/db_provider.c
+index 6461a83..e5b4e70 100644
+--- a/db_provider.c
++++ b/db_provider.c
+@@ -1,12 +1,19 @@
+ // Copyright 2004-present Facebook. All Rights Reserved.
+ 
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
++
++#include <semaphore.h>
+ #include <string.h>
+ #include <stdlib.h>
+ #include <lz4.h>
++#include <unistd.h>
+ 
+ #include "memcached.h"
+ #include "named_thread.h"
+ #include "db_items_int.h"
++#include "thread_pin.h"
+ 
+ static uint32_t num_active_slow_threads;
+ static pthread_mutex_t lock_num_active_slow_threads;
+@@ -18,11 +25,11 @@ static uint32_t *dispatch_requests_in_queue;
+ static pthread_mutex_t *lock_dispatch_request_queue;
+ 
+ // Per slow thread request queues
++static sem_t *slow_req_sems;
+ static slow_request **thread_first_request;
+ static slow_request **thread_last_request;
+ static pthread_mutex_t *lock_thread_req_queue;
+ 
+-
+ void init_slow_path(void) {
+     // Initialize state variables
+     num_active_slow_threads = 0;
+@@ -36,6 +43,9 @@ void init_slow_path(void) {
+     fprintf(stdout, "Initialized item generators.\n");
+ 
+     // Initialize linked lists with requests per threads
++    if (settings.tao_slow_use_semaphore) {
++        slow_req_sems = (sem_t*)malloc(sizeof(sem_t) * settings.tao_num_slow_threads);
++    }
+     thread_first_request = (slow_request**)malloc(sizeof(slow_request*) *
+         settings.tao_num_slow_threads);
+     thread_last_request = (slow_request**)malloc(sizeof(slow_request*) *
+@@ -43,6 +53,9 @@ void init_slow_path(void) {
+     lock_thread_req_queue = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t) *
+         settings.tao_num_slow_threads);
+     for (uint32_t i = 0; i < settings.tao_num_slow_threads; ++i) {
++        if (settings.tao_slow_use_semaphore) {
++            sem_init(&slow_req_sems[i], 0, 0);
++        }
+         thread_first_request[i] = NULL;
+         thread_last_request[i] = NULL;
+     }
+@@ -127,6 +140,14 @@ void free_slow_path_mem(void) {
+     }
+ 
+     // Free requests thread queues
++    if (slow_req_sems) {
++        for (uint32_t i = 0; i < settings.tao_num_slow_threads; ++i) {
++            sem_destroy(&slow_req_sems[i]);
++        }
++        free(slow_req_sems);
++        slow_req_sems = NULL;
++    }
++
+     if (thread_first_request) {
+         free(thread_first_request);
+         thread_first_request = NULL;
+@@ -198,6 +219,8 @@ void *slow_thread_dispatcher(void* queue_index) {
+     uint32_t thread_queue_index = 0;
+     uint32_t req_queue_index = *((uint32_t*)queue_index);
+ 
++    bind_thread_to_next_cpu();
++
+     fprintf(stdout, "Starting slow request dispatcher thread %u.\n", req_queue_index);
+     while (true) {
+         // Every task should start with a good sleep.
+@@ -235,6 +258,9 @@ void *slow_thread_dispatcher(void* queue_index) {
+                 thread_last_request[thread_queue_index] = req_to_dispatch;
+             }
+             pthread_mutex_unlock(&lock_thread_req_queue[thread_queue_index]);
++            if (settings.tao_slow_use_semaphore) {
++                sem_post(&slow_req_sems[thread_queue_index]);
++            }
+ 
+             // Move on to the next thread
+             thread_queue_index++;
+@@ -316,6 +342,8 @@ item *add_item_to_cache(slow_request *req, int nbytes, char *payload) {
+ void *handle_slow_request(void *arg) {
+     uint32_t ret = 0;
+ 
++    bind_thread_to_next_cpu();
++
+     // Increase active slow thread count
+     pthread_mutex_lock(&lock_num_active_slow_threads);
+     uint32_t idx_queue = num_active_slow_threads;
+@@ -325,13 +353,16 @@ void *handle_slow_request(void *arg) {
+     // TODO: Implement a kill mechanism
+     while (true) {
+         // Avoid starving CPU in this spinlock
+-        if (settings.tao_slow_sleep_ns > 0) {
+-            struct timespec t_sleep, t_slept;
+-            t_sleep.tv_sec = 0;
+-            t_sleep.tv_nsec = settings.tao_slow_sleep_ns;
+-            nanosleep(&t_sleep, &t_slept);
++        if (settings.tao_slow_use_semaphore) {
++            sem_wait(&slow_req_sems[idx_queue]);
++        } else {
++            if (settings.tao_slow_sleep_ns > 0) {
++                struct timespec t_sleep, t_slept;
++                t_sleep.tv_sec = 0;
++                t_sleep.tv_nsec = settings.tao_slow_sleep_ns;
++                nanosleep(&t_sleep, &t_slept);
++            }
+         }
+-
+         // Holds connection information and key
+         slow_request* req = NULL;
+ 
+diff --git a/memcached.c b/memcached.c
+index 9719981..87b6147 100644
+--- a/memcached.c
++++ b/memcached.c
+@@ -15,6 +15,7 @@
+  */
+ #include "memcached.h"
+ #include "named_thread.h"
++#include "thread_pin.h"
+ #include "db_provider.h"
+ 
+ #ifdef EXTSTORE
+@@ -348,6 +349,8 @@ static void settings_init(void) {
+     settings.tao_slow_path_sleep_us = 1;
+     settings.tao_compress_items = 1;
+     settings.tao_stats_sleep_ms = 5000;
++    settings.tao_slow_use_semaphore = 1;
++    settings.tao_pin_threads = 0;
+ #ifdef MEMCACHED_DEBUG
+     settings.relaxed_privileges = false;
+ #endif
+@@ -8436,6 +8439,11 @@ static void usage(void) {
+             settings.tao_compress_items);
+     printf("   - tao_stats_sleep_ms:  milliseconds to sleep on stats thread. (default: %d)\n",
+             settings.tao_stats_sleep_ms);
++    printf("   - tao_slow_use_semaphore:  if non-zero, use semaphore instead of spinning on nanosleep() "
++           "to wait for slow requests in the slow thread. (default: %d)\n",
++            settings.tao_slow_use_semaphore);
++    printf("   - tao_pin_threads:     if non-zero, pin each thread to dedicated cpu core. (default: %d)\n",
++            settings.tao_pin_threads);
+     verify_default("tail_repair_time", settings.tail_repair_time == TAIL_REPAIR_TIME_DEFAULT);
+     verify_default("lru_crawler_tocrawl", settings.lru_crawler_tocrawl == 0);
+     verify_default("idle_timeout", settings.idle_timeout == 0);
+@@ -9148,6 +9156,8 @@ int main (int argc, char **argv) {
+         TAO_SLOW_PATH_SLEEP_US,
+         TAO_COMPRESS_ITEMS,
+         TAO_STATS_SLEEP_MS,
++        TAO_SLOW_USE_SEMAPHORE,
++        TAO_PIN_THREADS,
+ #ifdef TLS
+         SSL_CERT,
+         SSL_KEY,
+@@ -9229,6 +9239,8 @@ int main (int argc, char **argv) {
+         [TAO_SLOW_PATH_SLEEP_US] = "tao_slow_path_sleep_us",
+         [TAO_COMPRESS_ITEMS] = "tao_compress_items",
+         [TAO_STATS_SLEEP_MS] = "tao_stats_sleep_ms",
++        [TAO_SLOW_USE_SEMAPHORE] = "tao_slow_use_semaphore",
++        [TAO_PIN_THREADS] = "tao_pin_threads",
+ #ifdef TLS
+         [SSL_CERT] = "ssl_chain_cert",
+         [SSL_KEY] = "ssl_key",
+@@ -10135,6 +10147,26 @@ int main (int argc, char **argv) {
+                     return 1;
+                 }
+                 break;
++            case TAO_SLOW_USE_SEMAPHORE:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_slow_use_semaphore argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_slow_use_semaphore)) {
++                    fprintf(stderr, "could not parse argument to tao_slow_use_semaphore\n");
++                    return 1;
++                }
++                break;
++            case TAO_PIN_THREADS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_pin_threads argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_pin_threads)) {
++                    fprintf(stderr, "could not parse argument to tao_pin_threads\n");
++                    return 1;
++                }
++                break;
+             case TAO_DISPATCHER_SLEEP_NS:
+                 if (subopts_value == NULL) {
+                     fprintf(stderr, "Missing tao_dispatcher_sleep_ns argument\n");
+@@ -10318,7 +10350,12 @@ int main (int argc, char **argv) {
+     fprintf(stdout, "Sleep on the slow path = %u us.\n", settings.tao_slow_path_sleep_us);
+     fprintf(stdout, "Item compression = %u.\n", settings.tao_compress_items);
+     fprintf(stdout, "Stats threads sleep time = %u ms.\n", settings.tao_stats_sleep_ms);
++    fprintf(stdout, "Slow threads use semaphore = %u.\n", settings.tao_slow_use_semaphore);
++    fprintf(stdout, "Pin threads to dedicated cores = %u.\n", settings.tao_pin_threads);
+ 
++    if (settings.tao_pin_threads) {
++        init_cpu_list();
++    }
+     /* TAO slow path initialize */
+     init_slow_path();
+ 
+@@ -10827,5 +10864,7 @@ int main (int argc, char **argv) {
+ 
+     free(meta);
+ 
++    destroy_cpu_list();
++
+     return retval;
+ }
+diff --git a/memcached.h b/memcached.h
+index 639c8ea..db4835a 100644
+--- a/memcached.h
++++ b/memcached.h
+@@ -466,6 +466,8 @@ struct settings {
+     uint32_t tao_slow_path_sleep_us; /* Number of us to sleep in each slow request. */
+     uint32_t tao_compress_items; /* If not 0, apply ZSTD compression on item payload */
+     uint32_t tao_stats_sleep_ms; /* Number of milliseconds to sleep on tao stats thread. */
++    uint32_t tao_slow_use_semaphore; /* Use semaphore instad of nanosleep to wait for slow requests. */
++    uint32_t tao_pin_threads;
+ #ifdef EXTSTORE
+     unsigned int ext_io_threadcount; /* number of IO threads to run. */
+     unsigned int ext_page_size; /* size in megabytes of storage pages. */
+diff --git a/thread.c b/thread.c
+index 8669d59..ca17595 100644
+--- a/thread.c
++++ b/thread.c
+@@ -4,6 +4,7 @@
+  */
+ #include "memcached.h"
+ #include "named_thread.h"
++#include "thread_pin.h"
+ #ifdef EXTSTORE
+ #include "storage.h"
+ #endif
+@@ -478,6 +479,8 @@ static void setup_thread(LIBEVENT_THREAD *me) {
+ static void *worker_libevent(void *arg) {
+     LIBEVENT_THREAD *me = arg;
+ 
++    bind_thread_to_next_cpu();
++
+     /* Any per-thread setup can happen here; memcached_thread_init() will block until
+      * all threads have finished initializing.
+      */
+diff --git a/thread_pin.c b/thread_pin.c
+new file mode 100644
+index 0000000..ef119b6
+--- /dev/null
++++ b/thread_pin.c
+@@ -0,0 +1,62 @@
++#include "thread_pin.h"
++
++// CPU affinity
++static int cpu_count;
++static int *cpu_list;
++static int next_cpu;
++static pthread_mutex_t lock_next_cpu;
++
++
++void init_cpu_list(void) {
++    cpu_set_t cpuset;
++    int ret = sched_getaffinity(getpid(), sizeof(cpuset), &cpuset);
++    if (ret != 0) {
++        fprintf(stderr, "Warning: unable to init CPU list (%d)\n", errno);
++        return;
++    }
++    cpu_count = CPU_COUNT(&cpuset);
++    cpu_list = (int*)malloc(sizeof(int) * cpu_count);
++    assert(cpu_list);
++    for (int i = 0, j = 0; i < cpu_count && j < CPU_SETSIZE; i++, j++) {
++        while (j < CPU_SETSIZE) {
++            if (CPU_ISSET(j, &cpuset)) {
++                cpu_list[i] = j;
++                break;
++            }
++            j++;
++        }
++    }
++    next_cpu = 0;
++    pthread_mutex_init(&lock_next_cpu, NULL);
++}
++
++void destroy_cpu_list(void) {
++    if (cpu_list) {
++        free(cpu_list);
++    }
++}
++
++int get_next_cpu(void) {
++    int res;
++    if (!cpu_list) {
++        return 0;
++    }
++    pthread_mutex_lock(&lock_next_cpu);
++    res = cpu_list[next_cpu];
++    next_cpu = (next_cpu + 1) % cpu_count;
++    pthread_mutex_unlock(&lock_next_cpu);
++    return res;
++}
++
++int bind_thread_to_next_cpu(void) {
++    cpu_set_t cpuset;
++    if (!cpu_list) {
++        return 0;
++    }
++    int nextcpu = get_next_cpu();
++    CPU_ZERO(&cpuset);
++    CPU_SET(nextcpu, &cpuset);
++    return sched_setaffinity(my_gettid(), sizeof(cpuset), &cpuset);
++}
++
++
+diff --git a/thread_pin.h b/thread_pin.h
+new file mode 100644
+index 0000000..f6f1d0c
+--- /dev/null
++++ b/thread_pin.h
+@@ -0,0 +1,22 @@
++#ifndef _THREAD_PIN_H_
++#define _THREAD_PIN_H_
++
++#include "config.h"
++#include <errno.h>
++#include <sched.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <pthread.h>
++#include <stdio.h>
++#include <assert.h>
++#include <sys/syscall.h>
++
++void init_cpu_list(void);
++int bind_thread_to_next_cpu(void);
++void destroy_cpu_list(void);
++
++static inline pid_t my_gettid() {
++    return ((pid_t)syscall(SYS_gettid));
++}
++
++#endif // _THREAD_PIN_H_ 

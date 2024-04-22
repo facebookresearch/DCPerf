@@ -16,16 +16,13 @@ recommend is 50Gbps.
 
 ## Operating System
 
-Currently TaoBench server can be run on CentOS Stream 8 or 9. If IOMMU is enabled
+Currently TaoBench server can be run on CentOS Stream 8 or 9. However, we recommend
+CentOS Stream 8 with Linux kernel 5.19 for best performance. Besides,
+If IOMMU is enabled
 in your system, please make sure you have IOMMU passthrough set in the
 kernel boot cmdline (`iommu=pt` for x86_64 and `iommu.passthrough=1` for ARM),
 otherwise the system will be soft locked up in network I/O when running
-TaoBench.
-
-CentOS 9 support in the clients is still work in progress. If you run clients on
-CentOS 9, the hit ratio may be slightly lower than the expected 0.89 and
-therefore the result parser would think there is no valid data points and reports
-zero as the final aggregated result.
+TaoBench and end up getting very low performance.
 
 # Installation
 
@@ -80,8 +77,8 @@ have substantial effects on the server:
   machines can connect. The default value is the return value of the python function
   `socket.gethostname()` or the output of `hostname` command. If the current hostname of
   your server machine is not resolvable by other machines (e.g. `localhost`), please set
-  this parameter to another hostname or an IP address that others can use connect to
-  the server.
+  this parameter to another resolvable hostname or an IP address that others can use
+  connect to the server.
   - `num_clients`: The number of client machines. Default is 2, but you can change this
   if you plan to use a different number of client machines.
 
@@ -203,6 +200,47 @@ at `benchmark_metrics_<run_id>/server_N.csv` for each TaoBench server instance
 under benchpress's folder. There will be individual logs at`
 `benchmark_metrics_<run_id>/tao-bench-server-<N>-<yymmdd_HHMMSS>.log` for each
 instance.
+
+## Experimental: `tao_bench_autoscale_v2_beta`
+
+### Overview
+
+This is a newly introduced TaoBench workload that aims at providing better
+and more stable scalability on servers equipped with ultra high core count CPUs
+(>=200 logical cores) and reducing overhead from timer IRQs. If you find your
+systems run into bottleneck and get lower-than-expected scores and very low user
+CPU utilization (less than 15%), you can try running this job. However, the
+results obatined from this job cannot be directly compared with results from the
+regular `tao_bench_autoscale` job because this `tao_bench_autoscale_v2_beta`
+has some substantial change in the workload logic.
+
+This workload job is marked `beta` because we are still working on analyzing its
+change in hot function profile in comparison to the original workload as well as
+validating its representativeness to the actual production workload.
+
+### Parameter
+
+In addition to the parameters supported by `tao_bench_autoscale`, this job has
+the following **additional** parameters:
+
+  - `slow_threads_use_semaphore` - Whether to use sempahore, instead of
+  `nanosleep()` to wait for the incoming requests in the slow threads. Set to 1
+  to enable and 0 to disable. Default is 1. Using semaphore will greatly reduce
+  the overhead from hardware timer IRQ and thus improving overall performance
+  and scalability.
+  - `pin_threads` - Pin each thread in TaoBench server to a dedicated CPU logical
+  core. This can reduce overhead from threads scheduling especially when the
+  number of CPU cores grows. Set to 1 to enable and 0 to disable. Default is 0.
+  - `conns_per_server_core` - TCP connections from clients per server CPU core.
+  Default is 85. Increasing this will incur more pressure of TCP connections on
+  the server and result in lower performance results.
+
+### Usage and reporting
+
+Usage and reporting is the same as the `tao_bench_autoscale` job, please refer to
+the guide for the `tao_bench_autoscale` job. Just replace the job name.
+A good run of this workload should have about 75~80% of CPU utilization in the steady
+state, of which 25~30% should be in userspace.
 
 ## Advanced job: `tao_bench_custom`
 

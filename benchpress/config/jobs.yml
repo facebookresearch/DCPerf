@@ -295,6 +295,8 @@
         - '--server-hostname={server_hostname}'
         - '--server-memsize={server_memsize}'
         - '--target-hit-ratio=0.9'
+        - '--data-size-min={data_size_min}'
+        - '--data-size-max={data_size_max}'
         - '--tunning-factor=0.807'
         - '--server-port-number={server_port_number}'
         - '--warmup-time={warmup_time}'
@@ -307,6 +309,8 @@
         - 'server_port_number=11211'
         - 'warmup_time=1200'
         - 'test_time=360'
+        - 'data_size_min=8191'
+        - 'data_size_max=8193'
   hooks:
     - hook: copymove
       options:
@@ -324,21 +328,75 @@
   args:
     - '--num-servers={num_servers}'
     - '--memsize={memsize}'
+    - '--fast-threads-ratio={fast_threads_ratio}'
+    - '--slow-to-fast-ratio={slow_to_fast_ratio}'
     - '--interface-name={interface_name}'
     - '--port-number-start=11211'
     - '--warmup-time={warmup_time}'
     - '--test-time={test_time}'
     - '--server-hostname={server_hostname}'
     - '--num-clients={num_clients}'
+    - '--clients-per-thread={clients_per_thread}'
     - '--real'
   vars:
     - 'num_servers=0'
     - 'memsize=0'
+    - 'fast_threads_ratio=0.75'
+    - 'slow_to_fast_ratio=3'
     - 'interface_name=eth0'
     - 'warmup_time=0'
     - 'test_time=720'
     - 'server_hostname='
     - 'num_clients=2'
+    - 'clients_per_thread=0'
+  hooks:
+    - hook: tao_instruction
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server*.csv'
+          - 'tao-bench-server-*.log'
+
+- benchmark: tao_bench_autoscale
+  name: tao_bench_autoscale_v2_beta
+  description:
+      Spawns multiple Tao benchmark servers depending on the CPU
+      core count. This is an experimental version that aims to
+      improve scalability on CPUs with large core counts and reduce
+      IRQ overhead.
+  args:
+    - '--num-servers={num_servers}'
+    - '--memsize={memsize}'
+    - '--fast-threads-ratio={fast_threads_ratio}'
+    - '--slow-to-fast-ratio={slow_to_fast_ratio}'
+    - '--slow-threads-use-semaphore={slow_threads_use_semaphore}'
+    - '--pin-threads={pin_threads}'
+    - '--interface-name={interface_name}'
+    - '--port-number-start=11211'
+    - '--warmup-time={warmup_time}'
+    - '--test-time={test_time}'
+    - '--server-hostname={server_hostname}'
+    - '--num-clients={num_clients}'
+    - '--clients-per-thread={clients_per_thread}'
+    - '--client-cores={client_cores}'
+    - '--conns-per-server-core={conns_per_server_core}'
+    - '--real'
+  vars:
+    - 'num_servers=0'
+    - 'memsize=0'
+    - 'fast_threads_ratio=1.25'
+    - 'slow_to_fast_ratio=3'
+    - 'slow_threads_use_semaphore=1'
+    - 'pin_threads=0'
+    - 'interface_name=eth0'
+    - 'warmup_time=0'
+    - 'test_time=720'
+    - 'server_hostname='
+    - 'num_clients=2'
+    - 'clients_per_thread=0'
+    - 'client_cores=0'
+    - 'conns_per_server_core=85'
   hooks:
     - hook: tao_instruction
     - hook: copymove

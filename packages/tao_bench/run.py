@@ -111,6 +111,8 @@ def run_server(args):
         "tao_slow_path_sleep_us=0",
         "tao_compress_items=1",
         "tao_stats_sleep_ms=5000",
+        f"tao_slow_use_semaphore={args.slow_threads_use_semaphore}",
+        f"tao_pin_threads={args.pin_threads}",
     ]
     server_cmd = [
         s_binary,
@@ -185,7 +187,7 @@ def get_client_cmd(args, n_seconds):
         "-R",
         "--hide-histogram",
         "--expiry-range=1800-1802",
-        "--data-size-range=8191-8193",
+        f"--data-size-range={args.data_size_min}-{args.data_size_max}",
         "--ratio=0:1",
         f"--key-minimum={n_key_min}",
         f"--key-maximum={n_key_max}",
@@ -256,6 +258,18 @@ def init_parser():
         help="ratio of # fast threads to # slow threads",
     )
     server_parser.add_argument(
+        "--slow-threads-use-semaphore",
+        type=int,
+        default=0,
+        help="use semaphore to wait for slow requests, set to 0 to turn off",
+    )
+    server_parser.add_argument(
+        "--pin-threads",
+        type=int,
+        default=0,
+        help="pin tao bench threads to dedicated cpu cores, set to nonzero to turn on",
+    )
+    server_parser.add_argument(
         "--interface-name",
         type=str,
         default="eth0",
@@ -290,6 +304,12 @@ def init_parser():
     )
     client_parser.add_argument(
         "--target-hit-ratio", type=float, default=0.9, help="target hit ratio"
+    )
+    client_parser.add_argument(
+        "--data-size-min", type=int, default=8191, help="minimum data size"
+    )
+    client_parser.add_argument(
+        "--data-size-max", type=int, default=8193, help="maximum data size"
     )
     client_parser.add_argument(
         "--tunning-factor",

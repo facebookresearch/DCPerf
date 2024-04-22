@@ -37,6 +37,10 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number):
         str(args.dispatcher_to_fast_ratio),
         "--slow-to-fast-ratio",
         str(args.slow_to_fast_ratio),
+        "--slow-threads-use-semaphore",
+        str(args.slow_threads_use_semaphore),
+        "--pin-threads",
+        str(args.pin_threads),
         "--interface-name",
         args.interface_name,
         "--port-number",
@@ -65,9 +69,34 @@ def list2ranges(core_list):
 def gen_client_instructions(args):
     instruction_text = "Please run the following commands **simultaneously** on all the client machines.\n"
     clients = [""] * args.num_clients
+    # If '--client-cores' not specified, assume the client machine has
+    # the same number of cores as the server
+    if args.client_cores <= 0:
+        args.client_cores = len(os.sched_getaffinity(0))
+    # Suggest clients_per_thread parameter on the client side
+    if args.clients_per_thread > 0:
+        clients_per_thread = args.clients_per_thread
+    elif args.conns_per_server_core > 0:
+        clients_per_thread = (
+            args.conns_per_server_core
+            * len(os.sched_getaffinity(0))
+            // ((args.client_cores - 6) * max(args.num_servers, args.num_clients))
+        )
+    else:
+        clients_per_thread = 0
+
     if args.num_servers > args.num_clients:
         for i in range(args.num_servers):
             c = i % args.num_clients
+            client_args = {
+                "server_hostname": socket.gethostname(),
+                "server_memsize": args.memsize // args.num_servers,
+                "warmup_time": get_warmup_time(args),
+                "test_time": args.test_time,
+                "server_port_number": args.port_number_start + i,
+            }
+            if clients_per_thread > 0:
+                client_args["clients_per_thread"] = clients_per_thread
             clients[c] += (
                 " ".join(
                     [
@@ -77,17 +106,7 @@ def gen_client_instructions(args):
                         "-r",
                         "client",
                         "-i",
-                        "'"
-                        + json.dumps(
-                            {
-                                "server_hostname": socket.gethostname(),
-                                "server_memsize": args.memsize // args.num_servers,
-                                "warmup_time": get_warmup_time(args),
-                                "test_time": args.test_time,
-                                "server_port_number": args.port_number_start + i,
-                            }
-                        )
-                        + "'",
+                        "'" + json.dumps(client_args) + "'",
                     ]
                 )
                 + "\n"
@@ -95,6 +114,15 @@ def gen_client_instructions(args):
     else:
         for i in range(args.num_clients):
             s = i % args.num_servers
+            client_args = {
+                "server_hostname": socket.gethostname(),
+                "server_memsize": args.memsize // args.num_servers,
+                "warmup_time": get_warmup_time(args),
+                "test_time": args.test_time,
+                "server_port_number": args.port_number_start + s,
+            }
+            if clients_per_thread > 0:
+                client_args["clients_per_thread"] = clients_per_thread
             clients[i] += (
                 " ".join(
                     [
@@ -104,17 +132,7 @@ def gen_client_instructions(args):
                         "-r",
                         "client",
                         "-i",
-                        "'"
-                        + json.dumps(
-                            {
-                                "server_hostname": socket.gethostname(),
-                                "server_memsize": args.memsize // args.num_servers,
-                                "warmup_time": get_warmup_time(args),
-                                "test_time": args.test_time,
-                                "server_port_number": args.port_number_start + s,
-                            }
-                        )
-                        + "'",
+                        "'" + json.dumps(client_args) + "'",
                     ]
                 )
                 + "\n"
@@ -264,7 +282,7 @@ def get_default_num_servers(max_cores_per_inst=72):
     return (ncores + max_cores_per_inst - 1) // max_cores_per_inst
 
 
-def get_warmup_time(args, secs_per_gb=10, min_time=1200):
+def get_warmup_time(args, secs_per_gb=5, min_time=1200):
     if args.warmup_time > 0:
         return args.warmup_time
     else:
@@ -311,6 +329,18 @@ def init_parser():
         help="ratio of # fast threads to # slow threads",
     )
     parser.add_argument(
+        "--slow-threads-use-semaphore",
+        type=int,
+        default=0,
+        help="use semaphore instead of nanosleep to wait for slow requests, set to 1 to turn on",
+    )
+    parser.add_argument(
+        "--pin-threads",
+        type=int,
+        default=0,
+        help="pin threads to dedicated cores, set to 1 to turn on",
+    )
+    parser.add_argument(
         "--interface-name",
         type=str,
         default="eth0",
@@ -326,7 +356,7 @@ def init_parser():
         "--warmup-time",
         type=int,
         default=0,
-        help="warmup time in seconds, default is max(10 * memsize, 1200)",
+        help="warmup time in seconds, default is max(5 * memsize, 1200)",
     )
     parser.add_argument(
         "--test-time", type=int, default=720, help="test time in seconds"
@@ -344,6 +374,31 @@ def init_parser():
         default=socket.gethostname(),
         type=str,
         help="hostname of the server. This parameter is used for generating client side commands and instructions.",
+    )
+    parser.add_argument(
+        "--clients-per-thread",
+        type=int,
+        default=0,
+        help="number of client connections per thread on the client side. "
+        + "This parameater is also used for generating client side commands and instructions. "
+        + "Can override the '--conns-per-server-core' parameter.",
+    )
+    parser.add_argument(
+        "--client-cores",
+        type=int,
+        default=0,
+        help="number of logical CPU cores on the client machine. "
+        + "If not specified, we will assume the client machine has the same number of cores as this server machine. "
+        + "This parameter is used for suggesting clients_per_thread parameter on the client side in accompany with "
+        + "'--conns-per-server-core'.",
+    )
+    parser.add_argument(
+        "--conns-per-server-core",
+        type=int,
+        default=0,
+        help="number of client connections per server core to impose. When set to a positive number"
+        + "this is used for calculating clients_per_thread parameter to be used on the client side. "
+        + "If `--clients-per-thread` is set to a positive number, this parameter will be ignored. ",
     )
     parser.add_argument("--real", action="store_true", help="for real")
     # functions
