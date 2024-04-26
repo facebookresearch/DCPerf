@@ -26,21 +26,11 @@ die() {
   exit "$code"
 }
 
-ARCH="$(uname -p)"
-if [ "$ARCH" = "aarch64" ]; then
-  if grep -i 'Ubuntu 22.04' /etc/os-release >/dev/null 2>&1; then
-    "${FEEDSIM_ROOT}"/install_feedsim_aarch64_ubuntu.sh
-     exit $?
-  else
-    "${FEEDSIM_ROOT}"/install_feedsim_aarch64.sh
-    exit $?
-  fi
-fi
-
-dnf install -y ninja-build flex bison git texinfo binutils-devel \
-    libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
-    libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \
-    zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch
+apt install -y cmake ninja-build flex bison texinfo binutils-dev \
+    libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
+    libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
+    zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
+    libfmt-dev sysstat
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -48,32 +38,17 @@ cd "${BENCHPRESS_ROOT}/benchmarks"
 
 # Copy run.sh template (overwrite)
 cp "${BENCHPRESS_ROOT}/packages/feedsim/run.sh" "${FEEDSIM_ROOT_SRC}/run.sh"
-cp "${BENCHPRESS_ROOT}/packages/feedsim/run-feedsim-multi.sh" "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 # Set as executable
 chmod u+x "${FEEDSIM_ROOT_SRC}/run.sh"
-chmod u+x "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 
 msg "Installing third-party dependencies..."
-cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party" "${FEEDSIM_ROOT_SRC}"
-mv "${FEEDSIM_THIRD_PARTY_SRC}/src" "${FEEDSIM_ROOT_SRC}/src"
-cd "${FEEDSIM_THIRD_PARTY_SRC}"
-
-# Installing cmake-3.14.5
-
-if ! [ -d "cmake-3.14.5" ]; then
-    wget "https://github.com/Kitware/CMake/releases/download/v3.14.5/cmake-3.14.5.tar.gz"
-    tar -zxf "cmake-3.14.5.tar.gz"
-    cd "cmake-3.14.5"
-    mkdir staging
-    ./bootstrap --parallel=8 --prefix="$(pwd)/staging"
-    make -j8
-    make install
-    cd ../
+mkdir -p "${FEEDSIM_THIRD_PARTY_SRC}"
+if ! [ -d "${FEEDSIM_ROOT_SRC}/src" ]; then
+    cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src" "${FEEDSIM_ROOT_SRC}/"
 else
-    msg "[SKIPPED] cmake-3.14.5"
+    msg "[SKIPPED] copying feedsim src"
 fi
-
-export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-3.14.5/staging/bin:${PATH}"
+cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
@@ -89,20 +64,18 @@ else
 fi
 
 # Installing Boost
-if ! [ -d "boost_1_71_0" ] && ! grep -i 'centos stream release 9' /etc/*-release; then
+if ! [ -d "boost_1_71_0" ]; then
     wget "https://boostorg.jfrog.io/artifactory/main/release/1.71.0/source/boost_1_71_0.tar.gz"
     tar -xzf "boost_1_71_0.tar.gz"
     cd "boost_1_71_0"
     ./bootstrap.sh --without-libraries=python
+    sed -i 's/if PTHREAD_STACK_MIN > 0/ifdef PTHREAD_STACK_MIN/g' boost/thread/pthread/thread_data.hpp
+    ./b2
     ./b2 install
     cd ../
-elif grep -i 'centos stream release 9' /etc/*-release; then
-    # On CentOS 9 let's just use boost 1.75 that comes with the system
-    sudo dnf install -y boost-devel
 else
     msg "[SKIPPED] boost_1_71_0"
 fi
-
 
 # Installing gflags
 if ! [ -d "gflags-2.2.2" ]; then
@@ -159,6 +132,19 @@ else
     msg "[SKIPPED] libevent-2.1.11-stable"
 fi
 
+# Installing openssl
+if ! [ -d "openssl" ]; then
+    mkdir -p build-deps
+    git clone --branch OpenSSL_1_1_1b --depth 1 https://github.com/openssl/openssl.git
+    cd "openssl"
+    ./config --prefix="${FEEDSIM_THIRD_PARTY_SRC}/build-deps"
+    make -j"$(nproc)"
+    make install
+    cd ../
+else
+    msg "[SKIPPED] openssl"
+fi
+
 msg "Installing third-party dependencies ... DONE"
 
 
@@ -168,27 +154,33 @@ cd "${FEEDSIM_ROOT_SRC}"
 cd "src"
 
 # Populate third party submodules
+msg "Checking out submodules..."
 while read -r submod;
 do
     REPO="$(echo "$submod" | cut -d ' ' -f 1)"
     COMMIT="$(echo "$submod" | cut -d ' ' -f 2)"
     SUBMOD_DIR="$(echo "$submod" | cut -d ' ' -f 3)"
-    mkdir -p "${SUBMOD_DIR}"
-    git clone "${REPO}" "${SUBMOD_DIR}"
-    pushd "${SUBMOD_DIR}"
-    git checkout "${COMMIT}"
-    popd
+    if ! [ -d "${SUBMOD_DIR}" ]; then
+        mkdir -p "${SUBMOD_DIR}"
+        git clone "${REPO}" "${SUBMOD_DIR}"
+        pushd "${SUBMOD_DIR}"
+        git checkout "${COMMIT}"
+        popd
+    else
+        msg "[SKIPPED] ${SUBMOD_DIR}"
+    fi
+
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
-# If running on CentOS Stream 9, apply compatilibity patches to folly, rsocket and wangle
+# If running on Ubuntu 22.04, apply compatilibity patches to folly, rsocket and wangle
 # TODO: This is a temporary fix. In the long term we should seek to have feedsim
 # support the up-to-date version of these dependencies
-REPOS_TO_PATCH=(folly wangle rsocket-cpp)
-if grep -i 'centos stream release 9' /etc/*-release >/dev/null 2>&1; then
+REPOS_TO_PATCH=(folly rsocket-cpp)
+if grep -i 'Ubuntu 22.04' /etc/os-release >/dev/null 2>&1; then
     for repo in "${REPOS_TO_PATCH[@]}"; do
         pushd "third_party/$repo" || exit 1
-        git apply --check "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff" && \
-            git apply "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff"
+        git apply --check "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff" && \
+            git apply "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff"
         popd || exit 1
     done
 fi
@@ -200,12 +192,19 @@ FS_CFLAGS="${BP_CFLAGS:--O3 -DNDEBUG}"
 FS_CXXFLAGS="${BP_CXXFLAGS:--O3 -DNDEBUG }"
 FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic"
 
+BP_CC=gcc
+BP_CXX=g++
+
 cmake -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/build-deps" \
     -DCMAKE_C_COMPILER="$BP_CC" \
     -DCMAKE_CXX_COMPILER="$BP_CXX" \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \
     -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     ../
+
+sed -i 's/lib64/lib/' build.ninja
+
 ninja -v
