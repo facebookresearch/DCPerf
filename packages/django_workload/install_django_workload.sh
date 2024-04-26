@@ -8,6 +8,11 @@ BENCHMARKS_ROOT="${BENCHPRESS_ROOT}/benchmarks"
 DJANGO_WORKLOAD_ROOT="${BENCHMARKS_ROOT}/django_workload"
 DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 
+if grep -i 'Ubuntu 22.04' /etc/os-release >/dev/null 2>&1; then
+    "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64_ubuntu22.sh
+    exit $?
+fi
+
 if [ "$(uname -p)" = "aarch64" ]; then
     "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64.sh
     exit $?

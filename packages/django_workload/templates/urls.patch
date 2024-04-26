@@ -1,0 +1,12 @@
+diff --git a/benchmarks/django_workload/django-workload/django-workload/django_workload/urls.py b/benchmarks/django_workload/django-workload/django-workload/django_workload/urls.py
+index 45f4694..fffad1c 100644
+--- a/benchmarks/django_workload/django-workload/django-workload/django_workload/urls.py
++++ b/benchmarks/django_workload/django-workload/django-workload/django_workload/urls.py
+@@ -4,7 +4,7 @@
+ # This source code is licensed under the license found in the
+ # LICENSE file in the root directory of this source tree.
+
+-from django.conf.urls import url
++from django.urls import re_path as url
+
+ from . import views
