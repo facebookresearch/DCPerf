@@ -6,10 +6,16 @@ TEMPLATES_DIR="$(dirname "$(readlink -f "$0")")"
 HHVM="/usr/local/hphpi/legacy/bin/hhvm"
 HHVM_VERSION="3.30.12"
 MARIADB_PWD="password"
+LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 # 1. Install prerequisite packages
-dnf install -y libevent-devel zlib-devel
-dnf install -y php-common php-cli php-devel
+if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  apt install -y libevent-dev zlib1g zlib1g-dev
+  apt install -y php-common php-cli php-dev
+elif [ "$LINUX_DIST_ID" = "centos" ]; then
+  dnf install -y libevent-devel zlib-devel
+  dnf install -y php-common php-cli php-devel
+fi
 
 # 2. Make sure hhvm 3.30.12 is installed
 if ! which "$HHVM" >/dev/null 2>&1; then
@@ -22,11 +28,19 @@ if [ "$($HHVM --version | head -n 1 | tr -d -c '0-9.')" != "$HHVM_VERSION" ]; th
 fi
 
 # 3. Install nginx
-dnf install -y nginx
+if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  apt install -y nginx
+elif [ "$LINUX_DIST_ID" = "centos" ]; then
+  dnf install -y nginx
+fi
 systemctl stop nginx
 
 # 4. Install mariadb
-dnf install -y mariadb-server
+if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  apt install -y mariadb-server
+elif [ "$LINUX_DIST_ID" = "centos" ]; then
+  dnf install -y mariadb-server
+fi
 systemctl start mariadb
 if ! [ -x "$(command -v mysql)" ]; then
   echo >&2 "Could not install mariadb!"
@@ -100,4 +114,7 @@ echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
 
 # 9. MariaDB tuning
 sudo cp "${TEMPLATES_DIR}/my.cnf" "/etc/my.cnf"
+if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  sudo mkdir /etc/my.cnf.d
+fi
 sudo systemctl restart mariadb
