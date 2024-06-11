@@ -67,6 +67,43 @@
     db:
       args:
         - '-r db'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/django_workload/django-workload/client/perf.data'
+
+- benchmark: django_workload
+  name: django_workload_arm
+  description: django-workload workload for ARM
+  tee_output: true
+  roles:
+    clientserver:
+      args:
+        - '-r clientserver'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c {db_addr}'
+        - '-m 50000'
+        - '-M 100000'
+      vars:
+        - 'db_addr'
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
+    db:
+      args:
+        - '-r db'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/django_workload/django-workload/client/perf.data'
 
 - benchmark: django_workload
   name: django_workload_custom
@@ -84,10 +121,14 @@
         - '-c {db_addr}'
         - '-w {server_workers}'
         - '-x {client_workers}'
+        - '-m {ib_min}'
+        - '-M {ib_max}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
+        - 'ib_min=100000'
+        - 'ib_max=200000'
         - 'db_addr'
         - 'server_workers'
         - 'client_workers'
@@ -112,9 +153,13 @@
         - '-r server'
         - '-c {db_addr}'
         - '-w {server_workers}'
+        - '-m {ib_min}'
+        - '-M {ib_max}'
       vars:
         - 'db_addr'
         - 'server_workers'
+        - '-m {ib_min}'
+        - '-M {ib_max}'
     db:
       args:
         - '-r db'

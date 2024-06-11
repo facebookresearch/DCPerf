@@ -31,6 +31,8 @@ Proxy shell script to executes django-workload benchmark
 For role "server", "clientserver":
     -w          number of server workers (default NPROC)
     -c          ip address of the cassandra server (required)
+    -m          minimum icachebuster calling rounds (default 100000)
+    -M          maximum icachebuster calling rounds (default 200000)
 For role "client", "clientserver":
     -x          number of client workers (default 1.2*NPROC)
     -i          number of iterations (default 7)
@@ -225,7 +227,13 @@ main() {
   local cassandra_bind_addr
   cassandra_bind_addr=''
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:' OPTION "${@}"; do
+  local django_ib_min
+  django_ib_min="100000"
+
+  local django_ib_max
+  django_ib_max="200000"
+
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -270,6 +278,12 @@ main() {
       b)
         cassandra_bind_addr="${OPTARG}"
         ;;
+      m)
+        django_ib_min="${OPTARG}"
+        ;;
+      M)
+        django_ib_max="${OPTARG}"
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -290,14 +304,20 @@ main() {
   readonly cassandra_addr
   readonly server_addr
   readonly cassandra_bind_addr
+  readonly django_ib_min
+  readonly django_ib_max
 
   if [ "$role" = "db" ]; then
     start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
   elif [ "$role" = "clientserver" ]; then
+    export IB_MIN="${django_ib_min}"
+    export IB_MAX="${django_ib_max}"
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps";
   elif [ "$role" = "client" ]; then
     start_client "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
+    export IB_MIN="${django_ib_min}"
+    export IB_MAX="${django_ib_max}"
     start_django_server "$cassandra_addr" "$num_server_workers";
   else
     echo "Role $role is invalid, it can only be 'db' or 'clientserver'";
