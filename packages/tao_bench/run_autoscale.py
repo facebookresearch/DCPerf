@@ -36,10 +36,13 @@ NUMA_NODES = find_numa_nodes()
 def check_nodes_of_cpu_range(cpu_ranges, numa_nodes):
     def get_start_end(cpu_range):
         start_end = cpu_range.split("-")
-        if len(start_end) < 2:
-            return int(start_end[0]), int(start_end[0])
-        else:
-            return int(start_end[0]), int(start_end[1])
+        try:
+            if len(start_end) < 2:
+                return int(start_end[0]), int(start_end[0])
+            else:
+                return int(start_end[0]), int(start_end[1])
+        except ValueError:
+            return (-1, -1)
 
     def is_in_range(node_cpu_ranges, input_cpu_range):
         input_start, input_end = get_start_end(input_cpu_range)
@@ -126,12 +129,16 @@ def gen_client_instructions(args):
         )
     else:
         clients_per_thread = 0
+    if not args.server_hostname:
+        server_hostname = socket.gethostname()
+    else:
+        server_hostname = args.server_hostname
 
     if args.num_servers > args.num_clients:
         for i in range(args.num_servers):
             c = i % args.num_clients
             client_args = {
-                "server_hostname": socket.gethostname(),
+                "server_hostname": server_hostname,
                 "server_memsize": args.memsize // args.num_servers,
                 "warmup_time": get_warmup_time(args),
                 "test_time": args.test_time,
@@ -157,7 +164,7 @@ def gen_client_instructions(args):
         for i in range(args.num_clients):
             s = i % args.num_servers
             client_args = {
-                "server_hostname": socket.gethostname(),
+                "server_hostname": server_hostname,
                 "server_memsize": args.memsize // args.num_servers,
                 "warmup_time": get_warmup_time(args),
                 "test_time": args.test_time,
