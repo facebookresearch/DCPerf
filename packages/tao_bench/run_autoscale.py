@@ -134,6 +134,11 @@ def gen_client_instructions(args):
     else:
         server_hostname = args.server_hostname
 
+    if args.server_hostname:
+        server_hostname = args.server_hostname
+    else:
+        server_hostname = socket.gethostname()
+
     if args.num_servers > args.num_clients:
         for i in range(args.num_servers):
             c = i % args.num_clients

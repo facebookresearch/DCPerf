@@ -21,20 +21,30 @@ else
     echo "Warning: unsupported platform ${LINUX_DIST_ID}-${LINUX_DIST_ID}"
 fi
 
-sudo dnf install -y cmake autoconf automake \
+if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  sudo apt install -y cmake autoconf automake flex bison \
+    libevent-dev openssl libssl-dev \
+    libzstd-dev lz4 liblz4-dev xzip libsnappy-dev zlib1g-dev bzip2 \
+    libaio-dev libunwind-dev patch libghc-double-conversion-dev \
+    libsodium-dev  libfmt-dev libtool perl git \
+    libgoogle-glog-dev python3-dev pkg-config \
+    git libpcre3 libpcre3-dev libgflags2.2 libgflags-dev
+elif [ "$LINUX_DIST_ID" = "centos" ]; then
+  sudo dnf install -y cmake autoconf automake \
     libevent-devel openssl openssl-devel \
     zlib-devel bzip2-devel xz-devel lz4-devel libzstd-devel \
     snappy-devel libaio-devel libunwind-devel patch \
     double-conversion-devel libsodium-devel \
     gflags-devel-2.2.2 fmt-devel perl libtool pcre-devel \
     git python3-devel ${GLOG_NAME}
+fi
 
 # Installing dependencies
 mkdir -p "${TAO_BENCH_DEPS}"
 pushd "${TAO_BENCH_ROOT}"
 
 if ! [ -f "/usr/local/bin/cmake" ]; then
-    sudo ln -s /usr/bin/cmake3 /usr/local/bin/cmake
+    sudo ln -s /usr/bin/cmake /usr/local/bin/cmake
 fi
 
 # Install openssl
@@ -101,6 +111,9 @@ fi
 if ! [ -d "${FMT_INSTALLED_PATH}" ]; then
     echo "Cannot find path to fmt" && exit 1
 fi
+if ! [ -d "${FMT_INSTALLED_PATH}/lib64" ] && [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+    ln -s -f "${FMT_INSTALLED_PATH}/lib" "${FMT_INSTALLED_PATH}/lib64"
+fi
 
 # Build and install
 if ! [ -f "/usr/bin/aclocal-1.16" ]; then
@@ -147,6 +160,10 @@ cp memtier_benchmark "${TAO_BENCH_ROOT}/tao_bench_client"
 popd # memtier_client
 popd # $TAO_BENCH_ROOT
 
+if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  cp build-deps/lib/libcrypto.so.1.1 /lib/x86_64-linux-gnu/
+fi
 # Extract certificates
 tar -zxf "${COMMON_DIR}/certs.tar.gz" -C "${TAO_BENCH_ROOT}/"
 popd
+

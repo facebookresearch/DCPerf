@@ -81,9 +81,9 @@ def run_server(args):
     except Exception as e:
         print(f"Failed to set affinity: {str(e)}")
     # number of threads for various paths
-    n_threads = int(n_cores * args.fast_threads_ratio)
-    n_dispatchers = int(n_threads * args.dispatcher_to_fast_ratio)
-    n_slow_threads = int(n_threads * args.slow_to_fast_ratio)
+    n_threads = max(int(n_cores * args.fast_threads_ratio), 1)
+    n_dispatchers = max(int(n_threads * args.dispatcher_to_fast_ratio), 1)
+    n_slow_threads = max(int(n_threads * args.slow_to_fast_ratio), 1)
     # memory size
     n_mem = int(args.memsize * 1024 * MEM_USAGE_FACTOR)
     # port number
