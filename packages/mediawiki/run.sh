@@ -9,6 +9,8 @@ SERVER_THREADS=$(echo "${BC_MAX_FN}; max(200, (2.8 * $(nproc)) / ${HHVM_SERVERS}
 CLIENT_THREADS=$(( 150 * HHVM_SERVERS ))
 MEMCACHE_THREADS=$(( 8 * HHVM_SERVERS ))
 
+export LD_LIBRARY_PATH=/opt/local/hhvm-3.30/lib
+
 function show_help() {
 cat <<EOF
 Usage: ${0##*/} [-h] [-H db host] [-r hhvm path] [-n nginx path] [-s siege path] [-t server threads] [-c client threads] [-m memcache thrads] [-- extra_args]
@@ -87,6 +89,7 @@ function run_benchmark() {
     --client-threads "$CLIENT_THREADS" \
     --server-threads "$SERVER_THREADS" \
     --scale-out "${HHVM_SERVERS}" \
+    --delay-check-health 30 \
     --hhvm-extra-arguments='-vEval.ProfileHWEnable=0' \
     ${extra_args}
   cd "${OLD_CWD}" || exit
