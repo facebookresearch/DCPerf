@@ -4,7 +4,7 @@ import logging
 import logging.config
 import os
 import subprocess
-from typing import List
+from typing import Dict, List
 
 
 CommandLogFormat = "\033[36m>>>> %(message)s\033[0m"
@@ -56,3 +56,28 @@ def run_cmd(
         (stdout, _) = proc.communicate()
         return stdout.decode("utf-8")
     return ""
+
+
+def get_os_release() -> Dict[str, str]:
+    if not os.path.exists("/etc/os-release"):
+        return {}
+    with open("/etc/os-release", "r") as f:
+        os_release_text = f.read()
+    os_release = {}
+    for line in os_release_text.splitlines():
+        key, value = line.split("=", maxsplit=1)
+        value = value.strip('"')
+        value = value.strip()
+        os_release[key] = value
+
+    return os_release
+
+
+def is_distro_like(distro_id: str) -> bool:
+    os_release = get_os_release()
+    ids = []
+    if "ID" in os_release.keys():
+        ids.append(os_release["ID"])
+    if "ID_LIKE" in os_release.keys():
+        ids.extend(os_release["ID_LIKE"].split(" "))
+    return distro_id in ids

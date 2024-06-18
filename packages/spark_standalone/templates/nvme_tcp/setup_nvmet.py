@@ -6,14 +6,18 @@ import os
 import socket
 import time
 
-from utils import exec_cmd, InfoLogFormat, run_cmd, setup_logger
+from utils import exec_cmd, InfoLogFormat, is_distro_like, run_cmd, setup_logger
 
 
 logger = setup_logger(__name__, logging.INFO, InfoLogFormat)
 
 
 def build_nvme_cli(real):
-    exec_cmd("dnf install -y libuuid-devel", real)
+    if is_distro_like("centos"):
+        exec_cmd("dnf install -y libuuid-devel", real)
+    elif is_distro_like("ubuntu"):
+        exec_cmd("apt install -y libuuid1", real)
+        exec_cmd("apt install -y uuid-dev", real)
     ROOT_PATH = os.getcwd()
     cli_util_path = os.path.join(ROOT_PATH, "nvme-cli")
     if not os.path.exists(cli_util_path):
@@ -21,6 +25,7 @@ def build_nvme_cli(real):
     logger.info(f"chdir to {cli_util_path}")
     os.chdir(cli_util_path)
     exec_cmd("git checkout 274a49759c8cbdd991253455c64136e0ea73cb6b", for_real=True)
+    exec_cmd("make clean", real)
     exec_cmd("make && make install", real)
     logger.info(f"chdir to {ROOT_PATH}")
     os.chdir(ROOT_PATH)
@@ -28,7 +33,10 @@ def build_nvme_cli(real):
 
 
 def build_nvmetcli(real):
-    exec_cmd("dnf install -y python3-configshell", real)
+    if is_distro_like("centos"):
+        exec_cmd("dnf install -y python3-configshell", real)
+    elif is_distro_like("ubuntu"):
+        exec_cmd("apt install -y python3-configshell-fb", real)
     ROOT_PATH = os.getcwd()
     cli_util_path = os.path.join(ROOT_PATH, "nvmetcli")
     if not os.path.exists(cli_util_path):

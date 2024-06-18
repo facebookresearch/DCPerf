@@ -2,6 +2,8 @@
 
 import json
 import os
+import pathlib
+import platform
 import subprocess
 from typing import Dict, List, Optional
 
@@ -81,11 +83,43 @@ def read_sys_configs() -> Dict[str, int]:
     return sys_configs
 
 
+def find_java_home() -> str:
+    # Try finding a home path for java 8
+    candidates = [
+        "/usr/lib/jvm/java-1.8.0-openjdk",
+        "/usr/lib/jvm/java-1.8.0-jre",
+        "/usr/lib/jvm/java-8-openjdk",
+        "/usr/lib/jvm/java-8-jre",
+        "/usr/lib/jvm/openjdk-8",
+        "/usr/lib/jvm/jre-1.8.0",
+        "/usr/lib/jvm/jre-1.8.0-openjdk",
+    ]
+    archname = platform.machine()
+    if archname == "x86_64":
+        archname = "amd64"
+    elif archname == "aarch64":
+        archname = "arm64"
+    for path in candidates:
+        if os.path.exists(f"{path}/bin/java"):
+            return path
+        path_with_arch = f"{path}-{archname}"
+        if os.path.exists(f"{path_with_arch}/bin/java"):
+            return path_with_arch
+    # If none of the candidate exists, try find through `java` command
+    try:
+        java_path = subprocess.check_output(["which", "java"], text=True).strip()
+        java_home = str(pathlib.Path(os.path.realpath(java_path)).parents[2])
+    except subprocess.CalledProcessError:
+        java_home = ""
+
+    return java_home
+
+
 def read_environ() -> Dict[str, str]:
     # default env values
     env_vars = {}
     env_vars["PROJ_ROOT"] = "/".join(os.path.abspath(__file__).split("/")[:-2])
-    env_vars["JAVA_HOME"] = "/usr/lib/jvm/jre-1.8.0-openjdk"
+    env_vars["JAVA_HOME"] = find_java_home()
     env_vars["SPARK_HOME"] = os.path.join(
         env_vars["PROJ_ROOT"], "spark-2.4.5-bin-hadoop2.7"
     )
@@ -102,6 +136,31 @@ def read_environ() -> Dict[str, str]:
         else:
             print(f"Using env {k} at {env_vars[k]}")
     return env_vars
+
+
+def get_os_release() -> dict[str, str]:
+    if not os.path.exists("/etc/os-release"):
+        return {}
+    with open("/etc/os-release", "r") as f:
+        os_release_text = f.read()
+    os_release = {}
+    for line in os_release_text.splitlines():
+        key, value = line.split("=", maxsplit=1)
+        value = value.strip('"')
+        value = value.strip()
+        os_release[key] = value
+
+    return os_release
+
+
+def is_distro_like(distro_id: str) -> bool:
+    os_release = get_os_release()
+    ids = []
+    if "ID" in os_release.keys():
+        ids.append(os_release["ID"])
+    if "ID_LIKE" in os_release.keys():
+        ids.extend(os_release["ID_LIKE"].split(" "))
+    return distro_id in ids
 
 
 if __name__ == "__main__":
