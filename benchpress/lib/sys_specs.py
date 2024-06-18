@@ -86,6 +86,26 @@ def get_rpm_packages():
     return rpm_packages
 
 
+def get_dpkg_packages():
+    dpkg_p = subprocess.Popen(
+        [
+            "dpkg-query",
+            "--show",
+            "--showformat",
+            "${Package}-${Version}.${Architecture}\\n",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    (dpkg_packages, err) = dpkg_p.communicate()
+    dpkg_packages = [
+        dpkg_package.strip()
+        for dpkg_package in dpkg_packages.decode("utf-8").split("\n")
+    ]  # Clean up output
+
+    return dpkg_packages
+
+
 def get_cpu_mem_data():
     cpu_mem_p = subprocess.Popen(
         ["cat", "/proc/meminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE

@@ -73,20 +73,27 @@ class RunCommand(BenchpressCommand):
 
         cpu_topology = sys_specs.get_cpu_topology()
         os_kernel_data = sys_specs.get_os_kernel()
+        os_release_data = sys_specs.get_os_release_data()
         kernel_cmdline = sys_specs.get_kernel_cmdline()
         dmidecode_data = sys_specs.get_dmidecode_data()
-        rpm_packages = sys_specs.get_rpm_packages()
+        if "id" in os_release_data:
+            os_id = os_release_data["id"].lower()
+            if os_id in ("centos", "rhel", "fedora"):
+                sys_packages = sys_specs.get_rpm_packages()
+            elif os_id in ("ubuntu", "debian"):
+                sys_packages = sys_specs.get_dpkg_packages()
+            else:
+                sys_packages = []
         kernel_params = sys_specs.get_sysctl_data()
         mem_data = sys_specs.get_cpu_mem_data()
         hw_data = sys_specs.get_hw_data()
-        os_release_data = sys_specs.get_os_release_data()
 
         sys_specs_dict = {}
         sys_specs_dict["cpu_topology"] = cpu_topology
         sys_specs_dict["os_kernel"] = os_kernel_data
         sys_specs_dict["kernel_cmdline"] = kernel_cmdline
         sys_specs_dict["dmidecode"] = dmidecode_data
-        sys_specs_dict["rpm_packages"] = rpm_packages
+        sys_specs_dict["sys_packages"] = sys_packages
         sys_specs_dict["kernel_params"] = kernel_params
         sys_specs_dict["memory"] = mem_data
         sys_specs_dict["hardware"] = hw_data

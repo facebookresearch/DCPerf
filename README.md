@@ -2,8 +2,8 @@
 
 ## Environment
 
-- OS: On x86-64 platform we support CentOS Stream 8 or 9. On ARM platform,
-  CentOS 9 is required.
+- CPU Architecture: x86_64 or aarch64
+- OS: CentOS Stream 8/9, Ubuntu 22.04
 - Running as the root user
 - Have access to the internet
 
@@ -38,7 +38,7 @@ After that, try running `./benchpress_cli.py` under the benchpress directory.
 
 ### On CentOS 9
 
-Install click, pyyaml and tabulate using DNF:
+Install click, pyyaml and tabulate using DNF, then install Pandas with pip:
 
 ```bash
 dnf install -y python3-click python3-pyyaml python3-tabulate python3-pip
@@ -50,6 +50,16 @@ Enable EPEL and PowerTools/CRB repos:
 dnf install epel-release
 dnf install 'dnf-command(config-manager)'
 dnf config-manager --set-enabled CRB
+```
+
+### On Ubuntu 22.04
+
+Install pip, then install click, pyyaml, tabulate and pandas:
+
+```bash
+sudo apt update
+sudo apt install -y python3-pip
+sudo pip3 install click pyyaml tabulate pandas
 ```
 
 ## Benchmarks
