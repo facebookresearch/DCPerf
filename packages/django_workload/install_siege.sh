@@ -10,7 +10,13 @@ BENCHPRESS_ROOT="$(readlink -f "${DJANGO_PKG_ROOT}/../..")"
 BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks"
 mkdir -p "$BENCHMARKS_DIR"
 
-dnf install -y autoconf automake zlib-devel
+LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
+
+if [ "$LINUX_DIST_ID" = "centos" ]; then
+  dnf install -y autoconf automake zlib-devel
+elif [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  apt install -y autoconf automake zlib1g-dev 
+fi
 
 SIEGE_INSTALLATION_PREFIX="${BENCHMARKS_DIR}/siege"
 SIEGE_BINARY_PATH="${SIEGE_INSTALLATION_PREFIX}/bin/siege"

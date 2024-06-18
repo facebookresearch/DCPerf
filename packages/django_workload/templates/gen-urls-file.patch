@@ -1,0 +1,13 @@
+diff --git a/benchmarks/django_workload/django-workload/client/gen-urls-file b/benchmarks/django_workload/django-workload/client/gen-urls-file
+index 006dcfd..a88eb95 100755
+--- a/benchmarks/django_workload/django-workload/client/gen-urls-file
++++ b/benchmarks/django_workload/django-workload/client/gen-urls-file
+@@ -4,7 +4,7 @@
+ # LICENSE file in the root directory of this source tree.
+
+ import sys
+-import parser
++#import parser
+ import optparse
+ import os
+ import random
