@@ -1,0 +1,13 @@
+diff --git a/wangle/ssl/SSLUtil.h b/wangle/ssl/SSLUtil.h
+index 1636a35..7be2ea6 100644
+--- a/wangle/ssl/SSLUtil.h
++++ b/wangle/ssl/SSLUtil.h
+@@ -109,7 +109,7 @@ class SSLUtil {
+ #ifdef OPENSSL_IS_BORINGSSL
+   using ex_data_dup_ptr_arg_t = void**;
+ #else
+-  using ex_data_dup_ptr_arg_t = void*;
++  using ex_data_dup_ptr_arg_t = void**;
+ #endif
+
+  public:

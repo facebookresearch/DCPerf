@@ -1,0 +1,26 @@
+diff --git a/folly/fibers/FiberManager.cpp b/folly/fibers/FiberManager.cpp
+index 23452d2..7b09742 100644
+--- a/folly/fibers/FiberManager.cpp
++++ b/folly/fibers/FiberManager.cpp
+@@ -323,7 +323,8 @@ namespace {
+
+ // SIGSTKSZ (8 kB on our architectures) isn't always enough for
+ // folly::symbolizer, so allocate 32 kB.
+-constexpr size_t kAltStackSize = folly::constexpr_max(SIGSTKSZ, 32 * 1024);
++// constexpr size_t kAltStackSize = folly::constexpr_max(SIGSTKSZ, 32 * 1024);
++constexpr size_t kAltStackSize = 32 * 1024;
+
+ bool hasAlternateStack() {
+   stack_t ss;
+diff --git a/folly/TimeoutQueue.cpp b/folly/TimeoutQueue.cpp
+index 706715f..48ab1af 100644
+--- a/folly/TimeoutQueue.cpp
++++ b/folly/TimeoutQueue.cpp
+@@ -17,6 +17,7 @@
+ #include <folly/TimeoutQueue.h>
+ #include <algorithm>
+ #include <vector>
++#include<limits>
+
+ namespace folly {
+

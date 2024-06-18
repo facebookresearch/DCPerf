@@ -26,10 +26,11 @@ die() {
   exit "$code"
 }
 
-dnf install -y cmake ninja-build flex bison git texinfo binutils-devel \
-    libunwind-devel bzip2-devel libsodium-devel double-conversion-devel \
-    libzstd-devel lz4-devel xz-devel snappy-devel libtool openssl-devel \
-    zlib-devel libdwarf-devel libaio-devel libatomic patch perl jq
+apt install -y cmake ninja-build flex bison texinfo binutils-dev \
+    libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
+    libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
+    zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
+    libfmt-dev sysstat jq
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -173,16 +174,15 @@ do
 
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
-# If running on CentOS Stream 9, apply compatilibity patches to folly, rsocket and wangle
+# If running on Ubuntu 22.04, apply compatilibity patches to folly, rsocket and wangle
 # TODO: This is a temporary fix. In the long term we should seek to have feedsim
 # support the up-to-date version of these dependencies
 REPOS_TO_PATCH=(folly rsocket-cpp)
-#REPOS_TO_PATCH=(folly wangle rsocket-cpp)
-if grep -i 'centos stream release 9' /etc/*-release >/dev/null 2>&1; then
+if grep -i 'Ubuntu 22.04' /etc/os-release >/dev/null 2>&1; then
     for repo in "${REPOS_TO_PATCH[@]}"; do
         pushd "third_party/$repo" || exit 1
-        git apply --check "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff" && \
-            git apply "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff"
+        git apply --check "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff" && \
+            git apply "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff"
         popd || exit 1
     done
 fi
@@ -206,4 +206,7 @@ cmake -G Ninja \
     -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     ../
-ninja-build -v
+
+sed -i 's/lib64/lib/' build.ninja
+
+ninja -v

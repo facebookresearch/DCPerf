@@ -26,10 +26,15 @@ die() {
   exit "$code"
 }
 
-dnf install -y cmake ninja-build flex bison git texinfo binutils-devel \
-    libunwind-devel bzip2-devel libsodium-devel double-conversion-devel \
-    libzstd-devel lz4-devel xz-devel snappy-devel libtool openssl-devel \
-    zlib-devel libdwarf-devel libaio-devel libatomic patch perl jq
+#dnf install -y cmake ninja-build flex bison git texinfo binutils-devel \
+#    libunwind-devel bzip2-devel libsodium-devel double-conversion-devel \
+#    libzstd-devel lz4-devel xz-devel snappy-devel libtool openssl-devel \
+#    zlib-devel libdwarf-devel libaio-devel libatomic patch perl
+apt install -y cmake ninja-build flex bison texinfo binutils-dev \
+    libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
+    libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
+    zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
+    libfmt-dev sysstat jq
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -50,6 +55,23 @@ else
     msg "[SKIPPED] copying feedsim src"
 fi
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
+
+# Installing cmake-3.14.5
+
+if ! [ -d "cmake-3.14.5" ]; then
+    wget "https://github.com/Kitware/CMake/releases/download/v3.14.5/cmake-3.14.5.tar.gz"
+    tar -zxf "cmake-3.14.5.tar.gz"
+    cd "cmake-3.14.5"
+    mkdir staging
+    ./bootstrap --parallel=8 --prefix="$(pwd)/staging"
+    make -j8
+    make install
+    cd ../
+else
+    msg "[SKIPPED] cmake-3.14.5"
+fi
+
+export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-3.14.5/staging/bin:${PATH}"
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
@@ -186,6 +208,14 @@ if grep -i 'centos stream release 9' /etc/*-release >/dev/null 2>&1; then
         popd || exit 1
     done
 fi
+if grep -i 'Ubuntu 22.04' /etc/os-release >/dev/null 2>&1; then
+    for repo in "${REPOS_TO_PATCH[@]}"; do
+        pushd "third_party/$repo" || exit 1
+        git apply --check "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff" && \
+            git apply "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff"
+        popd || exit 1
+    done
+fi
 
 mkdir -p build && cd build/
 
@@ -206,4 +236,7 @@ cmake -G Ninja \
     -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     ../
-ninja-build -v
+#sed -i 's/staging\/usr\/local\/lib64\/libfmt\.a/staging\/usr\/local\/lib\/libfmt\.a/g' build.ninja
+sed -i 's/lib64/lib/' build.ninja
+ninja -v
+

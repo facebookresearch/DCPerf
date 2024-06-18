@@ -10,10 +10,11 @@ FEEDSIM_ROOT_SRC="${BENCHPRESS_ROOT}/benchmarks/feedsim"
 FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
 
+source "${BENCHPRESS_ROOT}/packages/common/os-distro.sh"
+
 cleanup() {
   trap - SIGINT SIGTERM ERR EXIT
 }
-
 
 msg() {
   echo >&2 -e "${1-}"
@@ -28,14 +29,22 @@ die() {
 
 ARCH="$(uname -p)"
 if [ "$ARCH" = "aarch64" ]; then
+  if distro_is_like ubuntu; then
+    "${FEEDSIM_ROOT}"/install_feedsim_aarch64_ubuntu.sh
+     exit $?
+  else
     "${FEEDSIM_ROOT}"/install_feedsim_aarch64.sh
     exit $?
+  fi
 fi
-
+if distro_is_like ubuntu && [ "$(uname -p)" = "x86_64" ]; then
+  "${FEEDSIM_ROOT}"/install_feedsim_x86_64_ubuntu.sh
+  exit $?
+fi
 dnf install -y ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \
-    zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch
+    zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"

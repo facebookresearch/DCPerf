@@ -19,7 +19,7 @@ if [[ -n "$1" ]] && [[ "$1" -gt 0 ]]; then
     shift
 fi
 
-PORT=11211
+PORT=21212
 PIDS=()
 
 function get_cpu_range() {
