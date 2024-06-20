@@ -15,7 +15,7 @@ sys_configs = read_sys_configs()
 print(f"system cores={sys_configs['cores']} memory={sys_configs['memory']}")
 
 
-def init_configs(aggressive=0):
+def init_configs(aggressive=0, use_ipv4=False):
     # derive a baseline default config
     if aggressive > 0:
         if aggressive > 1:
@@ -66,6 +66,9 @@ def init_configs(aggressive=0):
         "cxl_skl-2s": {"cores": 80, "memory": 112},
     }
 
+    prefer_ipv4 = "true" if use_ipv4 else "false"
+    prefer_ipv6 = "true" if not use_ipv4 else "false"
+
     STANDALONE_CONFIGS["default-default"] = {
         "spark.cores.max": spark_cores,
         "spark.default.parallelism": "16",
@@ -74,8 +77,8 @@ def init_configs(aggressive=0):
         "spark.executor.cores": "4",
         "spark.executor.memory": f"{spark_on_heap_memory}m",
         "spark.executor.extraJavaOptions": [
-            "-Djava.net.preferIPv4Stack=false",
-            "-Djava.net.preferIPv6Addresses=true",
+            f"-Djava.net.preferIPv4Stack={prefer_ipv4}",
+            f"-Djava.net.preferIPv6Addresses={prefer_ipv6}",
             "-Dscala.usejavacp=true",
             "-XX:+PreserveFramePointer",
             "-XX:+UnlockDiagnosticVMOptions",

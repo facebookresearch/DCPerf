@@ -55,6 +55,12 @@ def install_database(args):
         "-k",
         args.shuffle_dir,
     ]
+    if args.ipv4:
+        cmd_list.append("--ipv4")
+        cmd_list.append("1")
+    if args.local_hostname:
+        cmd_list.append("--server-hostname")
+        cmd_list.append(args.local_hostname)
     if args.aggressive > 0:
         cmd_list.append(f"--aggressive {args.aggressive}")
     cmd_list.append("--real")
@@ -76,6 +82,12 @@ def run_test(args):
         "-k",
         args.shuffle_dir,
     ]
+    if args.ipv4:
+        cmd_list.append("--ipv4")
+        cmd_list.append("1")
+    if args.local_hostname:
+        cmd_list.append("--server-hostname")
+        cmd_list.append(args.local_hostname)
     if args.aggressive > 0:
         cmd_list.append(f"--aggressive {args.aggressive}")
     cmd_list.append("--real")
@@ -172,6 +184,19 @@ def init_parser():
         type=str,
         default=SPARK_DIR,
         help="where to point the directory for shuffling & temporary data",
+    )
+    run_parser.add_argument(
+        "--ipv4",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="set to 1 to use ipv4 protocol instead of ipv6",
+    )
+    run_parser.add_argument(
+        "--local-hostname",
+        type=str,
+        default="",
+        help="use a hostname different from the output of `hostname` command",
     )
     run_parser.add_argument(
         "--aggressive", type=int, default=0, help="aggressive memory settings"

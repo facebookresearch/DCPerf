@@ -224,7 +224,10 @@
   description: Spark standalone using local SSDs for database and shuffling point
   args:
     - 'run'
+    - '--ipv4 {ipv4}'
     - '--real'
+  vars:
+    - 'ipv4=0'
   hooks:
     - hook: copymove
       options:
@@ -246,7 +249,10 @@
     - '--dataset-path /flash23/'
     - '--warehouse-dir /flash23/warehouse'
     - '--shuffle-dir /flash23/spark_local_dir'
+    - '--ipv4 {ipv4}'
     - '--real'
+  vars:
+    - 'ipv4=0'
   hooks:
     - hook: copymove
       options:
@@ -263,7 +269,12 @@
     - '--warehouse-dir /flash23/warehouse'
     - '--shuffle-dir /flash23/spark_local_dir'
     - '--aggressive 1'
+    - '--ipv4 {ipv4}'
+    - '--local-hostname "{local_hostname}"'
     - '--real'
+  vars:
+    - 'ipv4=0'
+    - 'local_hostname='
   hooks:
     - hook: copymove
       options:

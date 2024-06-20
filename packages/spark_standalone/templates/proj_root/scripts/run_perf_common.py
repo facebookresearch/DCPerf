@@ -248,11 +248,15 @@ def start(args) -> None:
         cmd = ["numactl", "--cpunodebind=0", "--membind=0"] + cmd
     run_cmd(cmd, SPARK_HOME, log_file, env, args.real)
     # worker(s)
+    if args.server_hostname:
+        server_hostname = args.server_hostname
+    else:
+        server_hostname = socket.gethostname()
     cmd = [
         "sbin/start-slave-fb.sh",
         SPARK_CLI_ARGS["--master"],
         "-h",
-        socket.gethostname(),
+        server_hostname,
     ]
     for wid in range(args.num_workers):
         cmd_prefix = []
@@ -377,7 +381,8 @@ def write_spark_env(args, worker_idx: int) -> None:
 
 
 def setup(args, init: bool = False) -> None:
-    init_configs(args.aggressive)
+    use_ipv4 = args.ipv4 != 0
+    init_configs(args.aggressive, use_ipv4)
     global HARDWARE_INFO, SPARK_CLI_ARGS, SPARK_CONFIGS
     platform = "default-default"
     if args.arch and args.socket:
@@ -473,6 +478,14 @@ def init_parser():
             default=WAREHOUSE_PATH,
             help="path to warehouse directory",
         )
+        # whether to use ipv4
+        x.add_argument(
+            "--ipv4",
+            type=int,
+            default=0,
+            choices=[0, 1],
+            help="set to 1 to use ipv4 protocol instead of ipv6",
+        )
     for x in [start_parser, install_parser, exp_parser]:
         x.add_argument(
             "--shuffle-location",
@@ -480,6 +493,10 @@ def init_parser():
             type=str,
             default=PROJ_ROOT,
             help="path to shuffle location; /tmp/ will be appended",
+        )
+        # specify a hostname that is different from the output of `hostname` command`
+        x.add_argument(
+            "--server-hostname", type=str, default="", help="Spark server's hostname"
         )
     for x in [run_parser, exp_parser]:
         x.add_argument(

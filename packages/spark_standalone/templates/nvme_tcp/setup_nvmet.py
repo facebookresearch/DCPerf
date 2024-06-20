@@ -84,7 +84,10 @@ def export_devices(args, ip_addr):
     port_path = "/sys/kernel/config/nvmet/ports/1"
     exec_cmd(f"mkdir -p {port_path}", args.real)
     exec_cmd(f"echo {ip_addr} | tee -a {port_path}/addr_traddr > /dev/null", args.real)
-    exec_cmd(f"echo ipv6 | tee -a {port_path}/addr_adrfam > /dev/null", args.real)
+    ip_format = "ipv4" if args.ipv4 else "ipv6"
+    exec_cmd(
+        f"echo {ip_format} | tee -a {port_path}/addr_adrfam > /dev/null", args.real
+    )
     exec_cmd(f"echo tcp | tee -a {port_path}/addr_trtype > /dev/null", args.real)
     exec_cmd(f"echo 4420 | tee -a {port_path}/addr_trsvcid > /dev/null", args.real)
     for i in range(args.num_devices):
@@ -104,7 +107,11 @@ def setup_exporter(args):
     exec_cmd("/bin/mount -t configfs none /sys/kernel/config/", args.real)
     exec_cmd("lsblk", args.real)
     build_nvmetcli(args.real)
-    ip_addr = run_cmd(["hostname", "-i"], for_real=True).splitlines()[0].strip()
+    if args.ipaddr:
+        ip_addr = args.ipaddr
+    else:
+        ip_addr = run_cmd(["hostname", "-i"], for_real=True).splitlines()[0].strip()
+        ip_addr = ip_addr.split(" ")[0]
     try:
         create_partitions(args)
         export_devices(args, ip_addr)
@@ -287,6 +294,19 @@ def init_parser():
         type=str,
         default=default_target_name,
         help="target name prefix",
+    )
+    exporter_setup_parser.add_argument(
+        "--ipv4",
+        "-4",
+        action="store_true",
+        help="use ipv4",
+    )
+    exporter_setup_parser.add_argument(
+        "--ipaddr",
+        "-i",
+        type=str,
+        default="",
+        help="IP addr of this exporter host",
     )
     # importer side
     importer_connect_parser.add_argument(

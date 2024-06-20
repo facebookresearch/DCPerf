@@ -109,7 +109,7 @@ to be the path of the JDK if Spark benchmark fails.
 We need to first export the data SSDs on the storage nodes. The exportation command is as follows:
 
 ```
-./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n <N> -s <S> -p <P> --real
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n <N> -s <S> -p <P> [--target-name <name>] [--ipv4] [--ipaddr <host-ip-address>] --real
 ```
 
 - `N` is the number of SSDs you would like to export.
@@ -117,6 +117,17 @@ We need to first export the data SSDs on the storage nodes. The exportation comm
   `N` will be 1; if starting from `/dev/nvme3n1`, `N` will be 3.
 - `P` is the starting partition number. Usually this is 1, but if you would like to export the
   particular partition `/dev/nvme2n1p3`, `P` will be 3.
+
+There are also some optional arguments and when we should set them (shown in `[]` above):
+
+- `--target-name` or `-t`: Exported NVMe drive's target name prefix. By default it will be based on
+  the hostname, but it would be recommended to set this parameter to a unique name if your hostname
+  is `localhost`.
+- `--ipv4`: Use ipv4 - please set this if your system and network do not support IPv6.
+- `--ipaddr`: IP address of this host. By default it will be the first IP address returned by
+  `hostname -i` command. Please set this parameter to a host IP that other machines can reach if
+  `hostname -i` returns a local-only address such as `127.0.0.1`, `::1` or an address starting
+  with `fe80`.
 
 Here are some example usages:
 
@@ -265,6 +276,18 @@ spark_standalone benchmark
 ```
 ./benchpress_cli.py install spark_standalone_remote
 ./benchpress_cli.py run spark_standalone_remote
+```
+
+**NOTE**: If your system and network need IPV4, please run the following to
+launch the benchmark:
+```
+./benchpress_cli.py run spark_standalone_remote -i '{"ipv4": 1}'
+```
+
+Also, if the output of `hostname` command is not resolvable, please specify
+a resolvable hostname using `local_hostname` parameter:
+```
+./benchpress_cli.py run spark_standalone_remote -i '{"local_hostname": "localhost"}'
 ```
 
 ## Reporting
