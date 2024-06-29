@@ -1,0 +1,15 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+
+@require_user
+def bundle_tray{IDX}(request):
+    # Fetch bundles of content from followers to show
+    MLP.run(random.randint(50000, 100000), 5)
+    bundle = BundleTray(request)
+    result = bundle.get_bundle()
+    result = bundle.post_process(result)
+    return HttpResponse(json.dumps(result), content_type='text/json')
+

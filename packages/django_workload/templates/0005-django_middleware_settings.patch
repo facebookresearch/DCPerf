@@ -1,0 +1,23 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+diff --git a/django-workload/django_workload/settings.py b/django-workload/django_workload/settings.py
+index 676c66f..5d1d0a3 100644
+--- a/django-workload/django_workload/settings.py
++++ b/django-workload/django_workload/settings.py
+@@ -42,11 +42,11 @@ INSTALLED_APPS = [
+ 
+ MIDDLEWARE = [
+ #    'django.middleware.security.SecurityMiddleware',
+-#    'django.contrib.sessions.middleware.SessionMiddleware',
++    'django.contrib.sessions.middleware.SessionMiddleware',
+     'django.middleware.common.CommonMiddleware',
+ #    'django.middleware.csrf.CsrfViewMiddleware',
+-#    'django.contrib.auth.middleware.AuthenticationMiddleware',
+-#    'django.contrib.messages.middleware.MessageMiddleware',
++    'django.contrib.auth.middleware.AuthenticationMiddleware',
++    'django.contrib.messages.middleware.MessageMiddleware',
+ #    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+ 
+     'django_workload.middleware.global_request_middleware',

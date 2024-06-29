@@ -1,0 +1,113 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+oss_performance_mediawiki:
+  parser: mediawiki
+  install_script: ./packages/mediawiki/install_oss_performance_mediawiki.sh
+  cleanup_script: ./packages/mediawiki/cleanup_oss_performance_mediawiki.sh
+  path: ./packages/mediawiki/run.sh
+  tags:
+    scope:
+      - app
+      - web
+    component:
+      - cpu
+  metrics: []
+
+django_workload:
+  parser: django_workload
+  install_script: ./packages/django_workload/install_django_workload.sh
+  cleanup_script: ./packages/django_workload/cleanup_django_workload.sh
+  path: ./benchmarks/django_workload/bin/run.sh
+  tags:
+    scope:
+      - app
+      - django
+    component:
+      - cpu
+  metrics: []
+
+tao_bench:
+  parser: tao_bench
+  install_script: ./packages/tao_bench/install_tao_bench.sh
+  cleanup_script: ./packages/tao_bench/cleanup_tao_bench.sh
+  path: ./packages/tao_bench/run.py
+  tags:
+    scope:
+      - app
+      - cache
+    component:
+      - cpu
+      - memory
+  metrics: []
+  roles:
+    - server
+    - client
+
+tao_bench_autoscale:
+  parser: tao_bench_autoscale
+  install_script: ./packages/tao_bench/install_tao_bench.sh
+  cleanup_script: ./packages/tao_bench/cleanup_tao_bench.sh
+  path: ./packages/tao_bench/run_autoscale.py
+  tags:
+    scope:
+      - app
+      - cache
+    component:
+      - cpu
+      - memory
+  metrics: []
+
+feedsim:
+  parser: feedsim
+  install_script: ./packages/feedsim/install_feedsim.sh
+  cleanup_script: ./packages/feedsim/cleanup_feedsim.sh
+  path: ./benchmarks/feedsim/run.sh
+  tags:
+    scope:
+      - app
+      - feed
+    component:
+      - cpu
+      - memory
+  metrics:
+    - target_percentile
+    - target_latency_msec
+    - final_requested_qps
+    - final_achieved_qps
+    - final_latency_msec
+
+feedsim_autoscale:
+  parser: feedsim_autoscale
+  install_script: ./packages/feedsim/install_feedsim.sh
+  cleanup_script: ./packages/feedsim/cleanup_feedsim.sh
+  path: ./benchmarks/feedsim/run-feedsim-multi.sh
+  tags:
+    scope:
+      - app
+      - feed
+    component:
+      - cpu
+      - memory
+  metrics:
+    - target_percentile
+    - target_latency_msec
+    - final_requested_qps
+    - final_achieved_qps
+    - final_latency_msec
+
+
+spark_standalone:
+  parser: spark_standalone
+  install_script: ./packages/spark_standalone/install_spark_standalone.sh
+  cleanup_script: ./packages/spark_standalone/cleanup_spark_standalone.sh
+  path: ./packages/spark_standalone/templates/runner.py
+  tags:
+    scope:
+      - app
+    component:
+      - cpu
+      - memory
+  metrics: []
+

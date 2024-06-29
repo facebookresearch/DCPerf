@@ -1,0 +1,587 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+diff --git a/base/DatabaseInstaller.php b/base/DatabaseInstaller.php
+index ed545b5..803c99e 100644
+--- a/base/DatabaseInstaller.php
++++ b/base/DatabaseInstaller.php
+@@ -87,7 +87,7 @@ final class DatabaseInstaller {
+       '|'.
+       $sed.
+       Utils::EscapeCommand(
+-        Vector {'mysql', '-h', $dbHost.'', $db, '-u', $db, '-p'.$db},
++        Vector {'mysql', '-h'.$dbHost.'', $db, '-u'.$db, '-p'.$db},
+       ),
+       &$output,
+       &$ret,
+diff --git a/base/HHVMDaemon.php b/base/HHVMDaemon.php
+index 8b303fb..2caed99 100644
+--- a/base/HHVMDaemon.php
++++ b/base/HHVMDaemon.php
+@@ -11,11 +11,25 @@
+ final class HHVMDaemon extends PHPEngine {
+   private PerfTarget $target;
+   private string $serverType;
++  public int $backendPort;
++  public int $adminPort;
++  public Vector<Pair> $cpuCoreRanges;
+ 
+-  public function __construct(private PerfOptions $options) {
++  public function __construct(private PerfOptions $options, int $backendPort, int $adminPort, Vector<Pair> $cpuCoreRanges = Vector {}) {
+     $this->target = $options->getTarget();
++    $this->backendPort = $backendPort;
++    $this->adminPort = $adminPort;
++
+     parent::__construct((string) $options->hhvm);
+ 
++    if ($cpuCoreRanges->count() > 0) {
++      $rangeList = Vector {};
++      foreach($cpuCoreRanges as $range) {
++        $rangeList->add($range[0].'-'.$range[1]);
++      }
++      $this->cpuRange = implode(",", $rangeList);
++    }
++
+     $this->serverType = $options->proxygen ? 'proxygen' : 'fastcgi';
+     $runAsRoot = $options->runAsRoot ? '1' : '0';
+ 
+@@ -81,16 +95,15 @@ final class HHVMDaemon extends PHPEngine {
+ 
+   <<__Override>>
+   protected function getArguments(): Vector<string> {
+-    if ($this->options->cpuBind) {
+-      $this->cpuRange = $this->options->daemonProcessors;
+-    }
+     $args = Vector {
+       '-m',
+       'server',
+       '-p',
+-      (string) PerfSettings::BackendPort(),
++      (string) $this->backendPort,
++      '-v',
++      'AdminServer.Port='.$this->adminPort,
+       '-v',
+-      'AdminServer.Port='.PerfSettings::BackendAdminPort(),
++      'Eval.EnableNuma=0',
+       '-v',
+       'Server.Type='.$this->serverType,
+       '-v',
+@@ -339,7 +352,7 @@ final class HHVMDaemon extends PHPEngine {
+     string $path,
+     bool $allowFailures = true,
+   ): string {
+-    $url = 'http://localhost:'.PerfSettings::HttpAdminPort().$path;
++    $url = 'http://localhost:'.$this->adminPort.$path;
+     $ctx = stream_context_create(
+       ['http' => ['timeout' => $this->options->maxdelayAdminRequest]],
+     );
+diff --git a/base/NginxDaemon.php b/base/NginxDaemon.php
+index aa48307..7f02726 100644
+--- a/base/NginxDaemon.php
++++ b/base/NginxDaemon.php
+@@ -152,16 +152,8 @@ final class NginxDaemon extends Process {
+     }
+ 
+     if ($this->options->proxygen) {
+-      $proxy_pass = sprintf(
+-        'proxy_pass http://%s:%d$request_uri',
+-        $hostname,
+-        PerfSettings::BackendPort(),
+-      );
+-      $admin_proxy_pass = sprintf(
+-        'proxy_pass http://%s:%d$request_uri',
+-        $hostname,
+-        PerfSettings::BackendAdminPort(),
+-      );
++      $proxy_pass = 'proxy_pass http://hhvmscaleout$request_uri';
++      $admin_proxy_pass = 'proxy_pass http://hhvmadminscaleout$request_uri';
+     } else {
+       $proxy_pass = sprintf(
+         'fastcgi_pass %s:%d',
+@@ -175,6 +167,13 @@ final class NginxDaemon extends Process {
+       );
+     }
+ 
++    $backend_ports = '';
++    $admin_ports = '';
++    for ($i = 0; $i < $this->options->scaleOut; $i++) {
++      $backend_ports .= sprintf("server localhost:%d;\n    ", PerfSettings::BackendPorts($i));
++      $admin_ports .= sprintf("server localhost:%d;\n    ", PerfSettings::BackendAdminPorts($i));
++    }
++
+     $substitutions = Map {
+       '__HTTP_PORT__' => PerfSettings::HttpPort(),
+       '__HTTP_ADMIN_PORT__' => PerfSettings::HttpAdminPort(),
+@@ -191,6 +190,8 @@ final class NginxDaemon extends Process {
+       '__NGINX_PID_FILE__' => $this->getPidFilePath(),
+       '__DATE__' => date(DATE_W3C),
+       '__NGINX_RESOLVER__' => $nginx_resolver_line,
++      '__BACKEND_PORTS__' => $backend_ports,
++      '__ADMIN_PORTS__' => $admin_ports,
+     };
+ 
+     $config =
+diff --git a/base/PerfOptions.php b/base/PerfOptions.php
+index ccfcd35..c9ca871 100644
+--- a/base/PerfOptions.php
++++ b/base/PerfOptions.php
+@@ -130,6 +130,8 @@ final class PerfOptions {
+   public int $memcachedPort; //The hostname/IP of server which hosts memcached.
+   public int $memcachedThreads; // Number of memcached threads
+ 
++  public int $scaleOut = 1;
++
+   private array $args;
+   private Vector<string> $notBenchmarkingArgs = Vector {};
+ 
+@@ -209,6 +211,7 @@ final class PerfOptions {
+       'memcached-port:',
+       'memcached-threads:',
+       'no-memcached', // do not use memcached (even if target supports it)
++      'scale-out:',
+     };
+     $targets = $this->getTargetDefinitions()->keys();
+     $def->addAll($targets);
+@@ -381,6 +384,8 @@ final class PerfOptions {
+ 
+     $this->remoteSiege = $this->getNullableString('remote-siege');
+ 
++    $this->scaleOut = $this->getInt('scale-out', 1);
++
+     $duration = $this->getNullableString('siege-duration');
+     if ($duration) {
+       $this->siegeDuration = $duration;
+@@ -437,7 +442,7 @@ final class PerfOptions {
+         '--hhvm=/path/to/hhvm must be specified',
+       );
+     }
+-    $engine = $this->php5 !== null ? $this->php5 : $this->hhvm;
++    $engine = $this->hhvm !== null ? $this->hhvm : $this->php5;
+     invariant(
+       shell_exec('which '.escapeshellarg($engine)) !== null ||
+       is_executable($engine),
+@@ -472,6 +477,16 @@ final class PerfOptions {
+       );
+     }
+ 
++    if ($this->scaleOut < 1) {
++      invariant_violation('The parameter scale-out cannot be less than 1, specified %d', $this->scaleOut);
++      exit(1);
++    }
++
++    if ($this->hhvm === null && this->scaleOut > 1) {
++        invariant_violation('Multi-instance mode (--scale-out > 1) is only available when using HHVM as the engine');
++        exit(1);
++    }
++
+     SystemChecks::CheckAll($this);
+ 
+     // Validates that one was defined
+diff --git a/base/PerfRunner.php b/base/PerfRunner.php
+index 9d62c13..a261bc8 100644
+--- a/base/PerfRunner.php
++++ b/base/PerfRunner.php
+@@ -11,12 +11,17 @@
+ type PerfResult = Map<string, Map<string, num>>;
+ 
+ final class PerfRunner {
++  
+   public static function RunWithArgv(Vector<string> $argv): PerfResult {
+     $options = new PerfOptions($argv);
+-    return self::RunWithOptions($options);
++    $options_list = Vector {$options};
++    for ($i = 1; $i < $options->scaleOut; $i++) {
++        $options_list->add(new PerfOptions($argv));
++    }
++    return self::RunWithOptions($options_list);
+   }
+ 
+-  public static function RunWithOptions(PerfOptions $options): PerfResult {
++  public static function RunWithOptions(Vector<PerfOptions> $options_list): PerfResult {
+     // If we exit cleanly, Process::__destruct() gets called, but it doesn't
+     // if we're killed by Ctrl-C. This tends to leak php-cgi or hhvm processes -
+     // trap the signal so we can clean them up.
+@@ -28,35 +33,78 @@ final class PerfRunner {
+       },
+     );
+ 
+-    $php_engine = null;
++    $php_engines = Vector {}; 
++    $options = $options_list->get(0);
+ 
+-    if ($options->php5) {
+-      $php_engine = new PHP5Daemon($options);
+-    }
+     if ($options->hhvm) {
+-      $php_engine = new HHVMDaemon($options);
++      $is_smt_active = file_get_contents('/sys/devices/system/cpu/smt/active');
++      if ($is_smt_active !== false) {
++        $is_smt_active = trim($is_smt_active);
++      }
++      self::PrintProgress('CPU SMT Active: ' . strval($is_smt_active));
++      $nproc = cpu_get_count();
++      $physical_cores = $nproc;
++      $core_start = 0;
++      if ($is_smt_active === '1') {
++        $physical_cores = (int)($physical_cores / 2);
++        $smt_start = $nproc / 2;
++        $cores_per_daemon = (int)($nproc / $options->scaleOut / 2);
++      } else {
++        $cores_per_daemon = (int)($nproc / $options->scaleOut);
++      }
++      $remaining_cores = $physical_cores - $cores_per_daemon * $options->scaleOut;
++      for ($i = 0; $i < $options->scaleOut; $i++) {
++        $coreRange = Vector {};
++        if ($options->scaleOut > 1) {
++          $extra = ($remaining_cores > 0) ? 1 : 0;
++          $coreRange->add(Pair {$core_start, $core_start + $cores_per_daemon + $extra - 1});
++          $core_start = $core_start + $cores_per_daemon + $extra;
++          $remaining_cores = $remaining_cores - $extra;
++          if ($is_smt_active === '1') {
++            $coreRange->add(Pair {$smt_start, $smt_start + $cores_per_daemon + $extra - 1});
++            $smt_start = $smt_start + $cores_per_daemon + $extra;
++          }
++        }
++        $hhvm_daemon = new HHVMDaemon($options_list->get($i), PerfSettings::BackendPorts($i), PerfSettings::BackendAdminPorts($i), $coreRange);
++        $php_engines->add($hhvm_daemon);
++      }
++    } else if ($options->php5) {
++      $php_engines->add(new PHP5Daemon($options));
++    }
++
++    foreach ($php_engines as $engine) {
++      invariant($engine !== null, 'failed to initialize a PHP engine');
+     }
+-    invariant($php_engine !== null, 'failed to initialize a PHP engine');
+ 
+-    return self::RunWithOptionsAndEngine($options, $php_engine);
++    return self::RunWithOptionsAndEngines($options_list, $php_engines);
+   }
+ 
+-  private static function RunWithOptionsAndEngine(
+-    PerfOptions $options,
+-    PHPEngine $php_engine,
++  private static function RunWithOptionsAndEngines(
++    Vector<PerfOptions> $options_list,
++    Vector<PHPEngine> $engines,
+   ): PerfResult {
++    $options = $options_list->get(0);
++    $targets = Vector {};
++
+     $options->validate();
+-    $target = $options->getTarget();
+ 
+-    self::PrintProgress('Configuration: '.$target.' on '.$php_engine);
+-    self::PrintProgress('Installing framework');
++    for ($i = 0; $i < $options->scaleOut; $i++) {
++      $opt = $options_list->get($i);
++      $tgt = $opt->getTarget();
++      $targets->add($tgt);
+ 
+-    $target->install();
+-    if ($options->applyPatches) {
+-      self::PrintProgress('Applying patches');
+-      $target->applyPatches();
++      self::PrintProgress('Configuration: '.$tgt.' on '.$engines->get($i));
++      self::PrintProgress('Installing framework');
++
++      $tgt->install();
++      if ($options->applyPatches) {
++        self::PrintProgress('Applying patches');
++        $tgt->applyPatches();
++      }
++      $tgt->postInstall();
+     }
+-    $target->postInstall();
++
++    $target = $targets->get(0);
+ 
+     if ($options->setUpTest != null) {
+       $command =
+@@ -86,15 +134,22 @@ final class PerfRunner {
+       $memcached->start();
+     }
+ 
+-    self::PrintProgress('Starting PHP Engine');
+-    $php_engine->start();
+-    Process::sleepSeconds($options->delayPhpStartup);
+-    invariant(
+-      $php_engine->isRunning(),
+-      'Failed to start %s',
+-      get_class($php_engine),
+-    );
+-
++    foreach ($engines as $php_engine) {
++      if ($options->hhvm) {
++        $hhvm_engine = $php_engine;
++        self::PrintProgress('Starting HHVM engine with backend port '
++            .$hhvm_engine->backendPort
++            .' and admin port '
++            .$hhvm_engine->adminPort);
++        $hhvm_engine->start();
++      } else {
++        self::PrintProgress('Starting PHP5 engine');
++        $php5_engine = $php_engine;
++        $php5_engine->start();
++      }
++      Process::sleepSeconds($options->delayPhpStartup);
++      invariant($php_engine->isRunning(), 'Failed to start %s', get_class($php_engine));
++    }
+     if ($target->needsUnfreeze()) {
+       self::PrintProgress('Unfreezing framework');
+       $target->unfreeze($options);
+@@ -120,11 +175,16 @@ final class PerfRunner {
+       $siege->wait();
+ 
+       invariant(!$siege->isRunning(), 'Siege is still running :/');
+-      invariant(
+-        $php_engine->isRunning(),
+-        '%s crashed',
+-        get_class($php_engine),
+-      );
++
++      foreach ($engines as $php_engine) {
++        invariant(
++          $php_engine->isRunning(),
++          '%s:%d crashed',
++          get_class($php_engine),
++          $options->hhvm ? $php_engine->backendPort : 0
++        );
++      }
++
+     } else {
+       self::PrintProgress('Skipping single request warmup');
+     }
+@@ -137,16 +197,21 @@ final class PerfRunner {
+       $siege->wait();
+ 
+       invariant(!$siege->isRunning(), 'Siege is still running :/');
+-      invariant(
+-        $php_engine->isRunning(),
+-        '%s crashed',
+-        get_class($php_engine),
+-      );
++
++      foreach ($engines as $php_engine) {
++        invariant(
++          $php_engine->isRunning(),
++          '%s:%d crashed',
++          get_class($php_engine),
++          $options->hhvm ? $php_engine->backendPort : 0
++        );
++      }
++
+     } else {
+       self::PrintProgress('Skipping multi request warmup');
+     }
+ 
+-    while (!$options->skipWarmUp && $php_engine->needsRetranslatePause()) {
++    while (!$options->skipWarmUp && self::NeedsRetranslatePause($engines)) {
+       self::PrintProgress('Extending warmup, server is not done warming up.');
+       sleep(3);
+       $siege = new Siege($options, $target, RequestModes::WARMUP_MULTI, '10s');
+@@ -155,15 +220,19 @@ final class PerfRunner {
+       $siege->wait();
+ 
+       invariant(!$siege->isRunning(), 'Siege is still running :/');
+-      invariant(
+-        $php_engine->isRunning(),
+-        '%s crashed',
+-        get_class($php_engine),
+-      );
++
++      foreach ($engines as $php_engine) {
++        invariant(
++          $php_engine->isRunning(),
++          '%s:%d crashed',
++          get_class($php_engine),
++          $options->hhvm ? $php_engine->backendPort : 0
++        );
++      }
+     }
+ 
+     self::PrintProgress('Server warmed, checking queue status.');
+-    while (!$options->skipWarmUp && !$php_engine->queueEmpty()) {
++    while (!$options->skipWarmUp && self::NeedsWaitingForQueue($engines)) {
+       self::PrintProgress('Server warmed, waiting for queue to drain.');
+       sleep(10);
+     }
+@@ -228,13 +297,16 @@ final class PerfRunner {
+       (int) !$options->notBenchmarking;
+ 
+     self::PrintProgress('Collecting TC/PCRE data');
+-    $php_engine->writeStats();
+-
++    foreach ($engines as $php_engine) {
++        $php_engine->writeStats();
++    }
+     if ($options->waitAtEnd) {
+       self::PrintProgress('Press Enter to shutdown the server');
+       fread(STDIN, 1);
+     }
+-    $php_engine->stop();
++    foreach ($engines as $php_engine) {
++        $php_engine->stop();
++    }
+ 
+     if ($options->tearDownTest != null) {
+       $command =
+@@ -253,6 +325,24 @@ final class PerfRunner {
+     return $combined_stats;
+   }
+ 
++  private static function NeedsRetranslatePause(Vector<PHPEngine> $engines) : bool {
++    foreach ($engines as $php_engine) {
++      if ($php_engine->needsRetranslatePause()) {
++        return true;
++      }
++    }
++    return false;
++  }
++
++  private static function NeedsWaitingForQueue(Vector<PHPEngine> $engines) : bool {
++    foreach ($engines as $php_engine) {
++      if (!$php_engine->queueEmpty()) {
++        return true;
++      }
++    }
++    return false;
++  }
++
+   private static function PrintProgress(string $out): void {
+     $timestamp = strftime('%Y-%m-%d %H:%M:%S %Z');
+     $len = max(strlen($out), strlen($timestamp));
+diff --git a/base/PerfSettings.php b/base/PerfSettings.php
+index 558ba01..249dc18 100644
+--- a/base/PerfSettings.php
++++ b/base/PerfSettings.php
+@@ -12,6 +12,9 @@ final class PerfSettings {
+ 
+   ///// Benchmark Settings /////
+ 
++  public static int $backendPortStart = 8092;
++  public static int $backendAdminPortStart = 9092;
++
+   // Per concurrent thread - so, total number of requests made during warmup
+   // is WarmupRequests * WarmupConcurrency
+   public static function WarmupRequests(): int {
+@@ -38,10 +41,17 @@ final class PerfSettings {
+   }
+ 
+   public static function BackendPort(): int {
+-    return 8092;
++    return self::$backendPortStart;
++  }
++
++  public static function BackendPorts(int $index): int {
++    return self::$backendPortStart + $index;
+   }
+ 
+   public static function BackendAdminPort(): int {
+-    return 8093;
++    return self::$backendAdminPortStart;
++  }
++  public static function BackendAdminPorts(int $index): int {
++    return self::$backendAdminPortStart + $index;
+   }
+ }
+diff --git a/base/PerfTarget.php b/base/PerfTarget.php
+index 5b6f896..a4bac23 100644
+--- a/base/PerfTarget.php
++++ b/base/PerfTarget.php
+@@ -27,9 +27,10 @@ abstract class PerfTarget {
+     $content = file_get_contents($url, /* include path = */ false, $ctx);
+     invariant(
+       strstr($content, $this->getSanityCheckString()) !== false,
+-      'Failed to find string "%s" in %s',
++      'Failed to find string "%s" in %s, got the following: %s',
+       $this->getSanityCheckString(),
+       $url,
++      $content,
+     );
+   }
+ 
+diff --git a/base/Process.php b/base/Process.php
+index 5f7d7d9..2ccec2b 100644
+--- a/base/Process.php
++++ b/base/Process.php
+@@ -78,6 +78,7 @@ abstract class Process {
+       }
+     }
+ 
++    fprintf(STDERR, "command to run: %s\n", $this->command);
+     $proc = proc_open($this->command, $spec, &$pipes, null, $env);
+ 
+     // Give the shell some time to figure out if it could actually launch the
+diff --git a/base/Siege.php b/base/Siege.php
+index 3ef3ab6..1b1923c 100644
+--- a/base/Siege.php
++++ b/base/Siege.php
+@@ -60,7 +60,7 @@ final class Siege extends Process {
+   public function __destruct() {
+     $logfile = $this->logfile;
+     if ($logfile !== null && file_exists($logfile)) {
+-      unlink($logfile);
++      rename($logfile, $logfile.'_old');
+     }
+   }
+ 
+diff --git a/conf/nginx/nginx.conf.in b/conf/nginx/nginx.conf.in
+index c2c6f16..389bebf 100644
+--- a/conf/nginx/nginx.conf.in
++++ b/conf/nginx/nginx.conf.in
+@@ -35,6 +35,10 @@ http {
+ 
+   __NGINX_RESOLVER__
+ 
++  upstream hhvmscaleout {
++    __BACKEND_PORTS__
++  }
++
+   server {
+     listen [::]:__HTTP_PORT__ default_server;
+     listen __HTTP_PORT__ default_server;
+@@ -47,6 +51,10 @@ http {
+     root __FRAMEWORK_ROOT__;
+     index index.php;
+ 
++    location /nginx_status {
++	    stub_status;
++    }
++
+     location / {
+       try_files $uri $uri/ @rewrites;
+       expires 7d;
+@@ -82,6 +90,10 @@ http {
+     }
+   }
+ 
++  upstream hhvmadminscaleout {
++    __ADMIN_PORTS__
++  }
++
+   server {
+     listen [::]:__HTTP_ADMIN_PORT__ default_server;
+     listen __HTTP_ADMIN_PORT__ default_server;
+diff --git a/conf/php.ini b/conf/php.ini
+index 3ca1bfb..e9fe2c9 100644
+--- a/conf/php.ini
++++ b/conf/php.ini
+@@ -2,7 +2,7 @@
+ ; Generic ;
+ ;;;;;;;;;;;
+ max_execution_time=600
+-memory_limit=128M
++memory_limit=1024M
+ error_reporting=0
+ display_errors=0
+ log_errors=0
+@@ -15,6 +15,7 @@ assert.active=false
+ ;;;;;;;;;;;;;
+ ; HHVM Only ;
+ ;;;;;;;;;;;;;
++hhvm.enable_numa=0
+ hhvm.php7.all=0
+ ; This is a no-op on production builds, but makes it possible to get meaningful
+ ; profiles from debug builds

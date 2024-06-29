@@ -1,0 +1,1941 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+--- memcached-1.6.5/config.h.in	2020-04-13 11:46:30.000000000 -0700
++++ memcached-1.6.5/config.h.in	2022-02-12 12:09:29.857154374 -0800
+@@ -63,6 +63,9 @@
+ /* Define to 1 if you have the <inttypes.h> header file. */
+ #undef HAVE_INTTYPES_H
+
++/* Define to 1 if you have the `glog' library (-lglog). */
++#undef HAVE_LIBGLOG
++
+ /* Define to 1 if you have the `memcntl' function. */
+ #undef HAVE_MEMCNTL
+
+--- memcached-1.6.5/configure.ac	2020-04-13 11:39:14.000000000 -0700
++++ memcached-1.6.5/configure.ac	2022-02-12 12:08:52.965876008 -0800
+@@ -8,6 +8,8 @@
+ AM_CONFIG_HEADER([config.h])
+
+ AC_PROG_CC
++AC_PROG_CXX
++AC_PROG_CPP
+
+ dnl **********************************************************************
+ dnl DETECT_ICC ([ACTION-IF-YES], [ACTION-IF-NO])
+@@ -72,7 +74,7 @@
+ DETECT_SUNCC([CFLAGS="-mt $CFLAGS"], [])
+ AS_IF([test "$ICC" = "yes" -o "$GCC" = "yes"],
+ [
+-    AS_IF(test "$CLANG" = "no",[CFLAGS="$CFLAGS -pthread"])
++    AS_IF(test "$CLANG" = "no",[CFLAGS="$CFLAGS -pthread" CXXFLAGS="$CXX_FLAGS -pthread"])
+ ])
+
+ if test "$ICC" = "no"; then
+@@ -304,7 +306,6 @@
+ #            for libevent (to help people linking with static libevent)
+ AC_SEARCH_LIBS(socket, socket)
+ AC_SEARCH_LIBS(gethostbyname, nsl)
+-
+ trylibeventdir=""
+ AC_ARG_WITH(libevent,
+        [  --with-libevent=PATH     Specify path to libevent installation ],
+@@ -781,7 +782,8 @@
+ elif test "$GCC" = "yes"
+ then
+   GCC_VERSION=`$CC -dumpversion`
+-  CFLAGS="$CFLAGS -Wall -Werror -pedantic -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls"
++  CFLAGS="$CFLAGS -Wall -pedantic -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls"
++
+   if test "x$enable_asan" = "xyes"; then
+     CFLAGS="$CFLAGS -fsanitize=address"
+   fi
+@@ -796,5 +798,52 @@
+   CFLAGS="$CFLAGS -errfmt=error -errwarn -errshort=tags"
+ fi
+
++AC_ARG_WITH([folly],
++  [AS_HELP_STRING([--with-folly=<path_to_folly>], [Specify path to folly])])
++
++AS_IF([test "x$with_folly" != "x"], [
++  folly_config_dir=$with_folly/lib/pkgconfig/
++  AS_IF([test -f "$folly_config_dir/libfolly.pc"],
++    [export PKG_CONFIG_PATH=$folly_config_dir:$PKG_CONFIG_PATH],
++    [AC_MSG_ERROR([cannot find folly config $folly_config_dir/libfolly.pc])]
++	)
++])
++
++PKG_CHECK_MODULES([FOLLY], [libfolly], [folly=yes], [folly=no])
++
++CFLAGS="$CFLAGS $FOLL_CXXFLAGS"
++CXXFLAGS="$CXXFLAGS $FOLLY_CFLAGS"
++LIBS="$LIBS $FOLLY_LIBS"
++
++AC_ARG_WITH([fmt],
++  [AS_HELP_STRING([--with-fmt=<path_to_fmt>], [Specify path to fmt])])
++
++AS_IF([test "x$with_fmt" != "x"], [
++  fmt_config_dir=$with_fmt/lib64/pkgconfig/
++  AS_IF([test -f "$fmt_config_dir/fmt.pc"],
++    [export PKG_CONFIG_PATH=$fmt_config_dir:$PKG_CONFIG_PATH],
++    [AC_MSG_ERROR([cannot find fmt config $fmt_config_dir/fmt.pc])]
++	)
++])
++
++PKG_CHECK_MODULES([fmt], [fmt], [fmt=yes], [fmt=no])
++CXXFLAGS="$CXXFLAGS $fmt_CFLAGS"
++LIBS="$LIBS $fmt_LIBS -ldl -ldouble-conversion -llz4"
++
++PKG_CHECK_MODULES([gflags], [gflags], [gflags=yes], [gflags=no])
++CXXFLAGS="$CXXFLAGS $gflags_CFLAGS"
++LIBS="$LIBS $gflags_LIBS"
++
++
++PKG_CHECK_MODULES([glog], libglog >= 0.3.3,
++  [ CPPFLAGS="$CPPFLAGS $GLOG_CFLAGS"
++         LIBS="$LIBS $GLOG_LIBS $GFLAGS_LIBS" ],
++  [ AC_HAVE_LIBRARY([glog],[],[AC_MSG_ERROR(
++                [Please install google-glog library])]) ])
++CXXFLAGS="$CXXFLAGS $glog_CFLAGS"
++LIBS="$LIBS $glog_LIBS"
++
++
++
+ AC_CONFIG_FILES(Makefile doc/Makefile)
+ AC_OUTPUT
+--- memcached-1.6.5/db_items.cpp	1969-12-31 16:00:00.000000000 -0800
++++ memcached-1.6.5/db_items.cpp	2022-02-08 17:17:53.727661340 -0800
+@@ -0,0 +1,253 @@
++// Copyright 2004-present Facebook. All Rights Reserved.
++
++#include <algorithm>
++#include <stdio.h>
++#include <cstdint>
++#include <string>
++#include <fstream>
++#include <streambuf>
++#include <chrono>
++
++#include <folly/json.h>
++#include <folly/dynamic.h>
++#include <folly/FileUtil.h>
++#include <folly/Random.h>
++
++#include "db_items_int.h"
++#include "db_items.h"
++
++// Interface functions callable from C
++
++void init_item_generators(const char *s_json_fbobj, const char *s_json_assoc, uint32_t max_size) {
++    p_fbobj_generator = new db_items(s_json_fbobj, max_size);
++    p_assoc_generator = new db_items(s_json_assoc, max_size);
++}
++
++void clean_item_generators() {
++    if (p_fbobj_generator) {
++        delete p_fbobj_generator;
++        p_fbobj_generator = NULL;
++    }
++
++    if (p_assoc_generator) {
++        delete p_assoc_generator;
++        p_assoc_generator = NULL;
++    }
++}
++
++raw_item *generate_raw_fbobj(uint32_t gen_payload) {
++    return p_fbobj_generator->generate_raw_item(gen_payload);
++}
++
++raw_item *generate_raw_assoc(uint32_t gen_payload) {
++    return p_assoc_generator->generate_raw_item(gen_payload);
++}
++
++void free_raw_item(raw_item *item) {
++    if (item->p_buffer) {
++        delete[] item->p_buffer;
++        item->p_buffer = NULL;
++    }
++
++    if (item) {
++        delete item;
++    }
++}
++
++// DB Items Handler
++
++db_items::db_items(const char *s_json_sizes, uint32_t max_size) {
++    _max_threshold = 0;
++    _sizes = NULL;
++    _max_item_size = max_size;
++    _rng.seed();
++
++    pthread_mutex_init(&rngLock, NULL);
++    build_sizes_list_from_json(s_json_sizes);
++}
++
++db_items::~db_items() {
++    item_sizes *p_crnt = _sizes;
++    item_sizes *p_del = NULL;
++
++    while (p_crnt != NULL) {
++        p_del = p_crnt;
++        p_crnt = p_crnt->next_size;
++
++        if (p_del) {
++            p_del->max_bucket_bytes = 0;
++            p_del->min_bucket_bytes = 0;
++            p_del->next_size = NULL;
++            p_del->threshold = 0;
++            delete p_del;
++        }
++    }
++}
++
++uint64_t db_items::getUint64(uint64_t n_min, uint64_t n_max) {
++    uint64_t result = 0;
++    pthread_mutex_lock(&rngLock);
++    result = folly::Random::rand64(n_min, n_max, _rng);
++    pthread_mutex_unlock(&rngLock);
++    return result;
++}
++
++uint32_t db_items::getUint32(uint32_t n_min, uint32_t n_max) {
++    uint32_t result = 0;
++    pthread_mutex_lock(&rngLock);
++    result = folly::Random::rand32(n_min, n_max, _rng);
++    pthread_mutex_unlock(&rngLock);
++    return result;
++}
++
++uint32_t db_items::getUint32_Clock(uint32_t n_min, uint32_t n_max) {
++    uint32_t range = n_max - n_min;
++    auto tnow = std::chrono::high_resolution_clock::now();
++    auto duration = tnow.time_since_epoch();
++    auto t_us = std::chrono::duration_cast<std::chrono::microseconds>(duration);
++    uint32_t n_us = t_us.count();
++    uint32_t result = n_min + (n_us % range);
++    result = result > 0 ? result : 1;
++    return result;
++}
++
++void db_items::build_sizes_list_from_json(const char* json_file) {
++  // Read JSON file into string and do preallocation to avoid relying on
++  // string's reallocation
++
++  std::string sJson;
++  auto ret = folly::readFile(json_file, sJson);
++  if (ret)
++  {
++    _sizes = new item_sizes;
++    _sizes->threshold = 0;
++    _sizes->min_bucket_bytes = 0;
++    _sizes->max_bucket_bytes = 0;
++    _sizes->next_size = NULL;
++    item_sizes *p_last = _sizes;
++    item_sizes *p_crnt = NULL;
++
++    // fprintf(stderr, "The file: %s\n", json_file);
++
++    // Use folly to parse json string
++    folly::dynamic sJsonParsed = folly::parseJson(sJson);
++
++    // Read all sizes and put them in a linked list
++    folly::dynamic vSizes = sJsonParsed["valSizeRangeProbability"];
++
++    // Read all bucket boundaries
++    folly::dynamic vBuckets = sJsonParsed["valSizeRange"];
++
++    // Check if JSON structure is correct
++    /*
++    if (vBuckets.size() != (1 + vSizes.size())) {
++        fprintf(stderr, "Number of bucket sizes needs to be probabilities + 1.\n");
++        exit(-1);
++    }
++    */
++
++    // Read probabilities into a linked list
++    for (auto& element : vSizes) {
++        uint64_t crnt_size = (uint64_t)element.asInt();
++        _max_threshold += crnt_size;
++
++        p_crnt = new item_sizes;
++        p_crnt->threshold = _max_threshold;
++        p_crnt->min_bucket_bytes = 0;
++        p_crnt->max_bucket_bytes = 0;
++        p_crnt->next_size = NULL;
++        p_last->next_size = p_crnt;
++        p_last = p_crnt;
++    }
++
++    if (_max_threshold == 0) {
++        fprintf(stderr, "Invalid slow path configuration sizes file.\n");
++        exit(-1);
++    }
++
++    // Add bucket limits to list
++    p_crnt = _sizes;
++    uint64_t last_bucket_size = MIN_ITEM_SIZE;
++    for (auto& element : vBuckets) {
++        uint64_t crnt_bucket = (uint64_t)element.asInt();
++
++        if (p_crnt) {
++            if (last_bucket_size == crnt_bucket) {
++                fprintf(stderr, "Bucket has 0 bytes. left = %lu, right = %lu\n",
++                    last_bucket_size, crnt_bucket);
++                exit(-1);
++            }
++            p_crnt->min_bucket_bytes = last_bucket_size;
++            p_crnt->max_bucket_bytes = crnt_bucket;
++            last_bucket_size = crnt_bucket;
++            p_crnt = p_crnt->next_size;
++        }
++    }
++  }
++  else {
++    fprintf(stderr, "Invalid slow path configuration sizes file.\n");
++    exit(-1);
++  }
++}
++
++raw_item *db_items::generate_raw_item(uint32_t gen_payload) {
++    uint64_t bucket_id = getUint32(0, _max_threshold);
++    item_sizes *p_crnt = _sizes;
++
++    // Traverse the list until we figure out the bucket
++    bool b_found_bucket = false;
++    while (p_crnt != NULL) {
++        if (bucket_id > p_crnt->threshold) {
++            p_crnt = p_crnt->next_size;
++        }
++        else {
++            b_found_bucket = true;
++            break;
++        }
++    }
++
++    if (!b_found_bucket) {
++        return NULL;
++    }
++
++    // Generate an input size
++    if (p_crnt->max_bucket_bytes == p_crnt->min_bucket_bytes) {
++        fprintf(stderr, "Bucket has 0 bytes. left = %lu, right = %lu\n",
++            p_crnt->min_bucket_bytes, p_crnt->max_bucket_bytes);
++        exit(-1);
++    }
++    uint32_t it_size = getUint32(p_crnt->min_bucket_bytes, p_crnt->max_bucket_bytes);
++
++    // Clip the item size if it's too large
++    it_size = (it_size > _max_item_size) ? _max_item_size : it_size;
++
++    // Check if the item size is at least 0
++    if (it_size == 0) {
++        return NULL;
++    }
++
++    // Generate the item and its payload
++    raw_item *new_item = new raw_item();
++    new_item->sz_bytes = it_size;
++    new_item->p_buffer = new char[new_item->sz_bytes + 1];
++
++    if (gen_payload != 0) {
++        // Use Visual Basic LCG random generator
++        uint32_t a = 1140671485;
++        uint32_t c = 12820163;
++        uint32_t m = 1 << 24;
++        uint32_t x = getUint32(1, 1000);
++
++        for (int i = 0; i < new_item->sz_bytes; ++i) {
++            x = (a * x + c) % m;
++            new_item->p_buffer[i] = static_cast<char>(x % 255);
++        }
++    }
++    else {
++        for (int i = 0; i < new_item->sz_bytes; ++i) {
++            new_item->p_buffer[i] = static_cast<char>(i % 255);
++        }
++    }
++
++    return new_item;
++}
+--- memcached-1.6.5/db_items.h	1969-12-31 16:00:00.000000000 -0800
++++ memcached-1.6.5/db_items.h	2022-02-08 14:40:25.583929845 -0800
+@@ -0,0 +1,52 @@
++// Copyright 2004-present Facebook. All Rights Reserved.
++
++typedef struct S_item_sizes {
++    uint64_t threshold;
++    uint64_t min_bucket_bytes;
++    uint64_t max_bucket_bytes;
++    struct S_item_sizes *next_size;
++} item_sizes;
++
++#define MIN_ITEM_SIZE 32
++
++class db_items {
++    public:
++
++    db_items(const char *s_json_sizes, uint32_t max_size);
++    ~db_items();
++
++    // Will be called by clients
++    raw_item *generate_raw_item(uint32_t gen_payload);
++
++    private:
++
++    // Reads the json file and builds the structures containing the item
++    // sizes.
++    void build_sizes_list_from_json(const char* json_file);
++
++    // The maximum value to be used when generating numbers
++    uint64_t _max_threshold;
++
++    // A linked list with bucket definitions. When generating an item, a
++    // random number will be generated and we will traverse the list
++    // node by node until that number is higher than the value stored in
++    // the node. That means we are generating an item in that bucket size.
++    item_sizes *_sizes;
++
++    // A default size to return for debugging purposes
++    const uint32_t _default_size = 128;
++
++    // Maximum allowable item size
++    uint32_t _max_item_size;
++
++    // Random number generator
++    folly::Random::DefaultGenerator _rng;
++    pthread_mutex_t rngLock;
++    uint64_t getUint64(uint64_t n_min, uint64_t n_max);
++    uint32_t getUint32(uint32_t n_min, uint32_t n_max);
++    uint32_t getUint32_Clock(uint32_t n_min, uint32_t n_max);
++};
++
++// Global variables
++static db_items *p_fbobj_generator;
++static db_items *p_assoc_generator;
+--- memcached-1.6.5/db_items_int.h	1969-12-31 16:00:00.000000000 -0800
++++ memcached-1.6.5/db_items_int.h	2022-02-08 14:40:25.583929845 -0800
+@@ -0,0 +1,28 @@
++// Copyright 2004-present Facebook. All Rights Reserved.
++
++#ifndef _DB_ITEMS_INT_H_
++#define _DB_ITEMS_INT_H_
++
++#ifdef __cplusplus
++extern "C" {
++#endif // __cplusplus
++
++typedef struct {
++    char* p_buffer;
++    size_t sz_bytes;
++} raw_item;
++
++// Initialize the linked lists that hold the payload sizes probabilities
++extern void init_item_generators(const char *s_json_fbobj, const char *s_json_assoc, uint32_t max_size);
++extern void clean_item_generators();
++
++// Interface functions
++extern raw_item *generate_raw_fbobj(uint32_t gen_payload);
++extern raw_item *generate_raw_assoc(uint32_t gen_payload);
++extern void free_raw_item(raw_item *it);
++
++#ifdef __cplusplus
++}
++#endif // __cplusplus
++
++#endif // _DB_ITEMS_INT_H_
+--- memcached-1.6.5/db_provider.c	1969-12-31 16:00:00.000000000 -0800
++++ memcached-1.6.5/db_provider.c	2022-02-12 11:02:00.587060436 -0800
+@@ -0,0 +1,495 @@
++// Copyright 2004-present Facebook. All Rights Reserved.
++
++#include <string.h>
++#include <stdlib.h>
++#include <lz4.h>
++
++#include "memcached.h"
++#include "db_items_int.h"
++
++static uint32_t num_active_slow_threads;
++static pthread_mutex_t lock_num_active_slow_threads;
++
++// Request queue
++static slow_request **dispatch_first_request;
++static slow_request **dispatch_last_request;
++static uint32_t *dispatch_requests_in_queue;
++static pthread_mutex_t *lock_dispatch_request_queue;
++
++// Per slow thread request queues
++static slow_request **thread_first_request;
++static slow_request **thread_last_request;
++static pthread_mutex_t *lock_thread_req_queue;
++
++
++void init_slow_path(void) {
++    // Initialize state variables
++    num_active_slow_threads = 0;
++    dispatch_first_request = NULL;
++    dispatch_last_request = NULL;
++    dispatch_requests_in_queue = NULL;
++
++    // Item generators
++    srand(time(NULL));
++    init_item_generators(settings.tao_item_gen_file, settings.tao_item_gen_file, settings.tao_max_item_size);
++    fprintf(stdout, "Initialized item generators.\n");
++
++    // Initialize linked lists with requests per threads
++    thread_first_request = (slow_request**)malloc(sizeof(slow_request*) *
++        settings.tao_num_slow_threads);
++    thread_last_request = (slow_request**)malloc(sizeof(slow_request*) *
++        settings.tao_num_slow_threads);
++    lock_thread_req_queue = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t) *
++        settings.tao_num_slow_threads);
++    for (uint32_t i = 0; i < settings.tao_num_slow_threads; ++i) {
++        thread_first_request[i] = NULL;
++        thread_last_request[i] = NULL;
++    }
++    if (thread_first_request && thread_last_request && lock_thread_req_queue)
++        fprintf(stdout, "Allocated memory for request queues per thead.\n");
++
++    pthread_mutex_init(&lock_num_active_slow_threads, NULL);
++    for (uint32_t i = 0; i < settings.tao_num_slow_threads; ++i) {
++        pthread_mutex_init(&lock_thread_req_queue[i], NULL);
++    }
++    fprintf(stdout, "Initialized slow path locks.\n");
++
++    // Create slow thread pool
++    for (uint32_t i = 0; i < settings.tao_num_slow_threads; i++) {
++        pthread_t tid;
++        int err = pthread_create(&tid, NULL, handle_slow_request, NULL);
++        if (err) {
++            fprintf(stderr, "Failed to create slow request dispatcher thread.\n");
++        }
++    }
++
++    // Make sure that all the slow threads were created before creating dispatchers
++    // and sending them requests
++    bool b_all_slow_threads = false;
++    while (!b_all_slow_threads) {
++        usleep(1);
++        pthread_mutex_lock(&lock_num_active_slow_threads);
++        if (num_active_slow_threads >= settings.tao_num_slow_threads)
++            b_all_slow_threads = true;
++        pthread_mutex_unlock(&lock_num_active_slow_threads);
++    }
++    fprintf(stdout, "All slow threads are created and running, waiting for requests.\n");
++
++    // Create request queue thread dispatchers
++    if (b_all_slow_threads) {
++        dispatch_first_request = (slow_request**)malloc(settings.tao_slow_dispatchers *
++            sizeof(slow_request*));
++        dispatch_last_request = (slow_request**)malloc(settings.tao_slow_dispatchers *
++            sizeof(slow_request*));
++        dispatch_requests_in_queue = (uint32_t*)malloc(settings.tao_slow_dispatchers *
++            sizeof(uint32_t));
++        lock_dispatch_request_queue = (pthread_mutex_t*)malloc(settings.tao_slow_dispatchers *
++            sizeof(pthread_mutex_t));
++
++        for (uint32_t i = 0; i < settings.tao_slow_dispatchers; ++i) {
++            dispatch_last_request[i] = NULL;
++            dispatch_first_request[i] = NULL;
++            dispatch_requests_in_queue[i] = 0;
++            pthread_mutex_init(&lock_dispatch_request_queue[i], NULL);
++
++            pthread_t tid;
++            uint32_t *dispatcher_queue_idx = (uint32_t*)malloc(sizeof(uint32_t));
++            *dispatcher_queue_idx = i;
++            int err = pthread_create(&tid, NULL, slow_thread_dispatcher, dispatcher_queue_idx);
++            if (err) {
++                fprintf(stderr, "Failed to create slow request dispatcher thread %u.\n", i);
++            }
++        }
++    }
++}
++
++void free_slow_path_mem(void) {
++    // Free memory for item generators
++    clean_item_generators();
++
++    // Free dispatchers thread queues
++    if (lock_dispatch_request_queue) {
++        free(lock_dispatch_request_queue);
++        lock_dispatch_request_queue = NULL;
++    }
++
++    if (dispatch_first_request) {
++        free(dispatch_first_request);
++        dispatch_first_request = NULL;
++    }
++
++    if (dispatch_last_request) {
++        free(dispatch_last_request);
++        dispatch_last_request = NULL;
++    }
++
++    // Free requests thread queues
++    if (thread_first_request) {
++        free(thread_first_request);
++        thread_first_request = NULL;
++    }
++
++    if (thread_last_request) {
++        free(thread_last_request);
++        thread_last_request = NULL;
++    }
++
++    if (lock_thread_req_queue) {
++        free(lock_thread_req_queue);
++        lock_thread_req_queue = NULL;
++    }
++}
++
++bool add_slow_request(char* k, unsigned int nk, conn* c, uint64_t cas) {
++    // We don't use a lock here because the worst thing that could happen
++    // is that all connection threads will add requests. We can afford to
++    // go beyond the limit with ~conn_threads count.
++
++    // The connection will send the next slow request to the next queue
++    uint32_t req_queue_idx = c->slow_req_queue_index;
++    c->slow_req_queue_index++;
++    c->slow_req_queue_index %= settings.tao_slow_dispatchers;
++
++    if (dispatch_requests_in_queue[req_queue_idx] < settings.tao_max_slow_reqs) {
++        // Build the request object
++        slow_request* req = (slow_request*)malloc(sizeof(slow_request));
++        if (!req) {
++            fprintf(stderr, "Failed to allocate memory for slow request.\n");
++            return false;
++        }
++
++        req->key = (char*)malloc(nk);
++        if (!req->key) {
++            fprintf(stderr, "Failed to allocate memory for key in slow request.\n");
++            free_slow_request(req);
++            return false;
++        }
++
++        req->nkey = nk;
++        req->c = c;
++        req->req_cas = cas;
++        req->next_request = NULL;
++        memcpy(req->key, k, nk);
++
++        // Put the request in the queue
++        pthread_mutex_lock(&lock_dispatch_request_queue[req_queue_idx]);
++        if (dispatch_first_request[req_queue_idx] == NULL) {
++            dispatch_last_request[req_queue_idx] = req;
++            dispatch_first_request[req_queue_idx] = req;
++            dispatch_requests_in_queue[req_queue_idx] = 1;
++        }
++        else {
++            dispatch_last_request[req_queue_idx]->next_request = req;
++            dispatch_last_request[req_queue_idx] = req;
++            dispatch_requests_in_queue[req_queue_idx]++;
++        }
++        pthread_mutex_unlock(&lock_dispatch_request_queue[req_queue_idx]);
++    }
++    else
++        return false;
++
++    return true;
++}
++
++void *slow_thread_dispatcher(void* queue_index) {
++    uint32_t thread_queue_index = 0;
++    uint32_t req_queue_index = *((uint32_t*)queue_index);
++
++    fprintf(stdout, "Starting slow request dispatcher thread %u.\n", req_queue_index);
++    while (true) {
++        // Every task should start with a good sleep.
++        // Maybe not needed when waking up.
++        if (settings.tao_dispatcher_sleep_ns > 0) {
++            struct timespec t_sleep, t_slept;
++            t_sleep.tv_sec = 0;
++            t_sleep.tv_nsec = settings.tao_dispatcher_sleep_ns;
++            nanosleep(&t_sleep, &t_slept);
++        }
++
++        slow_request *req_to_dispatch = NULL;
++        if (dispatch_requests_in_queue[req_queue_index] > 0) {
++            pthread_mutex_lock(&lock_dispatch_request_queue[req_queue_index]);
++            if (dispatch_first_request[req_queue_index] != NULL) {
++                req_to_dispatch = dispatch_first_request[req_queue_index];
++                dispatch_first_request[req_queue_index] = req_to_dispatch->next_request;
++                dispatch_requests_in_queue[req_queue_index]--;
++            }
++            pthread_mutex_unlock(&lock_dispatch_request_queue[req_queue_index]);
++        }
++
++        if (req_to_dispatch) {
++            // Detach the request from the queue
++            req_to_dispatch->next_request = NULL;
++
++            // Get lock for slow thread queue
++            pthread_mutex_lock(&lock_thread_req_queue[thread_queue_index]);
++            if (thread_first_request[thread_queue_index] == NULL) {
++                thread_first_request[thread_queue_index] = req_to_dispatch;
++                thread_last_request[thread_queue_index] = req_to_dispatch;
++            }
++            else {
++                thread_last_request[thread_queue_index]->next_request = req_to_dispatch;
++                thread_last_request[thread_queue_index] = req_to_dispatch;
++            }
++            pthread_mutex_unlock(&lock_thread_req_queue[thread_queue_index]);
++
++            // Move on to the next thread
++            thread_queue_index++;
++            thread_queue_index = thread_queue_index % settings.tao_num_slow_threads;
++        }
++    }
++
++    return NULL;
++}
++
++item *add_item_to_cache(slow_request *req, int nbytes, char *payload) {
++    uint32_t flags = 0;
++    uint32_t exptime = 36000;
++
++    item* it = item_alloc(req->key, req->nkey, flags, realtime(exptime), nbytes + 2);
++
++    if (it == 0) {
++        if (!item_size_ok(req->nkey, flags, nbytes + 2)) {
++            fprintf(stderr, "Trying to allocate an item that is too large on slow path.\n");
++        } else {
++            fprintf(stderr, "OUT OF MEMORY when allocating item on slow path.\n");
++        }
++
++        // We ended up here after a MISS so an item with the same key
++        // does not exist in the cache. There is no need to evict it
++        // in case the item allocation failed.
++
++        // No need to update connection state here
++
++        return false;
++    }
++
++    // Set item CAS
++    ITEM_set_cas(it, req->req_cas);
++
++    // Move payload to populate item data field
++    char* item_data = ITEM_data(it);
++    memcpy(item_data, payload, nbytes);
++    *(item_data + nbytes - 2) = '\r';
++    *(item_data + nbytes - 1) = '\n';
++
++    // Update slab statistics; Check if this is creating too much lock contention
++    pthread_mutex_lock(&req->c->thread->stats.mutex);
++    req->c->thread->stats.slab_stats[ITEM_clsid(it)].slow_set_cmds++;
++    pthread_mutex_unlock(&req->c->thread->stats.mutex);
++
++    // Store item in the cache
++    enum store_item_type ret = store_item(it, NREAD_SET, req->c);
++    switch (ret) {
++    case STORED:
++        break;
++    case EXISTS:
++        fprintf(stderr, "Key exists when adding an item on the slow path.\n");
++        break;
++    case NOT_FOUND:
++        fprintf(stderr, "Key not found when adding an item on the slow path.\n");
++        break;
++    case NOT_STORED:
++        fprintf(stderr, "Item not stored on the slow path.\n");
++        break;
++    case TOO_LARGE:
++        fprintf(stderr, "Item too large when when adding it on the slow path.\n");
++        break;
++    case NO_MEMORY:
++        fprintf(stderr, "No memory when adding an item on the slow path.\n");
++        break;
++    }
++
++    // This is an item that will be sent back as in the case of a GET so
++    // the reference count will be decreased when finishing the response
++    // item_remove(it); /* release the c->item reference */
++
++    // Return the allocated item
++    return it;
++}
++
++void *handle_slow_request(void *arg) {
++    uint32_t ret = 0;
++
++    // Increase active slow thread count
++    pthread_mutex_lock(&lock_num_active_slow_threads);
++    uint32_t idx_queue = num_active_slow_threads;
++    num_active_slow_threads++;
++    pthread_mutex_unlock(&lock_num_active_slow_threads);
++
++    // TODO: Implement a kill mechanism
++    while (true) {
++        // Avoid starving CPU in this spinlock
++        if (settings.tao_slow_sleep_ns > 0) {
++            struct timespec t_sleep, t_slept;
++            t_sleep.tv_sec = 0;
++            t_sleep.tv_nsec = settings.tao_slow_sleep_ns;
++            nanosleep(&t_sleep, &t_slept);
++        }
++
++        // Holds connection information and key
++        slow_request* req = NULL;
++
++        // Check if we have a request in the queue
++        pthread_mutex_lock(&lock_thread_req_queue[idx_queue]);
++        if (thread_first_request[idx_queue] != NULL) {
++            req = thread_first_request[idx_queue];
++            thread_first_request[idx_queue] = req->next_request;
++        }
++        pthread_mutex_unlock(&lock_thread_req_queue[idx_queue]);
++
++        if (req != NULL)
++        {
++            // Finalize detaching the request from the queue
++            req->next_request = NULL;
++
++            // Make a request to UDB (memtier threads) to get the missing item
++
++            // Simulate UDB round trip time
++            if (settings.tao_slow_path_sleep_us > 0)
++                usleep(settings.tao_slow_path_sleep_us);
++
++            // Placeholder for payload buffer
++            char *v_compressed = NULL;
++            size_t sz_compressed_payload = 0;
++
++            // Fetch the missing item (wait for a SET or run a connection on this thread)
++            raw_item *raw_it = generate_raw_fbobj(settings.tao_gen_payload);
++
++            // Check if item was created
++            if (raw_it) {
++                // Check if we do compression
++                if (settings.tao_compress_items) {
++                    // How much buffer do we need for compressing the item
++                    const size_t sz_max_compressed_payload = LZ4_compressBound(raw_it->sz_bytes);
++
++                    // Allocate memory for the compressed item
++                    v_compressed = (char*)malloc(sz_max_compressed_payload);
++
++                    // Do an LZ4 compression
++                    sz_compressed_payload = LZ4_compress_fast(raw_it->p_buffer, v_compressed,
++                        raw_it->sz_bytes, sz_max_compressed_payload, 1);
++
++                    // Resulting compressed buffer may be smaller
++                    v_compressed = realloc(v_compressed, sz_compressed_payload);
++                }
++                else {
++                    // Use the payload as is
++                    sz_compressed_payload = raw_it->sz_bytes;
++                    v_compressed = (char*)malloc(sz_compressed_payload);
++                    memcpy(v_compressed, raw_it->p_buffer, sz_compressed_payload);
++                }
++
++                // Free the generated item object
++                free_raw_item(raw_it);
++            }
++            else {
++                sz_compressed_payload = ITEM_NOT_FOUND_SIZE;
++                v_compressed = (char*)malloc(ITEM_NOT_FOUND_SIZE);
++                ret = -1;
++            }
++
++            // DEBUG
++            v_compressed[0] = 69;
++            v_compressed[1] = 66;
++            v_compressed[2] = 96;
++
++            // Build an item
++            item *it = add_item_to_cache(req, sz_compressed_payload, v_compressed);
++            if (it) {
++                // Save the item address in a response queue for the fast thread to
++                // pick it up again and dispatch the response before handling other requests
++
++                slow_response *resp = (slow_response*)malloc(sizeof(slow_response));
++                resp->c = req->c;
++                resp->nkey = req->nkey;
++                resp->next_response = NULL;
++                resp->n_thread_id = pthread_self();
++                resp->it = it;
++
++                // Add response to response queue
++                pthread_mutex_lock(&req->c->lock_response_queue);
++                if (req->c->slow_response_first == NULL) {
++                    req->c->slow_response_first = resp;
++                    req->c->slow_response_last = req->c->slow_response_first;
++                }
++                else {
++                    req->c->slow_response_last->next_response = resp;
++                    req->c->slow_response_last = resp;
++                }
++                req->c->num_pending_slow_responses++;
++                pthread_mutex_unlock(&req->c->lock_response_queue);
++            }
++            else {
++                fprintf(stderr, "Could not add an item on the slow thread!\n");
++                ret = -2;
++            }
++
++            // Free the temporary payload buffer
++            if (v_compressed) {
++                free(v_compressed);
++                v_compressed = NULL;
++            }
++
++            // We don't need the request object any more as we already
++            // prepared a response.
++            free_slow_request(req);
++        }
++    }
++
++    // Decrease active slow thread count
++    pthread_mutex_lock(&lock_num_active_slow_threads);
++    num_active_slow_threads--;
++    pthread_mutex_unlock(&lock_num_active_slow_threads);
++
++    // Exit thread. Hope it cleans stuff.
++    pthread_exit(&ret);
++
++    return NULL;
++}
++
++// Releases memory used by the request objects an its members
++void free_slow_request(slow_request *req) {
++    if (req->key) {
++        free(req->key);
++        req->key = NULL;
++    }
++
++    // Free memory allocated just by the request object
++    if (req) {
++        req->c = NULL;
++        req->next_request = NULL;
++        req->nkey = 0;
++        req->req_cas = 0;
++
++        free(req);
++        req = NULL;
++    }
++}
++
++void free_slow_response(slow_response *resp) {
++    if (resp) {
++        resp->next_response = NULL;
++        resp->c = NULL;
++        resp->it = NULL;
++        resp->n_thread_id = 0;
++        resp->nkey = 0;
++
++        free(resp);
++        resp = NULL;
++    }
++}
++
++uint32_t get_slow_reqs_count(void) {
++    uint32_t num_reqs_in_queue = 0;
++    for (uint32_t i = 0; i < settings.tao_slow_dispatchers; ++i) {
++        pthread_mutex_lock(&lock_dispatch_request_queue[i]);
++        num_reqs_in_queue += dispatch_requests_in_queue[i];
++        pthread_mutex_unlock(&lock_dispatch_request_queue[i]);
++    }
++    return num_reqs_in_queue;
++}
++
++uint32_t get_slow_thread_count(void) {
++    return num_active_slow_threads;
++}
+--- memcached-1.6.5/db_provider.h	1969-12-31 16:00:00.000000000 -0800
++++ memcached-1.6.5/db_provider.h	2022-02-12 14:07:41.262313485 -0800
+@@ -0,0 +1,66 @@
++// Copyright 2004-present Facebook. All Rights Reserved.
++
++#ifndef _DB_PROVIDER_H_
++#define _DB_PROVIDER_H_
++
++#define TAO_MAX_ITEM_SIZE 32768
++#define ITEM_NOT_FOUND_SIZE 1280
++
++// TODO - Remove this and add cmd line param
++#define DEBUG_JSON_PATH "db_items.json"
++
++typedef struct S_slow_request {
++    char* key;
++    unsigned int nkey;
++    uint64_t req_cas;
++    conn* c;
++    struct S_slow_request *next_request;
++} slow_request;
++
++typedef struct S_slow_response {
++    conn* c;
++    unsigned int nkey;
++    pthread_t n_thread_id;
++    item *it;
++    struct S_slow_response *next_response;
++} slow_response;
++
++// External declarations
++
++extern rel_time_t realtime(const time_t exptime);
++
++// Slow path routines
++
++// Initializes global state associated with the slow path
++void init_slow_path(void);
++
++// Creates a request entry into the slow request queue
++bool add_slow_request(char* k, unsigned int nk, conn* c, uint64_t cas);
++
++// Reads entries from the slow request queue and creates threads
++void *slow_thread_dispatcher(void* req_queue_index);
++
++// Makes a request to persistent storage to get the item associated with
++// the key that generated a miss. It compresses the payload field and allocates
++// an item into the cache.
++void *handle_slow_request(void* request);
++
++// Allocates an item into the cache
++item *add_item_to_cache(slow_request *req, int nbytes, char *payload);
++
++// Releases memory consumed by the request object
++void free_slow_request(slow_request *req);
++
++// Releases memory consumed by the response object
++void free_slow_response(slow_response* resp);
++
++// Releases memory used by the global state associate with the slow path
++void free_slow_path_mem(void);
++
++// Get current slow threads
++uint32_t get_slow_thread_count(void);
++
++// Get current slow reqs
++uint32_t get_slow_reqs_count(void);
++
++#endif // _DB_PROVIDER_H_
+--- memcached-1.6.5/items.c	2020-04-03 19:14:26.000000000 -0700
++++ memcached-1.6.5/items.c	2022-02-08 14:40:25.584929852 -0800
+@@ -1208,7 +1208,8 @@
+                     if ((search->it_flags & ITEM_ACTIVE)) {
+                         itemstats[id].evicted_active++;
+                     }
+-                    LOGGER_LOG(NULL, LOG_EVICTIONS, LOGGER_EVICTION, search);
++                    // VAndrei - Weird crash when having to evict items
++                    // LOGGER_LOG(NULL, LOG_EVICTIONS, LOGGER_EVICTION, search);
+                     STORAGE_delete(ext_storage, search);
+                     do_item_unlink_nolock(search, hv);
+                     removed++;
+--- memcached-1.6.5/jenkins_hash.h	2019-04-27 17:18:53.000000000 -0700
++++ memcached-1.6.5/jenkins_hash.h	2022-02-08 14:40:25.585929859 -0800
+@@ -12,4 +12,3 @@
+ #endif
+
+ #endif    /* JENKINS_HASH_H */
+-
+--- memcached-1.6.5/Makefile.am	2020-04-12 13:39:36.000000000 -0700
++++ memcached-1.6.5/Makefile.am	2022-02-08 14:54:32.187989753 -0800
+@@ -10,6 +10,8 @@
+
+ memcached_SOURCES = memcached.c memcached.h \
+                     hash.c hash.h \
++		    db_provider.c db_provider.h \
++		    db_items_int.h db_items.h db_items.cpp \
+                     jenkins_hash.c jenkins_hash.h \
+                     murmur3_hash.c murmur3_hash.h \
+                     slabs.c slabs.h \
+--- memcached-1.6.5/memcached.c	2020-04-12 13:39:36.000000000 -0700
++++ memcached-1.6.5/memcached.c	2022-02-08 14:59:40.351201122 -0800
+@@ -14,6 +14,8 @@
+  *      Brad Fitzpatrick <brad@danga.com>
+  */
+ #include "memcached.h"
++#include "db_provider.h"
++
+ #ifdef EXTSTORE
+ #include "storage.h"
+ #endif
+@@ -85,7 +87,7 @@
+ static enum try_read_result try_read_network(conn *c);
+ static enum try_read_result try_read_udp(conn *c);
+
+-static void conn_set_state(conn *c, enum conn_states state);
++void conn_set_state(conn *c, enum conn_states state);
+ static int start_conn_timeout_thread();
+
+ static mc_resp* resp_finish(conn *c, mc_resp *resp);
+@@ -96,6 +98,13 @@
+ static void process_stat_settings(ADD_STAT add_stats, void *c);
+ static void conn_to_str(const conn *c, char *addr, char *svr_addr);
+
++/* tao stats */
++static pthread_t tid_tao_stats;
++static struct tao_stats tao_stats_current;
++static void start_tao_stats_monitor(void);
++static void compute_tao_stats_snapshot(bool print_stats);
++static void *monitor_tao_stats(void *arg);
++
+ /** Return a datum for stats in binary protocol */
+ static bool get_stats(const char *stat_type, int nkey, ADD_STAT add_stats, void *c);
+
+@@ -112,7 +121,9 @@
+ static void write_and_free(conn *c, char *buf, int bytes);
+ static void write_bin_error(conn *c, protocol_binary_response_status err,
+                             const char *errstr, int swallow);
+-static void write_bin_miss_response(conn *c, char *key, size_t nkey);
++
++static bool write_bin_slow_response(slow_response *resp);
++// static void write_bin_miss_response(conn *c, char *key, size_t nkey);
+
+ #ifdef EXTSTORE
+ static void _get_extstore_cb(void *e, obj_io *io, int ret);
+@@ -211,7 +222,8 @@
+  * unix time. Use the fact that delta can't exceed one month (and real time value can't
+  * be that low).
+  */
+-static rel_time_t realtime(const time_t exptime) {
++
++rel_time_t realtime(const time_t exptime) {
+     /* no. of seconds in 30 days - largest possible delta exptime */
+
+     if (exptime == 0) return 0; /* 0 means never expire */
+@@ -273,7 +285,7 @@
+ #endif
+     /* By default this string should be NULL for getaddrinfo() */
+     settings.inter = NULL;
+-    settings.maxbytes = 64 * 1024 * 1024; /* default is 64MB */
++    settings.maxbytes = 128 * 1024 * 1024; /* default is 128MB */
+     settings.maxconns = 1024;         /* to limit connections-related memory to about 5MB */
+     settings.verbose = 0;
+     settings.oldest_live = 0;
+@@ -323,11 +335,86 @@
+     settings.watch_enabled = true;
+     settings.resp_obj_mem_limit = 0;
+     settings.read_buf_mem_limit = 0;
++    settings.tao_item_gen_file = DEBUG_JSON_PATH;
++    settings.tao_max_item_size = TAO_MAX_ITEM_SIZE;
++    settings.tao_gen_payload = 1;
++    settings.tao_max_slow_reqs = 10000;
++    settings.tao_slow_dispatchers = 1;
++    settings.tao_num_slow_threads = 72;
++    settings.tao_worker_sleep_ns = 1;
++    settings.tao_dispatcher_sleep_ns = 1;
++    settings.tao_slow_sleep_ns = 1;
++    settings.tao_slow_path_sleep_us = 1;
++    settings.tao_compress_items = 1;
++    settings.tao_stats_sleep_ms = 5000;
+ #ifdef MEMCACHED_DEBUG
+     settings.relaxed_privileges = false;
+ #endif
+ }
+
++static void start_tao_stats_monitor(void) {
++    int err = pthread_create(&tid_tao_stats, NULL, monitor_tao_stats, NULL);
++    if (err) {
++        fprintf(stderr, "Failed to chreate thread for slow request.\n");
++    }
++}
++
++static void compute_tao_stats_snapshot(bool print_stats) {
++    struct thread_stats thread_stats;
++    threadlocal_stats_aggregate(&thread_stats);
++
++    rel_time_t elapsed_time = current_time - tao_stats_current.last_sample_time;
++    if (elapsed_time > 0) {
++        double fast_qps = (double)(thread_stats.tao_fast_responses -
++            tao_stats_current.fast_responses) / (double)elapsed_time;
++        double slow_qps = (double)(thread_stats.tao_slow_responses -
++            tao_stats_current.slow_responses) / (double)elapsed_time;
++        double wh_qps = (double)(thread_stats.tao_wh_transactions -
++            tao_stats_current.wh_transactions) / (double)elapsed_time;
++        double fast_cmds = (double)(thread_stats.get_cmds -
++            tao_stats_current.fast_cmds);
++        double fast_misses = (double)(thread_stats.get_misses -
++            tao_stats_current.fast_misses);
++        double fast_hit_rate = 0.0;
++        if (fast_cmds > 0.0) {
++            fast_hit_rate = 1 - fast_misses / fast_cmds;
++        }
++
++        tao_stats_current.fast_responses = thread_stats.tao_fast_responses;
++        tao_stats_current.slow_responses = thread_stats.tao_slow_responses;
++        tao_stats_current.wh_transactions = thread_stats.tao_wh_transactions;
++        tao_stats_current.fast_cmds = thread_stats.get_cmds;
++        tao_stats_current.fast_misses = thread_stats.get_misses;
++        tao_stats_current.last_sample_time = current_time;
++        double crnt_items = (double)stats_state.curr_items / 1000000;
++        uint32_t num_pending_slows = thread_stats.tao_slow_requests -
++            get_slow_reqs_count() - thread_stats.tao_slow_responses;
++
++        if (print_stats) {
++            fprintf(stdout, "fast_qps = %.1lf, hit_rate = %.3lf, slow_qps = %.1lf, wh_qps = %.1lf, curr_it = %.2lfM, ",
++                fast_qps, fast_hit_rate, slow_qps, wh_qps, crnt_items);
++
++            fprintf(stdout, "crnt_conn = %lu, slow_th = %u, slow_reqs = %u, slow_resp = %u\n",
++                stats_state.curr_conns, get_slow_thread_count(), get_slow_reqs_count(),
++                num_pending_slows);
++        }
++    }
++}
++
++static void *monitor_tao_stats(void *arg) {
++    tao_stats_current.fast_responses = 0;
++    tao_stats_current.slow_responses = 0;
++    tao_stats_current.wh_transactions = 0;
++    tao_stats_current.last_sample_time = current_time;
++
++    while (true) {
++        usleep(settings.tao_stats_sleep_ms * 1000);
++        compute_tao_stats_snapshot(true);
++    }
++
++    return NULL;
++}
++
+ extern pthread_mutex_t conn_lock;
+
+ /* Connection timeout thread bits */
+@@ -693,6 +780,11 @@
+     c->item = 0;
+
+     c->noreply = false;
++    c->slow_response_first = NULL;
++    c->slow_response_last = NULL;
++    c->num_pending_slow_responses = 0;
++    c->slow_req_queue_index = 0;
++    pthread_mutex_init(&c->lock_response_queue, NULL);
+
+ #ifdef TLS
+     if (ssl) {
+@@ -903,6 +995,20 @@
+             c->ssl_wbuf = NULL;
+ #endif
+
++        // TAO SLOW PATH
++
++        slow_response *p_crnt = c->slow_response_first;
++        slow_response *p_next = NULL;
++
++        pthread_mutex_lock(&c->lock_response_queue);
++        while (p_crnt != NULL){
++            p_next = p_crnt->next_response;
++            free_slow_response(p_crnt);
++            p_crnt = NULL;
++            p_crnt = p_next;
++        }
++        pthread_mutex_unlock(&c->lock_response_queue);
++
+         free(c);
+     }
+ }
+@@ -970,6 +1076,7 @@
+                                        "conn_swallow",
+                                        "conn_closing",
+                                        "conn_mwrite",
++                                       "conn_proc_slow",
+                                        "conn_closed",
+                                        "conn_watch" };
+     return statenames[state];
+@@ -980,7 +1087,7 @@
+  * processing that needs to happen on certain state transitions can
+  * happen here.
+  */
+-static void conn_set_state(conn *c, enum conn_states state) {
++void conn_set_state(conn *c, enum conn_states state) {
+     assert(c != NULL);
+     assert(state >= conn_listening && state < conn_max_state);
+
+@@ -1611,6 +1718,100 @@
+     }
+ }
+
++// TAO SLOW PATH
++
++static bool write_bin_slow_response(slow_response *resp) {
++    conn *c = resp->c;
++    item *it = resp->it;
++    protocol_binary_response_get* rsp = (protocol_binary_response_get*)c->resp->wbuf;
++    size_t nkey = resp->nkey;
++
++    int should_touch = (c->cmd == PROTOCOL_BINARY_CMD_TOUCH ||
++                        c->cmd == PROTOCOL_BINARY_CMD_GAT ||
++                        c->cmd == PROTOCOL_BINARY_CMD_GATK);
++    int should_return_key = (c->cmd == PROTOCOL_BINARY_CMD_GETK ||
++                             c->cmd == PROTOCOL_BINARY_CMD_GATK);
++    int should_return_value = true; // (c->cmd != PROTOCOL_BINARY_CMD_TOUCH);
++
++    bool failed = false;
++
++    if (settings.verbose > 1) {
++        fprintf(stderr, "<%d %s ", c->sfd, should_touch ? "TOUCH" : "GET");
++        if (fwrite(ITEM_key(it), 1, nkey, stderr)) {}
++        fputc('\n', stderr);
++    }
++
++    if (it) {
++        // the length has two unnecessary bytes ("\r\n")
++        uint16_t keylen = 0;
++        uint32_t bodylen = sizeof(rsp->message.body) + (it->nbytes - 2);
++
++        if (c->cmd == PROTOCOL_BINARY_CMD_TOUCH) {
++            bodylen -= it->nbytes - 2;
++        } else if (should_return_key) {
++            bodylen += nkey;
++            keylen = nkey;
++        }
++
++        add_bin_header(c, 0, sizeof(rsp->message.body), keylen, bodylen);
++        rsp->message.header.response.cas = htonll(ITEM_get_cas(it));
++
++        // add the flags
++        FLAGS_CONV(it, rsp->message.body.flags);
++        rsp->message.body.flags = htonl(rsp->message.body.flags);
++        resp_add_iov(c->resp, &rsp->message.body, sizeof(rsp->message.body));
++
++        if (should_return_key) {
++            resp_add_iov(c->resp, ITEM_key(it), nkey);
++        }
++
++        if (should_return_value) {
++            // Add the data minus the CRLF
++#ifdef EXTSTORE
++            if (it->it_flags & ITEM_HDR) {
++                if (_get_extstore(c, it, c->resp) != 0) {
++                    pthread_mutex_lock(&c->thread->stats.mutex);
++                    c->thread->stats.get_oom_extstore++;
++                    pthread_mutex_unlock(&c->thread->stats.mutex);
++
++                    failed = true;
++                }
++            } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
++                resp_add_iov(c->resp, ITEM_data(it), it->nbytes - 2);
++            } else {
++                // Allow transmit handler to find the item and expand iov's
++                resp_add_chunked_iov(c->resp, it, it->nbytes - 2);
++            }
++#else
++            if ((it->it_flags & ITEM_CHUNKED) == 0) {
++                resp_add_iov(c->resp, ITEM_data(it), it->nbytes - 2);
++            } else {
++                resp_add_chunked_iov(c->resp, it, it->nbytes - 2);
++            }
++#endif
++        }
++
++        if (!failed) {
++            conn_set_state(c, conn_new_cmd);
++            // Remember this command so we can garbage collect it later
++#ifdef EXTSTORE
++            if ((it->it_flags & ITEM_HDR) != 0 && should_return_value) {
++                // Only have extstore clean if header and returning value.
++                c->resp->item = NULL;
++            } else {
++                c->resp->item = it;
++            }
++#else
++            c->resp->item = it;
++#endif
++        } else {
++            item_remove(it);
++        }
++    }
++
++    return (!failed);
++}
++
+ static void process_bin_get_or_touch(conn *c, char *extbuf) {
+     item *it;
+
+@@ -1646,6 +1847,7 @@
+         uint32_t bodylen = sizeof(rsp->message.body) + (it->nbytes - 2);
+
+         pthread_mutex_lock(&c->thread->stats.mutex);
++        c->thread->stats.tao_fast_responses++;
+         if (should_touch) {
+             c->thread->stats.touch_cmds++;
+             c->thread->stats.slab_stats[ITEM_clsid(it)].touch_hits++;
+@@ -1728,8 +1930,29 @@
+         failed = true;
+     }
+
++    bool slow_req_successfull = false;
+     if (failed) {
++
++        /* TAO_SLOW_PATH
++
++        We need to forward the request key to the slow path handler and not update the
++        GET cmd count. Successful gets will be analogue to TAO Fast Requests and misses
++        will turn into TAO Slow Requests. Also we need to continue sending the response
++        so that the client will do a SET for the key that missed, in order to simulate
++        UDB ingress traffic.
++
++        */
++
++        // TAO: Slow path entry point. Creates a slow thread.
++        slow_req_successfull = add_slow_request(key, nkey, c, 0);
++
+         pthread_mutex_lock(&c->thread->stats.mutex);
++        if (slow_req_successfull) {
++            c->thread->stats.tao_slow_requests++;
++
++            // Do not send a response from the fast thread
++            conn_set_state(c, conn_proc_slow);
++        }
+         if (should_touch) {
+             c->thread->stats.touch_cmds++;
+             c->thread->stats.touch_misses++;
+@@ -1745,13 +1968,15 @@
+             MEMCACHED_COMMAND_GET(c->sfd, key, nkey, -1, 0);
+         }
+
+-        if (c->noreply) {
+-            conn_set_state(c, conn_new_cmd);
+-        } else {
+-            if (should_return_key) {
+-                write_bin_miss_response(c, key, nkey);
++        if (!slow_req_successfull) {
++            if (c->noreply) {
++                conn_set_state(c, conn_new_cmd);
+             } else {
+-                write_bin_miss_response(c, NULL, 0);
++                if (should_return_key) {
++                    write_bin_miss_response(c, key, nkey);
++                } else {
++                    write_bin_miss_response(c, NULL, 0);
++                }
+             }
+         }
+     }
+@@ -2426,6 +2651,11 @@
+         return;
+     }
+
++    /* TAO: Direct SET transactions simulate "Wormhole" */
++    pthread_mutex_lock(&c->thread->stats.mutex);
++    c->thread->stats.tao_wh_transactions++;
++    pthread_mutex_unlock(&c->thread->stats.mutex);
++
+     ITEM_set_cas(it, c->binary_header.request.cas);
+
+     switch (c->cmd) {
+@@ -3298,7 +3528,19 @@
+     APPEND_STAT("resp_obj_mem_limit", "%u", settings.resp_obj_mem_limit);
+     APPEND_STAT("read_buf_mem_limit", "%u", settings.read_buf_mem_limit);
+     APPEND_STAT("track_sizes", "%s", item_stats_sizes_status() ? "yes" : "no");
+-    APPEND_STAT("inline_ascii_response", "%s", "no"); // setting is dead, cannot be yes.
++    APPEND_STAT("tao_item_gen_file", "%s", settings.tao_item_gen_file);
++    APPEND_STAT("tao_max_item_size", "%u", settings.tao_max_item_size);
++    APPEND_STAT("tao_gen_payload", "%u", settings.tao_gen_payload);
++    APPEND_STAT("tao_slow_dispatchers", "%u", settings.tao_slow_dispatchers);
++    APPEND_STAT("tao_num_slow_threads", "%u", settings.tao_num_slow_threads);
++    APPEND_STAT("tao_max_slow_reqs", "%u", settings.tao_max_slow_reqs);
++    APPEND_STAT("tao_dispatcher_sleep_ns", "%u", settings.tao_dispatcher_sleep_ns);
++    APPEND_STAT("tao_worker_sleep_ns", "%u", settings.tao_worker_sleep_ns);
++    APPEND_STAT("tao_slow_sleep_ns", "%u", settings.tao_slow_sleep_ns);
++    APPEND_STAT("tao_slow_path_sleep_us", "%u", settings.tao_slow_path_sleep_us);
++    APPEND_STAT("tao_compress_items", "%u", settings.tao_compress_items);
++    APPEND_STAT("tao_stats_sleep_ms", "%u", settings.tao_stats_sleep_ms);
++    APPEND_STAT("inline_ascii_response", "%s", "no"); // setting is dead, cannot be yes
+ #ifdef HAVE_DROP_PRIVILEGES
+     APPEND_STAT("drop_privileges", "%s", settings.drop_privileges ? "yes" : "no");
+ #endif
+@@ -7094,6 +7336,9 @@
+
+     assert(c != NULL);
+
++    // Placeholder for sending the slow response
++    slow_response *resp_crnt = NULL;
++
+     while (!stop) {
+
+         switch(c->state) {
+@@ -7263,7 +7508,6 @@
+         case conn_new_cmd:
+             /* Only process nreqs at a time to avoid starving other
+                connections */
+-
+             --nreqs;
+             if (nreqs >= 0) {
+                 reset_cmd_handler(c);
+@@ -7290,6 +7534,7 @@
+                 }
+                 stop = true;
+             }
++
+             break;
+
+         case conn_nread:
+@@ -7380,6 +7625,52 @@
+             conn_set_state(c, conn_closing);
+             break;
+
++        case conn_proc_slow:
++            resp_crnt = NULL;
++
++            // Wait a bit, maybe the response arrives and we don't
++            // go to connection close state
++            if (settings.tao_worker_sleep_ns > 0) {
++                struct timespec t_sleep, t_slept;
++                t_sleep.tv_sec = 0;
++                t_sleep.tv_nsec = settings.tao_worker_sleep_ns;
++                nanosleep(&t_sleep, &t_slept);
++            }
++
++            if (c->slow_response_first != NULL) {
++                pthread_mutex_lock(&c->lock_response_queue);
++                if (c->slow_response_first != NULL) {
++                    // Fetch the first response in the queue
++                    resp_crnt = c->slow_response_first;
++
++                    // Move on to the next response
++                    c->slow_response_first = c->slow_response_first->next_response;
++                    pthread_mutex_unlock(&c->lock_response_queue);
++                }
++                pthread_mutex_unlock(&c->lock_response_queue);
++            }
++
++            if (resp_crnt != NULL) {
++                // This sets a new state for the state machine (conn_new_cmd)
++                write_bin_slow_response(resp_crnt);
++
++                // The connection can send only one response at a time
++                c->thread->stats.tao_slow_responses++;
++
++                // Free response
++                free_slow_response(resp_crnt);
++                resp_crnt = NULL;
++            }
++            else {
++                if (!update_event(c, EV_WRITE | EV_PERSIST)) {
++                    if (settings.verbose > 0)
++                        fprintf(stderr, "Couldn't update event\n");
++                    conn_set_state(c, conn_closing);
++                }
++            }
++
++            break;
++
+         case conn_swallow:
+             /* we are reading sbytes and throwing them away */
+             if (c->sbytes <= 0) {
+@@ -7468,6 +7759,7 @@
+                 stop = true;
+                 break;
+             }
++
+             break;
+
+         case conn_closing:
+@@ -7512,6 +7804,13 @@
+         return;
+     }
+
++    /* start with conn_proc_slow if we have pending slow responses */
++    pthread_mutex_lock(&c->lock_response_queue);
++    if (c->slow_response_first != NULL) {
++        conn_set_state(c, conn_proc_slow);
++    }
++    pthread_mutex_unlock(&c->lock_response_queue);
++
+     drive_machine(c);
+
+     /* wait for next event */
+@@ -8100,6 +8399,29 @@
+            "   - no_modern:           uses defaults of previous major version (1.4.x)\n",
+            settings.slab_chunk_size_max / (1 << 10), settings.logger_watcher_buf_size / (1 << 10),
+            settings.logger_buf_size / (1 << 10));
++    printf("   - tao_it_gen_file:     path to the input file that contains generated item sizes.\n");
++    printf("   - tao_max_item_size:   maximum allocated item size for tao slow reqests. (default: %d)\n",
++            settings.tao_max_item_size);
++    printf("   - tao_gen_payload:     if non-zero, use RNG to generate payload. (default: %d)\n",
++            settings.tao_gen_payload);
++    printf("   - tao_max_slow_reqs:   maximum number of inflight slow requests. (default: %d)\n",
++            settings.tao_max_slow_reqs);
++    printf("   - tao_slow_dispatchers: number of slow req dispatcher threads. (default: %d)\n",
++            settings.tao_slow_dispatchers);
++    printf("   - tao_num_slow_threads: number of slow threads. (default: %d)\n",
++            settings.tao_num_slow_threads);
++    printf("   - tao_dispatcher_sleep_ns: sleep interval for dispatcher threads. (default: %d)\n",
++            settings.tao_dispatcher_sleep_ns);
++    printf("   - tao_worker_sleep_ns: microseconds to sleep on a worker thread waiting for slow reqs. (default: %d)\n",
++            settings.tao_worker_sleep_ns);
++    printf("   - tao_slow_sleep_ns:   microseconds to sleep on a slow thread waiting for slow reqs. (default: %d)\n",
++            settings.tao_slow_sleep_ns);
++    printf("   - tao_slow_path_sleep: microseconds to sleep for each slow path request. (default: %d)\n",
++            settings.tao_slow_path_sleep_us);
++    printf("   - tao_compress_items:  if non-zero, aply ZSTD compression on payload. (default: %d)\n",
++            settings.tao_compress_items);
++    printf("   - tao_stats_sleep_ms:  milliseconds to sleep on stats thread. (default: %d)\n",
++            settings.tao_stats_sleep_ms);
+     verify_default("tail_repair_time", settings.tail_repair_time == TAIL_REPAIR_TIME_DEFAULT);
+     verify_default("lru_crawler_tocrawl", settings.lru_crawler_tocrawl == 0);
+     verify_default("idle_timeout", settings.idle_timeout == 0);
+@@ -8280,6 +8602,7 @@
+
+ static void sig_handler(const int sig) {
+     printf("Signal handled: %s.\n", strsignal(sig));
++    compute_tao_stats_snapshot(true);
+     exit(EXIT_SUCCESS);
+ }
+
+@@ -8454,7 +8777,7 @@
+     // TODO: should get a version of version which is numeric, else
+     // comparisons for compat reasons are difficult.
+     // it may be possible to punt on this for now; since we can test for the
+-    // absense of another key... such as the new numeric version.
++    // absence of another key... such as the new numeric version.
+     //restart_set_kv(ctx, "version", "%s", VERSION);
+     // We hold the original factor or subopts _string_
+     // it can be directly compared without roundtripping through floats or
+@@ -8799,6 +9122,18 @@
+         DROP_PRIVILEGES,
+         RESP_OBJ_MEM_LIMIT,
+         READ_BUF_MEM_LIMIT,
++        TAO_IT_GEN_FILE,
++        TAO_MAX_ITEM_SIZE_CL,
++        TAO_GEN_PAYLOAD,
++        TAO_MAX_SLOW_REQS,
++        TAO_SLOW_DISPATCHERS,
++        TAO_NUM_SLOW_THREADS,
++        TAO_DISPATCHER_SLEEP_NS,
++        TAO_WORKER_SLEEP_NS,
++        TAO_SLOW_SLEEP_NS,
++        TAO_SLOW_PATH_SLEEP_US,
++        TAO_COMPRESS_ITEMS,
++        TAO_STATS_SLEEP_MS,
+ #ifdef TLS
+         SSL_CERT,
+         SSL_KEY,
+@@ -8868,6 +9203,18 @@
+         [DROP_PRIVILEGES] = "drop_privileges",
+         [RESP_OBJ_MEM_LIMIT] = "resp_obj_mem_limit",
+         [READ_BUF_MEM_LIMIT] = "read_buf_mem_limit",
++        [TAO_IT_GEN_FILE] = "tao_it_gen_file",
++        [TAO_MAX_ITEM_SIZE_CL] = "tao_max_item_size",
++        [TAO_GEN_PAYLOAD] = "tao_gen_payload",
++        [TAO_MAX_SLOW_REQS] = "tao_max_slow_reqs",
++        [TAO_SLOW_DISPATCHERS] = "tao_slow_dispatchers",
++        [TAO_NUM_SLOW_THREADS] = "tao_num_slow_threads",
++        [TAO_DISPATCHER_SLEEP_NS] = "tao_dispatcher_sleep_ns",
++        [TAO_WORKER_SLEEP_NS] = "tao_worker_sleep_ns",
++        [TAO_SLOW_SLEEP_NS] = "tao_slow_sleep_ns",
++        [TAO_SLOW_PATH_SLEEP_US] = "tao_slow_path_sleep_us",
++        [TAO_COMPRESS_ITEMS] = "tao_compress_items",
++        [TAO_STATS_SLEEP_MS] = "tao_stats_sleep_ms",
+ #ifdef TLS
+         [SSL_CERT] = "ssl_chain_cert",
+         [SSL_KEY] = "ssl_key",
+@@ -8913,6 +9260,7 @@
+
+     /* init settings */
+     settings_init();
++
+     verify_default("hash_algorithm", hash_type == MURMUR3_HASH);
+ #ifdef EXTSTORE
+     settings.ext_item_size = 512;
+@@ -9753,6 +10101,123 @@
+                 }
+                 settings.read_buf_mem_limit *= 1024 * 1024; /* megabytes */
+                 break;
++            case TAO_SLOW_PATH_SLEEP_US:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_slow_path_sleep_us argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_slow_path_sleep_us)) {
++                    fprintf(stderr, "could not parse argument to tao_slow_path_sleep_us\n");
++                    return 1;
++                }
++                break;
++            case TAO_STATS_SLEEP_MS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_stats_sleep_ms argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_stats_sleep_ms)) {
++                    fprintf(stderr, "could not parse argument to tao_stats_sleep_ms\n");
++                    return 1;
++                }
++                break;
++            case TAO_DISPATCHER_SLEEP_NS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_dispatcher_sleep_ns argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_dispatcher_sleep_ns)) {
++                    fprintf(stderr, "could not parse argument to tao_dispatcher_sleep_ns\n");
++                    return 1;
++                }
++                break;
++            case TAO_WORKER_SLEEP_NS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_worker_sleep_ns argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_worker_sleep_ns)) {
++                    fprintf(stderr, "could not parse argument to tao_worker_sleep_ns\n");
++                    return 1;
++                }
++                break;
++            case TAO_SLOW_SLEEP_NS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_slow_sleep_ns argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_slow_sleep_ns)) {
++                    fprintf(stderr, "could not parse argument to tao_slow_sleep_ns\n");
++                    return 1;
++                }
++                break;
++            case TAO_SLOW_DISPATCHERS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_slow_dispatchers argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_slow_dispatchers)) {
++                    fprintf(stderr, "could not parse argument to tao_slow_dispatchers\n");
++                    return 1;
++                }
++                break;
++            case TAO_NUM_SLOW_THREADS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_num_slow_threads argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_num_slow_threads)) {
++                    fprintf(stderr, "could not parse argument to tao_num_slow_threads\n");
++                    return 1;
++                }
++                break;
++            case TAO_MAX_SLOW_REQS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_max_slow_reqs argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_max_slow_reqs)) {
++                    fprintf(stderr, "could not parse argument to tao_max_slow_reqs\n");
++                    return 1;
++                }
++                break;
++            case TAO_IT_GEN_FILE:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao item generation file.\n");
++                    return 1;
++                }
++                settings.tao_item_gen_file = strdup(subopts_value);
++                break;
++            case TAO_MAX_ITEM_SIZE_CL:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing max item size for tao slow paths argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_max_item_size)) {
++                    fprintf(stderr, "could not parse argument to tao_max_item_size\n");
++                    return 1;
++                }
++                break;
++            case TAO_GEN_PAYLOAD:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing gen payload value.\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_gen_payload)) {
++                    fprintf(stderr, "could not parse argument to tao_gen_payload\n");
++                    return 1;
++                }
++                break;
++            case TAO_COMPRESS_ITEMS:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing compress items value.\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_compress_items)) {
++                    fprintf(stderr, "could not parse argument to tao_compress_items\n");
++                    return 1;
++                }
++                break;
+ #ifdef MEMCACHED_DEBUG
+             case RELAXED_PRIVILEGES:
+                 settings.relaxed_privileges = true;
+@@ -9828,6 +10293,21 @@
+         settings.factor = 1.08;
+     }*/
+
++    fprintf(stdout, "Max item size = %u B.\n", settings.tao_max_item_size);
++    fprintf(stdout, "Generate payload = %u.\n", settings.tao_gen_payload);
++    fprintf(stdout, "Sleep on the worker threads = %u ns.\n", settings.tao_worker_sleep_ns);
++    fprintf(stdout, "Max slow request queue size = %u.\n", settings.tao_max_slow_reqs);
++    fprintf(stdout, "Number of dispatcher threads = %u.\n", settings.tao_slow_dispatchers);
++    fprintf(stdout, "Sleep on the dispatchers = %u ns\n", settings.tao_dispatcher_sleep_ns);
++    fprintf(stdout, "Number of slow threads = %u.\n", settings.tao_num_slow_threads);
++    fprintf(stdout, "Sleep on the slow threads = %u ns.\n", settings.tao_slow_sleep_ns);
++    fprintf(stdout, "Sleep on the slow path = %u us.\n", settings.tao_slow_path_sleep_us);
++    fprintf(stdout, "Item compression = %u.\n", settings.tao_compress_items);
++    fprintf(stdout, "Stats threads sleep time = %u ms.\n", settings.tao_stats_sleep_ms);
++
++    /* TAO slow path initialize */
++    init_slow_path();
++
+     if (slab_sizes_unparsed != NULL) {
+         // want the unedited string for restart code.
+         char *temp = strdup(slab_sizes_unparsed);
+@@ -9956,10 +10436,12 @@
+     } else {
+         rlim.rlim_cur = settings.maxconns;
+         rlim.rlim_max = settings.maxconns;
++        /*
+         if (setrlimit(RLIMIT_NOFILE, &rlim) != 0) {
+             fprintf(stderr, "failed to set rlimit for open files. Try starting as root or requesting smaller maxconns value.\n");
+             exit(EX_OSERR);
+         }
++        */
+     }
+
+     /* lose root privileges if we have them */
+@@ -10065,6 +10547,7 @@
+     stats_init();
+     logger_init();
+     conn_init();
++
+     bool reuse_mem = false;
+     void *mem_base = NULL;
+     bool prefill = false;
+@@ -10301,6 +10784,9 @@
+     /* Initialize the uriencode lookup table. */
+     uriencode_init();
+
++    /* tao stats monitor. We need all threads to be initialized. */
++    start_tao_stats_monitor();
++
+     /* enter the event loop */
+     while (!stop_main_loop) {
+         if (event_base_loop(main_base, EVLOOP_ONCE) != 0) {
+--- memcached-1.6.5/memcached.h	2020-04-03 19:14:26.000000000 -0700
++++ memcached-1.6.5/memcached.h	2022-02-08 14:40:25.592929909 -0800
+@@ -194,6 +194,7 @@
+     conn_swallow,    /**< swallowing unnecessary bytes w/o storing */
+     conn_closing,    /**< closing this connection */
+     conn_mwrite,     /**< writing out many items sequentially */
++    conn_proc_slow,  /**< waiting for the slow response to be prepared */
+     conn_closed,     /**< connection is closed */
+     conn_watch,      /**< held by the logger thread as a watcher */
+     conn_max_state   /**< Max state value (used for assertion) */
+@@ -261,6 +262,7 @@
+
+ #define SLAB_STATS_FIELDS \
+     X(set_cmds) \
++    X(slow_set_cmds) \
+     X(get_hits) \
+     X(touch_hits) \
+     X(delete_hits) \
+@@ -288,6 +290,10 @@
+     X(decr_misses) \
+     X(cas_misses) \
+     X(meta_cmds) \
++    X(tao_slow_requests) \
++    X(tao_fast_responses) \
++    X(tao_slow_responses) \
++    X(tao_wh_transactions) \
+     X(bytes_read) \
+     X(bytes_written) \
+     X(flush_cmds) \
+@@ -447,6 +453,18 @@
+     bool drop_privileges;   /* Whether or not to drop unnecessary process privileges */
+     bool watch_enabled; /* allows watch commands to be dropped */
+     bool relaxed_privileges;   /* Relax process restrictions when running testapp */
++    char *tao_item_gen_file; /* The path to the file containing generated item sizes. */
++    uint32_t tao_max_item_size; /* Maximum tao allowed item size to be generated. */
++    uint32_t tao_gen_payload; /* If not 0, use an RNG to generate payload */
++    uint32_t tao_slow_dispatchers; /* Number of dispatcher threads for slow requests. */
++    uint32_t tao_num_slow_threads; /* Maximum number of slow threads. */
++    uint32_t tao_max_slow_reqs; /* Maximum number of concurent slow requests. */
++    uint32_t tao_worker_sleep_ns; /* Microseconds of sleep to reduce CPU on worker threads. */
++    uint32_t tao_dispatcher_sleep_ns; /* Number of microseconds for dispatcher sleep. */
++    uint32_t tao_slow_sleep_ns; /* Microseconds of sleep to reduce CPU on slow threads. */
++    uint32_t tao_slow_path_sleep_us; /* Number of us to sleep in each slow request. */
++    uint32_t tao_compress_items; /* If not 0, apply ZSTD compression on item payload */
++    uint32_t tao_stats_sleep_ms; /* Number of milliseconds to sleep on tao stats thread. */
+ #ifdef EXTSTORE
+     unsigned int ext_io_threadcount; /* number of IO threads to run. */
+     unsigned int ext_page_size; /* size in megabytes of storage pages. */
+@@ -664,6 +682,10 @@
+     bool active;              /* tells if IO was dispatched or not */
+ } io_wrap;
+ #endif
++
++// TAO SLOW PATH
++#include "db_provider.h"
++
+ /**
+  * The structure representing a connection into memcached.
+  */
+@@ -744,6 +766,13 @@
+     ssize_t (*read)(conn  *c, void *buf, size_t count);
+     ssize_t (*sendmsg)(conn *c, struct msghdr *msg, int flags);
+     ssize_t (*write)(conn *c, void *buf, size_t count);
++
++    /* TAO SLOW PATH */
++    slow_response *slow_response_first;
++    slow_response *slow_response_last;
++    uint32_t slow_req_queue_index;
++    uint32_t num_pending_slow_responses;
++    pthread_mutex_t lock_response_queue;
+ };
+
+ /* array of conn structures, indexed by file descriptor */
+@@ -790,6 +819,7 @@
+     enum network_transport transport, struct event_base *base, void *ssl);
+
+ void conn_worker_readd(conn *c);
++void conn_send_slow_response(conn* c);
+ extern int daemonize(int nochdir, int noclose);
+
+ #define mutex_lock(x) pthread_mutex_lock(x)
+@@ -879,3 +909,13 @@
+
+ #define likely(x)       __builtin_expect((x),1)
+ #define unlikely(x)     __builtin_expect((x),0)
++
++/* tao benchmark runtime statistics */
++struct tao_stats {
++    uint64_t fast_responses;
++    uint64_t slow_responses;
++    uint64_t wh_transactions;
++    uint64_t fast_cmds;
++    uint64_t fast_misses;
++    uint64_t last_sample_time;
++};
+--- memcached-1.6.5/util.c	2020-04-03 19:14:26.000000000 -0700
++++ memcached-1.6.5/util.c	2022-02-08 14:40:25.593929917 -0800
+@@ -241,13 +241,17 @@
+ #ifdef ENDIAN_LITTLE
+     /* Little endian, flip the bytes around until someone makes a faster/better
+     * way to do this. */
++
++    /*
+     int64_t rv = 0;
+     int i = 0;
+      for(i = 0; i<8; i++) {
+         rv = (rv << 8) | (in & 0xff);
+         in >>= 8;
+      }
+-    return rv;
++    */
++
++    return htobe64(le64toh(in));
+ #else
+     /* big-endian machines don't need byte swapping */
+     return in;
+@@ -255,11 +259,10 @@
+ }
+
+ uint64_t ntohll(uint64_t val) {
+-   return mc_swap64(val);
++    return mc_swap64(val);
+ }
+
+ uint64_t htonll(uint64_t val) {
+    return mc_swap64(val);
+ }
+ #endif
+-

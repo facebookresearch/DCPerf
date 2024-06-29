@@ -1,0 +1,49 @@
+From 5b05bcdb4e2a2cbb1b0a68d2f9cd4819cf8fe1e1 Mon Sep 17 00:00:00 2001
+From: "Carlos L. Torres" <cltorres@fb.com>
+Date: Fri, 8 Nov 2019 14:32:24 -0800
+Subject: [PATCH] [gapbs] Add dummy PageRank class for passing parameters
+
+---
+ src/command_line.h | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/src/command_line.h b/src/command_line.h
+index a719977..6942c85 100644
+--- a/src/command_line.h
++++ b/src/command_line.h
+@@ -188,6 +188,32 @@ class CLPageRank : public CLApp {
+   double tolerance() const { return tolerance_; }
+ };
+ 
++class CLPageRankDummy : public CLBase {
++  bool do_analysis_ = false;
++  int num_trials_ = 16;
++  int64_t start_vertex_ = -1;
++  bool do_verify_ = false;
++
++  int max_iters_;
++  double tolerance_;
++
++  public:
++  CLPageRankDummy(
++      int scale, int degree, bool uniform, int num_trials,
++      double tolerance, int max_iters) : CLBase(0, nullptr, "pagerankdummy") {
++    tolerance_ = tolerance;
++    max_iters_ = max_iters;
++    num_trials_ = num_trials;
++    scale_ = scale;
++    degree_ = degree;
++    symmetrize_ = false;
++    uniform_ = uniform;
++  }
++
++  bool ParseArgs() { return true; };
++
++};
++
+ 
+ 
+ template<typename WeightT_>
+-- 
+2.17.1
+

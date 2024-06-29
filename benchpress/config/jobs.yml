@@ -1,0 +1,468 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+- benchmark: oss_performance_mediawiki
+  name: oss_performance_mediawiki
+  description: Default run for oss_performance_mediawiki
+  args:
+    - '-r/usr/local/hphpi/legacy/bin/hhvm'
+    - '-nnginx'
+    - '-ssiege'
+    - '--'
+    - '--mediawiki'
+    - '--siege-duration=10M'
+    - '--siege-timeout=11m'
+    - '--run-as-root'
+    - '--i-am-not-benchmarking'
+
+- benchmark: oss_performance_mediawiki
+  name: oss_performance_mediawiki_mlp
+  description: Tuned +MLP run for oss_performance_mediawiki
+  args:
+    - '-r/usr/local/hphpi/legacy/bin/hhvm'
+    - '-nnginx'
+    - '-ssiege'
+    - '-R{scale_out}'
+    - '-c{siege_concurrent}'
+    - '--'
+    - '--mediawiki-mlp'
+    - '--siege-duration=10M'
+    - '--siege-timeout=11m'
+    - '--run-as-root'
+    - '--i-am-not-benchmarking'
+  vars:
+    - 'scale_out=0'
+    - 'siege_concurrent=0'
+
+- benchmark: oss_performance_mediawiki
+  name: oss_performance_mediawiki_mem
+  description: Tuned +(MLP+LambdaChase) run for oss_performance_mediawiki
+  args:
+    - '-r/usr/local/hphpi/legacy/bin/hhvm'
+    - '-nnginx'
+    - '-ssiege'
+    - '--'
+    - '--mediawiki-mem'
+    - '--siege-duration=10M'
+    - '--siege-timeout=11m'
+    - '--run-as-root'
+    - '--i-am-not-benchmarking'
+
+- benchmark: django_workload
+  name: django_workload_default
+  description: Default run for django-workload
+  tee_output: true
+  roles:
+    clientserver:
+      args:
+        - '-r clientserver'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c {db_addr}'
+      vars:
+        - 'db_addr'
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
+    db:
+      args:
+        - '-r db'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/django_workload/django-workload/client/perf.data'
+
+- benchmark: django_workload
+  name: django_workload_arm
+  description: django-workload workload for ARM
+  tee_output: true
+  roles:
+    clientserver:
+      args:
+        - '-r clientserver'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c {db_addr}'
+        - '-m 50000'
+        - '-M 100000'
+      vars:
+        - 'db_addr'
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
+    db:
+      args:
+        - '-r db'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/django_workload/django-workload/client/perf.data'
+
+- benchmark: django_workload
+  name: django_workload_custom
+  description: Django-workload benchmark with custom parameters
+  tee_output: true
+  roles:
+    clientserver:
+      args:
+        - '-r clientserver'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c {db_addr}'
+        - '-w {server_workers}'
+        - '-x {client_workers}'
+        - '-m {ib_min}'
+        - '-M {ib_max}'
+      vars:
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
+        - 'ib_min=100000'
+        - 'ib_max=200000'
+        - 'db_addr'
+        - 'server_workers'
+        - 'client_workers'
+    client:
+      args:
+        - '-r client'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-x {client_workers}'
+        - '-z {server_addr}'
+      vars:
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
+        - 'client_workers'
+        - 'server_addr'
+    server:
+      args:
+        - '-r server'
+        - '-c {db_addr}'
+        - '-w {server_workers}'
+        - '-m {ib_min}'
+        - '-M {ib_max}'
+      vars:
+        - 'db_addr'
+        - 'server_workers'
+        - '-m {ib_min}'
+        - '-M {ib_max}'
+    db:
+      args:
+        - '-r db'
+        - '-y {concur_writes}'
+      vars:
+        - 'concur_writes'
+
+- name: feedsim_default
+  benchmark: feedsim
+  description: >
+    Aggregator like workload. Latency sensitive.
+    Finds maximum QPS that system can sustain while keeping
+    95th percentile latency <= 500 msecs.
+  args:
+    - '-p {port}'
+    - '-o {output}'
+  vars:
+    - 'port=11222'
+    - 'output=feedsim_results.txt'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results.txt'
+
+- name: feedsim_autoscale
+  benchmark: feedsim_autoscale
+  description: >
+    Aggregator like workload. Latency sensitive.
+    Finds maximum QPS that system can sustain while keeping
+    95th percentile latency <= 500 msecs. Automatically
+    spawns multiple workload instances at 100 cores per
+    instance (rounded up).
+  args:
+    - '{num_instances}'
+    - '{extra_args}'
+  vars:
+    - 'num_instances='
+    - 'extra_args='
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+
+
+- benchmark: spark_standalone
+  name: spark_standalone_local
+  description: Spark standalone using local SSDs for database and shuffling point
+  args:
+    - 'run'
+    - '--ipv4 {ipv4}'
+    - '--real'
+  vars:
+    - 'ipv4=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
+
+- benchmark: spark_standalone
+  name: spark_standalone_remote_setup
+  description: Instructions to setup to use remote SSDs via NVMe-over-TCP
+  args:
+    - 'setup'
+
+- benchmark: spark_standalone
+  name: spark_standalone_remote
+  description: Spark standalone using remote SSDs for database and shuffling point; compute & memory bound as in prod
+  args:
+    - 'run'
+    - '--dataset-path /flash23/'
+    - '--warehouse-dir /flash23/warehouse'
+    - '--shuffle-dir /flash23/spark_local_dir'
+    - '--ipv4 {ipv4}'
+    - '--real'
+  vars:
+    - 'ipv4=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
+
+- benchmark: spark_standalone
+  name: spark_standalone_remote_compute
+  description: Spark standalone using remote SSDs for database and shuffling point; compute bound only
+  args:
+    - 'run'
+    - '--dataset-path /flash23/'
+    - '--warehouse-dir /flash23/warehouse'
+    - '--shuffle-dir /flash23/spark_local_dir'
+    - '--aggressive 1'
+    - '--ipv4 {ipv4}'
+    - '--local-hostname "{local_hostname}"'
+    - '--real'
+  vars:
+    - 'ipv4=0'
+    - 'local_hostname='
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
+
+- benchmark: tao_bench
+  name: tao_bench_64g
+  description:
+      Tao benchmark using 64GB memory.
+      MAKE SURE to start clients within 1 minute.
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--memsize=64'
+        - '--nic-channel-ratio=0.5'
+        - '--fast-threads-ratio=0.75'
+        - '--dispatcher-to-fast-ratio=0.25'
+        - '--slow-to-fast-ratio=3'
+        - '--interface-name={interface_name}'
+        - '--real'
+      vars:
+        - 'interface_name=eth0'
+    client:
+      args:
+        - 'client'
+        - '--server-hostname={server_hostname}'
+        - '--server-memsize=64'
+        - '--target-hit-ratio=0.9'
+        - '--tunning-factor=0.807'
+        - '--warmup-time=1200'
+        - '--test-time=360'
+        - '--real'
+      vars:
+        - 'server_hostname'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server.csv'
+
+- benchmark: tao_bench
+  name: tao_bench_custom
+  description:
+      Tao benchmark using custom amount of memory and ports.
+      MAKE SURE to start clients within 1 minute.
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--memsize={memsize}'
+        - '--nic-channel-ratio=0.5'
+        - '--fast-threads-ratio=0.75'
+        - '--dispatcher-to-fast-ratio=0.25'
+        - '--slow-to-fast-ratio=3'
+        - '--interface-name={interface_name}'
+        - '--port-number={port_number}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--real'
+      vars:
+        - 'interface_name=eth0'
+        - 'memsize=64'
+        - 'port_number=11211'
+        - 'warmup_time=1200'
+        - 'test_time=360'
+    client:
+      args:
+        - 'client'
+        - '--clients-per-thread={clients_per_thread}'
+        - '--server-hostname={server_hostname}'
+        - '--server-memsize={server_memsize}'
+        - '--target-hit-ratio=0.9'
+        - '--data-size-min={data_size_min}'
+        - '--data-size-max={data_size_max}'
+        - '--tunning-factor=0.807'
+        - '--server-port-number={server_port_number}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--real'
+      vars:
+        - 'server_hostname'
+        - 'server_memsize=64'
+        - 'clients_per_thread=380'
+        - 'server_port_number=11211'
+        - 'warmup_time=1200'
+        - 'test_time=360'
+        - 'data_size_min=8191'
+        - 'data_size_max=8193'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server.csv'
+
+- benchmark: tao_bench_autoscale
+  name: tao_bench_autoscale
+  description:
+      Spawns multiple Tao benchmark servers depending on the CPU
+      core count. After executing this job, please see the tail
+      of benchpress.log for instructions on starting clients.
+      MAKE SURE to start clients within 1 minute.
+  args:
+    - '--num-servers={num_servers}'
+    - '--memsize={memsize}'
+    - '--fast-threads-ratio={fast_threads_ratio}'
+    - '--slow-to-fast-ratio={slow_to_fast_ratio}'
+    - '--interface-name={interface_name}'
+    - '--port-number-start=11211'
+    - '--warmup-time={warmup_time}'
+    - '--test-time={test_time}'
+    - '--server-hostname={server_hostname}'
+    - '--num-clients={num_clients}'
+    - '--clients-per-thread={clients_per_thread}'
+    - '--real'
+  vars:
+    - 'num_servers=0'
+    - 'memsize=0'
+    - 'fast_threads_ratio=0.75'
+    - 'slow_to_fast_ratio=3'
+    - 'interface_name=eth0'
+    - 'warmup_time=0'
+    - 'test_time=720'
+    - 'server_hostname='
+    - 'num_clients=2'
+    - 'clients_per_thread=0'
+  hooks:
+    - hook: tao_instruction
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server*.csv'
+          - 'tao-bench-server-*.log'
+
+- benchmark: tao_bench_autoscale
+  name: tao_bench_autoscale_v2_beta
+  description:
+      Spawns multiple Tao benchmark servers depending on the CPU
+      core count. This is an experimental version that aims to
+      improve scalability on CPUs with large core counts and reduce
+      IRQ overhead.
+  args:
+    - '--num-servers={num_servers}'
+    - '--memsize={memsize}'
+    - '--fast-threads-ratio={fast_threads_ratio}'
+    - '--slow-to-fast-ratio={slow_to_fast_ratio}'
+    - '--slow-threads-use-semaphore={slow_threads_use_semaphore}'
+    - '--pin-threads={pin_threads}'
+    - '--interface-name={interface_name}'
+    - '--port-number-start=11211'
+    - '--warmup-time={warmup_time}'
+    - '--test-time={test_time}'
+    - '--server-hostname={server_hostname}'
+    - '--num-clients={num_clients}'
+    - '--clients-per-thread={clients_per_thread}'
+    - '--client-cores={client_cores}'
+    - '--conns-per-server-core={conns_per_server_core}'
+    - '--real'
+  vars:
+    - 'num_servers=0'
+    - 'memsize=0'
+    - 'fast_threads_ratio=1.25'
+    - 'slow_to_fast_ratio=3'
+    - 'slow_threads_use_semaphore=1'
+    - 'pin_threads=0'
+    - 'interface_name=eth0'
+    - 'warmup_time=0'
+    - 'test_time=720'
+    - 'server_hostname='
+    - 'num_clients=2'
+    - 'clients_per_thread=0'
+    - 'client_cores=0'
+    - 'conns_per_server_core=85'
+  hooks:
+    - hook: tao_instruction
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server*.csv'
+          - 'tao-bench-server-*.log'
+

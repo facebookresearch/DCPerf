@@ -1,0 +1,47 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+package "LeafNodeRank"
+version "0.1"
+usage "LeafNodeRank [options]"
+description "Sample feed ranking workload: leaf node"
+
+args "-c cc --show-required -C --default-optional -l"
+
+option "verbose" v "Verbosity. Repeat for more verbose." multiple
+option "quiet" - "Disable log messages."
+
+option "graph_scale" - "Generate 2^scale uniform-random graph." int default="4"
+option "graph_degree" - "Average degree for synthetic graph." int default="16"
+option "graph_max_iters" - "Perform at most 'graph_max_iters' iterations during PageRank." int default="10"
+option "graph_subset" - "Perform partial PageRank over these numbers of nodes. 0 indicates all nodes." int default="3145728"
+option "num_objects" - "Number of objects to serialize." int default="40"
+option "random_data_size" - "Number of bytes of string random data." int default="3145728"
+option "max_response_size" - "Maximum response size in bytes returned by the leaf server." int default="131072"
+option "compression_data_size" - "Number of bytes to compress per request." int default="131072"
+option "rank_trials_per_thread" - "Number of iterations each CPU thread executes of rank work." int default="1"
+option "min_icache_iterations" - "At least this number of icache busting iteration will be executed." int default="0"
+option "chase_iterations" - "Number of chases to execute on handler thread." int default="5120"
+option "io_chase_iterations" - "Number of chases to execute on IO threads." int default="5120"
+option "io_time_ms" - "Milliseconds to sleep emualting I/O offcpu." int default="200"
+option "threads" - "Number of threads to use for serving." int default="1"
+option "cpu_threads" - "Number of threads to use for computation." int default="1"
+option "srv_threads" - "Number of threads for srv computation." int default="1"
+option "srv_io_threads" - "Number of threads for srv IO computation." int default="1"
+option "io_threads" - "Number of threads to use for IO." int default="1"
+option "timekeeper_threads" - "Number of threads to use for timekeepers." int default="1"
+option "port" - "Port to run server on." int default="11222"
+option "monitor_port" - "Port to run monitoring server on." int default="8888"
+option "noaffinity" - "Specify to disable thread pinning"
+option "noloadbalance" - "Specify to disable thread load balancing"

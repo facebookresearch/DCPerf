@@ -1,0 +1,369 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+diff --git a/Makefile.am b/Makefile.am
+index 98b23d7..301d16c 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -4,7 +4,7 @@ noinst_PROGRAMS = memcached-debug sizes testapp timedrun
+ 
+ BUILT_SOURCES=
+ 
+-testapp_SOURCES = testapp.c util.c util.h stats_prefix.c stats_prefix.h jenkins_hash.c murmur3_hash.c hash.h cache.c
++testapp_SOURCES = testapp.c util.c util.h stats_prefix.c stats_prefix.h jenkins_hash.c murmur3_hash.c hash.h cache.c named_thread.c
+ 
+ timedrun_SOURCES = timedrun.c
+ 
+@@ -27,7 +27,8 @@ memcached_SOURCES = memcached.c memcached.h \
+                     itoa_ljust.c itoa_ljust.h \
+                     slab_automove.c slab_automove.h \
+                     authfile.c authfile.h \
+-                    restart.c restart.h
++                    restart.c restart.h \
++					named_thread.c named_thread.h
+ 
+ if BUILD_SOLARIS_PRIVS
+ memcached_SOURCES += solaris_priv.c
+diff --git a/assoc.c b/assoc.c
+index 1a6b845..bebc020 100644
+--- a/assoc.c
++++ b/assoc.c
+@@ -12,6 +12,7 @@
+  */
+ 
+ #include "memcached.h"
++#include "named_thread.h"
+ #include <sys/stat.h>
+ #include <sys/socket.h>
+ #include <sys/resource.h>
+@@ -274,8 +275,9 @@ int start_assoc_maintenance_thread() {
+         }
+     }
+ 
+-    if ((ret = pthread_create(&maintenance_tid, NULL,
+-                              assoc_maintenance_thread, NULL)) != 0) {
++    if ((ret = pthread_create_with_name(&maintenance_tid, NULL,
++                              assoc_maintenance_thread, NULL,
++                              "assoc_maintenance")) != 0) {
+         fprintf(stderr, "Can't create thread: %s\n", strerror(ret));
+         return -1;
+     }
+diff --git a/crawler.c b/crawler.c
+index ba0daa5..853b229 100644
+--- a/crawler.c
++++ b/crawler.c
+@@ -6,6 +6,7 @@
+ 
+ /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
+ #include "memcached.h"
++#include "named_thread.h"
+ #include <sys/stat.h>
+ #include <sys/socket.h>
+ #include <sys/resource.h>
+@@ -502,8 +503,8 @@ int start_item_crawler_thread(void) {
+         return -1;
+     pthread_mutex_lock(&lru_crawler_lock);
+     do_run_lru_crawler_thread = 1;
+-    if ((ret = pthread_create(&item_crawler_tid, NULL,
+-        item_crawler_thread, NULL)) != 0) {
++    if ((ret = pthread_create_with_name(&item_crawler_tid, NULL,
++        item_crawler_thread, NULL, "crawler")) != 0) {
+         fprintf(stderr, "Can't create LRU crawler thread: %s\n",
+             strerror(ret));
+         pthread_mutex_unlock(&lru_crawler_lock);
+diff --git a/db_provider.c b/db_provider.c
+index 9aa1bd6..6461a83 100644
+--- a/db_provider.c
++++ b/db_provider.c
+@@ -5,6 +5,7 @@
+ #include <lz4.h>
+ 
+ #include "memcached.h"
++#include "named_thread.h"
+ #include "db_items_int.h"
+ 
+ static uint32_t num_active_slow_threads;
+@@ -57,7 +58,8 @@ void init_slow_path(void) {
+     // Create slow thread pool
+     for (uint32_t i = 0; i < settings.tao_num_slow_threads; i++) {
+         pthread_t tid;
+-        int err = pthread_create(&tid, NULL, handle_slow_request, NULL);
++        int err = pthread_create_with_name(&tid, NULL, handle_slow_request, NULL,
++                "tao_slow");
+         if (err) {
+             fprintf(stderr, "Failed to create slow request dispatcher thread.\n");
+         }
+@@ -95,7 +97,8 @@ void init_slow_path(void) {
+             pthread_t tid;
+             uint32_t *dispatcher_queue_idx = (uint32_t*)malloc(sizeof(uint32_t));
+             *dispatcher_queue_idx = i;
+-            int err = pthread_create(&tid, NULL, slow_thread_dispatcher, dispatcher_queue_idx);
++            int err = pthread_create_with_name(&tid, NULL, slow_thread_dispatcher,
++                    dispatcher_queue_idx, "tao_slow_dispatcher");
+             if (err) {
+                 fprintf(stderr, "Failed to create slow request dispatcher thread %u.\n", i);
+             }
+diff --git a/extstore.c b/extstore.c
+index 9e2a981..845207f 100644
+--- a/extstore.c
++++ b/extstore.c
+@@ -17,6 +17,7 @@
+ #include <assert.h>
+ #include "extstore.h"
+ #include "config.h"
++#include "named_thread.h"
+ 
+ // TODO: better if an init option turns this on/off.
+ #ifdef EXTSTORE_DEBUG
+@@ -359,7 +360,8 @@ void *extstore_init(struct extstore_conf_file *fh, struct extstore_conf *cf,
+         pthread_cond_init(&e->io_threads[i].cond, NULL);
+         e->io_threads[i].e = e;
+         // FIXME: error handling
+-        pthread_create(&thread, NULL, extstore_io_thread, &e->io_threads[i]);
++        pthread_create_with_name(&thread, NULL, extstore_io_thread,
++                &e->io_threads[i], "extstore_io");
+     }
+     e->io_threadcount = cf->io_threadcount;
+ 
+@@ -368,7 +370,8 @@ void *extstore_init(struct extstore_conf_file *fh, struct extstore_conf *cf,
+     // FIXME: error handling
+     pthread_mutex_init(&e->maint_thread->mutex, NULL);
+     pthread_cond_init(&e->maint_thread->cond, NULL);
+-    pthread_create(&thread, NULL, extstore_maint_thread, e->maint_thread);
++    pthread_create_with_name(&thread, NULL, extstore_maint_thread,
++            e->maint_thread, "extstore_main");
+ 
+     extstore_run_maint(e);
+ 
+diff --git a/items.c b/items.c
+index 525833e..ceec045 100644
+--- a/items.c
++++ b/items.c
+@@ -1,5 +1,6 @@
+ /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
+ #include "memcached.h"
++#include "named_thread.h"
+ #include "bipbuffer.h"
+ #include "slab_automove.h"
+ #ifdef EXTSTORE
+@@ -1701,8 +1702,8 @@ int start_lru_maintainer_thread(void *arg) {
+     pthread_mutex_lock(&lru_maintainer_lock);
+     do_run_lru_maintainer_thread = 1;
+     settings.lru_maintainer_thread = true;
+-    if ((ret = pthread_create(&lru_maintainer_tid, NULL,
+-        lru_maintainer_thread, arg)) != 0) {
++    if ((ret = pthread_create_with_name(&lru_maintainer_tid, NULL,
++        lru_maintainer_thread, arg, "lru_maintainer")) != 0) {
+         fprintf(stderr, "Can't create LRU maintainer thread: %s\n",
+             strerror(ret));
+         pthread_mutex_unlock(&lru_maintainer_lock);
+diff --git a/logger.c b/logger.c
+index cb92d64..3e5e052 100644
+--- a/logger.c
++++ b/logger.c
+@@ -13,6 +13,7 @@
+ #endif
+ 
+ #include "memcached.h"
++#include "named_thread.h"
+ #include "bipbuffer.h"
+ 
+ #ifdef LOGGER_DEBUG
+@@ -559,8 +560,8 @@ static void *logger_thread(void *arg) {
+ static int start_logger_thread(void) {
+     int ret;
+     do_run_logger_thread = 1;
+-    if ((ret = pthread_create(&logger_tid, NULL,
+-                              logger_thread, NULL)) != 0) {
++    if ((ret = pthread_create_with_name(&logger_tid, NULL,
++                              logger_thread, NULL, "logger")) != 0) {
+         fprintf(stderr, "Can't start logger thread: %s\n", strerror(ret));
+         return -1;
+     }
+diff --git a/memcached.c b/memcached.c
+index 2897898..9719981 100644
+--- a/memcached.c
++++ b/memcached.c
+@@ -14,6 +14,7 @@
+  *      Brad Fitzpatrick <brad@danga.com>
+  */
+ #include "memcached.h"
++#include "named_thread.h"
+ #include "db_provider.h"
+ 
+ #ifdef EXTSTORE
+@@ -353,7 +354,8 @@ static void settings_init(void) {
+ }
+ 
+ static void start_tao_stats_monitor(void) {
+-    int err = pthread_create(&tid_tao_stats, NULL, monitor_tao_stats, NULL);
++    int err = pthread_create_with_name(&tid_tao_stats, NULL, monitor_tao_stats,
++            NULL, "tao_stats_monitor");
+     if (err) {
+         fprintf(stderr, "Failed to chreate thread for slow request.\n");
+     }
+@@ -498,8 +500,8 @@ static int start_conn_timeout_thread() {
+         return -1;
+ 
+     do_run_conn_timeout_thread = 1;
+-    if ((ret = pthread_create(&conn_timeout_tid, NULL,
+-        conn_timeout_thread, NULL)) != 0) {
++    if ((ret = pthread_create_with_name(&conn_timeout_tid, NULL,
++        conn_timeout_thread, NULL, "conn_timeout")) != 0) {
+         fprintf(stderr, "Can't create idle connection timeout thread: %s\n",
+             strerror(ret));
+         return -1;
+diff --git a/named_thread.c b/named_thread.c
+new file mode 100644
+index 0000000..47398e1
+--- /dev/null
++++ b/named_thread.c
+@@ -0,0 +1,22 @@
++#include "named_thread.h"
++
++int pthread_create_with_name(pthread_t *thread,
++        const pthread_attr_t *attr,
++        void *(*start_routine) (void *),
++        void *arg,
++        const char *name)
++{
++    pthread_t tid;
++    char tname[16] = {0};
++    int creation_err = pthread_create(&tid, attr, start_routine, arg);
++    if (creation_err != 0)
++        return creation_err;
++    *thread = tid;
++    strncpy(tname, name, 15);
++    int naming_err = pthread_setname_np(tid, tname);
++    if (naming_err != 0) {
++        fprintf(stderr, "Unable to set the thread name to %s due to error %d, "
++                "but the thread will run anyway.\n", tname, naming_err);
++    }
++    return creation_err;
++}
+diff --git a/named_thread.h b/named_thread.h
+new file mode 100644
+index 0000000..6587634
+--- /dev/null
++++ b/named_thread.h
+@@ -0,0 +1,16 @@
++#ifndef _NAMED_THREAD_H_
++#define _NAMED_THREAD_H_
++
++#include "config.h"
++#include <stdio.h>
++#include <signal.h>
++#include <string.h>
++#include <pthread.h>
++
++int pthread_create_with_name(pthread_t *thread,
++        const pthread_attr_t *attr,
++        void *(*start_routine) (void *),
++        void *arg,
++        const char *name);
++
++#endif // _NAMED_THREAD_H_
+diff --git a/slabs.c b/slabs.c
+index 577304d..01d467a 100644
+--- a/slabs.c
++++ b/slabs.c
+@@ -8,6 +8,7 @@
+  * memcached protocol.
+  */
+ #include "memcached.h"
++#include "named_thread.h"
+ #include <sys/mman.h>
+ #include <sys/stat.h>
+ #include <sys/socket.h>
+@@ -1320,8 +1321,9 @@ int start_slab_maintenance_thread(void) {
+     slab_rebalance_signal = 0;
+     slab_rebal.slab_start = NULL;
+ 
+-    if ((ret = pthread_create(&rebalance_tid, NULL,
+-                              slab_rebalance_thread, NULL)) != 0) {
++    if ((ret = pthread_create_with_name(&rebalance_tid, NULL,
++                              slab_rebalance_thread, NULL,
++                              "slab_rebal")) != 0) {
+         fprintf(stderr, "Can't create rebal thread: %s\n", strerror(ret));
+         return -1;
+     }
+diff --git a/storage.c b/storage.c
+index 6c34d12..45990e4 100644
+--- a/storage.c
++++ b/storage.c
+@@ -1,5 +1,6 @@
+ /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
+ #include "memcached.h"
++#include "named_thread.h"
+ #ifdef EXTSTORE
+ 
+ #include "storage.h"
+@@ -223,8 +224,8 @@ int start_storage_write_thread(void *arg) {
+     int ret;
+ 
+     pthread_mutex_init(&storage_write_plock, NULL);
+-    if ((ret = pthread_create(&storage_write_tid, NULL,
+-        storage_write_thread, arg)) != 0) {
++    if ((ret = pthread_create_with_name(&storage_write_tid, NULL,
++        storage_write_thread, arg, "storage_write")) != 0) {
+         fprintf(stderr, "Can't create storage_write thread: %s\n",
+             strerror(ret));
+         return -1;
+@@ -557,8 +558,8 @@ int start_storage_compact_thread(void *arg) {
+     int ret;
+ 
+     pthread_mutex_init(&storage_compact_plock, NULL);
+-    if ((ret = pthread_create(&storage_compact_tid, NULL,
+-        storage_compact_thread, arg)) != 0) {
++    if ((ret = pthread_create_with_name(&storage_compact_tid, NULL,
++        storage_compact_thread, arg, "storage_compact")) != 0) {
+         fprintf(stderr, "Can't create storage_compact thread: %s\n",
+             strerror(ret));
+         return -1;
+diff --git a/testapp.c b/testapp.c
+index 193adda..2648ada 100644
+--- a/testapp.c
++++ b/testapp.c
+@@ -25,6 +25,7 @@
+ #include "stats_prefix.h"
+ #include "util.h"
+ #include "protocol_binary.h"
++#include "named_thread.h"
+ #ifdef TLS
+ #include <openssl/ssl.h>
+ #endif
+@@ -2107,8 +2108,9 @@ static enum test_return test_binary_pipeline_hickup(void)
+     int ret;
+     allow_closed_read = true;
+     hickup_thread_running = true;
+-    if ((ret = pthread_create(&tid, NULL,
+-                              binary_hickup_recv_verification_thread, NULL)) != 0) {
++    if ((ret = pthread_create_with_name(&tid, NULL,
++                              binary_hickup_recv_verification_thread,
++                              NULL, "binary_hickup")) != 0) {
+         fprintf(stderr, "Can't create thread: %s\n", strerror(ret));
+         free(buffer);
+         return TEST_FAIL;
+diff --git a/thread.c b/thread.c
+index f162d26..8669d59 100644
+--- a/thread.c
++++ b/thread.c
+@@ -3,6 +3,7 @@
+  * Thread management for memcached.
+  */
+ #include "memcached.h"
++#include "named_thread.h"
+ #ifdef EXTSTORE
+ #include "storage.h"
+ #endif
+@@ -362,7 +363,8 @@ static void create_worker(void *(*func)(void *), void *arg) {
+ 
+     pthread_attr_init(&attr);
+ 
+-    if ((ret = pthread_create(&((LIBEVENT_THREAD*)arg)->thread_id, &attr, func, arg)) != 0) {
++    if ((ret = pthread_create_with_name(&((LIBEVENT_THREAD*)arg)->thread_id,
++                    &attr, func, arg, "libevent_worker")) != 0) {
+         fprintf(stderr, "Can't create thread: %s\n",
+                 strerror(ret));
+         exit(1);

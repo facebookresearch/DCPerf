@@ -1,0 +1,94 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+diff --git a/folly/Format-inl.h b/folly/Format-inl.h
+index 593c54e78..c826517cc 100644
+--- a/folly/Format-inl.h
++++ b/folly/Format-inl.h
+@@ -36,6 +36,7 @@
+ FOLLY_PUSH_WARNING
+ FOLLY_GNU_DISABLE_WARNING("-Wformat-nonliteral")
+ FOLLY_GNU_DISABLE_WARNING("-Wconversion")
++FOLLY_GNU_DISABLE_WARNING("-Warray-bounds")
+ 
+ namespace folly {
+ 
+diff --git a/folly/TimeoutQueue.cpp b/folly/TimeoutQueue.cpp
+index 706715f71..5ea970679 100644
+--- a/folly/TimeoutQueue.cpp
++++ b/folly/TimeoutQueue.cpp
+@@ -16,6 +16,7 @@
+ 
+ #include <folly/TimeoutQueue.h>
+ #include <algorithm>
++#include <limits>
+ #include <vector>
+ 
+ namespace folly {
+diff --git a/folly/fibers/FiberManager.cpp b/folly/fibers/FiberManager.cpp
+index 23452d259..7888c6e20 100644
+--- a/folly/fibers/FiberManager.cpp
++++ b/folly/fibers/FiberManager.cpp
+@@ -16,6 +16,7 @@
+ 
+ #include <folly/fibers/FiberManagerInternal.h>
+ 
++#include <array>
+ #include <csignal>
+ 
+ #include <cassert>
+@@ -323,7 +324,9 @@ namespace {
+ 
+ // SIGSTKSZ (8 kB on our architectures) isn't always enough for
+ // folly::symbolizer, so allocate 32 kB.
+-constexpr size_t kAltStackSize = folly::constexpr_max(SIGSTKSZ, 32 * 1024);
++// NOTE: commenting out this because SIGSTKSZ is no longer a constant value
++// in 2.34
++// constexpr size_t kAltStackSize = folly::constexpr_max(SIGSTKSZ, (long)32 * 1024);
+ 
+ bool hasAlternateStack() {
+   stack_t ss;
+@@ -352,9 +355,11 @@ class ScopedAlternateSignalStack {
+       return;
+     }
+ 
+-    stack_ = std::make_unique<AltStackBuffer>();
++    size_t kAltStackSize = std::max(size_t(SIGSTKSZ), size_t(32 * 1024));
+ 
+-    setAlternateStack(stack_->data(), stack_->size());
++    stack_ = std::unique_ptr<char[]>(new char[kAltStackSize]);
++
++    setAlternateStack(stack_.get(), kAltStackSize);
+   }
+ 
+   ScopedAlternateSignalStack(ScopedAlternateSignalStack&&) = default;
+@@ -367,8 +372,7 @@ class ScopedAlternateSignalStack {
+   }
+ 
+  private:
+-  using AltStackBuffer = std::array<char, kAltStackSize>;
+-  std::unique_ptr<AltStackBuffer> stack_;
++  std::unique_ptr<char[]> stack_;
+ };
+ } // namespace
+ 
+diff --git a/folly/portability/OpenSSL.h b/folly/portability/OpenSSL.h
+index b22b3c58f..a83b459da 100644
+--- a/folly/portability/OpenSSL.h
++++ b/folly/portability/OpenSSL.h
+@@ -62,6 +62,14 @@
+ #define FOLLY_OPENSSL_IS_110 (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+ #endif
+ 
++// Defined according to version number description in
++// https://www.openssl.org/docs/man1.1.1/man3/OPENSSL_VERSION_NUMBER.html
++// ie. (nibbles) MNNFFPPS: major minor fix patch status
++#define FOLLY_OPENSSL_CALCULATE_VERSION(major, minor, fix) \
++  (((major << 28) | ((minor << 20) | (fix << 12))))
++#define FOLLY_OPENSSL_PREREQ(major, minor, fix) \
++  (OPENSSL_VERSION_NUMBER >= FOLLY_OPENSSL_CALCULATE_VERSION(major, minor, fix))
++
+ #if !defined(OPENSSL_IS_BORINGSSL) && !FOLLY_OPENSSL_IS_100 && \
+     !FOLLY_OPENSSL_IS_101 && !FOLLY_OPENSSL_IS_102 && !FOLLY_OPENSSL_IS_110
+ #warning Compiling with unsupported OpenSSL version

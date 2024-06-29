@@ -1,0 +1,10 @@
+# Configuration
+/config.log
+/oldisim/config.h
+/.sconf_temp
+/.sconsign.dblite
+
+# Build directories
+/debug
+/release
+/build

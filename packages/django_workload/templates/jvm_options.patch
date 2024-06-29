@@ -1,0 +1,32 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+diff --git a/benchmarks/django_workload/apache-cassandra/conf/jvm.options b/benchmarks/django_workload/apache-cassandra/conf/jvm.options
+index cbdb2dd..3ef6b37 100644
+--- a/benchmarks/django_workload/apache-cassandra/conf/jvm.options
++++ b/benchmarks/django_workload/apache-cassandra/conf/jvm.options
+@@ -8,23 +8,6 @@
+ -Xss256k
+ -XX:StringTableSize=1000003
+
+-# CMS settings
+--XX:+UseParNewGC
+--XX:+UseConcMarkSweepGC
+--XX:+CMSParallelRemarkEnabled
+--XX:SurvivorRatio=4
+--XX:MaxTenuringThreshold=1
+--XX:CMSInitiatingOccupancyFraction=60
+--XX:+UseCMSInitiatingOccupancyOnly
+-
+--XX:+CMSScavengeBeforeRemark
+--XX:CMSMaxAbortablePrecleanTime=60000
+-
+--XX:CMSWaitDuration=30000
+--XX:+CMSParallelInitialMarkEnabled
+--XX:+CMSEdenChunksRecordAlways
+--XX:+CMSClassUnloadingEnabled
+-
+ # Additional settings
+ -XX:+UseCondCardMark
+ -XX:MaxTenuringThreshold=2

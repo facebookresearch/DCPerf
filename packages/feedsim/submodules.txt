@@ -1,0 +1,8 @@
+https://github.com/USCiLab/cereal 81ec2714ea969bbf01330bf84917022473cff032 third_party/cereal
+https://github.com/facebook/fbthrift 773f9a846f3d3cf720b94fcb2807deb871e36607 third_party/fbthrift
+https://github.com/facebookincubator/fizz 724529f926bf6045d0bb005e37342a1393133c19 third_party/fizz
+https://github.com/fmtlib/fmt 6793ffc1d64fe91ac66a0b4e4d93505f5b74e1d9 third_party/fmt
+https://github.com/facebook/folly cc3f054a35dec6d6385ed62738b479b879904293 third_party/folly
+https://github.com/sbeamer/gapbs 120cd01448d7ccf86235f9c2d0e25d563ac596cd third_party/gapbs
+https://github.com/rsocket/rsocket-cpp 68193f9c1ad85b50534880e22c4c8636c5229be3 third_party/rsocket-cpp
+https://github.com/facebook/wangle d2cb4e370892320882c96deb5878109793bb6111 third_party/wangle

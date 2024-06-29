@@ -1,0 +1,13 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+clang:
+  cc: /usr/bin/clang
+  cxx: /usr/bin/clang++
+  ldflags:
+    - -fuse-ld=lld
+
+gcc:
+  cc: /usr/bin/gcc
+  cxx: /usr/bin/g++

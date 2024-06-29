@@ -1,0 +1,17 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+diff --git a/django-workload/django_workload/urls.py b/django-workload/django_workload/urls.py
+index fffad1c..45f4694 100644
+--- a/django-workload/django_workload/urls.py
++++ b/django-workload/django_workload/urls.py
+@@ -4,7 +4,7 @@
+ # This source code is licensed under the license found in the
+ # LICENSE file in the root directory of this source tree.
+ 
+-from django.conf.urls import url
++from django.urls import re_path as url
+ 
+ from . import views
+ 

@@ -1,0 +1,41 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+Note: Make sure -Djava.net.preferIPv4Stack=true is not set or is set to false. Otherwise Cassandra won't bind to the IPv6 address
+-Xms65536M
+-Xmx65536M
+-Xmn16384M
+
+-XX:+HeapDumpOnOutOfMemoryError
+-Xss256k
+-XX:StringTableSize=1000003
+
+# CMS settings
+-XX:+UseParNewGC
+-XX:+UseConcMarkSweepGC
+-XX:+CMSParallelRemarkEnabled
+-XX:SurvivorRatio=4
+-XX:MaxTenuringThreshold=1
+-XX:CMSInitiatingOccupancyFraction=60
+-XX:+UseCMSInitiatingOccupancyOnly
+
+-XX:+CMSScavengeBeforeRemark
+-XX:CMSMaxAbortablePrecleanTime=60000
+
+-XX:CMSWaitDuration=30000
+-XX:+CMSParallelInitialMarkEnabled
+-XX:+CMSEdenChunksRecordAlways
+-XX:+CMSClassUnloadingEnabled
+
+# Additional settings
+-XX:+UseCondCardMark
+-XX:MaxTenuringThreshold=2
+-XX:-UseBiasedLocking
+-XX:+UseTLAB
+-XX:+ResizeTLAB
+-XX:+PerfDisableSharedMem
+-XX:+AlwaysPreTouch
+-XX:+UnlockDiagnosticVMOptions
+-XX:ParGCCardsPerStrideChunk=4096
+

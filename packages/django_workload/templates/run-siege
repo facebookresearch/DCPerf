@@ -1,0 +1,333 @@
+#!/usr/bin/python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+import optparse
+import os
+import subprocess
+import re
+import numpy as np
+
+# Concurrent worker count
+WORKERS = 185
+
+# Test duration (units are H, M or S, for hours, minutes or seconds)
+DURATION = "2M"
+
+# Log file (outputs CSV rows)
+LOG = "./siege.log"
+
+# Source file
+SOURCE = "urls.txt"
+
+# Full output file for Siege
+SIEGE_OUT_FILE = "/tmp/siege_out"
+
+# URL template file
+URLS_TEMPLATE_FILE = "urls_template.txt"
+
+
+def parse_urls(url_file):
+    url_dict = {}
+    url_target = {}
+
+    try:
+        line_count = 0
+
+        for line in open(url_file, 'r'):
+            values = line.strip().split()
+            val_len = len(values)
+            line_count += 1
+
+            # The URL_TEMPLATE file must only have lines that respect the
+            # format "URL [POST [<in_file]] weight"
+            if val_len >= 2:
+                url_components = values[0].split("/")
+                comp_len = len(url_components)
+                short_url = "/" + url_components[comp_len - 1]
+                url_dict[short_url] = []
+                url_target[short_url] = values[val_len - 1]
+            else:
+                print("ERROR: Unable to parse " + URLS_TEMPLATE_FILE)
+                print("The " + URLS_TEMPLATE_FILE + " must only have lines that "
+                      "respect the format \"URL [POST [<in_file]] weight\"\n")
+                exit(1)
+
+        if line_count == 0:
+            print("ERROR: " + URLS_TEMPLATE_FILE + " is empty\n")
+            exit(1)
+    except FileNotFoundError:
+        print("ERROR: Unable to parse " + URLS_TEMPLATE_FILE + ": file not found\n")
+        exit(1)
+
+    return [url_dict, url_target]
+
+
+def delete_file(f):
+    try:
+        os.remove(f)
+    except OSError:
+        pass
+
+
+def setup_variables():
+    global WORKERS
+    global DURATION
+    global LOG
+    global SOURCE
+
+    if "WORKERS" in os.environ:
+        WORKERS = os.environ["WORKERS"]
+    if "DURATION" in os.environ:
+        DURATION = os.environ["DURATION"]
+    if "LOG" in os.environ:
+        LOG = os.environ["LOG"]
+    if "SOURCE" in os.environ:
+        SOURCE = os.environ["SOURCE"]
+
+
+def validate_output(siege_file):
+    http_error_codes = 0
+    socket_timeouts = 0
+    conn_refused = 0
+    http_1_0 = 0
+    has_warning = False
+
+    for line in open(siege_file, 'r'):
+        if re.search("HTTP/1.1", line):
+            values = line.strip().split()
+
+            # Only expecting 200 codes
+            if len(values) >= 9 and values[1] != "200":
+                http_error_codes += 1
+        elif re.search("Connection timed out", line):
+            socket_timeouts += 1
+        elif re.search("Connection refused", line):
+            conn_refused += 1
+        elif re.search("HTTP/1.0", line):
+            http_1_0 += 1
+
+    if http_error_codes > 0:
+        print("WARNING: Got " + str(http_error_codes) + " HTTP "
+              "codes different than 200")
+        has_warning = True
+    if socket_timeouts > 0:
+        print("WARNING: Got " + str(socket_timeouts) + " socket timeout "
+              "alerts")
+        has_warning = True
+    if conn_refused > 0:
+        print("WARNING: Got " + str(conn_refused) + " connection refused "
+              "errors")
+        has_warning = True
+    if http_1_0 > 0:
+        print("WARNING: Got " + str(http_1_0) + " HTTP/1.0 requests. This "
+              "workload is intended to use HTTP/1.1, therefore some metrics "
+              "will not not be computed. Please change the \"protocol\" "
+              "variable in siegerc to HTTP/1.1 or install a newer Siege")
+        has_warning = True
+    if has_warning:
+        print("Please see full Siege log in " + siege_file + "\n")
+
+
+def run_siege(options):
+    cmd = "siege -v -c " + str(WORKERS) + " -b"
+    if options.reps > 0:
+        cmd = cmd + " -r " + str(options.reps)
+    else:
+        cmd = cmd + " -t " + DURATION
+    cmd = cmd + " -f " + SOURCE + " --log=" + LOG + " &>> "
+    iterations = options.iterations
+    url_dict, url_target = parse_urls(URLS_TEMPLATE_FILE)
+
+    # perform 7 runs, discard the min and max Transaction rate numbers and
+    # display average of Siege metrics. Perform a single run if "-s" option
+    # is used
+    for i in range(iterations):
+        current_file = SIEGE_OUT_FILE + "_" + str(i + 1)
+        delete_file(current_file)
+        current_cmd = cmd + current_file
+
+        print("Running iteration " + str(i + 1), end="", flush=True)
+        subprocess.check_output(['bash', '-c', current_cmd])
+        print(" --- DONE")
+
+        # check for error codes or request time-out
+        validate_output(current_file)
+
+        # only do one run if the "single" option is set
+        if options.single:
+            iterations = 1
+            break
+
+    print()
+    parse_results(iterations, url_dict, url_target)
+    print("\nFull Siege output is available in " + SIEGE_OUT_FILE + "_[N]")
+
+
+def get_percentiles(latencies):
+    percentiles = {}
+    count = len(latencies)
+
+    if count > 0:
+        latencies.sort()
+        percentiles["P50"] = latencies[int(0.5 * count)]
+        percentiles["P90"] = latencies[int(0.9 * count)]
+        percentiles["P95"] = latencies[int(0.95 * count)]
+        percentiles["P99"] = latencies[int(0.99 * count)]
+    else:
+        percentiles["P50"] = -1
+        percentiles["P90"] = -1
+        percentiles["P95"] = -1
+        percentiles["P99"] = -1
+
+    return percentiles
+
+
+def update_percentages(url_dict, local_hits, total_hits):
+    for url in url_dict:
+        current_perc = 0
+
+        if url in local_hits:
+            if total_hits > 0:
+                current_perc = float(local_hits[url]) / total_hits
+        url_dict[url].append(current_perc)
+    return url_dict
+
+
+def match(url_dict, url_str):
+    for key in url_dict:
+        if re.search(key, url_str):
+            return key
+    return ""
+
+
+def parse_results(iterations, url_dict, url_target):
+    results = {}
+    unit_measures = {"P50": "secs", "P90": "secs",
+                     "P95": "secs", "P99": "secs"}
+    siege_metrics = ["Transactions", "Availability", "Elapsed time",
+                     "Data transferred", "Response time", "Transaction rate",
+                     "Throughput", "Concurrency", "Successful transactions",
+                     "Failed transactions", "Longest transaction",
+                     "Shortest transaction"]
+    p_metrics = ["P50", "P90", "P95", "P99"]
+    all_metrics = siege_metrics + p_metrics
+
+    # populate results with empty lists
+    for metric in all_metrics:
+        results[metric] = []
+
+    for i in range(iterations):
+        latencies = []
+        out_file = SIEGE_OUT_FILE + "_" + str(i + 1)
+        local_hits = {}
+        total_200_hits = 0
+
+        for line in open(out_file, 'r'):
+            if re.search("HTTP/1.1 200", line):
+                values = line.strip().split()
+                if len(values) >= 9:
+                    latencies.append(float(values[2]))
+                    total_200_hits += 1
+                    curr_url = match(url_dict, values[8])
+                    if len(curr_url) == 0:
+                        continue
+                    if curr_url in local_hits:
+                        local_hits[curr_url] = local_hits[curr_url] + 1
+                    else:
+                        local_hits[curr_url] = 1
+            else:
+                for metric in siege_metrics:
+                    if re.search(metric, line):
+                        res = line.replace(metric + ":", "").strip()
+                        values = res.split()
+                        if len(values) == 1:
+                            unit_measures[metric] = ""
+                        elif len(values) == 2:
+                            unit_measures[metric] = values[1]
+                        results[metric].append(float(values[0]))
+        url_dict = update_percentages(url_dict, local_hits, total_200_hits)
+        percentiles = get_percentiles(latencies)
+        for metric in p_metrics:
+            results[metric].append(percentiles[metric])
+
+    if iterations > 1:
+        # find min and max from result list
+        tr_results = results["Transaction rate"]
+        min_index = tr_results.index(min(tr_results))
+        max_index = tr_results.index(max(tr_results))
+
+        print("Removing results with Transaction rate min=" +
+              str(tr_results[min_index]) + " and max=" +
+              str(tr_results[max_index]) + "\n")
+
+        # remove entry associated with min and max transaction rate. Delete
+        # larger index first so that the other index does not change
+        first_idx, second_idx = sorted([min_index, max_index])
+
+    print("URL hit percentages:")
+    for url in url_dict:
+        if iterations > 1:
+            del url_dict[url][second_idx]
+            del url_dict[url][first_idx]
+        arr = np.array(url_dict[url])
+        arr_mean = np.mean(arr) * 100
+        print(padding(url, 3), end="")
+        print(str(arr_mean) + "%, expected " + str(url_target[url]) + "%")
+    print()
+
+    for metric in all_metrics:
+        if iterations > 1:
+            del results[metric][second_idx]
+            del results[metric][first_idx]
+
+        print(padding(metric, 5), end="")
+
+        arr = np.array(results[metric])
+        arr_mean = np.mean(arr)
+        if arr_mean >= 0:
+            if arr_mean == 0:
+                arr_rsd = 0
+            else:
+                arr_rsd = np.std(arr) / arr_mean
+            print(str(arr_mean) + " " + unit_measures[metric], end="")
+            print(" ---- RSD " + str(arr_rsd))
+        else:
+            print("N/A, please check Siege output file(s)")
+
+
+def padding(string, tabno):
+    tabs_already = (len(string) + 1) // 8
+    tabs_left = int(tabno - tabs_already)
+    result = string + ":" + ("\t" * tabs_left)
+    return result
+
+
+def main():
+    parser = optparse.OptionParser(
+        usage="%prog [options]",
+        description=("Run the Django Workload using the Siege load " +
+                     "generator multiple times and display an average of " +
+                     "the results"))
+
+    parser.add_option("-s", "--single", action="store_true", dest="single",
+                      default=False, help="Do a single run of the workload")
+    parser.add_option("-i", "--iterations", action="store", type="int",
+                      dest="iterations", default=7, help="Set the number of " +
+                      "iterations to run. Will not work if -s is set")
+    parser.add_option("-r", "--reps", action="store", type="int", dest="reps",
+                      default=0, help="Run siege for fixed number of " +
+                      "repetitions instead of amount of time. This will " +
+                      "override DURATION env variable if set to a positive " +
+                      "integer.")
+
+    (options, args) = parser.parse_args()
+
+    setup_variables()
+    run_siege(options)
+
+
+if __name__ == "__main__":
+    main()

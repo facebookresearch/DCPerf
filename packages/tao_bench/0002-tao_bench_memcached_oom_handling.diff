@@ -1,0 +1,161 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+diff --git a/db_provider.c b/db_provider.c
+index cf79ae2..9aa1bd6 100644
+--- a/db_provider.c
++++ b/db_provider.c
+@@ -252,7 +252,9 @@ item *add_item_to_cache(slow_request *req, int nbytes, char *payload) {
+         if (!item_size_ok(req->nkey, flags, nbytes + 2)) {
+             fprintf(stderr, "Trying to allocate an item that is too large on slow path.\n");
+         } else {
+-            fprintf(stderr, "OUT OF MEMORY when allocating item on slow path.\n");
++            if (settings.verbose > 0) {
++                fprintf(stderr, "OUT OF MEMORY when allocating item on slow path.\n");
++            }
+         }
+ 
+         // We ended up here after a MISS so an item with the same key
+@@ -394,36 +396,39 @@ void *handle_slow_request(void *arg) {
+             v_compressed[1] = 66;
+             v_compressed[2] = 96;
+ 
++            // Save the item address in a response queue for the fast thread to
++            // pick it up again and dispatch the response before handling other requests
++
++            slow_response *resp = (slow_response*)malloc(sizeof(slow_response));
++            resp->c = req->c;
++            resp->it = NULL;
++            resp->nkey = req->nkey;
++            resp->next_response = NULL;
++            resp->n_thread_id = pthread_self();
++
+             // Build an item
+             item *it = add_item_to_cache(req, sz_compressed_payload, v_compressed);
+             if (it) {
+-                // Save the item address in a response queue for the fast thread to
+-                // pick it up again and dispatch the response before handling other requests
+-
+-                slow_response *resp = (slow_response*)malloc(sizeof(slow_response));
+-                resp->c = req->c;
+-                resp->nkey = req->nkey;
+-                resp->next_response = NULL;
+-                resp->n_thread_id = pthread_self();
+-                resp->it = it;
+-
+-                // Add response to response queue
+-                pthread_mutex_lock(&req->c->lock_response_queue);
+-                if (req->c->slow_response_first == NULL) {
+-                    req->c->slow_response_first = resp;
+-                    req->c->slow_response_last = req->c->slow_response_first;
++                    resp->it = it;
++            } else {
++                if (settings.verbose > 0) {
++                    fprintf(stderr, "Could not add an item on the slow thread!\n");
+                 }
+-                else {
+-                    req->c->slow_response_last->next_response = resp;
+-                    req->c->slow_response_last = resp;
+-                }
+-                req->c->num_pending_slow_responses++;
+-                pthread_mutex_unlock(&req->c->lock_response_queue);
++                //ret = -2;
++            }
++
++            // Add response to response queue
++            pthread_mutex_lock(&req->c->lock_response_queue);
++            if (req->c->slow_response_first == NULL) {
++                req->c->slow_response_first = resp;
++                req->c->slow_response_last = req->c->slow_response_first;
+             }
+             else {
+-                fprintf(stderr, "Could not add an item on the slow thread!\n");
+-                ret = -2;
++                req->c->slow_response_last->next_response = resp;
++                req->c->slow_response_last = resp;
+             }
++            req->c->num_pending_slow_responses++;
++            pthread_mutex_unlock(&req->c->lock_response_queue);
+ 
+             // Free the temporary payload buffer
+             if (v_compressed) {
+diff --git a/memcached.c b/memcached.c
+index 8ecb455..2897898 100644
+--- a/memcached.c
++++ b/memcached.c
+@@ -369,6 +369,8 @@ static void compute_tao_stats_snapshot(bool print_stats) {
+             tao_stats_current.fast_responses) / (double)elapsed_time;
+         double slow_qps = (double)(thread_stats.tao_slow_responses -
+             tao_stats_current.slow_responses) / (double)elapsed_time;
++        double slow_qps_oom = (double)(thread_stats.tao_slow_responses_oom -
++            tao_stats_current.slow_responses_oom) / (double)elapsed_time;
+         double wh_qps = (double)(thread_stats.tao_wh_transactions -
+             tao_stats_current.wh_transactions) / (double)elapsed_time;
+         double fast_cmds = (double)(thread_stats.get_cmds -
+@@ -382,6 +384,7 @@ static void compute_tao_stats_snapshot(bool print_stats) {
+ 
+         tao_stats_current.fast_responses = thread_stats.tao_fast_responses;
+         tao_stats_current.slow_responses = thread_stats.tao_slow_responses;
++        tao_stats_current.slow_responses_oom = thread_stats.tao_slow_responses_oom;
+         tao_stats_current.wh_transactions = thread_stats.tao_wh_transactions;
+         tao_stats_current.fast_cmds = thread_stats.get_cmds;
+         tao_stats_current.fast_misses = thread_stats.get_misses;
+@@ -391,8 +394,8 @@ static void compute_tao_stats_snapshot(bool print_stats) {
+             get_slow_reqs_count() - thread_stats.tao_slow_responses;
+ 
+         if (print_stats) {
+-            fprintf(stdout, "fast_qps = %.1lf, hit_rate = %.3lf, slow_qps = %.1lf, wh_qps = %.1lf, curr_it = %.2lfM, ",
+-                fast_qps, fast_hit_rate, slow_qps, wh_qps, crnt_items);
++            fprintf(stdout, "fast_qps = %.1lf, hit_rate = %.3lf, slow_qps = %.1lf, wh_qps = %.1lf, curr_it = %.2lfM, slow_qps_oom =  %.1lf, ",
++                fast_qps, fast_hit_rate, slow_qps, wh_qps, crnt_items, slow_qps_oom);
+ 
+             fprintf(stdout, "crnt_conn = %lu, slow_th = %u, slow_reqs = %u, slow_resp = %u\n",
+                 stats_state.curr_conns, get_slow_thread_count(), get_slow_reqs_count(),
+@@ -404,6 +407,7 @@ static void compute_tao_stats_snapshot(bool print_stats) {
+ static void *monitor_tao_stats(void *arg) {
+     tao_stats_current.fast_responses = 0;
+     tao_stats_current.slow_responses = 0;
++    tao_stats_current.slow_responses_oom = 0;
+     tao_stats_current.wh_transactions = 0;
+     tao_stats_current.last_sample_time = current_time;
+ 
+@@ -7651,8 +7655,16 @@ static void drive_machine(conn *c) {
+             }
+ 
+             if (resp_crnt != NULL) {
+-                // This sets a new state for the state machine (conn_new_cmd)
+-                write_bin_slow_response(resp_crnt);
++                if (resp_crnt->it == NULL) {
++                    //We have response but with empty item.
++                    //We need to find a better error response here.
++                    c->thread->stats.tao_slow_responses_oom++;
++                    out_of_memory(c, "SERVER_ERROR Out of memory on a slow path.");
++                    conn_set_state(c, conn_swallow);
++                } else {
++                    // This sets a new state for the state machine (conn_new_cmd)
++                    write_bin_slow_response(resp_crnt);
++                }
+ 
+                 // The connection can send only one response at a time
+                 c->thread->stats.tao_slow_responses++;
+diff --git a/memcached.h b/memcached.h
+index 0197c98..639c8ea 100644
+--- a/memcached.h
++++ b/memcached.h
+@@ -293,6 +293,7 @@ struct slab_stats {
+     X(tao_slow_requests) \
+     X(tao_fast_responses) \
+     X(tao_slow_responses) \
++    X(tao_slow_responses_oom) \
+     X(tao_wh_transactions) \
+     X(bytes_read) \
+     X(bytes_written) \
+@@ -914,6 +915,7 @@ extern void drop_worker_privileges(void);
+ struct tao_stats {
+     uint64_t fast_responses;
+     uint64_t slow_responses;
++    uint64_t slow_responses_oom;
+     uint64_t wh_transactions;
+     uint64_t fast_cmds;
+     uint64_t fast_misses;
