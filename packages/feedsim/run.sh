@@ -106,7 +106,9 @@ main() {
     local result_filename
     result_filename="feedsim_results.txt"
 
-    echo > $BREPS_LFILE
+    if [ -z "$IS_AUTOSCALE_RUN" ]; then
+       echo > $BREPS_LFILE
+    fi
     benchreps_tell_state "start"
 
     while :; do

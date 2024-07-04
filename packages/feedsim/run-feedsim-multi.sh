@@ -4,6 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+BREPS_LFILE=/tmp/feedsim_log.txt
 IS_FIXED_QPS=0
 FIXQPS_SUFFIX=""
 THIS_CMD="$0 $*"
@@ -62,13 +63,14 @@ function get_cpu_range() {
     echo "$RES"
 }
 
+echo > $BREPS_LFILE
 # shellcheck disable=SC2086
 for i in $(seq 1 ${NUM_INSTANCES}); do
     CORE_RANGE="$(get_cpu_range "${NUM_INSTANCES}" "$((i - 1))")"
-    CMD="taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt $*"
+    CMD="IS_AUTOSCALE_RUN=1 taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt $*"
     echo "$CMD" > "${FEEDSIM_LOG_PREFIX}${i}.log"
     # shellcheck disable=SC2068,SC2069
-    stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
+    IS_AUTOSCALE_RUN=1 stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
     PIDS+=("$!")
     PHY_CORE_ID=$((PHY_CORE_ID + CORES_PER_INST))
     SMT_ID=$((SMT_ID + CORES_PER_INST))
