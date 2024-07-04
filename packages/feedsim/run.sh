@@ -67,7 +67,7 @@ EOF
 cleanup() {
   trap - SIGINT SIGTERM ERR EXIT
 
-  pkill -2 LeafNodeRank || true # Ignore exit status code of pkill
+  kill -SIGINT $LEAF_PID || true # Ignore exit status code of kill
 }
 
 msg() {
