@@ -67,7 +67,7 @@ EOF
 cleanup() {
   trap - SIGINT SIGTERM ERR EXIT
 
-  pkill -2 LeafNodeRank || true # Ignore exit status code of pkill
+  kill -SIGINT $LEAF_PID || true # Ignore exit status code of kill
 }
 
 msg() {
@@ -106,7 +106,9 @@ main() {
     local result_filename
     result_filename="feedsim_results.txt"
 
-    echo > $BREPS_LFILE
+    if [ -z "$IS_AUTOSCALE_RUN" ]; then
+       echo > $BREPS_LFILE
+    fi
     benchreps_tell_state "start"
 
     while :; do
