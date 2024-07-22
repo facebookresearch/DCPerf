@@ -163,7 +163,7 @@ git apply --check "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_2023061
     git apply "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_20230615.diff"
 # Build and install
 autoreconf --force --install
-./configure --enable-tls
+PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" ./configure --enable-tls
 make -j"$(nproc)" || ( automake --add-missing && make -j"$(nproc)" )
 cp memtier_benchmark "${TAO_BENCH_ROOT}/tao_bench_client"
 popd # memtier_client
