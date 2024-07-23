@@ -95,10 +95,15 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number):
         "--test-time",
         str(args.test_time),
     ]
-    if len(NUMA_NODES) > 1:
+    if len(NUMA_NODES) > 1 and (args.bind_cpu > 0 or args.bind_mem > 0):
         numa_nodes_belong_to = check_nodes_of_cpu_range(cpu_core_range, NUMA_NODES)
         nodelist = ",".join(numa_nodes_belong_to)
-        cmd = ["numactl", "--cpubind", nodelist, "--membind", nodelist] + cmd
+        numactl_cmd = ["numactl"]
+        if args.bind_cpu:
+            numactl_cmd += ["--cpunodebind", nodelist]
+        if args.bind_mem:
+            numactl_cmd += ["--membind", nodelist]
+        cmd = numactl_cmd + cmd
     if args.real:
         cmd.append("--real")
     return cmd
@@ -453,6 +458,21 @@ def init_parser():
         help="number of client connections per server core to impose. When set to a positive number"
         + "this is used for calculating clients_per_thread parameter to be used on the client side. "
         + "If `--clients-per-thread` is set to a positive number, this parameter will be ignored. ",
+    )
+    parser.add_argument(
+        "--bind-cpu",
+        type=int,
+        default=1,
+        help="explicitly bind TaoBench server instances to dedicated CPU sockets on machines with "
+        + "multiple NUMA nodes to minimize cross-socket traffic.",
+    )
+    parser.add_argument(
+        "--bind-mem",
+        type=int,
+        default=1,
+        help="explicitly bind TaoBench server instances to the memory node local to the CPU cores "
+        + "on machines with multiple NUMA nodes in order to minimize cross-socket traffic. "
+        + "Please set this to 0 if you would like to test hetereogeneous memory systems such as CXL.",
     )
     parser.add_argument("--real", action="store_true", help="for real")
     # functions

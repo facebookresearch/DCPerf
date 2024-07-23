@@ -76,6 +76,16 @@ This job provides the following optional parameters that you may be interested i
     The default is `10 * memsize` or 1200, whichever is greater.
   - `test_time`: Time to stress TaoBench server and measure performance, in seconds.
     Optional, default is 720.
+  - `bind_cpu`: When running on machines with multiple NUMA nodes, setting this to 1 will
+    bind each server instance to the CPU node(s) that the assigned CPU cores belong to.
+    This can minimize cross-socket traffic. By default this is set to 1, and you can set
+    it to 0 to disable.
+  - `bind_mem`: When running on machines with multiple NUMA nodes, setting this to 1 will
+    bind each server instance to the memory node that is local to the CPU cores assigned
+    to run the server instance. This can also minimize cross-socket traffic. By default
+    it's set to 1. You may want to set this to 0 if you would like to test heterogeneous
+    memory systems such as CXL systems, otherwise the benchmark will not be able to use
+    the CXL memory.
 
 The following parameters are used for generating client side instructions and will not
 have substantial effects on the server:

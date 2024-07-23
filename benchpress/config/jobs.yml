@@ -397,6 +397,8 @@
     - '--server-hostname={server_hostname}'
     - '--num-clients={num_clients}'
     - '--clients-per-thread={clients_per_thread}'
+    - '--bind-cpu={bind_cpu}'
+    - '--bind-mem={bind_mem}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -409,6 +411,8 @@
     - 'server_hostname='
     - 'num_clients=2'
     - 'clients_per_thread=0'
+    - 'bind_cpu=1'
+    - 'bind_mem=1'
   hooks:
     - hook: tao_instruction
     - hook: copymove
