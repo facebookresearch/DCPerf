@@ -231,16 +231,17 @@ if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
 fi
 
 pushd "${BENCHPRESS_ROOT}"
+# Patch for Java
+git apply --check "${TEMPLATES_DIR}/cassandra-env.patch" && git apply "${TEMPLATES_DIR}/cassandra-env.patch"
+git apply --check "${TEMPLATES_DIR}/jvm_options.patch" && git apply "${TEMPLATES_DIR}/jvm_options.patch"
+popd
+
+pushd "${DJANGO_SERVER_ROOT}/django_workload"
 # Patch for URLs
 git apply --check "${TEMPLATES_DIR}/urls.patch" && git apply "${TEMPLATES_DIR}/urls.patch"
 git apply --check "${TEMPLATES_DIR}/gen-urls-file.patch" && git apply "${TEMPLATES_DIR}/gen-urls-file.patch"
 
-# Patch for Java
-git apply --check "${TEMPLATES_DIR}/cassandra-env.patch" && git apply "${TEMPLATES_DIR}/cassandra-env.patch"
-git apply --check "${TEMPLATES_DIR}/jvm_options.patch" && git apply "${TEMPLATES_DIR}/jvm_options.patch"
-
 # Apply Memcache tuning
-pushd "${DJANGO_SERVER_ROOT}/django_workload"
 git apply --check "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch" && git apply "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch"
 # Apply db caching
 git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch"
