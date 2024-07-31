@@ -172,9 +172,9 @@ index,timestamp,eth0_rx_bytes_per_sec,eth0_rx_packets_per_sec,eth0_tx_bytes_per_
 5,11:40:12 AM,474492398.205,315435.441,1838215.502,18091.69,2030.368,7.992,3408.588,16.583,88168680.613,58690.05,356612.422,3508.088,221889436.894,147617.631,840583.755,8146.645,3284434.002,2046.551,3284434.002,2046.551,
 ```
 
-### `cpufreq`
+### `cpufreq_scaling`
 
-Monitors CPU frequency during benchmark. The methodology is to take the average
+Monitors CPU software frequency request during benchmark. The methodology is to take the average
 of all numbers collected from `/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`.
 
 #### Requirements
@@ -188,7 +188,7 @@ Your system supports CPU frequency reporting in
 
 #### Output
 
-`benchmark_metrics_<run_id>/cpufreq.csv`
+`benchmark_metrics_<run_id>/cpufreq_scaling.csv`
 
 Sample content:
 
@@ -201,6 +201,36 @@ index,timestamp,cpufreq_mhz
 4,11:40:02 AM,3582.7051692708333,
 5,11:40:07 AM,3532.95028125,
 ```
+### `cpufreq_cpuinfo`
+
+Monitors CPU measured frequency during benchmark. The methodology is to take the average
+of all numbers collected from `/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_cur_freq`.
+
+#### Requirements
+
+Your system supports CPU frequency reporting in
+`/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_cur_freq`.
+
+#### Parameters
+
+* `interval`: Metrics collection interval in seconds, default is `5`
+
+#### Output
+
+`benchmark_metrics_<run_id>/cpufreq_cpuinfo.csv`
+
+Sample content:
+
+```
+index,timestamp,cpufreq_mhz
+0,11:39:42 AM,2555.0808671875,
+1,11:39:47 AM,3583.5317708333337,
+2,11:39:52 AM,3610.2936796875,
+3,11:39:57 AM,3561.6386927083336,
+4,11:40:02 AM,3582.7051692708333,
+5,11:40:07 AM,3532.95028125,
+```
+
 
 ### `topdown`
 

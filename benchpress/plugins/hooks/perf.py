@@ -9,7 +9,15 @@ import sys
 
 from benchpress.lib.hook import Hook
 
-from .perf_monitors import cpufreq, memstat, mpstat, netstat, perfstat, topdown
+from .perf_monitors import (
+    cpufreq_cpuinfo,
+    cpufreq_scaling,
+    memstat,
+    mpstat,
+    netstat,
+    perfstat,
+    topdown,
+)
 
 BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
 
@@ -17,7 +25,10 @@ DEFAULT_OPTIONS = {
     "mpstat": {
         "interval": 5,
     },
-    "cpufreq": {
+    "cpufreq_scaling": {
+        "interval": 5,
+    },
+    "cpufreq_cpuinfo": {
         "interval": 5,
     },
     "perfstat": {"interval": 5, "additional_events": []},
@@ -28,7 +39,8 @@ DEFAULT_OPTIONS = {
 
 AVAIL_MONITORS = {
     "mpstat": mpstat.MPStat,
-    "cpufreq": cpufreq.CPUFreq,
+    "cpufreq_scaling": cpufreq_scaling.CPUFreq,
+    "cpufreq_cpuinfo": cpufreq_cpuinfo.CPUFreq,
     "perfstat": perfstat.PerfStat,
     "netstat": netstat.NetStat,
     "memstat": memstat.MemStat,

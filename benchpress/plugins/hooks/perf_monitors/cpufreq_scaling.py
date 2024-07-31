@@ -13,7 +13,7 @@ from . import logger, Monitor
 
 class CPUFreq(Monitor):
     def __init__(self, interval, job_uuid):
-        super(CPUFreq, self).__init__(interval, "cpufreq", job_uuid)
+        super(CPUFreq, self).__init__(interval, "cpufreq_scaling", job_uuid)
         self.run_freq_collector = False
         self.supported = os.path.exists(
             "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
@@ -47,7 +47,9 @@ class CPUFreq(Monitor):
                 + "not found, therefore we cannot monitor CPU frequency"
             )
         self.run_freq_collector = True
-        self.proc = threading.Thread(target=self.collector, name="cpufreq", args=())
+        self.proc = threading.Thread(
+            target=self.collector, name="cpufreq_scaling", args=()
+        )
         self.proc.start()
 
     def terminate(self):
