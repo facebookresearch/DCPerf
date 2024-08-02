@@ -8,6 +8,9 @@ import os
 import re
 import subprocess
 
+import numpy as np
+import pandas as pd
+
 from . import BP_BASEPATH, logger, Monitor
 
 
@@ -116,7 +119,8 @@ class IntelPerfSpect(Monitor):
         else:
             self.supported = False
             logger.warning(
-                f"{self.perfspect_path} does not have perf-collect and perf-postprocess"
+                f"{self.perfspect_path} does not have perf-collect and perf-postprocess.\n"
+                f"Please download PerfSpect and copy the binaries to {self.perfspect_path}."
             )
 
     def run(self):
@@ -289,11 +293,90 @@ class AMDPerfUtil:
             self.perfutil_zen4.write_csv()
 
 
-class ARMPerfUtil(BasePerfUtil):
+class ARMPerfUtil(Monitor):
+    TOPDOWN_TOOL_URL = (
+        "https://git.gitlab.arm.com/telemetry-solution/telemetry-solution.git"
+    )
+
+    def __init__(self, job_uuid, interval=5):
+        super(ARMPerfUtil, self).__init__(interval, "arm-perf-collector", job_uuid)
+        self.avail = self.install_if_not_available()
+        if not self.avail:
+            logger.warning(
+                "topdown-tool is not available and we weren't able to install it."
+            )
+            logger.warning(
+                "Please install it manually by following the guide at "
+                + "https://learn.arm.com/install-guides/topdown-tool/"
+            )
+
+    def install_if_not_available(self):
+        proc = subprocess.run(["topdown-tool", "--help"], capture_output=True)
+        if proc.returncode == 0:
+            return True
+
+        logger.warning("ARM topdown-tool is not available, trying to install...")
+        try:
+            subprocess.run(["git", "clone", self.TOPDOWN_TOOL_URL], check=True)
+            os.chdir("telemetry-solution/tools/topdown_tool")
+            subprocess.run(["sudo", "pip-3.9", "install", "."], check=True)
+            subprocess.run(["topdown-tool", "--help"], capture_output=True, check=True)
+        except subprocess.CalledProcessError as e:
+            print(
+                f"Failed to install topdown-tool. Command: {e.cmd}, exit code: {e.returncode}"
+            )
+            return False
+        except OSError:
+            print("Unable to chdir telemetry-solution/tools/topdown_tool")
+            return False
+        return True
+
+    def run(self):
+        if not self.avail:
+            return
+
+        self.proc = subprocess.Popen(
+            [
+                "topdown-tool",
+                "-a",
+                "-i",
+                str(self.interval * 1000),
+                "--csv",
+                self.csvpath,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+        )
+        super(ARMPerfUtil, self).run()
+
+    def write_csv(self):
+        """
+        Override the original write_csv() method to write a transposed version
+        of CSV table based on what topdown-tool generates
+        """
+        t_csv_path = self.gen_path(f"{self.name}-transposed.csv")
+        df = pd.read_csv(self.csvpath)
+        t_rows = []
+        for i in range(len(df)):
+            metric_key = df.iloc[i]["group"] + "/" + df.iloc[i]["metric"]
+            if len(t_rows) == 0 or not np.isclose(
+                df.iloc[i]["time"], t_rows[-1]["time"]
+            ):
+                t_rows.append(
+                    {"time": df.iloc[i]["time"], metric_key: df.iloc[i]["value"]}
+                )
+            else:
+                t_rows[-1][metric_key] = df.iloc[i]["value"]
+        df_t = pd.DataFrame(t_rows)
+        df_t.to_csv(t_csv_path, index=False)
+
+
+class NVPerfUtil(BasePerfUtil):
     def __init__(self, job_uuid, **kwargs):
-        super(ARMPerfUtil, self).__init__(
+        super(NVPerfUtil, self).__init__(
             job_uuid,
-            "arm-perf-collector",
+            "nv-perf-collector",
             perf_collect_script_name="collect_nvda_neoversev2_perf_counters.sh",
             perf_postproc_script_name="generate_arm_perf_report.py",
         )
@@ -325,12 +408,9 @@ elif cpu_vendor == "amd":
 elif cpu_vendor == "arm":
     vendor2 = get_cpu_vendor_from_dmi()
     if vendor2 == "nvidia":
-        TopDown = ARMPerfUtil
+        TopDown = NVPerfUtil
     else:
-        TopDown = DummyPerfUtil
-        logger.warning(
-            f"Current we only support NVIDIA ARM processors, got vendor '{vendor2}"
-        )
+        TopDown = ARMPerfUtil
 else:
     logger.warning(f"Unsupported CPU vendor '{cpu_vendor}'")
     TopDown = DummyPerfUtil

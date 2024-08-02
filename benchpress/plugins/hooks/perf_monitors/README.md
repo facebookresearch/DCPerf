@@ -278,7 +278,7 @@ the benchmark. We currently support the following processors:
 
 * Intel CPUs
 * AMD Zen-series CPUs
-* NVIDIA Grace
+* ARM CPUs
 
 #### Requirements
 
@@ -291,6 +291,8 @@ the benchmark. We currently support the following processors:
 * For NVIDIA systems, please use Linux kernel 6.4.3 or later and make sure the
   kernel module `arm_cspmu_module` is loaded. If not, please install the module
   at `/lib/modules/$(uname -r)/kernel/drivers/perf/arm_cspmu/arm_cspmu_module.ko`
+* For other ARM systems, please install ARM's topdown-tool by following this
+  guide: [Telemetry Solution (Topdown Methodology)](https://learn.arm.com/install-guides/topdown-tool/).
 
 #### Parameters
 
@@ -335,12 +337,33 @@ For Zen4+ CPUs, there are also the following files:
 
 NVIDIA Grace:
 
-* `arm-perf-collector-summary.csv`: A summary spreadsheet showing the average,
+* `nv-perf-collector-summary.csv`: A summary spreadsheet showing the average,
   stddev, min, p95 and max of the microarch metrics observed throughout the
   benchmark.
-* `arm-perf-collector-timeseries.csv`: The time-series sheet recording the
+* `nv-perf-collector-timeseries.csv`: The time-series sheet recording the
   microarch metrics during the benchmark, in the interval of 5 secs.
-* `arm-perf-collector.log`: The raw perf event data collected during the benchmark.
+* `nv-perf-collector.log`: The raw perf event data collected during the benchmark.
+
+Other ARM CPUs:
+
+* `arm-perf-collector.csv`: The time-series sheet recording the micro-arch
+  metrics during the benchmark, in the interval of 5 secs. The format of each
+  row is: time, level, stage, group, metric, value, units. For example:
+  ```
+  5.003257503,1,1,Topdown Level 1,Backend Bound,79.70455968414414,percent of slots
+  5.003257503,2,2,General,Instructions Per Cycle,0.0860849778138224,per cycle
+  5.003257503,1,1,Topdown Level 1,Backend Bound,79.70455968414414,percent of slots
+  ```
+* `arm-perf-collector-transposed.csv`: A transposed version of the time-series
+  sheet, in which each row has all metrics collected at the same timestamp. This
+  makes it easier to plot time-series charts in the spreadsheet software.
+  Below is an example header and a row in this file:
+  ```
+  time,Topdown Level 1/Frontend Bound,Topdown Level 1/Backend Bound,Topdown Level 1/Retiring,Topdown Level 1/Bad Speculation,Branch Effectiveness/Branch Misprediction Ratio,Branch Effectiveness/Branch MPKI,Cycle Accounting/Backend Stalled Cycles,Cycle Accounting/Frontend Stalled Cycles,Data TLB Effectiveness/DTLB MPKI,Data TLB Effectiveness/DTLB Walk Ratio,Data TLB Effectiveness/L1 Data TLB Miss Ratio,Data TLB Effectiveness/L1 Data TLB MPKI,Data TLB Effectiveness/L2 Unified TLB Miss Ratio,Data TLB Effectiveness/L2 Unified TLB MPKI,General/Instructions Per Cycle,Instruction TLB Effectiveness/ITLB MPKI,Instruction TLB Effectiveness/ITLB Walk Ratio,Instruction TLB Effectiveness/L1 Instruction TLB Miss Ratio,Instruction TLB Effectiveness/L1 Instruction TLB MPKI,Instruction TLB Effectiveness/L2 Unified TLB Miss Ratio,Instruction TLB Effectiveness/L2 Unified TLB MPKI,L1 Data Cache Effectiveness/L1D Cache Miss Ratio,L1 Data Cache Effectiveness/L1D Cache MPKI,L1 Instruction Cache Effectiveness/L1I Cache Miss Ratio,L1 Instruction Cache Effectiveness/L1I Cache MPKI,L2 Unified Cache Effectiveness/L2 Cache Miss Ratio,L2 Unified Cache Effectiveness/L2 Cache MPKI,Last Level Cache Effectiveness/LL Cache Read Hit Ratio,Last Level Cache Effectiveness/LL Cache Read Miss Ratio,Last Level Cache Effectiveness/LL Cache Read MPKI,Misses Per Kilo Instructions/Branch MPKI,Misses Per Kilo Instructions/DTLB MPKI,Misses Per Kilo Instructions/ITLB MPKI,Misses Per Kilo Instructions/L1D Cache MPKI,Misses Per Kilo Instructions/L1 Data TLB MPKI,Misses Per Kilo Instructions/L1I Cache MPKI,Misses Per Kilo Instructions/L1 Instruction TLB MPKI,Misses Per Kilo Instructions/L2 Cache MPKI,Misses Per Kilo Instructions/L2 Unified TLB MPKI,Misses Per Kilo Instructions/LL Cache Read MPKI,Miss Ratio/Branch Misprediction Ratio,Miss Ratio/DTLB Walk Ratio,Miss Ratio/ITLB Walk Ratio,Miss Ratio/L1D Cache Miss Ratio,Miss Ratio/L1 Data TLB Miss Ratio,Miss Ratio/L1I Cache Miss Ratio,Miss Ratio/L1 Instruction TLB Miss Ratio,Miss Ratio/L2 Cache Miss Ratio,Miss Ratio/L2 Unified TLB Miss Ratio,Miss Ratio/LL Cache Read Miss Ratio,Speculative Operation Mix/Branch Operations Percentage,Speculative Operation Mix/Crypto Operations Percentage,Speculative Operation Mix/Integer Operations Percentage,Speculative Operation Mix/Load Operations Percentage,Speculative Operation Mix/Floating Point Operations Percentage,Speculative Operation Mix/Advanced SIMD Operations Percentage,Speculative Operation Mix/Store Operations Percentage
+  ...
+  246.991144298,27.425617615729976,33.32633262935843,31.85108723775399,10.828895094360552,0.0393350145473815,6.035870872000497,31.06953356335234,20.2302919739733,0.3762944007772692,0.0007983001023691,0.0821181049114656,39.69456947728879,0.0081693773180869,0.3454832703348868,1.5198842942372353,0.0104187574327196,6.824508768161541e-05,0.0196974510546291,3.089776920238521,0.0081693773180869,0.3454832703348868,0.0831785155732513,30.79672949443595,0.0164945963437625,5.4164483888050965,0.0177127907718231,1.2690812958006823,,,8.50498021606944,6.035870872000497,0.3762944007772692,0.0104187574327196,30.79672949443595,39.69456947728879,5.4164483888050965,3.089776920238521,1.2690812958006823,0.3454832703348868,8.50498021606944,0.0393350145473815,0.0007983001023691,6.824508768161541e-05,0.0831785155732513,0.0821181049114656,0.0164945963437625,0.0196974510546291,0.0177127907718231,0.0081693773180869,,13.475609758408927,0.0,43.35147275540571,25.39628434041637,4.940091933772775,0.627451800412457,9.227640110228428
+  ```
+* `arm-perf-collector.log`: Contains messages printed by topdown-tools, if there's any.
 
 ### `perfstat`
 

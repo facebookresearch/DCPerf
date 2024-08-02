@@ -19,6 +19,10 @@ BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
 class Monitor:
+
+    def gen_path(self, filename):
+        return BP_BASEPATH + f"/benchmark_metrics_{self.job_uuid}/{filename}"
+
     def __init__(self, interval, name, job_uuid):
         """Initialize some common parameters and storage variables"""
         self.name = name
@@ -28,8 +32,8 @@ class Monitor:
         # Reserved for original output of the monitoring process
         self.output = ""
         self.job_uuid = job_uuid
-        self.logpath = BP_BASEPATH + f"/benchmark_metrics_{job_uuid}/{name}.log"
-        self.csvpath = BP_BASEPATH + f"/benchmark_metrics_{job_uuid}/{name}.csv"
+        self.logpath = self.gen_path(f"{name}.log")
+        self.csvpath = self.gen_path(f"{name}.csv")
         self.logfile = open(self.logpath, "w", buffering=1)  # noqa: P201
 
     def __del__(self):
@@ -92,12 +96,12 @@ class Monitor:
 
     def terminate(self):
         """
-        Kill the monitoring process using SIGTERM signal and join the stdout
+        Kill the monitoring process using SIGINT signal and join the stdout
         and stderr catcher threads.
         """
         exitcode = -1
         if hasattr(self, "proc") and isinstance(self.proc, subprocess.Popen):
-            os.kill(self.proc.pid, signal.SIGTERM)
+            os.kill(self.proc.pid, signal.SIGINT)
             exitcode = self.proc.wait()
         if hasattr(self, "oc") and isinstance(self.oc, threading.Thread):
             self.oc.join()
@@ -126,5 +130,7 @@ class Monitor:
 
     def write_csv(self):
         csv = self.gen_csv()
+        if len(csv.strip()) == 0:
+            return
         with open(self.csvpath, "w") as f:
             f.write(csv)
