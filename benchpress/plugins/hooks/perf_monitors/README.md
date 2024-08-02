@@ -231,6 +231,44 @@ index,timestamp,cpufreq_mhz
 5,11:40:07 AM,3532.95028125,
 ```
 
+### `power`
+
+`power` monitors system power sensors through `/sys/class/hwmon`.
+
+#### Requirements
+
+This monitor only works when the power sensors in your system works with
+`/sys/class/hwmon`.
+
+#### Parameters
+
+These are optional parameters:
+
+* `interval`: Reporting interval, default 1s
+* `sensor_interval_ms`: Sensor reporting interval, in milliseconds. This controls
+  the averaging period of the power reporting. By default it's `1000 * interval`.
+
+#### Output
+
+`benchmark_metrics_<run_id>/power.csv`
+
+Sample content:
+
+```
+index,timestamp,CPU Power Socket 0,SoC Power Socket 0,TH500 Power Socket 0
+0,05:25:37 PM,14.334,1.938,47.053,
+1,05:25:38 PM,14.876,1.85,46.988,
+2,05:25:39 PM,14.794,1.949,47.317,
+3,05:25:40 PM,14.498,1.906,47.186,
+4,05:25:41 PM,14.302,1.896,46.594,
+5,05:25:42 PM,14.268,1.992,46.924,
+6,05:25:43 PM,14.006,1.859,46.595,
+7,05:25:44 PM,14.974,1.941,47.186,
+8,05:25:45 PM,15.646,2.348,50.463,
+9,05:25:46 PM,15.957,2.35,51.183,
+10,05:25:47 PM,15.875,2.481,51.38,
+......
+```
 
 ### `topdown`
 

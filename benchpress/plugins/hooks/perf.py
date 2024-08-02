@@ -16,6 +16,7 @@ from .perf_monitors import (
     mpstat,
     netstat,
     perfstat,
+    power,
     topdown,
 )
 
@@ -35,6 +36,7 @@ DEFAULT_OPTIONS = {
     "netstat": {"interval": 5, "additional_counters": []},
     "memstat": {"interval": 5, "additional_counters": []},
     "topdown": {},
+    "power": {"interval": 1},
 }
 
 AVAIL_MONITORS = {
@@ -45,6 +47,7 @@ AVAIL_MONITORS = {
     "netstat": netstat.NetStat,
     "memstat": memstat.MemStat,
     "topdown": topdown.TopDown,
+    "power": power.Power,
 }
 
 
