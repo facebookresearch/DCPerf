@@ -15,8 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+BREPS_LFILE=/tmp/feedsim_log.txt
+
 function benchreps_tell_state () {
-    BREPS_LFILE=/tmp/feedsim_log.txt
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
 
@@ -392,6 +393,20 @@ while [[ $loop_cond -eq 1 ]]; do
 done
 benchreps_tell_state "after gap_qps"
 
+
+if [[ -n "$IS_AUTOSCALE_RUN" ]] && [[ "$IS_AUTOSCALE_RUN" -gt 1 ]]; then
+    NUM_INSTANCES=$IS_AUTOSCALE_RUN
+    num_ready_inst=$(grep --count "after gap_qps" $BREPS_LFILE)
+    if [[ $num_ready_inst -lt $NUM_INSTANCES ]]; then
+        result_filename=$(basename "$output_csv_file")
+        current_inst_num=$(echo "$result_filename" | sed -E "s/feedsim_results_([0-9]+).txt/\1/g")
+        benchreps_tell_state "[Instance $current_inst_num] Waiting for other instances to finish \"gap_qps\" stage."
+        while [[ $num_ready_inst -lt $NUM_INSTANCES ]]; do
+            sleep 1
+            num_ready_inst=$(grep --count "after gap_qps" $BREPS_LFILE)
+        done
+    fi
+fi
 
 # do final measurement
 benchreps_tell_state "before final_qps"
