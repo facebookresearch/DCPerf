@@ -381,3 +381,40 @@ to run on the client machines.
 > }
 >
 > ```
+
+# Troubleshooting
+
+## Build error related to Boost, numpy and `PyArray_Descr`
+
+If TaoBench failed to install and you find the following build error near the end of the
+output:
+
+```
+libs/python/src/numpy/dtype.cpp: In member function ‘int boost::python::numpy::dtype::get_itemsize() const’:
+libs/python/src/numpy/dtype.cpp:101:83: error: ‘PyArray_Descr’ {aka ‘struct _PyArray_Descr’} has no member named ‘elsize’
+  101 | int dtype::get_itemsize() const { return reinterpret_cast<PyArray_Descr*>(ptr())->elsize;}
+      |                                                                                   ^~~~~~
+...failed gcc.compile.c++ bin.v2/libs/python/build/gcc-11/release/debug-symbols-on/link-static/pch-off/python-3.9/threading-multi/visibility-global/numpy/dtype.o...
+gcc.compile.c++ bin.v2/libs/python/build/gcc-11/release/debug-symbols-on/link-static/pch-off/python-3.9/threading-multi/visibility-global/numpy/numpy.o
+```
+This is because the Boost library that came with Folly is not compatible with Numpy 2.0.
+Please resolve the build error by downgrading your Numpy to 1.26 (by running
+`pip3 install 'numpy<2'`>).
+
+## Cannot assign requested address on the clients
+
+First, please make sure the open files limit (`ulimit -n`) on your system is large enough.
+We recommend at least 64K for this limit.
+
+If the error still exists after raising the open files limit, please reduce the value of
+`clients_per_thread` parameter in your client commands. By default this parameter is set
+to the lower of `380` or `floor(32768 / (NPROC - 6))` (`NPROC` is the number of logical
+cores on your client node). On some systems you might need to reduce this value to even
+lower to avoid (e.g. half of the default value) the "cannot assign requested address" error.
+
+## TLS connection error: (null)
+
+If (one of) the clients exits early and has the error message of "TLS connection error: (null)",
+it's likely due to there's a Memcached service running and taking the port 11211 on the server
+machine. In this case, please try stopping the Memcached service and relaunch TaoBench
+benchmark.

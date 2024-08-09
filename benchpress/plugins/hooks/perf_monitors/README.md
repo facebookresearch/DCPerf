@@ -6,14 +6,14 @@ while running DCPerf benchmarks.
 
 `perf` hook is capable of monitoring the following metrics:
 
-* CPU utilization, broken down by each categories (e.g. %usr, %sys, %wait, %irq, etc)
-* Memory capacity utilization
-* CPU Frequency
-* Network bandwidth
-* IPC
-* Microarch telemetry (e.g. memory bandwidth, cache miss rate and
-  frontend / backend boundedness)
-
+| Monitor | Metrics |
+| --- | --- |
+| [mpstat](#mpstat) |  CPU utilization, broken down by each categories (e.g. %usr, %sys, %wait, %irq, etc) |
+| [memstat](#memstat) | Monitors memory usage during benchmarks by collecting data from `/proc/meminfo`. |
+| [netstat](#netstat) | Monitors network bandwidth during benchmarks by collecting metrics from `/sys/class/net`. |
+| [cpufreq_scaling](#cpufreq_scaling) <br> [cpufreq_cpuinfo](#cpufreq_cpuinfo) | Monitors CPU frequency during benchmarks. |
+| [topdown](#topdown) | Monitors uArch and top-down telemetries such as cache miss rates, memory bandwidth, and frontend/backend boundedness. |
+| [perfstat](#perfstat) | Collects performance counters through the `perf stat` command. Includes IPC by default. |
 
 ## Getting started
 

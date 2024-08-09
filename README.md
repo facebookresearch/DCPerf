@@ -158,6 +158,8 @@ please feel free to use the following Table of Contents:
 - OS: CentOS Stream 8/9, Ubuntu 22.04
 - Running as the root user
 - Have access to the internet
+- Please set `ulimit -n` to at least 65536. For permanent change please
+  edit `/etc/security/limits.conf`
 
 ### Install Prerequisites
 
@@ -187,6 +189,19 @@ dnf config-manager --set-enabled PowerTools
 ```
 
 After that, try running `./benchpress_cli.py` under the benchpress directory.
+
+**NOTE**: Since CentOS Stream 8 has reached EOL as of June 2024, some DCPerf's
+dependencies (such as folly) may start to drop its support. You may also
+encounter some troubles when trying to install packages via `dnf`. Therefore we
+recommend upgrading your OS to CentOS Stream 9. The newer version of folly may
+have begun to require newer versions of GCC compilers. If you still wish to
+run DCPerf on CentOS Stream 8, please install and enable GCC 11 with the
+following steps:
+
+```bash
+dnf install -y gcc-toolset-11
+scl enable gcc-toolset-11 bash
+```
 
 #### On CentOS 9
 
