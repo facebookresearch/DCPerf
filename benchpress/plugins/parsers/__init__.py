@@ -16,6 +16,7 @@ from .fb_fiosynth import Fiosynth_Parser
 from .fbgemm import FbgemmParser
 from .feedsim import FeedSimParser
 from .feedsim_autoscale import FeedSimAutoscaleParser
+from .ffmpeg import FfmpegParser
 from .fio import FioParser
 from .gapbs import GAPBSParser
 from .generic import JSONParser
@@ -85,3 +86,4 @@ def register_parsers(factory):
     factory.register("feedsim_autoscale", FeedSimAutoscaleParser)
     factory.register("tailbench_imgdnn", TailBenchParser)
     factory.register("cloudsuite_graph", CloudSuiteGraphParser)
+    factory.register("ffmpeg_video_workload", FfmpegParser)
