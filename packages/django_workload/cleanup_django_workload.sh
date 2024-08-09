@@ -11,8 +11,8 @@ DJANGO_BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks/django_workload"
 # TODO: Uninstall siege here!
 rm -rf "${DJANGO_BENCHMARKS_DIR}"
 # Kill Cassandra process
-pkill java
+pkill java || true
 # Kill memcache processes
-pkill memcache
+pkill memcache || true
 # Kill uWSGI master process
-kill $(ps aux | grep -i '[u]wsgi master' | awk '{print $2}')
+kill $(ps aux | grep -i '[u]wsgi master' | awk '{print $2}') || true

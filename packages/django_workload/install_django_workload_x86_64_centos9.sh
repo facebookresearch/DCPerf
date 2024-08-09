@@ -137,8 +137,10 @@ cp "${TEMPLATES_DIR}/run-siege" "${DJANGO_REPO_ROOT}/client/run-siege" || exit 1
 # Patch for MLP and icache buster
 # cltorres: Disable MLP patch. MLP implemented in Python does not work as intented due to bytecode abstraction
 # git apply --check "${TEMPLATES_DIR}/django_mlp.patch" && git apply "${TEMPLATES_DIR}/django_mlp.patch"
+pushd "${DJANGO_REPO_ROOT}"
 git apply --check "${TEMPLATES_DIR}/django_genurl.patch" && git apply "${TEMPLATES_DIR}/django_genurl.patch"
 git apply --check "${TEMPLATES_DIR}/django_libib.patch" && git apply "${TEMPLATES_DIR}/django_libib.patch"
+popd # ${DJANGO_REPO_ROOT}
 
 # Build oldisim icache buster library
 set +u
@@ -147,7 +149,7 @@ if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
         IBCC="/bin/c++"
     fi
     cd "${TEMPLATES_DIR}" || exit 1
-    mkdir build
+    mkdir -p build
     cd build || exit 1
     python3 ../gen_icache_buster.py --num_methods=100000 --num_splits=24 --output_dir ./
     # shellcheck disable=SC2086
