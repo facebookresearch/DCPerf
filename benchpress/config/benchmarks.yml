@@ -111,3 +111,17 @@ spark_standalone:
       - memory
   metrics: []
 
+
+ffmpeg_video_workload:
+  parser: ffmpeg_video_workload
+  install_script: ./packages/ffmpeg_video_workload/install_ffmpeg_video_workload.sh
+  cleanup_script: ./packages/ffmpeg_video_workload/cleanup_ffmpeg_video_workload.sh
+  path: ./benchmarks/ffmpeg_video_workload/run.sh
+  tags:
+    scope:
+      - app
+      - ffmpeg
+    component:
+      - cpu
+      - memory
+  metrics: []

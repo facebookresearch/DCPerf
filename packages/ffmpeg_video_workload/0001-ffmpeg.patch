@@ -1,0 +1,36 @@
+diff --git a/libavfilter/vf_libvmaf.c b/libavfilter/vf_libvmaf.c
+index 2c99d792af..1d5745bf6b 100644
+--- a/libavfilter/vf_libvmaf.c
++++ b/libavfilter/vf_libvmaf.c
+@@ -61,6 +61,7 @@ typedef struct LIBVMAFContext {
+     unsigned model_cnt;
+     unsigned frame_cnt;
+     unsigned bpc;
++    int aom_ctc;
+ #if CONFIG_LIBVMAF_CUDA_FILTER
+     VmafCudaState *cu_state;
+ #endif
+@@ -77,6 +78,7 @@ static const AVOption libvmaf_options[] = {
+     {"n_subsample", "Set interval for frame subsampling used when computing vmaf.",     OFFSET(n_subsample), AV_OPT_TYPE_INT, {.i64=1}, 1, UINT_MAX, FLAGS},
+     {"model",  "Set the model to be used for computing vmaf.",                          OFFSET(model_cfg), AV_OPT_TYPE_STRING, {.str="version=vmaf_v0.6.1"}, 0, 1, FLAGS},
+     {"feature",  "Set the feature to be used for computing vmaf.",                      OFFSET(feature_cfg), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
++    {"aom_ctc", "Set the options for aom_ctc v1.0",                                     OFFSET(aom_ctc), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS},
+     { NULL }
+ };
+ 
+@@ -441,6 +443,15 @@ static av_cold int init(AVFilterContext *ctx)
+     if (err)
+         return AVERROR(EINVAL);
+ 
++    if (s->aom_ctc) {
++        av_free(s->model_cfg);
++        av_free(s->feature_cfg);
++        s->model_cfg = av_strdup(
++            "version=vmaf_v0.6.1:name=vmaf|version=vmaf_v0.6.1neg:name=vmaf_neg");
++        s->feature_cfg = av_strdup(
++            "name=psnr:reduced_hbd_peak=true:enable_apsnr=true:min_sse=0.5|"
++            "name=float_ssim:enable_db=true:clip_db=true");
++    }
+     err = parse_models(ctx);
+     if (err)
+         return err;
