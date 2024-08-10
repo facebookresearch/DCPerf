@@ -28,6 +28,8 @@ On both of the machines:
 
 ## Run django workload
 
+### Start Cassandra DB
+
 On the Cassandra DB server machine:
 
 ```
@@ -37,11 +39,23 @@ This should run indefinitely. You will see a lot of `java` processes running, an
 if Cassandra has started up successfully by running `lsof -i -P -n | grep 9042`. Cassandra will also
 output log at `benchmarks/django_workload/cassandra.log`.
 
+If you would like Cassandra DB to bind a custom address, please use the following command:
+
+```
+./benchpress_cli.py run django_workload_default -r db -i '{"bind_ip": "<ip_addr>"}'
+```
+
+This is useful when the output of `hostname -i` does not return a reachable IP address or is not the
+address you would like to use. Please see more details in [Troubleshooting](#troubleshooting).
+
+### Start benchmarking
+
 On the django benchmarking machine (where the django server and client are run):
 
 ```
 ./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>"}'
 ```
+Note that `<db-server-ip>` has to be an IP address, hostname will not work.
 
 If running on ARM platform, please use the job `django_workload_arm`:
 
@@ -124,7 +138,7 @@ Cassandra DB.
 In this case, please start Cassandra DB by running the following command:
 
 ```
-./benchmarks/django_workload/bin/run.sh -r db -b <host-ip>
+./benchpress_cli.py run django_workload_default -r db -i '{"bind_ip": "<host-ip>"}'
 ```
 Where `<host-ip>` is the IP address that Cassandra is supposed to bind and the
 benchmarking machine can connect to.

@@ -71,6 +71,9 @@
     db:
       args:
         - '-r db'
+        - '-b {bind_ip}'
+      vars:
+        - 'bind_ip=default'
   hooks:
     - hook: copymove
       options:
@@ -102,6 +105,9 @@
     db:
       args:
         - '-r db'
+        - '-b {bind_ip}'
+      vars:
+        - 'bind_ip=default'
   hooks:
     - hook: copymove
       options:
@@ -168,8 +174,10 @@
       args:
         - '-r db'
         - '-y {concur_writes}'
+        - '-b {bind_ip}'
       vars:
         - 'concur_writes'
+        - 'bind_ip=default'
 
 - name: feedsim_default
   benchmark: feedsim

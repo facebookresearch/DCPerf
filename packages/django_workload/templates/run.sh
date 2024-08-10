@@ -50,7 +50,7 @@ For role "client":
     -z          ip address of the django server (required when role is 'client', default is ::1)
 For role "db":
     -y          number of cassandra concurrent writes (default 128)
-    -b          ip address that cassandra will bind to (default to the output of `hostname -i`)
+    -b          ip address that cassandra will bind to (default to the first IP from "hostname -i": `hostname -i`)
 
 EOF
 }
@@ -87,7 +87,7 @@ start_cassandra() {
   fi
 
   CASSANDRA_YAML="./apache-cassandra/conf/cassandra.yaml"
-  if [ -z "$cassandra_bind_addr" ]; then
+  if [ -z "$cassandra_bind_addr" ] || [ "$cassandra_bind_addr" = "default" ]; then
     HOST_IP="$(hostname -i | awk '{print $1}')"
   else
     HOST_IP="$cassandra_bind_addr"
