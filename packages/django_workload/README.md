@@ -12,8 +12,11 @@ to around 95% and measure the max transaction rate it can achieve.
 
 ## System Requirements
 
-Django workload requires two machine: one for running Cassandra DB server (DB server machine),
-the other for running the django server and client (benchmarking machine).
+Django workload can have two configurations. The most recommended one requires two machines:
+one for running Cassandra DB server (DB server machine), the other for running the django server
+and client (benchmarking machine).
+Another configuration is the standalone config which is to run the django server, DB Server and
+client on the same machine.
 
 We recommend placing the DB server machine and the benchmarking machine within the same network
 and maintain the ping latency between them to be in the range of 0.1 and 0.15ms.
@@ -61,6 +64,18 @@ If running on ARM platform, please use the job `django_workload_arm`:
 
 ```
 ./benchpress_cli.py run django_workload_arm -r clientserver -i '{"db_addr": "<db-server-ip>"}'
+```
+
+### Using standalone configuration
+
+To run the server, client and database on the same benchmarking machine:
+```
+./benchpress_cli.py run django_workload_default -r standalone
+```
+If running on ARM platform, please use the job `django_workload_arm`:
+
+```
+./benchpress_cli.py run django_workload_arm -r standalone
 ```
 
 ## Reporting

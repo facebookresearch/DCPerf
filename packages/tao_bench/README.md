@@ -19,6 +19,8 @@ the machines to be in the range of 0.1ms and 0.15ms and the network bandwidth to
 be at least 10Gbps for small to medium core count CPUs (<= 72 logical cores) or
 20Gbps for high core count ones (>72 logical cores). The maximum NIC bandwidth we
 recommend is 50Gbps.
+If the client nodes are not available, we offer an option to run the server and
+the clients on the same machine.
 
 ## Operating System
 
@@ -147,6 +149,14 @@ is `enP8s6`, then the command would be;
 ```bash
 ./benchpress_cli.py run tao_bench_autoscale -i '{"num_servers": 4, "memsize": 512, "interface_name": "enP8s6"}'
 ```
+
+## Standalone configuration: `tao_bench_standalone`
+
+To start the clients and the server with autoscale on the same benchmarking machine:
+```bash
+./benchpress_cli.py run tao_bench_standlone
+```
+All the parameters used with autoscale can be used with standalone except interface_name.
 
 ### Result reporting
 

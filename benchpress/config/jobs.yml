@@ -74,6 +74,19 @@
         - '-b {bind_ip}'
       vars:
         - 'bind_ip=default'
+    standalone:
+      args:
+        - '-r standalone'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c 127.0.0.1'
+      vars:
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
   hooks:
     - hook: copymove
       options:
@@ -108,6 +121,21 @@
         - '-b {bind_ip}'
       vars:
         - 'bind_ip=default'
+    standalone:
+      args:
+        - '-r standalone'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c 127.0.0.1'
+        - '-m 50000'
+        - '-M 100000'
+      vars:
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
   hooks:
     - hook: copymove
       options:
@@ -423,6 +451,46 @@
     - 'bind_mem=1'
   hooks:
     - hook: tao_instruction
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server*.csv'
+          - 'tao-bench-server-*.log'
+
+- benchmark: tao_bench_standalone
+  name: tao_bench_standalone
+  description:
+      Spawns multiple Tao benchmark servers depending on the CPU
+      core count. After executing this job, please see the tail
+      of benchpress.log for instructions on starting clients.
+      Clients start on the same instance.
+      MAKE SURE to start clients within 1 minute.
+
+  args:
+    - '--num-servers={num_servers}'
+    - '--memsize={memsize}'
+    - '--fast-threads-ratio={fast_threads_ratio}'
+    - '--slow-to-fast-ratio={slow_to_fast_ratio}'
+    - '--port-number-start=11211'
+    - '--warmup-time={warmup_time}'
+    - '--test-time={test_time}'
+    - '--num-clients={num_clients}'
+    - '--clients-per-thread={clients_per_thread}'
+    - '--bind-cpu={bind_cpu}'
+    - '--bind-mem={bind_mem}'
+  vars:
+    - 'num_servers=0'
+    - 'memsize=0'
+    - 'fast_threads_ratio=0.75'
+    - 'slow_to_fast_ratio=3'
+    - 'warmup_time=0'
+    - 'test_time=720'
+    - 'num_clients=2'
+    - 'clients_per_thread=0'
+    - 'bind_cpu=1'
+    - 'bind_mem=1'
+  hooks:
     - hook: copymove
       options:
         is_move: true

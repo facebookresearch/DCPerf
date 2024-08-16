@@ -323,8 +323,15 @@ main() {
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
     start_django_server "$cassandra_addr" "$num_server_workers";
+  elif [ "$role" = "standalone" ]; then
+    export IB_MIN="${django_ib_min}"
+    export IB_MAX="${django_ib_max}"
+    start_cassandra "$num_cassandra_writes" 127.0.0.1 &
+    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps";
+    pgrep -f cassandra | xargs kill
+
   else
-    echo "Role $role is invalid, it can only be 'db' or 'clientserver'";
+    echo "Role $role is invalid, it can only be 'db' or 'clientserver' or 'standalone'";
     exit 1
   fi
   exit 0
