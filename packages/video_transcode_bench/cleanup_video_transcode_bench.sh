@@ -7,6 +7,6 @@
 BPKGS_FFMPEG_ROOT="$(dirname "$(readlink -f "$0")")"
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_FFMPEG_ROOT/../..")"
 BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks"
-FFMPEG_DIR="${BENCHMARKS_DIR}/ffmpeg_video_workload"
+FFMPEG_DIR="${BENCHMARKS_DIR}/video_transcode_bench"
 
 rm -rf "$FFMPEG_DIR"

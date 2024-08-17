@@ -48,7 +48,7 @@ to improve and add in the future
 
 ## Workload Coverage
 
-As of 2024 Q2, DCPerf consists of five benchmarks and provides coverage for the
+As of 2024 Q3, DCPerf consists of six benchmarks and provides coverage for the
 major production workloads listed as follows:
 
 <table>
@@ -90,6 +90,12 @@ major production workloads listed as follows:
    <td>Python, C++ </td>
    <td>Django framework, UWSGI, Apache Cassandra, Memcached, Siege</td>
    <td>Web Serving (Instagram) </td>
+  </tr>
+  <tr>
+   <td>VideoTranscodeBench </td>
+   <td>C++ </td>
+   <td>ffmpeg, svt-av1, libaom</td>
+   <td>Video Processing </td>
   </tr>
 </table>
 
@@ -292,6 +298,7 @@ running the benchmarks. What's discussed in this section is an overview of Bench
 * [Mediawiki](packages/mediawiki/README.md).
 * [DjangoWorkload](packages/django_workload//README.md).
 * [SparkBench](packages/spark_standalone/README.md).
+* [VideoTranscodeBench](packages/video_transcode_bench/README.md).
 
 #### Installation
 
@@ -464,6 +471,11 @@ sufficiently stressed the system.
    <td>SparkBench </td>
    <td>Stage 2.0 full batch period </td>
    <td>90~100% </td>
+  </tr>
+  <tr>
+   <td>VideoTranscodeBench </td>
+   <td>Encoding periods (most of the execution time) </td>
+   <td>85~100% </td>
   </tr>
 </table>
 

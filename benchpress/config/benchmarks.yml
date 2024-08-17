@@ -126,11 +126,11 @@ spark_standalone:
   metrics: []
 
 
-ffmpeg_video_workload:
-  parser: ffmpeg_video_workload
-  install_script: ./packages/ffmpeg_video_workload/install_ffmpeg_video_workload.sh
-  cleanup_script: ./packages/ffmpeg_video_workload/cleanup_ffmpeg_video_workload.sh
-  path: ./benchmarks/ffmpeg_video_workload/run.sh
+video_transcode_bench:
+  parser: video_transcode_bench
+  install_script: ./packages/video_transcode_bench/install_video_transcode_bench.sh
+  cleanup_script: ./packages/video_transcode_bench/cleanup_video_transcode_bench.sh
+  path: ./benchmarks/video_transcode_bench/run.sh
   tags:
     scope:
       - app

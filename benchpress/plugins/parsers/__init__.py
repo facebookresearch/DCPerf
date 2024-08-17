@@ -86,4 +86,4 @@ def register_parsers(factory):
     factory.register("feedsim_autoscale", FeedSimAutoscaleParser)
     factory.register("tailbench_imgdnn", TailBenchParser)
     factory.register("cloudsuite_graph", CloudSuiteGraphParser)
-    factory.register("ffmpeg_video_workload", FfmpegParser)
+    factory.register("video_transcode_bench", FfmpegParser)

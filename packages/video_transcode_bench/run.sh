@@ -21,7 +21,7 @@ FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets"
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [--encoder svt|aom] [--levels low:high]
+Usage: ${0##*/} [-h] [--encoder svt|aom] [--levels low:high]|[--runtime long|medium|short]
 
     -h Display this help and exit
     --encoder encoder name. Default: svt
@@ -29,23 +29,6 @@ Usage: ${0##*/} [-h] [--encoder svt|aom] [--levels low:high]
 EOF
 }
 
-replicate_videos() {
-    #ensure that we have enough dataset to satruate all cores. If you have enough video as dataset, this step is no needed
-    count=$1
-
-    pushd "${FFMPEG_DATASETS}"
-    for file in ./*; do
-      # Get the file name without the extension
-      filename="${file##*/}"
-      filename="${filename%.*}"
-
-      # Copy the file 4 times
-      for i in $(seq 1 "$count"); do
-        cp "$file" "./replica_${filename}_${i}.y4m"
-      done
-    done
-    popd
-}
 
 delete_replicas() {
     pushd "${FFMPEG_DATASETS}"
@@ -56,6 +39,12 @@ delete_replicas() {
       fi
     done
     popd
+
+    if [ -d "${FFMPEG_ROOT}/resized_clips" ]; then
+        pushd "${FFMPEG_ROOT}/resized_clips"
+        rm ./* -rf
+        popd
+    fi
 }
 
 
@@ -64,13 +53,13 @@ main() {
     encoder="svt"
 
     local levels
-    levels="1:5"
+    levels="0:0"
 
     local result_filename
     result_filename="ffmpeg_video_workload_results.txt"
 
-    local count_replica
-    count_replica=3
+    local runtime
+    runtime="medium"
 
     while :; do
         case $1 in
@@ -83,8 +72,8 @@ main() {
             --output)
                 result_filename="$2"
                 ;;
-            --replica)
-                count_replica="$2"
+            --runtime)
+                runtime="$2"
                 ;;
             -h)
                 show_help >&2
@@ -96,7 +85,7 @@ main() {
         esac
 
         case $1 in
-            --levels|--encoder|--output)
+            --levels|--encoder|--output|--runtime)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -107,11 +96,45 @@ main() {
         shift
     done
 
+
+
+    if [ "$encoder" = "svt" ]; then
+        if [ "$levels" = "0:0" ]; then
+            if [ "$runtime" = "short" ]; then
+                levels="12:13"
+            elif [ "$runtime" = "medium" ]; then
+                levels="6:6"
+            elif [ "$runtime" = "long" ]; then
+                levels="2:2"
+            else
+                echo "Invalid runtime, available options are short, medium, and long"
+                exit 1
+            fi
+        fi
+    elif [ "$encoder" = "aom" ]; then
+        if [ "$levels" = "0:0" ]; then
+            if [ "$runtime" = "short" ]; then
+                levels="6:6"
+            elif [ "$runtime" = "medium" ]; then
+                levels="5:5"
+            elif [ "$runtime" = "long" ]; then
+                levels="3:3"
+            else
+                echo "Invalid runtime, available options are short, medium, and long"
+                exit 1
+            fi
+        fi
+    else
+            echo "Invalid encoder, available options are svt and aom"
+            exit 1
+    fi
+
+
     set -u  # Enable unbound variables check from here onwards
     benchreps_tell_state "working on config"
     pushd "${FFMPEG_ROOT}"
 
-    replicate_videos "$count_replica"
+    delete_replicas
 
     #Customize the script to genrate commands
     sed -i "/^ENC/d" ./generate_commands_all.py
@@ -157,15 +180,20 @@ main() {
         rm "${result_filename}"
     fi
 
+    total_size=0
+    for file in "${FFMPEG_ROOT}/resized_clips"/*; do
+        size=$(stat -c %s "$file")
+        total_size=$((total_size + size))
+    done
+
+    total_size_GB=$(echo "$total_size / 1024 / 1024 / 1024" | bc -l | awk '{printf "%.2f", $0}')
+
+    echo "total_data_encoded: ${total_size_GB} GB"
     for num in $(seq "${low}" "${high}"); do
-        # Read the file x-number.txt
         filename="time_enc_${num}.log"
         if [ -f "${filename}" ]; then
-            # Extract the line starting with "aaa"
             line=$(grep "Elapsed" "${filename}")
-            # Cut the line by "):" and keep the last element
             last_element=$(echo "${line}" | cut -d' ' -f 8)
-            # Add the last element to the output file
             echo "res_level${num}:" "${last_element}" | tee -a "${result_filename}"
         fi
     done

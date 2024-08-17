@@ -547,20 +547,20 @@
           - 'tao-bench-server-*.log'
 
 
-- name: ffmpeg_video_workload_svt
-  benchmark: ffmpeg_video_workload
+- name: video_transcode_bench_svt
+  benchmark: video_transcode_bench
   description: >
     SVT-AV1 based video encoding workload. Compute and memory intensive.
   args:
     - '--encoder {encoder}'
     - '--levels {levels}'
     - '--output {output}'
-    - '--replica {replica}'
+    - '--runtime {runtime}'
   vars:
     - 'encoder=svt'
-    - 'levels=1:13'
-    - 'output=ffmpeg_video_workload_results.txt'
-    - 'replica=3'
+    - 'levels=0:0'
+    - 'output=video_transcode_bench_results.txt'
+    - 'runtime=medium'
   hooks:
     - hook: cpu-mpstat
       options:
@@ -571,22 +571,22 @@
       options:
         is_move: true
         after:
-          - 'benchmarks/ffmpeg_video_workload/ffmpeg_video_workload_results.txt'
+          - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
 
-- name: ffmpeg_video_workload_aom
-  benchmark: ffmpeg_video_workload
+- name: video_transcode_bench_aom
+  benchmark: video_transcode_bench
   description: >
     AOM based video encoding workload. Compute and memory intensive.
   args:
     - '--encoder {encoder}'
     - '--levels {levels}'
     - '--output {output}'
-    - '--replica {replica}'
+    - '--runtime {runtime}'
   vars:
     - 'encoder=aom'
-    - 'levels=1:6'
-    - 'output=ffmpeg_video_workload_results.txt'
-    - 'replica=3'
+    - 'levels=0:0'
+    - 'output=video_transcode_bench_results.txt'
+    - 'runtime=medium'
   hooks:
     - hook: cpu-mpstat
       options:
@@ -597,4 +597,4 @@
       options:
         is_move: true
         after:
-          - 'benchmarks/ffmpeg_video_workload/ffmpeg_video_workload_results.txt'
+          - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
