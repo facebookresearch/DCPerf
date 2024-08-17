@@ -355,6 +355,8 @@ class ARMPerfUtil(Monitor):
         Override the original write_csv() method to write a transposed version
         of CSV table based on what topdown-tool generates
         """
+        if not os.path.exists(self.csvpath):
+            return
         t_csv_path = self.gen_path(f"{self.name}-transposed.csv")
         df = pd.read_csv(self.csvpath)
         t_rows = []
