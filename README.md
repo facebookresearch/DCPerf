@@ -370,8 +370,11 @@ successfully finishes. Inside the folder there will be at least two files:
 
 ### Getting DCPerf Score
 
-After running all five DCPerf benchmarks, you can obtain an overall DCPerf score of your
-test machine by running `./benchpress_cli.py report score` command. For example:
+After running five DCPerf benchmarks (TaoBench, FeedSim, DjangoBench, Mediawiki, SparkBench),
+ you can obtain an overall DCPerf score of your
+test machine by running `./benchpress_cli.py report score` command. We are currently in the
+process of validating correlation of the Video Transcode benchmark so it's not yet included in
+DCPerf overall score calculation. For example:
 
 ```bash
 [root@hostname ~/DCPerf]# ./benchpress_cli.py report score

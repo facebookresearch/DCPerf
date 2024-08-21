@@ -138,6 +138,16 @@ is the metric that measures performance.:
 ```
 ## Troubleshooting
 
+### Cassandra could not start
+
+If Cassandra could not start and quits soon after launching, please look at
+`benchmarks/django_workload/cassandra.log` to see if there's any error message.
+
+One common error you might see is "Unable to find java executable.
+Check JAVA_HOME and PATH environment variables". This is because Cassandra
+could not find JVM in your system. If this happens, please manually export
+the environment variable `JAVA_HOME` setting it to the path to your JVM.
+
 ### Cassandra IP binding
 
 By default, Django benchmark decides which IP address to have Cassandra bind by

@@ -16,10 +16,11 @@ Currently Mediawiki supports these platforms:
 ## Installing HHVM
 
 Mediawiki benchmarks requires HHVM-3.30, which is the last version of HHVM that
-supports PHP. For convenience, you can download the binary package of HHVM-3.30
-[here](https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary.tar.xz)
-and then upload it to the machine on which you would like to experiment, then
-install HHVM:
+supports PHP. For convenience, you can download the pre-built HHVM-3.30 binary package
+[for CentOS](https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary.tar.xz)
+or [for Ubuntu](https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary-ubuntu.tar.xz),
+upload it to the machine on which you would like to experiment, and then
+install HHVM with the following command:
 
 ```bash
 tar -Jxf hhvm-3.30-multplatform-binary.tar.xz

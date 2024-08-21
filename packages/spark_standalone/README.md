@@ -63,12 +63,13 @@ bandwidth between the compute node and the storage nodes.
 
 * Storage: We recommend NVMe SSDs on PCIe 3.0 or newer. Each data node needs to
 have at least one spare drive or spare partition to export to the compute node.
-All data nodes need to provide at least 500GB of free space in total.
+All data nodes need to provide at least 500GB of free space in combination.
 
 * CPU & Memory: We recommend using CPU of 26 cores or more and at least 64GB
 of memory.
 
-* Network: 25Gbps NIC or higher
+* Network: 25Gbps NIC or higher on each data node. We recommend the total network
+bandwidth between the compute node and the storage nodes to be at least 50Gbps.
 
 ### Number of data nodes
 
@@ -80,9 +81,58 @@ because it highly depends on the relative performance between the compute node
 and the storage nodes: if your storage nodes are significantly weaker than the
 compute node, you will probably need more storage nodes, and vice versa.
 
-The bottom line is, if you see the average CPU IOWait% being high (>= 10%)
-throughout the benchmark, you should consider adding more data nodes because
-the I/O now becomes a bottleneck.
+Here are some general guidance:
+
+1. The RAID array created by the remote SSDs from data nodes should be
+able to provide at least 200K IOPS of both random read and write throughput
+(total 400K IOPS) with the average block size of 64KB, queue depth of 24 and
+1:1 R/W mix. You can measure the I/O performance after finishing
+[mounting the remote SSDs on the compute node](#on-the-compute-node)
+using [fio](https://github.com/axboe/fio) with the following example command:
+
+```bash
+fio \
+  --rw=randrw \
+  --filename=/flash23/test.bin \
+  --ioengine=io_uring \
+  --iomem=mmap \
+  --rwmixread=50 \
+  --rwmixwrite=50 \
+  --bssplit=4k/8:8k/5:16k/10:32k/18:64k/40:128k/19 \
+  --size=300G \
+  --iodepth=24 \
+  --numjobs=32 \
+  --time_based=1 \
+  --runtime=60 \
+  --name=spark_io_synth \
+  --direct=1
+```
+
+2. The average CPU IOWait% throughout the benchmark should be less than 10%. If
+you see the IOWait% being high throughout the benchmark, you should consider adding
+more data nodes, importing more remote SSD drives or upgrading your network bandwidth
+because the I/O now becomes a bottleneck.
+
+### What if I cannot do distributed setup?
+
+If you are not able to put together a satisfactory distributed setup for SparkBench
+either because there is no extra machines or because you don't have a high bandwidth
+network infrastructure, you can choose to run SparkBench locally in the following two
+ways. But keep in mind that local runs will not be as representative as runs with
+the recommended distributed setup.
+
+* Option 1: Create a folder `/flash23`, then jump to step 4
+of the section "[On the compute node](#on-the-compute-node)". This option is the
+simplest, but SparkBench will likely run much slower than what the CPU can achieve and
+you'll likely see very high CPU IOWait% because a single SSD is unlikely to meet the
+random I/O throughput needs by SparkBench.
+
+* Option 2: Install multiple NVMe drives in your testing machine, create a RAID array
+with them according to step 3 of the section "[On the compute node](#on-the-compute-node)"
+and then do the following steps. This option will relieve the benchmark of I/O bottleneck
+if your RAID array can provide 200k+ random R&W IOPS as is discussed previously, but
+such setup will not capture the network overhead that the real world Data Warehouse
+workload will encounter.
 
 ### Environment
 
@@ -94,8 +144,8 @@ for ARM).
 your local DNS, please change it to `localhost`
 
 * Network: Spark benchmark is designed to work with IPv6, so it is recommended
-to run your systems exclusively with IPv6. We will provide a switch to have
-this benchmark work with IPv4 in the near future.
+to run your systems exclusively with IPv6. If your systems only support IPv4,
+we now provide a flag to enable support for it.
 
 * `JAVA_HOME`: You may need to manually set the environment variable `JAVA_HOME`
 to be the path of the JDK if Spark benchmark fails.
