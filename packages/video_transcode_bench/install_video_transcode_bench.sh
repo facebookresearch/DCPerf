@@ -110,7 +110,7 @@ build_vmaf()
     pushd "${FFMPEG_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     cd "$lib/libvmaf" || exit
-    meson setup _build --prefix="${FFMPEG_BUILD}" --default-library static --prefer-static --buildtype release
+    meson setup _build --prefix="${FFMPEG_BUILD}" --default-library static --buildtype release
     ninja -vC _build install
     popd || exit
 }
@@ -118,12 +118,12 @@ build_vmaf()
 build_ffmpeg()
 {
     pushd "${FFMPEG_SOURCE}"
-    lib=ffmpeg
+    lib='ffmpeg'
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
     mkdir -p _build && cd _build || exit
     if [ -v PKG_CONFIG_PATH ]; then
-        PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig \
+        PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib/x86_64-linux-gnu/pkgconfig:$FFMPEG_BUILD/lib/aarch64-linux-gnu/pkgconfig \
             ../configure --ld="g++" \
             --enable-gpl --enable-nonfree --enable-version3 \
             --enable-static --disable-shared \
@@ -139,7 +139,7 @@ build_ffmpeg()
             --prefix="${FFMPEG_BUILD}"
 
     else
-        PKG_CONFIG_PATH=$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig \
+        PKG_CONFIG_PATH=$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib/x86_64-linux-gnu/pkgconfig:$FFMPEG_BUILD/lib/aarch64-linux-gnu/pkgconfig \
             ../configure --ld="g++" \
             --enable-gpl --enable-nonfree --enable-version3 \
             --enable-static --disable-shared \
