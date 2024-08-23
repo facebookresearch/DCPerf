@@ -37,7 +37,7 @@ def launch_proc(cmd, cwd, stdout, stderr, env):
 def run_cmd(
     cmd: List[str],
     cwd: str,
-    outfile: str,
+    outfile: Optional[str],
     env: Dict[str, str],
     for_real: bool,
     print_cmd: bool = True,
@@ -112,7 +112,7 @@ def find_java_home() -> str:
     # If none of the candidate exists, try find through `java` command
     try:
         java_path = subprocess.check_output(["which", "java"], text=True).strip()
-        java_home = str(pathlib.Path(os.path.realpath(java_path)).parents[2])
+        java_home = str(pathlib.Path(os.path.realpath(java_path)).parents[1])
     except subprocess.CalledProcessError:
         java_home = ""
 

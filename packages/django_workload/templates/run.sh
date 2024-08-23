@@ -4,13 +4,20 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# Abs path of benchmarks/django_workload/bin
 SCRIPT_ROOT="$(dirname "$(readlink -f "$0")")"
+# Abs path to DCPerf root
+BENCHPRESS_ROOT="$(readlink -f "${SCRIPT_ROOT}/../../..")"
 MEMCACHED_PID=
+CLEANUP_REQS=0
 
 if [ -z "$JAVA_HOME" ]; then
-    export JAVA_HOME="/etc/alternatives/jre_1.8.0_openjdk"
+  _JAVA_HOME="$("${BENCHPRESS_ROOT}"/packages/common/find_java_home.py)"
+  export JAVA_HOME="${_JAVA_HOME}"
+  echo "JAVA_HOME is not set, so setting it to ${JAVA_HOME}."
 fi
 
+# shellcheck disable=SC2317
 cleanup() {
   echo "Stopping services ..."
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -21,7 +28,14 @@ cleanup() {
   [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" || true; }
   # Stop Cassandra
   [ -f cassandra.pid ] && { echo "Stopping cassandra"; kill "$(cat cassandra.pid)" || true; }
+  # Kill Siege
+  SIEGE_PID="$(pgrep siege)"
+  [ -n "$SIEGE_PID" ] && { echo "Killing siege"; kill -9 "$SIEGE_PID" || true; }
   echo "Done"
+  if [ "$CLEANUP_REQS" -gt 0 ]; then
+    exit
+  fi
+  CLEANUP_REQS=$((CLEANUP_REQS + 1))
 }
 
 trap 'cleanup' ERR EXIT SIGINT SIGTERM
