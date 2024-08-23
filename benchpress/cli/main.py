@@ -12,7 +12,7 @@ import sys
 import typing
 
 import click
-from benchpress import config, logging_config
+from benchpress import config, logging_config, PROJECT, VERSION
 from benchpress.lib.job import Job, JobSuiteBuilder
 from benchpress.lib.job_listing import create_job_listing
 from benchpress.lib.reporter import JSONFileReporter, ScoreReporter, StdoutReporter
@@ -214,6 +214,7 @@ def setup_parser():
         help="directory to load/store results",
     )
     parser.add_argument("--verbose", "-v", action="count", default=0)
+    parser.add_argument("--version", action="version", version=f"{PROJECT} {VERSION}")
 
     return parser
 
