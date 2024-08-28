@@ -154,7 +154,7 @@ is `enP8s6`, then the command would be;
 
 To start the clients and the server with autoscale on the same benchmarking machine:
 ```bash
-./benchpress_cli.py run tao_bench_standlone
+./benchpress_cli.py run tao_bench_standalone
 ```
 All the parameters used with autoscale can be used with standalone except interface_name.
 
