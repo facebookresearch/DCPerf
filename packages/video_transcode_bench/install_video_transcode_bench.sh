@@ -166,7 +166,7 @@ download_dataset()
     dataset="$1"
     pushd "${FFMPEG_DATASETS}"
     link=${DATASETS[$dataset]}
-    wget "${link}"
+    wget "${link}" || exit 1
 
     if [ "$dataset" = "chimera" ]; then
          ../ffmpeg -i Chimera_DCI4k2398p_HDR_P3PQ.mp4 -c:v rawvideo -pix_fmt yuv420p chimera.y4m

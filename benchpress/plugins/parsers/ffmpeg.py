@@ -9,11 +9,6 @@ import statistics
 
 from benchpress.lib.parser import Parser
 
-# pick up values for different metrics
-REGEX_VAL_AFTER_MEAN = r"mean (\d*)"
-REGEX_VAL_AFTER_STDDEV = r"stddev (\d*)"
-REGEX_VAL_AFTER_MAX = r"max (\d*)"
-
 
 class FfmpegParser(Parser):
     """

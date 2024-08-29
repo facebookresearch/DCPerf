@@ -4,23 +4,23 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 -->
-# FFMPEG
+# VideoTranscodeBench
 
-Ffmpeg is a benchmark that represents the video encoding workloads. It can apply different encoders and videos, and run them at various encoding levels.
+This is a benchmark based on ffmpeg that represents the video encoding workloads. It can apply different encoders and videos, and run them at various encoding levels.
 
-## Install ffmpeg
+## Install VideoTranscodeBench
 
 ```
 ./benchpress_cli.py install video_transcode_bench_svt
 ```
 
-## Run ffmpeg
+## Run VideoTranscodeBench
 
 ### Example job - `video_transcode_bench_svt`
 
-`video_transcode_bench_svt` is the version of ffmpeg benchmark that use all CPU cores to conduct video encoding with `SVT-AV1` encoder.
+`video_transcode_bench_svt` is the version of VideoTranscodeBench that use all CPU cores to conduct video encoding with `SVT-AV1` encoder.
 
-To run ffmpeg benchmark, simply execute the following command
+To run VideoTranscodeBench, simply execute the following command
 
 ```
 ./benchpress_cli.py run video_transcode_bench_svt
