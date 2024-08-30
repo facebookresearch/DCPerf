@@ -1,0 +1,149 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+- name: folly_single_core
+  benchmark: wdl_bench
+  description: >
+    folly libraries and functions (using single core). Compute intensive.
+  args:
+    - '--type {type}'
+    - '--output {output}'
+  vars:
+    - 'type=single_core'
+    - 'output=wdl_bench_results.txt'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+          - 'benchmarks/wdl_bench/out_*.json'
+
+- name: folly_all_core
+  benchmark: wdl_bench
+  description: >
+    folly libraries and functions (using all cores). Compute intensive.
+  args:
+    - '--type {type}'
+    - '--output {output}'
+  vars:
+    - 'type=all_core'
+    - 'output=wdl_bench_results.txt'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+          - 'benchmarks/wdl_bench/out_*.json'
+
+- name: folly_multi_thread
+  benchmark: wdl_bench
+  description: >
+    folly libraries and functions (multi-threaded, e.g., locks and mutex). Compute intensive.
+  args:
+    - '--type {type}'
+    - '--output {output}'
+  vars:
+    - 'type=multi_thread'
+    - 'output=wdl_bench_results.txt'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+          - 'benchmarks/wdl_bench/out_*.json'
+
+- name: folly_individual
+  benchmark: wdl_bench
+  description: >
+    folly libraries and functions. Compute intensive.
+  args:
+    - '--name {name}'
+    - '--output {output}'
+  vars:
+    - 'name=hash_benchmark'
+    - 'output=wdl_bench_results.txt'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+          - 'benchmarks/wdl_bench/out_*.json'
+
+- name: lzbench
+  benchmark: wdl_bench
+  description: >
+    lzbench for compression. Compute intensive.
+  args:
+    - '--name {name}'
+    - '--type {type}'
+    - '--output {output}'
+    - '--algo {algo}'
+  vars:
+    - 'name=lzbench'
+    - 'type=single_core'
+    - 'output=wdl_bench_results.txt'
+    - 'algo=zstd'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+
+- name: openssl
+  benchmark: wdl_bench
+  description: >
+    openssl for crypto. Compute intensive.
+  args:
+    - '--name {name}'
+    - '--type {type}'
+    - '--output {output}'
+    - '--algo {algo}'
+  vars:
+    - 'name=openssl'
+    - 'type=single_core'
+    - 'output=wdl_bench_results.txt'
+    - 'algo=ctr'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+          - 'benchmarks/wdl_bench/out_*.json'

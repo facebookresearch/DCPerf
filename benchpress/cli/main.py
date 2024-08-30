@@ -242,11 +242,37 @@ def load_config(args) -> config.BenchpressConfig:
     If either `--jobs` or `--benchmarks` paths have been provided,
     override default configs to use those instead.
     """
+    override_benchmark = False
+
     try:
         with config.BENCHMARKS_CONFIG_PATH as bench_path:
             benchmarks_specs = bench_path.open()
             if args.benchmarks:
                 benchmarks_specs_path = os.path.abspath(args.benchmarks)
+
+                # benchmarks file name overriding logic
+                if (not os.path.exists(benchmarks_specs_path)) and (
+                    "/" not in args.benchmarks
+                ):
+                    override_benchmark = True
+                    logger.info(
+                        'benchmarks file with name "{}" not found, overriding it'.format(
+                            args.benchmarks
+                        )
+                    )
+                    benchmarks_specs_path = os.path.abspath(
+                        "./benchpress/config/benchmarks_" + args.benchmarks + ".yml"
+                    )
+
+                # benchmarks file path existence check
+                if not os.path.exists(benchmarks_specs_path):
+                    logger.error(
+                        'benchmarks file with name "{}" not found'.format(
+                            benchmarks_specs_path
+                        )
+                    )
+                    exit(1)
+
                 logger.warning("Overriding default benchmarks!")
                 logger.info(
                     'Loading benchmarks from "{}"'.format(benchmarks_specs_path)
@@ -257,8 +283,25 @@ def load_config(args) -> config.BenchpressConfig:
 
         with config.JOBS_CONFIG_PATH as jobs_path:
             jobs_specs = jobs_path.open()
+            if override_benchmark:
+                args.jobs_file = args.benchmarks
+
             if args.jobs_file:
                 jobs_specs_path = os.path.abspath(args.jobs_file)
+
+                # jobs file name overriding logic
+                if not os.path.exists(jobs_specs_path) or override_benchmark:
+                    jobs_specs_path = os.path.abspath(
+                        "./benchpress/config/jobs_" + args.benchmarks + ".yml"
+                    )
+
+                # jobs file path existence check
+                if not os.path.exists(jobs_specs_path):
+                    logger.error(
+                        'jobs file with name "{}" not found'.format(jobs_specs_path)
+                    )
+                    exit(1)
+
                 logger.warning("Overriding default jobs!")
                 logger.info('Loading jobs from "{}"'.format(jobs_specs_path))
                 with open(jobs_specs_path) as jb:

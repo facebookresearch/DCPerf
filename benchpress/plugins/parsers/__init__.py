@@ -43,6 +43,7 @@ from .stream import StreamParser
 from .tailbench import TailBenchParser
 from .tao_bench import TaoBenchParser
 from .tao_bench_autoscale import TaoBenchAutoscaleParser
+from .wdl import WDLParser
 
 
 def register_parsers(factory):
@@ -87,3 +88,4 @@ def register_parsers(factory):
     factory.register("tailbench_imgdnn", TailBenchParser)
     factory.register("cloudsuite_graph", CloudSuiteGraphParser)
     factory.register("video_transcode_bench", FfmpegParser)
+    factory.register("wdl_bench", WDLParser)

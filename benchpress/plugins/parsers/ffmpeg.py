@@ -47,4 +47,7 @@ class FfmpegParser(Parser):
         metrics["throughput_all_levels_hmean_MBps"] = statistics.harmonic_mean(
             throughputs
         )
+        metrics["throughput_all_levels_geomean_MBps"] = statistics.geometric_mean(
+            throughputs
+        )
         return metrics

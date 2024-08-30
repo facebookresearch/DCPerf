@@ -1,0 +1,18 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+wdl_bench:
+  parser: wdl_bench
+  install_script: ./packages/wdl_bench/install_wdl_bench.sh
+  cleanup_script: ./packages/wdl_bench/cleanup_wdl_bench.sh
+  path: ./benchmarks/wdl_bench/run.sh
+  tags:
+    scope:
+      - app
+      - folly
+      - fbthrift
+    component:
+      - cpu
+  metrics: []

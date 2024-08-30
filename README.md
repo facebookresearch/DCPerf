@@ -99,6 +99,28 @@ major production workloads listed as follows:
   </tr>
 </table>
 
+Also, DCPerf includes micro-benchmarks focusing on hot and commons functions/routines in the datacenter.
+
+**Note:** WDLBench has different usages than other benchmarks. To use it, please first go
+through this README, and then go to WDLBench's
+specific [README]((packages/wdl_bench/README.md)).
+
+<table>
+  <tr>
+   <td>Benchmarks </td>
+   <td>Programming Languages</td>
+   <td>LIbraries / SW Stack</td>
+   <td>Application domain they represent</td>
+  </tr>
+  <tr>
+   <td>WDLBench </td>
+   <td>C++ </td>
+   <td>folly, zstd, openssl</td>
+   <td>Widely distributed functions across different workloads</td>
+  </tr>
+</table>
+
+
 ## Representativeness
 
 When designing DCPerf, our goal is to have it represent real-world production
