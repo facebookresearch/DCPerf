@@ -103,7 +103,7 @@ Also, DCPerf includes micro-benchmarks focusing on hot and commons functions/rou
 
 **Note:** WDLBench has different usages than other benchmarks. To use it, please first go
 through this README, and then go to WDLBench's
-specific [README]((packages/wdl_bench/README.md)).
+specific [README](packages/wdl_bench/README.md).
 
 <table>
   <tr>

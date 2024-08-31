@@ -144,7 +144,7 @@ main() {
 
     elif [ "$name" != "none" ]; then
         run_list=$name
-        if [ "$name" = "small_locks_benchmark" ]; then
+        if [ "$name" = "small_locks_benchmark" ] || [ "$name" = "iobuf_benchmark" ]; then
                 "./${name}" --bm_min_iters=1000000 > "out_${benchmark}".txt
             else
                 "./${name}"  > "out_${name}".txt
@@ -153,7 +153,11 @@ main() {
     elif [ "$run_type" = "single_core" ]; then
         run_list=$folly_benchmark_list_single
         for benchmark in $run_list; do
-            "./${benchmark}" > "out_${benchmark}".txt
+            if [ "$benchmark" = "iobuf_benchmark" ]; then
+                "./${benchmark}" --bm_min_iters=1000000 > "out_${benchmark}".txt
+            else
+                "./${benchmark}"  > "out_${benchmark}".txt
+            fi
         done
     elif [ "$run_type" = "all_core" ]; then
         run_list=$folly_benchmark_list_all
