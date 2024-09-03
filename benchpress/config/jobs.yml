@@ -36,6 +36,26 @@
     - 'siege_concurrent=0'
 
 - benchmark: oss_performance_mediawiki
+  name: oss_performance_mediawiki_mlp_no_jit
+  description: Tuned +MLP run for oss_performance_mediawiki
+  args:
+    - '-r/usr/local/hphpi/legacy/bin/hhvm'
+    - '-nnginx'
+    - '-ssiege'
+    - '-R{scale_out}'
+    - '-c{siege_concurrent}'
+    - '--'
+    - '--mediawiki-mlp'
+    - '--siege-duration=10M'
+    - '--siege-timeout=11m'
+    - '--run-as-root'
+    - '--no-jit'
+    - '--i-am-not-benchmarking'
+  vars:
+    - 'scale_out=0'
+    - 'siege_concurrent=0'
+
+- benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mem
   description: Tuned +(MLP+LambdaChase) run for oss_performance_mediawiki
   args:
