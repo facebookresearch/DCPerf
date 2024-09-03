@@ -30,7 +30,7 @@ die() {
   exit "$code"
 }
 
-apt install -y cmake ninja-build flex bison texinfo binutils-dev \
+apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \

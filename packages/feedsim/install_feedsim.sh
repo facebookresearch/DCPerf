@@ -45,7 +45,7 @@ if distro_is_like ubuntu && [ "$(uname -p)" = "x86_64" ]; then
   "${FEEDSIM_ROOT}"/install_feedsim_x86_64_ubuntu.sh
   exit $?
 fi
-dnf install -y ninja-build flex bison git texinfo binutils-devel \
+dnf install -y bc ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \
     zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq

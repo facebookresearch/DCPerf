@@ -34,7 +34,7 @@ die() {
 #    libunwind-devel bzip2-devel libsodium-devel double-conversion-devel \
 #    libzstd-devel lz4-devel xz-devel snappy-devel libtool openssl-devel \
 #    zlib-devel libdwarf-devel libaio-devel libatomic patch perl
-apt install -y cmake ninja-build flex bison texinfo binutils-dev \
+apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
@@ -243,4 +243,3 @@ cmake -G Ninja \
 #sed -i 's/staging\/usr\/local\/lib64\/libfmt\.a/staging\/usr\/local\/lib\/libfmt\.a/g' build.ninja
 sed -i 's/lib64/lib/' build.ninja
 ninja -v
-
