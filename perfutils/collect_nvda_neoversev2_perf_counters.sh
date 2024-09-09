@@ -25,29 +25,56 @@ INTERVAL_SECS=5
 ### - Supports up to 6 PMCs per core on the Core PMU
 
 ### Cycles and Instructions
-INSTRUCTIONS_RATE='cycles,instructions,duration_time'
+# r08: ins
+INSTRUCTIONS_RATE='cycles,instructions,duration_time,task-clock,r08'
 
 ### Cache Effectiveness Metrics
-L1_CACHE_MISSES='l1d_cache_refill,l1i_cache_refill,l1i_cache,l1d_cache'
-L2_CACHE_MISSES='l2d_cache_refill,l2d_cache'
-L3_CACHE_MISSES='ll_cache_miss_rd,ll_cache_rd'
+# l1d access, l1d miss
+L1_DCACHE_MISSES='r04,r03'
+# l1i access, l1i miss, l1i refill
+L1_ICACHE_MISSES='r14,r01,r4006'
+# L2 access, L2 miss, L2 miss, L2 read access, L2 write access
+L2_CACHE_MISSES='r16,r17,r18,r50,r51'
+# l3 read access, l3 read miss
+L3_CACHE_MISSES='r36,r37'
+
+### Uncore Accesses
+# mem access, bus access, bus access read, bus access write
+MEM_ACCESSES='r13,r19,r60,r61'
 
 ### Branches
-BRANCH_MISPREDS='br_mis_pred_retired,br_retired'
+# branch inst, branch miss, BR_IMMED_SPEC, BR_INDIRECT_SPEC
+BRANCH_MISPREDS='r21,r22,r78,r7a'
 
-### Floating-Point
-FLOPS_RATE='fp_scale_ops_spec,fp_fixed_ops_spec'
+### Arithmetic
+# dp_spec (inst mix -- int), ase_spec (inst mix -- ase), vfp_spec (inst mix -- fp ops),  fp_scale_ops_spec (inst mix -- fp), fp_fixed_ops_spec (inst mix -- fp), crypto
+ARITHMETRIC_RATE='r73,r74,r75,r80C0,r80C1,r77'
+
+### SIMD (including mem and arithmetics)
+# ase_inst_spec (inst mix -- ase_inst), sve_inst_spec (inst mix -- sve_inst),
+SIMD_RATE='r8005,r8006'
+
+### mem ops
+# ld_spec (inst mix -- load), st_spec (inst mix -- store)
+MEM_OP_RATE='r70,r71'
 
 ### TopDown Metrics
-RETIRING='op_retired,op_spec,stall_slot'
-FE_BE_BOUNDEDNESS='stall_slot_backend,stall_slot_frontend,br_mis_pred'
+# uops retired, op_spec (uops executed), stall slots, stall backend mem
+RETIRING='r3A,r3B,r3F,r4005'
+# stall cycles, backend stall slots, frontend stall slots, mispredicted branch, frontend stall cycles, backend stall cycles
+FE_BE_BOUNDEDNESS='r3C,r3D,r3E,r10,r23,r24'
 
 ### TLB Effectiveness Metrics
-L1D_TLB_MISSES='l1d_tlb_refill'
-L1I_TLB_MISSES='l1i_tlb_refill'
-L2_TLB_MISSES='l2d_tlb_refill'
-DTLB_WALKS='dtlb_walk'
-ITLB_WALKS='itlb_walk'
+# l1d_tlb access, l1d_tlb miss
+L1D_TLB_MISSES='r25,r05'
+# l1i_tlb access, l1i_tlb miss
+L1I_TLB_MISSES='r26,r02'
+# l2d_tlb access, l2d_tlb miss
+L2_TLB_MISSES='r2F,r2D'
+# dtlb_walk
+DTLB_WALKS='r34'
+# itlb_walk
+ITLB_WALKS='r35'
 
 ### SCF PMU Events ---------------------------------
 ### - SCF, or Scalable Coherence Fabric, its akin to an uncore or DF.
@@ -78,9 +105,9 @@ SCF_REMOTE_MEM_GROUP="${SCF_REMOTE_TOTAL_MEM_BW_RD_EV}\
 
 ## Purposedly let CPU events multiplex, simplifies our report generation
 ## In production take proper care of handling multiplexing
-CPU_GROUP_MUX="${INSTRUCTIONS_RATE},${L1_CACHE_MISSES},${L2_CACHE_MISSES},${L3_CACHE_MISSES}\
-,${BRANCH_MISPREDS},${FLOPS_RATE},${RETIRING},${FE_BE_BOUNDEDNESS},${L1D_TLB_MISSES}\
-,${L1I_TLB_MISSES},${L2_TLB_MISSES},${DTLB_WALKS},${ITLB_WALKS}"
+CPU_GROUP_MUX="${INSTRUCTIONS_RATE},${L1_DCACHE_MISSES},${L1_ICACHE_MISSES},${L2_CACHE_MISSES},${L3_CACHE_MISSES}\
+,${MEM_ACCESSES},${ARITHMETRIC_RATE},${SIMD_RATE},${MEM_OP_RATE},${BRANCH_MISPREDS},${RETIRING}\
+,${FE_BE_BOUNDEDNESS},${L1D_TLB_MISSES},${L1I_TLB_MISSES},${L2_TLB_MISSES},${DTLB_WALKS},${ITLB_WALKS}"
 
 PERF_PID=
 wrapup() {
@@ -109,4 +136,4 @@ collect_counters() {
   perf_stat "$events" "$interval_ms"
 }
 
-collect_counters "$1" 2>/tmp/${ME}.err
+collect_counters "$1" 2>/tmp/"${ME}".err

@@ -134,6 +134,12 @@ def mips(grouped_df):
 
 
 @skip_if_missing
+def muopps(grouped_df):
+    inst_series = grouped_df.get_group("r3A").counter_value
+    return {"name": "MuOPPS", "series": inst_series, "prefix": 10**-6}
+
+
+@skip_if_missing
 def ipc(grouped_df):
     cycles_series = grouped_df.get_group("cycles").counter_value
     inst_series = grouped_df.get_group("instructions").counter_value
@@ -144,9 +150,132 @@ def ipc(grouped_df):
 
 
 @skip_if_missing
+def int_inst_percent(grouped_df):
+    int_inst_series = grouped_df.get_group("r73").counter_value
+    inst_series = grouped_df.get_group("instructions").counter_value
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    int_inst_series.index = duration_series.index
+    inst_series.index = duration_series.index
+
+    int_inst_percent_series = int_inst_series / inst_series
+    return {
+        "name": "INT instruction %",
+        "series": int_inst_percent_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def simd_inst_percent(grouped_df):
+    simd_inst_series = grouped_df.get_group("r74").counter_value
+    inst_series = grouped_df.get_group("instructions").counter_value
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    simd_inst_series.index = duration_series.index
+    inst_series.index = duration_series.index
+
+    simd_inst_percent_series = simd_inst_series / inst_series
+    return {
+        "name": "SIMD instruction %",
+        "series": simd_inst_percent_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def fp_inst_percent(grouped_df):
+    fp_inst_series = grouped_df.get_group("r75").counter_value
+    inst_series = grouped_df.get_group("instructions").counter_value
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    fp_inst_series.index = duration_series.index
+    inst_series.index = duration_series.index
+
+    fp_inst_percent_series = fp_inst_series / inst_series
+    return {
+        "name": "FP instruction %",
+        "series": fp_inst_percent_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def ld_inst_percent(grouped_df):
+    ld_inst_series = grouped_df.get_group("r70").counter_value
+    inst_series = grouped_df.get_group("instructions").counter_value
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    ld_inst_series.index = duration_series.index
+    inst_series.index = duration_series.index
+
+    ld_inst_percent_series = ld_inst_series / inst_series
+    return {
+        "name": "Load instruction %",
+        "series": ld_inst_percent_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def st_inst_percent(grouped_df):
+    st_inst_series = grouped_df.get_group("r71").counter_value
+    inst_series = grouped_df.get_group("instructions").counter_value
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    st_inst_series.index = duration_series.index
+    inst_series.index = duration_series.index
+
+    st_inst_percent_series = st_inst_series / inst_series
+    return {
+        "name": "Store instruction %",
+        "series": st_inst_percent_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def crypto_inst_percent(grouped_df):
+    crypto_inst_series = grouped_df.get_group("r77").counter_value
+    inst_series = grouped_df.get_group("instructions").counter_value
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    crypto_inst_series.index = duration_series.index
+    inst_series.index = duration_series.index
+
+    crypto_inst_percent_series = crypto_inst_series / inst_series
+    return {
+        "name": "Crypto instruction %",
+        "series": crypto_inst_percent_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def branch_inst_percent(grouped_df):
+    branch_imm_inst_series = grouped_df.get_group("r78").counter_value
+    branch_ind_inst_series = grouped_df.get_group("r7a").counter_value
+    inst_series = grouped_df.get_group("instructions").counter_value
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    branch_imm_inst_series.index = duration_series.index
+    branch_ind_inst_series.index = duration_series.index
+    inst_series.index = duration_series.index
+
+    branch_inst_percent_series = (
+        branch_imm_inst_series + branch_ind_inst_series
+    ) / inst_series
+    return {
+        "name": "Branch instruction %",
+        "series": branch_inst_percent_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def flops(grouped_df):
-    fp_scale_series = grouped_df.get_group("fp_scale_ops_spec").counter_value
-    fp_fixed_series = grouped_df.get_group("fp_fixed_ops_spec").counter_value
+    fp_scale_series = grouped_df.get_group("r80c0").counter_value  # FP_SCALE_OPS_SPEC
+    fp_fixed_series = grouped_df.get_group("r80c1").counter_value  # FP_FIXED_OPS_SPEC
     duration_series = grouped_df.get_group("duration_time").counter_value
 
     fp_scale_series.index = duration_series.index
@@ -162,7 +291,7 @@ def flops(grouped_df):
 
 @skip_if_missing
 def sve_flops(grouped_df):
-    fp_scale_series = grouped_df.get_group("fp_scale_ops_spec").counter_value
+    fp_scale_series = grouped_df.get_group("r80c1").counter_value  # FP_FIXED_OPS_SPEC
     duration_series = grouped_df.get_group("duration_time").counter_value
 
     fp_scale_series.index = duration_series.index
@@ -175,8 +304,41 @@ def sve_flops(grouped_df):
 
 
 @skip_if_missing
+def branch_mpki(grouped_df):
+    branch_refill_series = grouped_df.get_group(
+        "r22"
+    ).counter_value  # BR_MIS_PRED_RETIRED
+    instructions_series = grouped_df.get_group("instructions").counter_value
+
+    branch_refill_series.index = instructions_series.index
+    return {
+        "name": "Branch MPKI",
+        "series": branch_refill_series.div(instructions_series / 1000.0),
+    }
+
+
+@skip_if_missing
+def branch_miss_rate(grouped_df):
+    branch_miss_series = grouped_df.get_group(
+        "r22"  # BR_MIS_PRED_RETIRED
+    ).counter_value
+    branch_series = grouped_df.get_group("r21").counter_value  # BR_RETIRED
+    instructions_series = grouped_df.get_group("instructions").counter_value
+
+    branch_miss_series.index = instructions_series.index
+    branch_series.index = instructions_series.index
+    branch_miss_rate_series = branch_miss_series / branch_series
+
+    return {
+        "name": "Branch Miss Rate %",
+        "series": branch_miss_rate_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def l1_icache_mpki(grouped_df):
-    icache_refill_series = grouped_df.get_group("l1i_cache_refill").counter_value
+    icache_refill_series = grouped_df.get_group("r01").counter_value  # L1I_CACHE_LMISS
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     icache_refill_series.index = instructions_series.index
@@ -187,8 +349,27 @@ def l1_icache_mpki(grouped_df):
 
 
 @skip_if_missing
+def l1_icache_miss_rate(grouped_df):
+    l1_icache_miss_rd_series = grouped_df.get_group(
+        "r01"  # L1i_CACHE_LMISS
+    ).counter_value
+    l1_icache_rd_series = grouped_df.get_group("r14").counter_value  # L1i_CACHE
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    l1_icache_miss_rd_series.index = duration_series.index
+    l1_icache_rd_series.index = duration_series.index
+    l1_icache_miss_rate_series = l1_icache_miss_rd_series / l1_icache_rd_series
+
+    return {
+        "name": "L1i Cache Miss Rate %",
+        "series": l1_icache_miss_rate_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def l1_dcache_mpki(grouped_df):
-    dcache_refill_series = grouped_df.get_group("l1d_cache_refill").counter_value
+    dcache_refill_series = grouped_df.get_group("r03").counter_value  # L1D_CACHE_LMISS
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     dcache_refill_series.index = instructions_series.index
@@ -199,8 +380,29 @@ def l1_dcache_mpki(grouped_df):
 
 
 @skip_if_missing
+def l1_dcache_miss_rate(grouped_df):
+    l1_dcache_miss_rd_series = grouped_df.get_group(
+        "r03"  # L1D_CACHE_LMISS
+    ).counter_value
+    l1_dcache_rd_series = grouped_df.get_group("r04").counter_value  # L1D_CACHE
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    l1_dcache_miss_rd_series.index = duration_series.index
+    l1_dcache_rd_series.index = duration_series.index
+    l1_dcache_miss_rate_series = l1_dcache_miss_rd_series / l1_dcache_rd_series
+
+    return {
+        "name": "L1d Cache Miss Rate %",
+        "series": l1_dcache_miss_rate_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def l2_cache_mpki(grouped_df):
-    l2_dcache_refill_series = grouped_df.get_group("l2d_cache_refill").counter_value
+    l2_dcache_refill_series = grouped_df.get_group(
+        "r17"  # L2D_CACHE_REFILL
+    ).counter_value
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     l2_dcache_refill_series.index = instructions_series.index
@@ -211,8 +413,29 @@ def l2_cache_mpki(grouped_df):
 
 
 @skip_if_missing
+def l2_cache_miss_rate(grouped_df):
+    l2_cache_miss_rd_series = grouped_df.get_group(
+        "r17"  # L2D_CACHE_REFILL
+    ).counter_value
+    l2_cache_rd_series = grouped_df.get_group("r16").counter_value  # L2D_CACHE
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    l2_cache_miss_rd_series.index = duration_series.index
+    l2_cache_rd_series.index = duration_series.index
+    l2_cache_miss_rate_series = l2_cache_miss_rd_series / l2_cache_rd_series
+
+    return {
+        "name": "L2 Cache Miss Rate %",
+        "series": l2_cache_miss_rate_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def l3_cache_mpki(grouped_df):
-    l3_cache_miss_rd_series = grouped_df.get_group("ll_cache_miss_rd").counter_value
+    l3_cache_miss_rd_series = grouped_df.get_group(
+        "r37"  # LL_CACHE_MISS_RD
+    ).counter_value
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     l3_cache_miss_rd_series.index = instructions_series.index
@@ -223,8 +446,27 @@ def l3_cache_mpki(grouped_df):
 
 
 @skip_if_missing
+def l3_cache_miss_rate(grouped_df):
+    l3_cache_miss_rd_series = grouped_df.get_group(
+        "r37"  # LL_CACHE_MISS_RD
+    ).counter_value
+    l3_cache_rd_series = grouped_df.get_group("r36").counter_value  # LL_CACHE_MISS_RD
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    l3_cache_miss_rd_series.index = duration_series.index
+    l3_cache_rd_series.index = duration_series.index
+    l3_cache_miss_rate_series = l3_cache_miss_rd_series / l3_cache_rd_series
+
+    return {
+        "name": "L3 Cache Miss Rate %",
+        "series": l3_cache_miss_rate_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def itlb_mpki(grouped_df):
-    l1i_tlb_refill_series = grouped_df.get_group("l1i_tlb_refill").counter_value
+    l1i_tlb_refill_series = grouped_df.get_group("r02").counter_value  # L1I_TLB_REFILL
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     l1i_tlb_refill_series.index = instructions_series.index
@@ -236,8 +478,25 @@ def itlb_mpki(grouped_df):
 
 
 @skip_if_missing
+def itlb_miss_rate(grouped_df):
+    itlb_miss_rd_series = grouped_df.get_group("r02").counter_value  # L1I_TLB_REFILL
+    itlb_rd_series = grouped_df.get_group("r26").counter_value  # L1I_TLB
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    itlb_miss_rd_series.index = duration_series.index
+    itlb_rd_series.index = duration_series.index
+    itlb_miss_rate_series = itlb_miss_rd_series / itlb_rd_series
+
+    return {
+        "name": "L1 iTLB Miss Rate %",
+        "series": itlb_miss_rate_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def dtlb_mpki(grouped_df):
-    l1d_tlb_refill_series = grouped_df.get_group("l1d_tlb_refill").counter_value
+    l1d_tlb_refill_series = grouped_df.get_group("r05").counter_value  # L1D_TLB_REFILL
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     l1d_tlb_refill_series.index = instructions_series.index
@@ -249,8 +508,25 @@ def dtlb_mpki(grouped_df):
 
 
 @skip_if_missing
+def dtlb_miss_rate(grouped_df):
+    dtlb_miss_rd_series = grouped_df.get_group("r05").counter_value  # L1D_TLB_REFILL
+    dtlb_rd_series = grouped_df.get_group("r25").counter_value  # L1D_TLB
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    dtlb_miss_rd_series.index = duration_series.index
+    dtlb_rd_series.index = duration_series.index
+    dtlb_miss_rate_series = dtlb_miss_rd_series / dtlb_rd_series
+
+    return {
+        "name": "L1 dTLB Miss Rate %",
+        "series": dtlb_miss_rate_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def l2tlb_mpki(grouped_df):
-    l2_tlb_refill_series = grouped_df.get_group("l2d_tlb_refill").counter_value
+    l2_tlb_refill_series = grouped_df.get_group("r2D").counter_value  # L2D_TLB_REFILL
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     l2_tlb_refill_series.index = instructions_series.index
@@ -262,8 +538,26 @@ def l2tlb_mpki(grouped_df):
 
 
 @skip_if_missing
+def l2tlb_miss_rate(grouped_df):
+    l2tlb_miss_rd_series = grouped_df.get_group("r2D").counter_value  # L2D_TLB_REFILL
+    l2tlb_rd_series = grouped_df.get_group("r2F").counter_value  # L2D_TLB
+    duration_series = grouped_df.get_group("duration_time").counter_value
+
+    l2tlb_miss_rd_series.index = duration_series.index
+    l2tlb_rd_series.index = duration_series.index
+
+    l2tlb_miss_rate_series = l2tlb_miss_rd_series / l2tlb_rd_series
+
+    return {
+        "name": "L2 TLB Miss Rate %",
+        "series": l2tlb_miss_rate_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
 def itlb_walk_mpki(grouped_df):
-    itlb_walk_series = grouped_df.get_group("itlb_walk").counter_value
+    itlb_walk_series = grouped_df.get_group("r35").counter_value  # ITLB_WALK
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     itlb_walk_series.index = instructions_series.index
@@ -276,7 +570,7 @@ def itlb_walk_mpki(grouped_df):
 
 @skip_if_missing
 def dtlb_walk_mpki(grouped_df):
-    dtlb_walk_series = grouped_df.get_group("dtlb_walk").counter_value
+    dtlb_walk_series = grouped_df.get_group("r34").counter_value  # DTLB_WALK
     instructions_series = grouped_df.get_group("instructions").counter_value
 
     dtlb_walk_series.index = instructions_series.index
@@ -289,17 +583,17 @@ def dtlb_walk_mpki(grouped_df):
 
 @skip_if_missing
 def retiring_slots(grouped_df):
-    op_retired_series = grouped_df.get_group("op_retired").counter_value
-    op_spec_series = grouped_df.get_group("op_spec").counter_value
-    stall_slot_series = grouped_df.get_group("stall_slot").counter_value
-    cycles = grouped_df.get_group("cycles").counter_value
+    op_retired_series = grouped_df.get_group("r3A").counter_value  # OP_RETIRED
+    op_spec_series = grouped_df.get_group("r3B").counter_value  # OP_SPEC
+    stall_slot_series = grouped_df.get_group("r3F").counter_value  # STALL_SLOT
+    cycles_series = grouped_df.get_group("cycles").counter_value
 
-    op_retired_series.index = cycles.index
-    op_spec_series.index = cycles.index
-    stall_slot_series.index = cycles.index
+    op_retired_series.index = cycles_series.index
+    op_spec_series.index = cycles_series.index
+    stall_slot_series.index = cycles_series.index
 
     retiring_slots_series = (op_retired_series / op_spec_series) * (
-        1 - (stall_slot_series / (8 * cycles))
+        1 - (stall_slot_series / (8 * cycles_series))
     )
     return {
         "name": "TopDown Retiring %",
@@ -310,15 +604,17 @@ def retiring_slots(grouped_df):
 
 @skip_if_missing
 def frontend_bound_slots(grouped_df):
-    stall_slot_fe_series = grouped_df.get_group("stall_slot_frontend").counter_value
-    br_mis_pred_series = grouped_df.get_group("br_mis_pred").counter_value
+    stall_slot_fe_series = grouped_df.get_group(
+        "r3E"  # STALL_SLOT_FRONTEND
+    ).counter_value
+    br_mis_pred_series = grouped_df.get_group("r10").counter_value  # BR_MISPRED
     cycles_series = grouped_df.get_group("cycles").counter_value
 
     stall_slot_fe_series.index = cycles_series.index
     br_mis_pred_series.index = cycles_series.index
 
     fe_bound_series = (stall_slot_fe_series / (8 * cycles_series)) - (
-        (br_mis_pred_series * 4) / cycles_series
+        br_mis_pred_series / cycles_series
     )
     return {
         "name": "TopDown FrontendBound %",
@@ -329,15 +625,46 @@ def frontend_bound_slots(grouped_df):
 
 @skip_if_missing
 def backend_bound_slots(grouped_df):
-    stall_slot_be_series = grouped_df.get_group("stall_slot_backend").counter_value
+    stall_slot_be_series = grouped_df.get_group(
+        "r3D"  # STALL_SLOT_BACKEND
+    ).counter_value
+    br_mis_pred_series = grouped_df.get_group("r10").counter_value  # BR_MISPRED
     cycles_series = grouped_df.get_group("cycles").counter_value
 
     stall_slot_be_series.index = cycles_series.index
+    br_mis_pred_series.index = cycles_series.index
 
-    be_bound_series = stall_slot_be_series / (8 * cycles_series)
+    be_bound_series = (
+        stall_slot_be_series / (8 * cycles_series)
+        - br_mis_pred_series * 3 / cycles_series
+    )
     return {
         "name": "TopDown BackendBound %",
         "series": be_bound_series,
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def bad_speculation(grouped_df):
+    op_retired_series = grouped_df.get_group("r3A").counter_value  # OP_RETIRED
+    op_spec_series = grouped_df.get_group("r3B").counter_value  # OP_SPEC
+    stall_slot_series = grouped_df.get_group("r3F").counter_value  # STALL_SLOT
+    br_mis_pred_series = grouped_df.get_group("r10").counter_value  # BR_MISPRED
+    cycles_series = grouped_df.get_group("cycles").counter_value
+
+    op_retired_series.index = cycles_series.index
+    op_spec_series.index = cycles_series.index
+    stall_slot_series.index = cycles_series.index
+    br_mis_pred_series.index = cycles_series.index
+
+    bad_speculation_series = (1 - op_retired_series / op_spec_series) * (
+        1 - (stall_slot_series / (8 * cycles_series))
+    ) + (br_mis_pred_series * 4 / cycles_series)
+
+    return {
+        "name": "TopDown bad Speculation %",
+        "series": bad_speculation_series,
         "prefix": 100,
     }
 
@@ -435,21 +762,39 @@ def main(
         timestamp(grouped_df),
         duration(grouped_df),
         mips(grouped_df),
+        muopps(grouped_df),
         ipc(grouped_df),
+        int_inst_percent(grouped_df),
+        simd_inst_percent(grouped_df),
+        fp_inst_percent(grouped_df),
+        ld_inst_percent(grouped_df),
+        st_inst_percent(grouped_df),
+        crypto_inst_percent(grouped_df),
+        branch_inst_percent(grouped_df),
         flops(grouped_df),
         sve_flops(grouped_df),
+        branch_mpki(grouped_df),
+        branch_miss_rate(grouped_df),
+        l1_icache_mpki(grouped_df),
+        l1_icache_miss_rate(grouped_df),
+        l1_dcache_mpki(grouped_df),
+        l1_dcache_miss_rate(grouped_df),
+        l2_cache_mpki(grouped_df),
+        l2_cache_miss_rate(grouped_df),
+        l3_cache_mpki(grouped_df),
+        l3_cache_miss_rate(grouped_df),
+        itlb_mpki(grouped_df),
+        itlb_miss_rate(grouped_df),
+        dtlb_mpki(grouped_df),
+        dtlb_miss_rate(grouped_df),
+        l2tlb_mpki(grouped_df),
+        l2tlb_miss_rate(grouped_df),
+        itlb_walk_mpki(grouped_df),
+        dtlb_walk_mpki(grouped_df),
         retiring_slots(grouped_df),
         frontend_bound_slots(grouped_df),
         backend_bound_slots(grouped_df),
-        l1_icache_mpki(grouped_df),
-        l1_dcache_mpki(grouped_df),
-        l2_cache_mpki(grouped_df),
-        l3_cache_mpki(grouped_df),
-        itlb_mpki(grouped_df),
-        dtlb_mpki(grouped_df),
-        l2tlb_mpki(grouped_df),
-        itlb_walk_mpki(grouped_df),
-        dtlb_walk_mpki(grouped_df),
+        bad_speculation(grouped_df),
         nvidia_scf_mem_read_bw_MBps(grouped_df),
         nvidia_scf_mem_write_bw_MBps(grouped_df),
         nvidia_scf_mem_latency_ns(grouped_df),
