@@ -618,3 +618,29 @@
         is_move: true
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+
+- name: video_transcode_bench_x264
+  benchmark: video_transcode_bench
+  description: >
+    x264 based video encoding workload. Compute and memory intensive.
+  args:
+    - '--encoder {encoder}'
+    - '--levels {levels}'
+    - '--output {output}'
+    - '--runtime {runtime}'
+  vars:
+    - 'encoder=x264'
+    - 'levels=0:0'
+    - 'output=video_transcode_bench_results.txt'
+    - 'runtime=medium'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'

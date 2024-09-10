@@ -94,7 +94,7 @@ major production workloads listed as follows:
   <tr>
    <td>VideoTranscodeBench </td>
    <td>C++ </td>
-   <td>ffmpeg, svt-av1, libaom</td>
+   <td>ffmpeg, svt-av1, libaom, x264</td>
    <td>Video Processing </td>
   </tr>
 </table>

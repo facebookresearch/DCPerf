@@ -54,7 +54,7 @@ It is also recommended to turn on CPU boost before running this benchmark, other
 
 ## Encoders
 
-For now, this benchmark support two encoders -- `SVT-AV1` and `libaom` (`SVT-AV1` is the default one). To add more, please modify the `BENCHMARK CONFIG` section, adn the function `build_ffmpeg` in `./packages/video_transcode_bench/install_video_transcode_bench.sh`, as well as a new `build_encoder_name` function inside.
+For now, this benchmark support three encoders -- `SVT-AV1`, `libaom`, and `x264` (`SVT-AV1` is the default one). To add more, please modify the `BENCHMARK CONFIG` section, adn the function `build_ffmpeg` in `./packages/video_transcode_bench/install_video_transcode_bench.sh`, as well as a new `build_encoder_name` function inside.
 
 ## Datasets
 
@@ -122,7 +122,7 @@ Please refer to `./benchmarks/video_transcode_bench/run.sh -h` to see other avai
 parameters that you can supply to the `extra_args` parameter:
 
 ```
-Usage: ./run.sh [-h] [--encoder svt|aom] [--levels low:high] [--runtime short|medium|long]
+Usage: ./run.sh [-h] [--encoder svt|aom|x264] [--levels low:high] [--runtime short|medium|long]
 
     -h Display this help and exit
     --encoder encoder name. Default: svt

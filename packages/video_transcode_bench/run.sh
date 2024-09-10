@@ -21,7 +21,7 @@ FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets"
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [--encoder svt|aom] [--levels low:high]|[--runtime long|medium|short]
+Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]
 
     -h Display this help and exit
     --encoder encoder name. Default: svt
@@ -124,6 +124,17 @@ main() {
                 exit 1
             fi
         fi
+    elif [ "$encoder" = "x264" ]; then
+        if [ "$levels" = "0:0" ]; then
+            if [ "$runtime" = "short" ]; then
+                levels="3:3"
+            elif [ "$runtime" = "medium" ]; then
+                levels="6:6"
+            else
+                echo "Invalid runtime, available options are short, medium, and long"
+                exit 1
+            fi
+        fi
     else
             echo "Invalid encoder, available options are svt and aom"
             exit 1
@@ -142,6 +153,9 @@ main() {
     if [ "$encoder" = "svt" ]; then
         sed -i '/^bitstream\_folders/a ENCODER\=\"ffmpeg-svt\"' ./generate_commands_all.py
         run_sh="ffmpeg-svt-1p-run-all-paral.sh"
+    elif [ "$encoder" = "x264" ]; then
+        sed -i '/^bitstream\_folders/a ENCODER\=\"ffmpeg-x264\"' ./generate_commands_all.py
+        run_sh="ffmpeg-x264-1p-run-all-paral.sh"
     elif [ "$encoder" = "aom" ]; then
         sed -i '/^bitstream\_folders/a ENCODER\=\"ffmpeg-libaom\"' ./generate_commands_all.py
         run_sh="ffmpeg-libaom-2p-run-all-paral.sh"
@@ -161,7 +175,13 @@ main() {
         range+=",$i"
     done
     range+="]"
-    num_pool="num_pool = $(nproc)"
+    num_files=$(find ./datasets/cuts/ | wc -l)
+    num_proc=$(nproc)
+    if [ "$num_files" -lt "$num_proc" ]; then
+        num_pool="num_pool = $num_files"
+    else
+        num_pool="num_pool = $(nproc)"
+    fi
 
     sed -i "/^CLIP\_DIRS/a ${range}" ./generate_commands_all.py
     sed -i "/^CLIP\_DIRS/a ${num_pool}" ./generate_commands_all.py

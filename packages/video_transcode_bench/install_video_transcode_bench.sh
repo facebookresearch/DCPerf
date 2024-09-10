@@ -13,6 +13,7 @@ declare -A REPOS=(
     ['SVT-AV1']='https://gitlab.com/AOMediaCodec/SVT-AV1.git'
     ['vmaf']='https://github.com/Netflix/vmaf.git'
     ['aom-testing']='https://gitlab.com/AOMediaCodec/aom-testing.git'
+    ['x264']='https://code.videolan.org/videolan/x264.git'
 )
 
 declare -A TAGS=(
@@ -21,6 +22,7 @@ declare -A TAGS=(
     ['SVT-AV1']='v2.1.2'
     ['vmaf']='v3.0.0'
     ['aom-testing']='master'
+    ['x264']='4613ac3c15fd75cebc4b9f65b7fb95e70a3acce1'
 )
 
 declare -A DATASETS=(
@@ -74,6 +76,18 @@ clone()
     tag=${TAGS[$lib]}
     git checkout "$tag" || exit 1
     popd || exit 1
+}
+
+build_x264()
+{
+    lib='x264'
+    pushd "${FFMPEG_SOURCE}"
+    clone $lib || echo "Failed to clone $lib"
+    cd "$lib" || exit
+    mkdir -p _build && cd _build || exit
+    ../configure --prefix="${FFMPEG_BUILD}" --enable-static
+    make -j "$(nproc)" && make install
+    popd || exit
 }
 
 build_svtav1()
@@ -130,6 +144,7 @@ build_ffmpeg()
             --pkg-config-flags=--static \
             --cc="clang" \
             --cxx="clang++" \
+            --enable-libx264 \
             --enable-libaom \
             --enable-libsvtav1 \
             --enable-libvmaf \
@@ -146,6 +161,7 @@ build_ffmpeg()
             --pkg-config-flags=--static \
             --cc="clang" \
             --cxx="clang++" \
+            --enable-libx264 \
             --enable-libaom \
             --enable-libsvtav1 \
             --enable-libvmaf \
@@ -190,19 +206,19 @@ auto_cut_video()
 
     core_count=$(grep -c ^processor /proc/cpuinfo)
     mem_capacity=$(grep MemTotal /proc/meminfo | awk '{print $2/1024/1024}' | sed 's/\.0$//')
-    mem_capacity=$(echo "$mem_capacity" | awk '{print int($0)}')
+    mem_capacity=$(echo "$mem_capacity - 20" | bc -l | awk '{print int($0)}')
     mem_factor=$(echo "$core_count * 0.7" | bc -l | awk '{print int($0)}')
 
     if [ "$mem_factor" -lt "$mem_capacity" ]; then
         cut_count=$(echo "$core_count * 2 + 8" | bc -l | awk '{print int($0)}')
     else
-        cut_count=$(echo "($mem_capacity - 20) / 0.7" | bc -l | awk '{print int($0)}')
+        cut_count=$(echo "$mem_capacity / 0.7" | bc -l | awk '{print int($0)}')
     fi
 
-    cut_min=$(echo "($cut_count / 2)  / 60" | bc -l | awk '{print int($0)}')
-    cut_sec=$(echo "($cut_count / 2) - 60 * $cut_min" | bc -l | awk '{print int($0)}')
+    cut_min=$(echo "($cut_count / 4)  / 60" | bc -l | awk '{print int($0)}')
+    cut_sec=$(echo "($cut_count / 4) - 60 * $cut_min" | bc -l | awk '{print int($0)}')
 
-    ../ffmpeg -i ./*.y4m  -to 00:"$cut_min":"$cut_sec" -c copy -segment_time 0.5 -f segment ./cuts/output_%03d.y4m
+    ../ffmpeg -i ./*.y4m  -to 00:"$cut_min":"$cut_sec" -c copy -segment_time 0.25 -f segment ./cuts/output_%03d.y4m
 
     popd
 
@@ -225,6 +241,7 @@ download_testing_scripts()
 
 pushd "${FFMPEG_ROOT}"
 
+build_x264
 build_svtav1
 build_aom
 build_vmaf
