@@ -33,8 +33,8 @@ INSTRUCTIONS_RATE='cycles,instructions,duration_time,task-clock,r08'
 L1_DCACHE_MISSES='r04,r03'
 # l1i access, l1i miss, l1i refill
 L1_ICACHE_MISSES='r14,r01,r4006'
-# L2 access, L2 miss, L2 miss, L2 read access, L2 write access
-L2_CACHE_MISSES='r16,r17,r18,r50,r51'
+# L2 access, L2 miss, L2 miss, L2 read access, L2 write access, L2 code miss
+L2_CACHE_MISSES='r16,r17,r18,r50,r51,r108'
 # l3 read access, l3 read miss
 L3_CACHE_MISSES='r36,r37'
 

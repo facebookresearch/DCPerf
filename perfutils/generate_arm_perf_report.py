@@ -413,6 +413,18 @@ def l2_cache_mpki(grouped_df):
 
 
 @skip_if_missing
+def l2_cache_code_mpki(grouped_df):
+    l2_cache_code_refill_series = grouped_df.get_group("r108").counter_value
+    instructions_series = grouped_df.get_group("instructions").counter_value
+
+    l2_cache_code_refill_series.index = instructions_series.index
+    return {
+        "name": "L2 Cache Code MPKI",
+        "series": l2_cache_code_refill_series.div(instructions_series / 1000.0),
+    }
+
+
+@skip_if_missing
 def l2_cache_miss_rate(grouped_df):
     l2_cache_miss_rd_series = grouped_df.get_group(
         "r17"  # L2D_CACHE_REFILL
@@ -780,6 +792,7 @@ def main(
         l1_dcache_mpki(grouped_df),
         l1_dcache_miss_rate(grouped_df),
         l2_cache_mpki(grouped_df),
+        l2_cache_code_mpki(grouped_df),
         l2_cache_miss_rate(grouped_df),
         l3_cache_mpki(grouped_df),
         l3_cache_miss_rate(grouped_df),
