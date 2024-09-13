@@ -28,7 +28,7 @@ else
 fi
 
 if distro_is_like centos; then
-  sudo dnf install -y cmake autoconf automake \
+  sudo dnf install -y cmake iperf3 autoconf automake \
     libevent-devel openssl openssl-devel \
     zlib-devel bzip2-devel xz-devel lz4-devel libzstd-devel \
     snappy-devel libaio-devel libunwind-devel patch \
@@ -36,7 +36,7 @@ if distro_is_like centos; then
     gflags-devel-2.2.2 fmt-devel perl libtool pcre-devel \
     git python3-devel ${GLOG_NAME}
 elif distro_is_like ubuntu; then
-  sudo apt install -y cmake autoconf automake flex bison \
+  sudo apt install -y cmake iperf3 autoconf automake flex bison \
     libevent-dev openssl libssl-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev zlib1g-dev bzip2 \
     libaio-dev libunwind-dev patch libghc-double-conversion-dev \

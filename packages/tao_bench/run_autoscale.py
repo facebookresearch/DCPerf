@@ -8,11 +8,12 @@ import argparse
 import json
 import os
 import pathlib
+import re
+import shlex
 import socket
 import subprocess
 import sys
 from datetime import datetime
-
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "packages", "tao_bench")
@@ -156,6 +157,8 @@ def gen_client_instructions(args):
             }
             if clients_per_thread > 0:
                 client_args["clients_per_thread"] = clients_per_thread
+            if args.sanity > 0 and i == 0:
+                client_args["sanity"] = args.sanity
             clients[c] += (
                 " ".join(
                     [
@@ -182,6 +185,8 @@ def gen_client_instructions(args):
             }
             if clients_per_thread > 0:
                 client_args["clients_per_thread"] = clients_per_thread
+            if args.sanity > 0 and i == 0:
+                client_args["sanity"] = args.sanity
             clients[i] += (
                 " ".join(
                     [
@@ -270,6 +275,20 @@ def run_server(args):
     # generate client side instructions
     if args.real:
         gen_client_instructions(args)
+    if args.sanity > 0:
+        cmd = "iperf3 -s -1"
+        p = subprocess.run(["iperf3", "-s", "-1"], capture_output=True)
+        stdout = p.stdout.decode()
+        client_ip = stdout.split("Accepted connection from")[1].split(",")[0]
+        bandwidth = stdout.split()[-3]
+        cmd = f"ping -c 4 {client_ip}"
+        p = subprocess.run(shlex.split(cmd), capture_output=True)
+        stdout = p.stdout.decode()
+        pattern = r"rtt min/avg/max/mdev = \d+\.\d+/(\d+\.\d+)/"
+        match = re.search(pattern, stdout)
+        if match:
+            latency = match.group(1)
+
     # let's spawn servers
     procs = []
     for server in servers:
@@ -298,6 +317,10 @@ def run_server(args):
         "total_qps": 0,
         "num_data_points": 0,
     }
+    if args.sanity > 0:
+        overall["latency(ms)"] = latency
+        overall["bandwidth"] = bandwidth
+
     for i in range(args.num_servers):
         logpath = servers[i][2]
         with open(logpath, "r") as log:
@@ -473,6 +496,12 @@ def init_parser():
         help="explicitly bind TaoBench server instances to the memory node local to the CPU cores "
         + "on machines with multiple NUMA nodes in order to minimize cross-socket traffic. "
         + "Please set this to 0 if you would like to test hetereogeneous memory systems such as CXL.",
+    )
+    parser.add_argument(
+        "--sanity",
+        type=int,
+        default=0,
+        help="sanity check for the network bandwidth and latency between the server and the client.",
     )
     parser.add_argument("--real", action="store_true", help="for real")
     # functions

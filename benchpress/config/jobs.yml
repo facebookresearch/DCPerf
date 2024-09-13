@@ -311,8 +311,10 @@
     - '--shuffle-dir /flash23/spark_local_dir'
     - '--ipv4 {ipv4}'
     - '--real'
+    - '--sanity {sanity}'
   vars:
     - 'ipv4=0'
+    - 'sanity=0'
   hooks:
     - hook: copymove
       options:
@@ -417,6 +419,7 @@
         - '--server-port-number={server_port_number}'
         - '--warmup-time={warmup_time}'
         - '--test-time={test_time}'
+        - '--sanity={sanity}'
         - '--real'
       vars:
         - 'server_hostname'
@@ -427,6 +430,7 @@
         - 'test_time=360'
         - 'data_size_min=8191'
         - 'data_size_max=8193'
+        - 'sanity=0'
   hooks:
     - hook: copymove
       options:
@@ -455,6 +459,7 @@
     - '--clients-per-thread={clients_per_thread}'
     - '--bind-cpu={bind_cpu}'
     - '--bind-mem={bind_mem}'
+    - '--sanity={sanity}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -469,6 +474,7 @@
     - 'clients_per_thread=0'
     - 'bind_cpu=1'
     - 'bind_mem=1'
+    - 'sanity=0'
   hooks:
     - hook: tao_instruction
     - hook: copymove

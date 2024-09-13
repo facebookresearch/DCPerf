@@ -26,7 +26,7 @@ else
 fi
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y cmake autoconf automake flex bison \
+  sudo apt install -y cmake iperf3 autoconf automake flex bison \
     libevent-dev openssl libssl-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev zlib1g-dev bzip2 \
     libaio-dev libunwind-dev patch libghc-double-conversion-dev \
@@ -34,7 +34,7 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
     libgoogle-glog-dev python3-dev pkg-config \
     git libpcre3 libpcre3-dev libgflags2.2 libgflags-dev
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y cmake autoconf automake \
+  sudo dnf install -y cmake iperf3 autoconf automake \
     libevent-devel openssl openssl-devel \
     zlib-devel bzip2-devel xz-devel lz4-devel libzstd-devel \
     snappy-devel libaio-devel libunwind-devel patch \
@@ -170,4 +170,3 @@ fi
 # Extract certificates
 tar -zxf "${COMMON_DIR}/certs.tar.gz" -C "${TAO_BENCH_ROOT}/"
 popd
-

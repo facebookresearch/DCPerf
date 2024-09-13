@@ -88,6 +88,10 @@ This job provides the following optional parameters that you may be interested i
     it's set to 1. You may want to set this to 0 if you would like to test heterogeneous
     memory systems such as CXL systems, otherwise the benchmark will not be able to use
     the CXL memory.
+  - `sanity`: Sanity check to measure the network bandwidth and latency between the server
+    and the client. The default is 0 which is not running the sanity check.
+    Please set this to 1 if you would like to run the sanity check and measure
+    network bandwidth and latency.
 
 The following parameters are used for generating client side instructions and will not
 have substantial effects on the server:

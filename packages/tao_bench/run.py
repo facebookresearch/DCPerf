@@ -8,6 +8,7 @@ import argparse
 import multiprocessing
 import os
 import pathlib
+import shlex
 import subprocess
 import time
 from typing import List
@@ -207,6 +208,10 @@ def get_client_cmd(args, n_seconds):
 
 
 def run_client(args):
+    if args.sanity > 0:
+        cmd = f"iperf3 -c {args.server_hostname} -P4"
+        subprocess.run(shlex.split(cmd))
+
     print("warm up phase ...")
     cmd = get_client_cmd(args, n_seconds=args.warmup_time)
     run_cmd(cmd, timeout=args.warmup_time + 30, for_real=args.real)
@@ -333,6 +338,13 @@ def init_parser():
         default=11211,
         help="port number of server",
     )
+    client_parser.add_argument(
+        "--sanity",
+        type=int,
+        default=0,
+        help="sanity check for the network bandwidth and latency between the server and the client.",
+    )
+
     # for both server & client
     for x_parser in [server_parser, client_parser]:
         x_parser.add_argument(

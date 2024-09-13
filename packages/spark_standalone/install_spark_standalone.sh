@@ -13,10 +13,10 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 # Install system dependencies
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt install -y openjdk-8-jdk
+  apt install -y openjdk-8-jdk fio
   apt install -y git-lfs
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  dnf install -y java-1.8.0-openjdk
+  dnf install -y java-1.8.0-openjdk fio
   dnf install -y git-lfs
 fi
 

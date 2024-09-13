@@ -343,6 +343,12 @@ launch the benchmark:
 ./benchpress_cli.py run spark_standalone_remote -i '{"ipv4": 1}'
 ```
 
+If you would like to perform the I/O performance [sanity check](#number-of-data-nodes)
+before executing SparkBench workload and report the total IOPS for read and write measured by fio:
+```
+./benchpress_cli.py run spark_standalone_remote -i '{"sanity": 1}'
+```
+
 Also, if the output of `hostname` command is not resolvable, please specify
 a resolvable hostname using `local_hostname` parameter:
 ```

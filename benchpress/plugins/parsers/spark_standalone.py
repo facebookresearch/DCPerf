@@ -28,4 +28,9 @@ class SparkStandaloneParser(Parser):
                 metrics["worker_cores"] = int(items[1].strip())
             if line.strip().startswith("worker-memory"):
                 metrics["worker_memory"] = f"{items[1].strip()}GB"
+            if line.strip().startswith("total_iops_read"):
+                metrics["total_iops_read"] = int(items[1].strip())
+            if line.strip().startswith("total_iops_write"):
+                metrics["total_iops_write"] = int(items[1].strip())
+
         return metrics

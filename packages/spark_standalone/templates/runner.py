@@ -7,7 +7,9 @@
 import argparse
 import os
 import pathlib
-
+import re
+import shlex
+import subprocess
 
 SRC_DATASET = "bpc_t93586_s2_synthetic"
 
@@ -150,6 +152,45 @@ def run(args):
             )
             return
     exec_cmd(f"mkdir -p {WORK_DIR}")
+    if args.sanity > 0:
+        cmd = "fio \
+            --rw=randrw \
+            --filename=/flash23/test.bin \
+            --ioengine=io_uring \
+            --iomem=mmap \
+            --rwmixread=50 \
+            --rwmixwrite=50 \
+            --bssplit=4k/8:8k/5:16k/10:32k/18:64k/40:128k/19 \
+            --size=300G \
+            --iodepth=24 \
+            --numjobs=32 \
+            --time_based=1 \
+            --runtime=60 \
+            --name=spark_io_synth \
+            --direct=1"
+        p = subprocess.run(shlex.split(cmd), capture_output=True)
+        stdout = p.stdout.decode()
+        lines = stdout.split("\n")
+        total_iops_read = 0
+        total_iops_write = 0
+
+        def iops():
+            pattern = r"IOPS=(\d+)"
+            match = re.search(pattern, line)
+            if match:
+                value = int(match.group(1))
+            return value
+
+        for line in lines:
+            if "IOPS" in line and "read" in line:
+                value = iops()
+                total_iops_read += value
+            if "IOPS" in line and "write" in line:
+                value = iops()
+                total_iops_write += value
+        with open(f"{WORK_DIR}/results.txt", "at") as fp:  # internal
+            fp.write(f"total_iops_read : {total_iops_read}\n")
+            fp.write(f"total_iops_write : {total_iops_write}\n")
     exec_cmd(f"mkdir -p {DATASET_DIR}")
     download_dataset(args)
     install_database(args)
@@ -204,6 +245,12 @@ def init_parser():
     )
     run_parser.add_argument(
         "--aggressive", type=int, default=0, help="aggressive memory settings"
+    )
+    run_parser.add_argument(
+        "--sanity",
+        type=int,
+        default=0,
+        help="sanity check for total read and write IOPS",
     )
     run_parser.add_argument("--real", action="store_true", help="for real")
     setup_parser.set_defaults(func=setup)
