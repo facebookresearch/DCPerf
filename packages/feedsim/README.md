@@ -35,8 +35,9 @@ To run Feedsim benchmark, simply execute the following command
 This job also has the following optional parameters:
   - `num_instances`: manually specify the number of feedsim workload instances
   to run in parallel instead of automatically scaling with the CPU core count
-  - `extra_args`: extra argument you would like to pass to Feedsim's runner
-  script
+  - `extra_args`: extra arguments you would like to pass to Feedsim's runner
+  script. Available arguments can be viewed by running
+  `./benchmarks/feedsim/run.sh -h`.
 
 For example, if you would like to run two instances regardless the CPU core
 count, you can run the following:
@@ -180,7 +181,11 @@ To do so, simply run the following:
 `-q` follows the desired QPS you would like **each instance** to drive,
 and `-d` is an optional parameter stating the duration of the experiment
 (default is 300s). Note that the total runtime could be longer because
-feedsim needs to warmup.
+feedsim needs to populate object graphs and perform a warmup. The default
+warmup period is 120s, and can be changed by specifying the optional
+parameter `-w`. Reducing warmup (and experiment) time can make the run
+faster, but may affect accuracy and end up with lower QPS than the machine
+can actually achieve.
 
 For example, if you would like to drive 250 QPS in each feedsim instance
 on a 380-core CPU system:

@@ -58,7 +58,8 @@ Usage: ${0##*/} [-h] [-t <thrift_threads>] [-c <ranking_cpu_threads>]
        min(requested_qps / 4, $(nproc) / 5) in each iteration (experimental feature).
     -q Number of QPS to request. If this is present, feedsim will run a fixed-QPS experiment instead of searching
        for a QPS that meets latency target.
-    -d Duration of each load testing experiment, in seconds. Default: 300
+    -d Duration of fixed-QPS load testing experiment, in seconds. Default: 300
+    -w Duration of warmup in fixed-QPS experiment, in seconds. Default: 120
     -p Port to use by the LeafNodeRank server and the load drievrs. Default: 11222
     -o Result output file name. Default: "feedsim_results.txt"
 EOF
@@ -100,6 +101,9 @@ main() {
     local fixed_qps_duration
     fixed_qps_duration="300"
 
+    local warmup_time
+    warmup_time="120"
+
     local port
     port="11222"
 
@@ -131,6 +135,9 @@ main() {
             -d)
                 fixed_qps_duration="$2"
                 ;;
+            -w)
+                warmup_time="$2"
+                ;;
             -p)
                 port="$2"
                 ;;
@@ -147,7 +154,7 @@ main() {
         esac
 
         case $1 in
-            -t|-c|-s|-d|-p|-o)
+            -t|-c|-s|-d|-p|-q|-o|-w)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -228,8 +235,11 @@ main() {
             num_workers=$DRIVER_THREADS
         fi
         benchreps_tell_state "before fixed_qps_exp"
-        scripts/search_qps.sh -s 95p -t "$fixed_qps_duration" -q "$fixed_qps" -o "${FEEDSIM_ROOT}/${result_filename}" -- \
-            build/workloads/ranking/DriverNodeRank \
+        scripts/search_qps.sh -s 95p -t "$fixed_qps_duration" \
+            -m "$warmup_time" \
+            -q "$fixed_qps" \
+            -o "${FEEDSIM_ROOT}/${result_filename}" \
+            -- build/workloads/ranking/DriverNodeRank \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
                 --threads="${num_workers}" \

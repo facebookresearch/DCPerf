@@ -65,6 +65,7 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
     -t          amount of time to run each experiment in seconds. Default: 30 seconds
     -f          amount of time to run final experiments in seconds. Default: 90 seconds
     -w          amount of time to wait before starting next experiment. Default: 5 seconds
+    -m          amount of time to warmup in seconds. Default: same as the value of -t
     -s          metric:target (in msec). Example: 99p:5.01. Allowable metrics
                 are avg, 50p, 90p, 95p, 99p, 99.9p
     -q          number of qps to use. If this option is present, the program will execute
@@ -194,6 +195,7 @@ run_loadtest() {
 # Initialize our own variables:
 experiment_time=120
 wait_time=5
+warmup_time=""
 final_experiment_time=90
 latency_type=""
 latency_target=""
@@ -203,7 +205,7 @@ fixed_qps=""
 auto_driver_threads=""
 
 OPTIND=1 # Reset is necessary if getopts was used previously in the script.  It is a good idea to make this local in a function.
-while getopts "ht:f:w:s:q:ao:" opt; do
+while getopts "ht:f:w:m:s:q:ao:" opt; do
   case "$opt" in
     h)
       show_help
@@ -217,6 +219,9 @@ while getopts "ht:f:w:s:q:ao:" opt; do
       ;;
     w)
       wait_time=$OPTARG
+      ;;
+    m)
+      warmup_time="$OPTARG"
       ;;
     s)
       latency_type=$(echo $OPTARG | tr ':' ' ' | awk '{print $1}')
@@ -238,6 +243,10 @@ while getopts "ht:f:w:s:q:ao:" opt; do
   esac
 done
 shift "$((OPTIND-1))" # Shift off the options and optional --.
+
+if [ -z "$warmup_time" ]; then
+  warmup_time="$experiment_time"
+fi
 
 # remaining argument is loadtest command
 command=$@
@@ -296,10 +305,15 @@ else
 fi
 
 # warm-up trials
-benchreps_tell_state "before warmup"
-run_loadtest peak_qps measured_latency
-printf "warmup qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
-benchreps_tell_state "after warmup"
+if [ "$warmup_time" -gt 0 ]; then
+  benchreps_tell_state "before warmup"
+  saved_experiment_time="$experiment_time"
+  experiment_time="$warmup_time"
+  run_loadtest peak_qps measured_latency
+  printf "warmup qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
+  benchreps_tell_state "after warmup"
+  experiment_time="$saved_experiment_time"
+fi
 
 if [[ -n "$fixed_qps" ]]; then
   run_loadtest measured_qps measured_latency $fixed_qps
