@@ -9,10 +9,16 @@ LICENSE file in the root directory of this source tree.
 This is a benchmark based on ffmpeg that represents the video encoding workloads. It can apply different encoders and videos, and run them at various encoding levels.
 
 ## Install VideoTranscodeBench
+Installing VideoTranscodeBench involves two steps.
+
+### 1. Build libraries and executables
 
 ```
 ./benchpress_cli.py install video_transcode_bench_svt
 ```
+
+### 2. Download and prepare datasets
+We recommend using the `El Fuente Test Sequence` from [CDVL](https://www.cdvl.org/). the CDVL website requires (free) registration, so this step is not included in the install script. After registering and logging in, search for  `ElFuente Shots for SI/TI, Y4M format, 1080p 29.96fps` and download the zip file to your local machine. We recommend `p7zip` for decompression (and please ignore the header error during decompression). After decompression, move all the `.y4m` files to the folder `./benchmarks/video_transcode_bench/datasets/cuts`, which has been created in step 1.
 
 ## Run VideoTranscodeBench
 

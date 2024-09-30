@@ -25,11 +25,6 @@ declare -A TAGS=(
     ['x264']='4613ac3c15fd75cebc4b9f65b7fb95e70a3acce1'
 )
 
-declare -A DATASETS=(
-    ['elfuente']='http://download.opencontent.netflix.com.s3.amazonaws.com/ElFuente/Netflix_Boat_4096x2160_60fps_10bit_420.y4m'
-    ['elfuente_footmarket']='http://download.opencontent.netflix.com.s3.amazonaws.com/ElFuente/Netflix_FoodMarket_4096x2160_60fps_10bit_420.y4m'
-    ['chimera']='http://download.opencontent.netflix.com.s3.amazonaws.com/Chimera/Chimera_DCI4k2398p_HDR_P3PQ.mp4'
-)
 
 ##################### SYS CONFIG AND DEPS #########################
 
@@ -39,7 +34,7 @@ BENCHPRESS_ROOT="$(readlink -f "$BPKGS_FFMPEG_ROOT/../..")"
 FFMPEG_ROOT="${BENCHPRESS_ROOT}/benchmarks/video_transcode_bench"
 FFMPEG_SOURCE="${FFMPEG_ROOT}/ffmpeg_sources"
 FFMPEG_BUILD="${FFMPEG_ROOT}/ffmpeg_build"
-FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets"
+FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets/cuts"
 
 # Determine OS version
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
@@ -47,11 +42,11 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   sudo apt install -y cmake autoconf automake flex bison \
     meson nasm clang patch git \
-    python3-dev pkg-config time parallel
+    python3-dev pkg-config time parallel p7zip
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   sudo dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch \
-    git python3-devel time parallel
+    git python3-devel time parallel p7zip
 fi
 
 mkdir -p "${FFMPEG_SOURCE}"
@@ -177,63 +172,15 @@ build_ffmpeg()
     popd || exit
 }
 
-download_dataset()
-{
-    dataset="$1"
-    pushd "${FFMPEG_DATASETS}"
-    link=${DATASETS[$dataset]}
-    wget "${link}" || exit 1
 
-    if [ "$dataset" = "chimera" ]; then
-         ../ffmpeg -i Chimera_DCI4k2398p_HDR_P3PQ.mp4 -c:v rawvideo -pix_fmt yuv420p chimera.y4m
-    fi
-
-    popd || exit
-}
-
-auto_cut_video()
-{
-    pushd "${FFMPEG_DATASETS}"
-    mkdir -p ./cuts
-
-    # calculate cut_count: this is based on the estimation of memory consumption of each ffmpeg instance.
-    # The goal is to saturate all CPU cores, while avoiding running out of system memory capacity.
-    # Basically, each ffmpeg instance would take ~0.7GB memory to process a single clip. Hence, (1) if the memory
-    # capacity is smaller than 0.7 x core_count, we may not be able to run ffmpeg instances on all cores simultaneously.
-    # we will calculate the cut_count based on memory capacity (reserve 20GB for OS, other apps, etc.)
-    # (2) if memory capacity is not a problem, we make the cut cout a little bit more (the parameter "8") than 2 times of CPU core count to
-    # ensure enough load.
-
-    core_count=$(grep -c ^processor /proc/cpuinfo)
-    mem_capacity=$(grep MemTotal /proc/meminfo | awk '{print $2/1024/1024}' | sed 's/\.0$//')
-    mem_capacity=$(echo "$mem_capacity - 20" | bc -l | awk '{print int($0)}')
-    mem_factor=$(echo "$core_count * 0.7" | bc -l | awk '{print int($0)}')
-
-    if [ "$mem_factor" -lt "$mem_capacity" ]; then
-        cut_count=$(echo "$core_count * 2 + 8" | bc -l | awk '{print int($0)}')
-    else
-        cut_count=$(echo "$mem_capacity / 0.7" | bc -l | awk '{print int($0)}')
-    fi
-
-    cut_min=$(echo "($cut_count / 4)  / 60" | bc -l | awk '{print int($0)}')
-    cut_sec=$(echo "($cut_count / 4) - 60 * $cut_min" | bc -l | awk '{print int($0)}')
-
-    ../ffmpeg -i ./*.y4m  -to 00:"$cut_min":"$cut_sec" -c copy -segment_time 0.25 -f segment ./cuts/output_%03d.y4m
-
-    popd
-
-}
 
 download_testing_scripts()
 {
     pushd "${FFMPEG_ROOT}"
     clone 'aom-testing'
-    sed -i "s@/home/user/stream@${FFMPEG_DATASETS}/cuts@g" ./aom-testing/scripts/content-adaptive-streaming-pipeline-scripts/generate_commands_all.py
+    sed -i "s@/home/user/stream@${FFMPEG_DATASETS}@g" ./aom-testing/scripts/content-adaptive-streaming-pipeline-scripts/generate_commands_all.py
     sed -i '/^ENCODER/s/^/\#/' ./aom-testing/scripts/content-adaptive-streaming-pipeline-scripts/generate_commands_all.py
     sed -i '/^ENC_MODES/s/^/\#/' ./aom-testing/scripts/content-adaptive-streaming-pipeline-scripts/generate_commands_all.py
-    sed -i '/^downscale_target_resolutions/s/^/\#/' ./aom-testing/scripts/content-adaptive-streaming-pipeline-scripts/generate_commands_all.py
-    resize_res="downscale_target_resolutions     = [(512,288)]"
-    sed -i "/^#downscale_target_resolutions/a ${resize_res}" ./aom-testing/scripts/content-adaptive-streaming-pipeline-scripts/generate_commands_all.py
     popd || exit
 }
 
@@ -256,9 +203,6 @@ mkdir -p tools
 ln -s "${FFMPEG_BUILD}/bin/ffmpeg" ./tools/ffmpeg
 ln -s "${FFMPEG_BUILD}/bin/ffmpeg" ./ffmpeg
 
-download_dataset 'chimera'
-auto_cut_video
-#download_dataset 'elfuente_footmarket'
 popd
 
 exit $?

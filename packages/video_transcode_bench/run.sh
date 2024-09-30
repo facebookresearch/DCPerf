@@ -17,7 +17,6 @@ function benchreps_tell_state () {
 
 # Constants
 FFMPEG_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
-FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets"
 
 show_help() {
 cat <<EOF
@@ -31,15 +30,6 @@ EOF
 
 
 delete_replicas() {
-    pushd "${FFMPEG_DATASETS}"
-    for file in ./*; do
-      # Get the file name without the extension
-      if [[ ${file##*/} =~ ^replica_ ]]; then
-        rm "$file"
-      fi
-    done
-    popd
-
     if [ -d "${FFMPEG_ROOT}/resized_clips" ]; then
         pushd "${FFMPEG_ROOT}/resized_clips"
         rm ./* -rf
@@ -176,6 +166,7 @@ main() {
     done
     range+="]"
     num_files=$(find ./datasets/cuts/ | wc -l)
+    num_files=$(echo "$num_files * 8" | bc -l | awk '{print int($0)}')
     num_proc=$(nproc)
     if [ "$num_files" -lt "$num_proc" ]; then
         num_pool="num_pool = $num_files"
