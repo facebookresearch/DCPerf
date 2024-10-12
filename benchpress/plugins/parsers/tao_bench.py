@@ -11,7 +11,6 @@ TAO_BENCH_BASELINE = BASELINES["taobench"]
 
 
 class TaoBenchServerSnapshot:
-
     KEYS = ["fast_qps", "hit_rate", "slow_qps", "slow_qps_oom"]
 
     def __init__(self, line):
@@ -47,7 +46,6 @@ class TaoBenchServerSnapshot:
 
 
 class TaoBenchParser(Parser):
-
     # Minimum hit rate for a server data point to be considered in
     # result qps calculation
     MIN_HIT_RATE = 0.88

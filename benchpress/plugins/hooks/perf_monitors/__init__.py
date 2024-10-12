@@ -19,7 +19,6 @@ BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
 class Monitor:
-
     def gen_path(self, filename):
         return BP_BASEPATH + f"/benchmark_metrics_{self.job_uuid}/{filename}"
 

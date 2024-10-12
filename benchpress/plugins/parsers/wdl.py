@@ -11,7 +11,6 @@ from benchpress.lib.parser import Parser
 
 
 class WDLParser(Parser):
-
     def parse(self, stdout, stderr, returncode):
         metrics = {}
         benchmarks = []

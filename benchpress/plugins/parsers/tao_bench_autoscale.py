@@ -14,7 +14,6 @@ TAO_BENCH_BASELINE = BASELINES["taobench"]
 
 
 class TaoBenchAutoscaleParser(Parser):
-
     def parse(self, stdout, stderr, returncode):
         """Extracts TAO bench results from stdout."""
         metrics = {}

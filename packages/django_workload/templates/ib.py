@@ -10,7 +10,6 @@ endpoint_list = ["feed_timeline", "timeline", "bundle_tray", "inbox", "seen"]
 
 
 def main(argv):
-
     num_endpoints = 1000
     if 1 < len(argv):
         num_endpoints = int(argv[1])
@@ -88,5 +87,4 @@ urlpatterns = [
 
 
 if "__main__" == __name__:
-
     main(sys.argv)

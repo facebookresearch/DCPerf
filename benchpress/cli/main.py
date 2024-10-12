@@ -86,9 +86,9 @@ class Benchpress:
                     },
                 }
                 if self.hook_bg_duration is not None:
-                    custom_hook["options"]["background_mode"][
-                        "duration"
-                    ] = self.hook_bg_duration
+                    custom_hook["options"]["background_mode"]["duration"] = (
+                        self.hook_bg_duration
+                    )
                 if "hooks" in j:
                     j["hooks"].append(custom_hook)
                 else:
