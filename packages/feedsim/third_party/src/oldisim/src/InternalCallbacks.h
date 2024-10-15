@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef INTERNAL_CALLBACKS_H
-#define INTERNAL_CALLBACKS_H
+#pragma once
 
 #include <functional>
 #include <memory>
@@ -35,5 +33,3 @@ typedef std::function<void(NodeThread&, ParentConnection&)>
 typedef std::function<void(NodeThread&, ChildConnection&)>
     ChildConnectionClosedCallback;
 }  // namespace oldisim
-
-#endif  // INTERNAL_CALLBACKS_H

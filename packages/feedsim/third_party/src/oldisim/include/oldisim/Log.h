@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef OLDISIM_LOG_H
-#define OLDISIM_LOG_H
+#pragma once
 
 #include <stdlib.h>
 
@@ -42,5 +40,3 @@ void log_file_line(log_level_t level, const char* file, int line,
     (x);                         \
     log_level = old;             \
   } while (0)
-
-#endif  // OLDISIM_LOG_H

@@ -12,9 +12,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef OLDISIM_UTIL_H
-#define OLDISIM_UTIL_H
+#pragma once
 
 #include <sys/time.h>
 #include <stdint.h>
@@ -144,6 +142,3 @@ inline std::string RandomString(size_t length) {
 }
 
 void sleep_time(double duration);
-
-
-#endif  // OLDISIM_UTIL_H

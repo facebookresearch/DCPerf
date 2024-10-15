@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef FORCED_EV_TIMER_H
-#define FORCED_EV_TIMER_H
+#pragma once
 
 #include <event2/event.h>
 
@@ -46,5 +44,3 @@ class ForcedEvTimer {
   event* timer_event_;
 };
 }  // namespace oldisim
-
-#endif  // FORCED_EV_TIMER_H

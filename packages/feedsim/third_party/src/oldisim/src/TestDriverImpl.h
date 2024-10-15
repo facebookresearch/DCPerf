@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef TEST_DRIVER_IMPL_H
-#define TEST_DRIVER_IMPL_H
+#pragma once
 
 #include <inttypes.h>
 #include <event2/event.h>
@@ -89,4 +87,3 @@ struct TestDriver::TestDriverImpl {
   static void MakeRequests(TestDriver& driver);
 };
 }  // namespace oldisim
-#endif  // TEST_DRIVER_IMPL_H

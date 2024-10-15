@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef CONNECTION_UTIL_H
-#define CONNECTION_UTIL_H
+#pragma once
 
 #include <inttypes.h>
 #include <netdb.h>
@@ -73,5 +71,3 @@ class ConnectionUtil {
       const LeafNodeStats& stats, double elapsed_time);
 };
 }  // namespace oldisim
-
-#endif  // CONNECTION_UTIL_H

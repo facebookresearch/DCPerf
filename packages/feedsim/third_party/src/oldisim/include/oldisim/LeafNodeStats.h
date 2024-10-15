@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef OLDISIM_LEAF_NODE_STATS_H
-#define OLDISIM_LEAF_NODE_STATS_H
+#pragma once
 
 #include <assert.h>
 #include <stdint.h>
@@ -104,5 +102,3 @@ class LeafNodeStats {
   }
 };
 }  // namespace oldisim
-
-#endif  // OLDISIM_LEAF_NODE_STATS_H

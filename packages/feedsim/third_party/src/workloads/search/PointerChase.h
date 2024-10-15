@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef POINTER_CHASE_H
-#define POINTER_CHASE_H
+#pragma once
 
 #include <stdint.h>
 
@@ -31,5 +29,3 @@ class PointerChase {
   size_t current_index_;
 };
 }  // namespace search
-
-#endif  // POINTER_CHASE_H

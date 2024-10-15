@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef FAN_OUT_MANAGER_IMPL_H
-#define FAN_OUT_MANAGER_IMPL_H
+#pragma once
 
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
@@ -96,5 +94,3 @@ struct FanoutManager::FanoutManagerImpl {
                      std::shared_ptr<FanoutReplyTrackerInternal>> TimeoutArgs;
 };
 }  // namespace oldisim
-
-#endif  // FAN_OUT_MANAGER_IMPL_H

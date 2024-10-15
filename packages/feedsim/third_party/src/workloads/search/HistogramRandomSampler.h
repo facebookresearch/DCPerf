@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef HISTOGRAM_RANDOM_SAMPLER
-#define HISTOGRAM_RANDOM_SAMPLER
+#pragma once
 
 #include <random>
 #include <string>
@@ -37,5 +35,3 @@ class HistogramRandomSampler {
   int count_sum_;
   std::default_random_engine rng_;
 };
-
-#endif  // HISTOGRAM_RANDOM_SAMPLER

@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef OLDISIM_CHILD_CONNECTION_STATS_H
-#define OLDISIM_CHILD_CONNECTION_STATS_H
+#pragma once
 
 #include <inttypes.h>
 
@@ -132,5 +130,3 @@ class ChildConnectionStats {
   }
 };
 }  // namespace oldisim
-
-#endif  // OLDISIM_CHILD_CONNECTION_STATS_H

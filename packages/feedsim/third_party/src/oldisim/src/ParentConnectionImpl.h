@@ -13,9 +13,7 @@
 // limitations under the License.
 
 // -*- c++-mode -*-
-
-#ifndef PARENT_CONNECTION_IMPL_H
-#define PARENT_CONNECTION_IMPL_H
+#pragma once
 
 #include <inttypes.h>
 #include <event2/bufferevent.h>
@@ -60,5 +58,3 @@ struct ParentConnection::ParentConnectionImpl {
   static void bev_write_cb(struct bufferevent* bev, void* ptr);
 };
 }  // namespace oldisim
-
-#endif  // PARENT_CONNECTION_IMPL_H

@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef OLDISIM_DRIVER_NODE_H
-#define OLDISIM_DRIVER_NODE_H
+#pragma once
 
 #include <inttypes.h>
 
@@ -76,5 +74,3 @@ class DriverNode {
   std::unique_ptr<DriverNodeImpl> impl_;
 };
 }  // namespace oldisim
-
-#endif  // OLDISIM_DRIVER_NODE_H
