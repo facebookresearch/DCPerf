@@ -38,11 +38,24 @@ Run the following commands under the DCPerf OSS repo (assuming you are logged in
 as root and you have internet access):
 
 ```bash
-./benchpress_cli.py install tao_bench_64g
+./benchpress_cli.py install tao_bench_autoscale
 ```
 
 This should automatically build and install all dependencies as well as TaoBench
 server and client binaries.
+
+## OpenSSL dependency
+
+When installing TaoBench, the installer script will download and build OpenSSL
+3.3.2 and link TaoBench server and client binaries to it. If you wish to use a
+different version, you can prefix the installation command with `OPENSSL_BRANCH`
+variable. The value of the variable should be a valid tag name in
+[OpenSSL's Github repo](https://github.com/openssl/openssl/tags).
+For example, to use OpenSSL 1.1.1w, run the following:
+
+```bash
+OPENSSL_BRANCH=OpenSSL_1_1_1w ./benchpress_cli.py install tao_bench_autoscale
+```
 
 **NOTE**: TaoBench requires gflags-devel-2.2.2. If you happen to have installed
 an older version of gflags to support other software or benchmarks (e.g. Mediawiki)

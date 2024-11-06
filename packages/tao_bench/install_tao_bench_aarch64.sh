@@ -12,6 +12,10 @@ TAO_BENCH_ROOT="${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 TAO_BENCH_DEPS="${TAO_BENCH_ROOT}/build-deps"
 FOLLY_BUILD_ROOT="${TAO_BENCH_ROOT}/build-folly"
 
+if [ -z "${OPENSSL_BRANCH+x}" ]; then
+    OPENSSL_BRANCH="openssl-3.3.2"
+fi
+
 source "${COMMON_DIR}/os-distro.sh"
 
 # Determine OS version
@@ -57,14 +61,14 @@ fi
 
 # Install openssl
 if ! [ -d "openssl" ]; then
-    git clone --branch OpenSSL_1_1_1b --depth 1 https://github.com/openssl/openssl.git
+    git clone --branch "${OPENSSL_BRANCH}" --depth 1 https://github.com/openssl/openssl.git
     pushd openssl/
-    ./config --prefix="${TAO_BENCH_DEPS}"
+    ./config --prefix="${TAO_BENCH_DEPS}" --libdir=lib
     make -j"$(nproc)"
     make install
     popd
 else
-    echo "[SKIPPED] openssl_1_1_1b"
+    echo "[SKIPPED] OpenSSL (${OPENSSL_BRANCH})"
 fi
 
 # Install libevent
