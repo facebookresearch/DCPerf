@@ -8,13 +8,21 @@
   args:
     - '-r/usr/local/hphpi/legacy/bin/hhvm'
     - '-nnginx'
-    - '-ssiege'
+    - '-L {load_generator}'
+    - '-s {lg_path}'
     - '--'
     - '--mediawiki'
-    - '--siege-duration=10M'
-    - '--siege-timeout=11m'
+    - '--client-duration={duration}'
+    - '--client-timeout={timeout}'
     - '--run-as-root'
     - '--i-am-not-benchmarking'
+    - '{extra_args}'
+  vars:
+    - 'load_generator=wrk'
+    - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
+    - 'duration=600'
+    - 'timeout=11m'
+    - 'extra_args='
 
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mlp
@@ -22,18 +30,25 @@
   args:
     - '-r/usr/local/hphpi/legacy/bin/hhvm'
     - '-nnginx'
-    - '-ssiege'
+    - '-L {load_generator}'
+    - '-s {lg_path}'
     - '-R{scale_out}'
-    - '-c{siege_concurrent}'
+    - '-c{client_threads}'
     - '--'
     - '--mediawiki-mlp'
-    - '--siege-duration=10M'
-    - '--siege-timeout=11m'
+    - '--client-duration={duration}'
+    - '--client-timeout={timeout}'
     - '--run-as-root'
     - '--i-am-not-benchmarking'
+    - '{extra_args}'
   vars:
+    - 'load_generator=wrk'
+    - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
     - 'scale_out=0'
-    - 'siege_concurrent=0'
+    - 'client_threads=0'
+    - 'duration=600'
+    - 'timeout=11m'
+    - 'extra_args='
 
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mlp_no_jit
@@ -41,19 +56,26 @@
   args:
     - '-r/usr/local/hphpi/legacy/bin/hhvm'
     - '-nnginx'
-    - '-ssiege'
+    - '-L {load_generator}'
+    - '-s {lg_path}'
     - '-R{scale_out}'
-    - '-c{siege_concurrent}'
+    - '-c{client_threads}'
     - '--'
     - '--mediawiki-mlp'
-    - '--siege-duration=10M'
-    - '--siege-timeout=11m'
+    - '--client-duration={duration}'
+    - '--client-timeout={timeout}'
     - '--run-as-root'
     - '--no-jit'
     - '--i-am-not-benchmarking'
+    - '{extra_args}'
   vars:
+    - 'load_generator=wrk'
+    - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
     - 'scale_out=0'
-    - 'siege_concurrent=0'
+    - 'client_threads=0'
+    - 'duration=600'
+    - 'timeout=11m'
+    - 'extra_args='
 
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mem
@@ -61,13 +83,25 @@
   args:
     - '-r/usr/local/hphpi/legacy/bin/hhvm'
     - '-nnginx'
-    - '-ssiege'
+    - '-L {load_generator}'
+    - '-s {lg_path}'
+    - '-R{scale_out}'
+    - '-c{client_threads}'
     - '--'
     - '--mediawiki-mem'
-    - '--siege-duration=10M'
-    - '--siege-timeout=11m'
+    - '--client-duration={duration}'
+    - '--client-timeout={timeout}'
     - '--run-as-root'
     - '--i-am-not-benchmarking'
+    - '{extra_args}'
+  vars:
+    - 'load_generator=wrk'
+    - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
+    - 'scale_out=0'
+    - 'client_threads=0'
+    - 'duration=600'
+    - 'timeout=11m'
+    - 'extra_args='
 
 - benchmark: django_workload
   name: django_workload_default

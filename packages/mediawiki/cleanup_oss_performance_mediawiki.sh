@@ -9,3 +9,4 @@ BENCHPRESS_ROOT="$(readlink -f "$MW_ROOT/../..")"
 
 sudo systemctl stop mariadb
 rm -rf "${BENCHPRESS_ROOT}/oss-performance"
+rm -rf "${BENCHPRESS_ROOT}/benchmarks/oss_performance_mediawiki"

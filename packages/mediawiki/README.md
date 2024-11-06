@@ -102,18 +102,28 @@ there is no need to do them manually anymore
 For machines equipped with high-TDP CPUs that have more than 100 logical cores,
 Mediawiki will automatically launch multiple HHVM server instances during the benchmark.
 The number of HHVM instances equals to the number of CPU logical cores in the system
-divided by 100, rounded up. Meanwhile, the benchmark will scale Siege (the load tester)
-concurrency by the number of HHVM instances.
+divided by 100, rounded up. Meanwhile, the benchmark will scale the load generator's
+concurrency by the number of HHVM instances as well.
 
 ### Optional parameters
 
 We provide the following optional parameters for `oss_performance_mediawiki_mlp` job:
+  - `load_generator`: Which load generator to use. Currently we support `wrk` and `siege`
+  and the default load generator is `wrk`. Siege has a
+  [known issue](https://github.com/JoeDog/siege/issues/4) that it may run into
+  dead-lock and hang in some cases, especially when the CPU core count is large.
+  - `lg_path`: Path to the load generator. By default it's `benchmarks/oss_performance_mediawiki/wrk/wrk`
+  which is where `wrk` is installed by the installer script. Please change this if you
+  would like use Siege instead of wrk.
   - `scale_out`: The number of HHVM instances to spawn. This can be used if you are not
   satistfied with the benchmark's automatic scaling and want to specify how many HHVMs
   to start on your own.
-  - `siege_concurrent`: The number of Siege concurrency. Can be used for manually
-  specifying how many Siege client threads to launch if you don't want the benchmark
-  to automatically scale.
+  - `client_threads`: The number of threads that the load generator should spawn.
+  Can be used for manually specifying how many wrk/siege client threads to launch if you
+  don't want the benchmark to automatically scale.
+  - `duration`: The duration of the benchmarking phase, in seconds. Default is 600.
+  - `timeout`: Time-out limit for the load generator in the benchmarking phase. This
+  parameter can accept time units. Default is `11m`.
 
 For example, if you want to run with three HHVM instances regardless CPU core count,
 you can run the following:
@@ -134,25 +144,31 @@ Mediawiki benchmark performance.
   "benchmark_args": [
     "-r/usr/local/hphpi/legacy/bin/hhvm",
     "-nnginx",
-    "-ssiege",
+    "-L wrk",
+    "-s benchmarks/oss_performance_mediawiki/wrk/wrk",
+    "-R0",
+    "-c0",
     "--",
     "--mediawiki-mlp",
-    "--siege-duration=10M",
-    "--siege-timeout=11m",
+    "--client-duration=600",
+    "--client-timeout=11m",
     "--run-as-root",
-    "--i-am-not-benchmarking"
+    "--i-am-not-benchmarking",
+    ""
   ],
   "benchmark_desc": "Tuned +MLP run for oss_performance_mediawiki",
-  "benchmark_hooks": [],
+  "benchmark_hooks": [
+    "perf: None"
+  ],
   "benchmark_name": "oss_performance_mediawiki_mlp",
   "machines": [
     {
       "cpu_architecture": "x86_64",
-      "cpu_model": "<CPU name>",
+      "cpu_model": "<cpu-model>",
       "hostname": "<server-hostname>",
-      "kernel_version": "5.19.0-0_xxxxxx",
-      "mem_total_kib": "2377504144 KiB",
-      "num_logical_cpus": "380",
+      "kernel_version": "6.9.5-xxxxxx",
+      "mem_total_kib": "2377400164 KiB",
+      "num_logical_cpus": "400",
       "os_distro": "centos",
       "os_release_name": "CentOS Stream 9"
     }
@@ -165,57 +181,53 @@ Mediawiki benchmark performance.
   },
   "metrics": {
     "Combined": {
-      "Nginx 200": 8374159,
-      "Nginx 404": 363874,
-      "Nginx P50 time": 0.03,
-      "Nginx P90 time": 0.056,
-      "Nginx P95 time": 0.062,
-      "Nginx P99 time": 0.079,
-      "Nginx avg bytes": 158805.64830391,
-      "Nginx avg time": 0.032921501326598,
-      "Nginx hits": 8738033,
-      "Siege RPS": 14566.1,
-      "Siege failed requests": 0,
-      "Siege requests": 8737475,
-      "Siege successful requests": 8373635,
-      "Siege wall sec": 0.04,
+      "Nginx 200": 8419888,
+      "Nginx 404": 366118,
+      "Nginx 499": 1,
+      "Nginx P50 time": 0.047,
+      "Nginx P90 time": 0.08,
+      "Nginx P95 time": 0.094,
+      "Nginx P99 time": 0.139,
+      "Nginx avg bytes": 158935.64890035,
+      "Nginx avg time": 0.050271790131627,
+      "Nginx hits": 8786007,
+      "Wrk RPS": 14639.53,
+      "Wrk failed requests": 366090,
+      "Wrk requests": 8785249,
+      "Wrk successful requests": 8419159,
+      "Wrk wall sec": 600.1,
       "canonical": 0
-    },
-    "score": 11.3796875
+    }
   },
-  "run_id": "4d12a075",
-  "timestamp": 1702336331
+  "run_id": "5e8513d6",
+  "timestamp": 1730833222
 }
-
 ```
 
 ## Troubleshooting
 
 ### Siege hanging
 
-In some rare cases the load generator Siege may run into deadlock and hang. This
-a known issue discussed in [Siege's
-repo](https://github.com/JoeDog/siege/issues/4) and it may happen more
-frequently on high core count CPU with boost off. If you observe near-zero CPU
-utilization and the benchmark won't finish, that's probably the case. The only
-thing you can do now is to kill Siege with `kill -9 $(pgrep siege)`, stop the
-benchmark and run it again.
+> In some rare cases, the load generator Siege may run into deadlock and hang. This
+> a known issue discussed in [Siege's
+> repo](https://github.com/JoeDog/siege/issues/4), and it may happen more
+> frequently on high core count CPU with boost off. If you observe near-zero CPU
+> utilization and the benchmark won't finish, that's probably the case. The only
+> thing you can do now is to kill Siege with `kill -9 $(pgrep siege)`, stop the
+> benchmark and run it again.
+
+**As of Nov 2024**, we added support for [wrk](https://github.com/wg/wrk) as the load
+generator and designated it as the default one. This should workaround the Siege
+hanging problem.
 
 ### Unable to open `http://localhost:9092/check-health`
 
 1. Disable proxy by unsetting `http_proxy` and `https_proxy` in your shell
-2. Use `--delay-check-health` option by running Mediawiki directly using the
-   following command:
+2. Use `--delay-check-health` option by using the following command:
+
 ```bash
-./packages/mediawiki/run.sh \
-    -r/usr/local/hphpi/legacy/bin/hhvm \
-    -nnginx -ssiege -c300 -- --mediawiki-mlp \
-    --siege-duration=10M --siege-timeout=11m \
-    --run-as-root --scale-out=1 --delay-health-check=30 \
-    --i-am-not-benchmarking
+./benchpress_cli.py run oss_performance_mediawiki_mlp -i '{"extra_args": "--delay-check-health"}'
 ```
-(Replace `--scale-out=1` with `--scale-out=N` if you would like to use
-N-instance HHVM scale-up setup)
 
 ### Too many open files
 
@@ -248,18 +260,11 @@ commands provided:
 #### Disable JIT
 
 ```
-./packages/mediawiki/run.sh \
-   -r/usr/local/hphpi/legacy/bin/hhvm \
-   -nnginx \
-   -ssiege \
-   -c300 \
-   -- \
-   --mediawiki-mlp \
-   --siege-duration=10M \
-   --siege-timeout=11m \
-   --run-as-root \
-   --no-jit \
-   --scale-out=2 \
-   --delay-check-health=30 \
-   --i-am-not-benchmarking
+./benchpress_cli.py run oss_performance_mediawiki_mlp -i '{"extra_args": "--no-jit"}'
+```
+
+#### Skip warm-up
+
+```
+./benchpress_cli.py run oss_performance_mediawiki_mlp -i '{"extra_args": "--skip-warmup"}'
 ```
