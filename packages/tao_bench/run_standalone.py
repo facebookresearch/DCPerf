@@ -22,7 +22,7 @@ def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--memsize",
-        type=int,
+        type=float,
         default=run_autoscale.get_system_memsize_gb(),
         help="memory size in GB",
     )
@@ -88,6 +88,12 @@ def init_parser():
         + "on machines with multiple NUMA nodes in order to minimize cross-socket traffic. "
         + "Please set this to 0 if you would like to test hetereogeneous memory systems such as CXL.",
     )
+    parser.add_argument(
+        "--stats-interval",
+        type=int,
+        default=5000,
+        help="interval of stats reporting in ms",
+    )
     args = parser.parse_args()
     return args
 
@@ -114,7 +120,8 @@ def launch_server():
         --warmup-time={args.warmup_time} --test-time={args.test_time} \
         --port-number-start={args.port_number_start} --bind-cpu={args.bind_cpu} \
         --bind-mem {args.bind_mem} --memsize={args.memsize} --num-clients={args.num_clients} \
-        --interface-name=lo"
+        --interface-name=lo --stats-interval={args.stats_interval} \
+        --client-wait-after-warmup=0 --timeout-buffer=0"
     stdout, stderr, exitcode = exec_cmd(cmd)
     print(stdout)
 

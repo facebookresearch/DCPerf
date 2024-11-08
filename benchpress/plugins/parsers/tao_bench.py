@@ -107,7 +107,6 @@ class TaoBenchParser(Parser):
         counter = 0
         total_fast_qps = 0
         total_slow_pqs = 0
-        num = 0
         for snapshot in reversed(server_snapshots):
             if not snapshot.valid:
                 continue
@@ -119,15 +118,13 @@ class TaoBenchParser(Parser):
                 counter += 1
             else:
                 continue
-            if counter >= 5:
-                total_fast_qps += snapshot.get("fast_qps")
-                total_slow_pqs += snapshot.get("slow_qps")
-                num += 1
+            total_fast_qps += snapshot.get("fast_qps")
+            total_slow_pqs += snapshot.get("slow_qps")
             if counter >= 360 / 5 - 10:
                 break
-        if num > 0:
-            metrics["fast_qps"] = total_fast_qps / num
-            metrics["slow_qps"] = total_slow_pqs / num
+        if counter > 0:
+            metrics["fast_qps"] = total_fast_qps / counter
+            metrics["slow_qps"] = total_slow_pqs / counter
         else:
             metrics["fast_qps"] = 0
             metrics["slow_qps"] = 0
@@ -137,4 +134,4 @@ class TaoBenchParser(Parser):
             metrics["hit_ratio"] = metrics["fast_qps"] / metrics["total_qps"]
         else:
             metrics["hit_ratio"] = 0
-        metrics["num_data_points"] = num
+        metrics["num_data_points"] = counter

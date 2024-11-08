@@ -13,12 +13,11 @@ import subprocess
 import time
 from typing import List
 
+import args_utils
+
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
-
-MEM_USAGE_FACTOR = 0.75  # not really matter
-MAX_CLIENT_CONN = 32768
 
 
 def get_affinitize_nic_path():
@@ -27,12 +26,6 @@ def get_affinitize_nic_path():
         return default_path
     else:
         return os.path.join(TAO_BENCH_DIR, "affinitize/affinitize_nic.py")
-
-
-def sanitize_clients_per_thread(val=380):
-    ncores = len(os.sched_getaffinity(0))
-    max_clients_per_thread = MAX_CLIENT_CONN // ncores
-    return min(val, max_clients_per_thread)
 
 
 def run_cmd(
@@ -53,7 +46,7 @@ def run_cmd(
             proc.wait()
 
 
-def run_server(args):
+def affinitize_nic(args):
     n_cores = len(os.sched_getaffinity(0))
     n_channels = int(n_cores * args.nic_channel_ratio)
     # set # channels
@@ -85,12 +78,19 @@ def run_server(args):
         run_cmd(cmd)
     except Exception as e:
         print(f"Failed to set affinity: {str(e)}")
+
+
+def run_server(args):
+    n_cores = len(os.sched_getaffinity(0))
+    n_channels = int(n_cores * args.nic_channel_ratio)
+    if args.interface_name != "lo":
+        affinitize_nic(args)
     # number of threads for various paths
     n_threads = max(int(n_cores * args.fast_threads_ratio), 1)
     n_dispatchers = max(int(n_threads * args.dispatcher_to_fast_ratio), 1)
     n_slow_threads = max(int(n_threads * args.slow_to_fast_ratio), 1)
     # memory size
-    n_mem = int(args.memsize * 1024 * MEM_USAGE_FACTOR)
+    n_mem = int(args.memsize * 1024 * args_utils.MEM_USAGE_FACTOR)
     # port number
     if args.port_number > 0:
         port_num = args.port_number
@@ -115,7 +115,7 @@ def run_server(args):
         "tao_slow_sleep_ns=100",
         "tao_slow_path_sleep_us=0",
         "tao_compress_items=1",
-        "tao_stats_sleep_ms=5000",
+        f"tao_stats_sleep_ms={args.stats_interval}",
         f"tao_slow_use_semaphore={args.slow_threads_use_semaphore}",
         f"tao_pin_threads={args.pin_threads}",
     ]
@@ -139,7 +139,7 @@ def run_server(args):
         "-o",
         ",".join(extended_options),
     ]
-    timeout = args.warmup_time + args.test_time + 180
+    timeout = args.warmup_time + args.test_time + args.timeout_buffer
     run_cmd(server_cmd, timeout, args.real)
 
 
@@ -153,9 +153,9 @@ def get_client_cmd(args, n_seconds):
             n_threads = int(len(os.sched_getaffinity(0)) * 0.8)
     # clients
     if args.clients_per_thread > 0:
-        n_clients = sanitize_clients_per_thread(args.clients_per_thread)
+        n_clients = args_utils.sanitize_clients_per_thread(args.clients_per_thread)
     else:
-        n_clients = sanitize_clients_per_thread(380)
+        n_clients = args_utils.sanitize_clients_per_thread(380)
     # server port number
     if args.server_port_number > 0:
         server_port_num = args.server_port_number
@@ -164,7 +164,7 @@ def get_client_cmd(args, n_seconds):
 
     # mem size
     n_bytes_per_item = 434  # average from collected distribution
-    mem_size_mb = int(args.server_memsize * 1024 * MEM_USAGE_FACTOR)
+    mem_size_mb = int(args.server_memsize * 1024 * args_utils.MEM_USAGE_FACTOR)
     n_key_min = 1
     n_keys = int(mem_size_mb * 1024 * 1024 / n_bytes_per_item)
     n_key_max = int(n_keys / args.target_hit_ratio)
@@ -215,8 +215,8 @@ def run_client(args):
     print("warm up phase ...")
     cmd = get_client_cmd(args, n_seconds=args.warmup_time)
     run_cmd(cmd, timeout=args.warmup_time + 30, for_real=args.real)
-    if args.real:
-        time.sleep(5)
+    if args.real and args.wait_after_warmup > 0:
+        time.sleep(args.wait_after_warmup)
     print("execution phase ...")
     cmd = get_client_cmd(args, n_seconds=args.test_time)
     run_cmd(cmd, timeout=args.test_time + 30, for_real=args.real)
@@ -239,121 +239,17 @@ def init_parser():
         help="run client",
     )
     # server-side arguments
-    server_parser.add_argument(
-        "--memsize", type=int, required=True, help="memory size, e.g. 64 or 96"
-    )
-    server_parser.add_argument(
-        "--nic-channel-ratio",
-        type=float,
-        default=0.5,
-        help="ratio of # NIC channels to # logical cores",
-    )
-    server_parser.add_argument(
-        "--fast-threads-ratio",
-        type=float,
-        default=0.75,
-        help="ratio of # fast threads to # logical cores",
-    )
-    server_parser.add_argument(
-        "--dispatcher-to-fast-ratio",
-        type=float,
-        default=0.25,
-        help="ratio of # dispatchers to # fast threads",
-    )
-    server_parser.add_argument(
-        "--slow-to-fast-ratio",
-        type=float,
-        default=3,
-        help="ratio of # fast threads to # slow threads",
-    )
-    server_parser.add_argument(
-        "--slow-threads-use-semaphore",
-        type=int,
-        default=0,
-        help="use semaphore to wait for slow requests, set to 0 to turn off",
-    )
-    server_parser.add_argument(
-        "--pin-threads",
-        type=int,
-        default=0,
-        help="pin tao bench threads to dedicated cpu cores, set to nonzero to turn on",
-    )
-    server_parser.add_argument(
-        "--interface-name",
-        type=str,
-        default="eth0",
-        help="name of the NIC interface",
-    )
-    server_parser.add_argument(
-        "--hard-binding",
-        action="store_true",
-        help="hard bind NIC channels to cores",
-    )
+    args_utils.add_common_server_args(server_parser)
     server_parser.add_argument(
         "--port-number",
         type=int,
         default=11211,
         help="port number of server",
     )
-    # client-side arguments
-    client_parser.add_argument(
-        "--server-hostname", type=str, required=True, help="server hostname"
-    )
-    client_parser.add_argument(
-        "--server-memsize",
-        type=int,
-        required=True,
-        help="server memory size, e.g. 64, 96",
-    )
-    client_parser.add_argument(
-        "--num-threads",
-        type=int,
-        default=0,
-        help="# threads; default 0 - use (core count - 6)",
-    )
-    client_parser.add_argument(
-        "--target-hit-ratio", type=float, default=0.9, help="target hit ratio"
-    )
-    client_parser.add_argument(
-        "--data-size-min", type=int, default=8191, help="minimum data size"
-    )
-    client_parser.add_argument(
-        "--data-size-max", type=int, default=8193, help="maximum data size"
-    )
-    client_parser.add_argument(
-        "--tunning-factor",
-        type=float,
-        default=0.807,
-        help="tuning factor for key range to get target hit ratio",
-    )
-    client_parser.add_argument(
-        "--clients-per-thread",
-        type=int,
-        default=sanitize_clients_per_thread(380),
-        help="Number of clients per thread",
-    )
-    client_parser.add_argument(
-        "--server-port-number",
-        type=int,
-        default=11211,
-        help="port number of server",
-    )
-    client_parser.add_argument(
-        "--sanity",
-        type=int,
-        default=0,
-        help="sanity check for the network bandwidth and latency between the server and the client.",
-    )
 
-    # for both server & client
-    for x_parser in [server_parser, client_parser]:
-        x_parser.add_argument(
-            "--warmup-time", type=int, default=1200, help="warmup time in seconds"
-        )
-        x_parser.add_argument(
-            "--test-time", type=int, default=360, help="test time in seconds"
-        )
-        x_parser.add_argument("--real", action="store_true", help="for real")
+    # client-side arguments
+    args_utils.add_common_client_args(client_parser)
+
     # functions
     server_parser.set_defaults(func=run_server)
     client_parser.set_defaults(func=run_client)

@@ -15,6 +15,8 @@ import subprocess
 import sys
 from datetime import datetime
 
+import args_utils
+
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "packages", "tao_bench")
 TAO_BENCH_BM_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
@@ -66,36 +68,29 @@ def check_nodes_of_cpu_range(cpu_ranges, numa_nodes):
     return list(matched_nodes)
 
 
+SERVER_CMD_OPTIONS = []  # To be initialized in init_parser()
+
+
 def compose_server_cmd(args, cpu_core_range, memsize, port_number):
+    server_args = {
+        optstr: getattr(args, argkey) for optstr, argkey in SERVER_CMD_OPTIONS
+    }
+    server_args["--memsize"] = memsize
+    server_args["--port-number"] = port_number
     cmd = [
         "taskset",
         "--cpu-list",
         cpu_core_range,
         os.path.join(TAO_BENCH_DIR, "run.py"),
         "server",
-        "--memsize",
-        str(memsize),
-        "--nic-channel-ratio",
-        str(args.nic_channel_ratio),
-        "--fast-threads-ratio",
-        str(args.fast_threads_ratio),
-        "--dispatcher-to-fast-ratio",
-        str(args.dispatcher_to_fast_ratio),
-        "--slow-to-fast-ratio",
-        str(args.slow_to_fast_ratio),
-        "--slow-threads-use-semaphore",
-        str(args.slow_threads_use_semaphore),
-        "--pin-threads",
-        str(args.pin_threads),
-        "--interface-name",
-        args.interface_name,
-        "--port-number",
-        str(port_number),
-        "--warmup-time",
-        str(get_warmup_time(args)),
-        "--test-time",
-        str(args.test_time),
     ]
+    for argname, argval in server_args.items():
+        if isinstance(argval, bool):
+            if argval:
+                cmd.append(argname)
+        elif argval is not None:
+            cmd += [argname, str(argval)]
+
     if len(NUMA_NODES) > 1 and (args.bind_cpu > 0 or args.bind_mem > 0):
         numa_nodes_belong_to = check_nodes_of_cpu_range(cpu_core_range, NUMA_NODES)
         nodelist = ",".join(numa_nodes_belong_to)
@@ -107,6 +102,7 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number):
         cmd = numactl_cmd + cmd
     if args.real:
         cmd.append("--real")
+    print(cmd)
     return cmd
 
 
@@ -150,7 +146,7 @@ def gen_client_instructions(args):
             c = i % args.num_clients
             client_args = {
                 "server_hostname": server_hostname,
-                "server_memsize": args.memsize // args.num_servers,
+                "server_memsize": args.memsize / args.num_servers,
                 "warmup_time": get_warmup_time(args),
                 "test_time": args.test_time,
                 "server_port_number": args.port_number_start + i,
@@ -159,6 +155,8 @@ def gen_client_instructions(args):
                 client_args["clients_per_thread"] = clients_per_thread
             if args.sanity > 0 and i == 0:
                 client_args["sanity"] = args.sanity
+            if args.client_wait_after_warmup >= 0:
+                client_args["wait_after_warmup"] = args.client_wait_after_warmup
             clients[c] += (
                 " ".join(
                     [
@@ -178,7 +176,7 @@ def gen_client_instructions(args):
             s = i % args.num_servers
             client_args = {
                 "server_hostname": server_hostname,
-                "server_memsize": args.memsize // args.num_servers,
+                "server_memsize": args.memsize / args.num_servers,
                 "warmup_time": get_warmup_time(args),
                 "test_time": args.test_time,
                 "server_port_number": args.port_number_start + s,
@@ -187,6 +185,8 @@ def gen_client_instructions(args):
                 client_args["clients_per_thread"] = clients_per_thread
             if args.sanity > 0 and i == 0:
                 client_args["sanity"] = args.sanity
+            if args.client_wait_after_warmup >= 0:
+                client_args["wait_after_warmup"] = args.client_wait_after_warmup
             clients[i] += (
                 " ".join(
                     [
@@ -256,8 +256,8 @@ def distribute_cores(n_parts):
 def run_server(args):
     core_ranges = distribute_cores(args.num_servers)
     # memory size - split evenly for each server
-    n_mem = int(args.memsize)
-    mem_per_inst = n_mem // args.num_servers
+    n_mem = float(args.memsize)
+    mem_per_inst = n_mem / args.num_servers
     ts = datetime.strftime(datetime.now(), "%y%m%d_%H%M%S")
     # compose servers: [server_cmd, output_file, logpath]
     servers = []
@@ -295,8 +295,9 @@ def run_server(args):
         print("Spawn server instance: " + " ".join(server[0]))
         p = subprocess.Popen(server[0], stdout=server[1], stderr=server[1])
         procs.append(p)
-    # wait for servers to finish
-    timeout = get_warmup_time(args) + args.test_time + 240
+    # wait for servers to finish - add extra minute to make sure
+    # post-processing will finish
+    timeout = get_warmup_time(args) + args.test_time + args.timeout_buffer + 60
     for p in procs:
         try:
             (out, err) = p.communicate(timeout=timeout)
@@ -356,7 +357,7 @@ def get_proc_meminfo():
 
 def get_system_memsize_gb():
     meminfo = get_proc_meminfo()
-    return meminfo["MemTotal"] // (1024**3)
+    return meminfo["MemTotal"] / (1024**3)
 
 
 def get_default_num_servers(max_cores_per_inst=72):
@@ -368,7 +369,7 @@ def get_warmup_time(args, secs_per_gb=5, min_time=1200):
     if args.warmup_time > 0:
         return args.warmup_time
     else:
-        time_to_fill = secs_per_gb * args.memsize
+        time_to_fill = int(secs_per_gb * args.memsize)
         return max(time_to_fill, min_time)
 
 
@@ -377,9 +378,8 @@ def init_parser():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     # server-side arguments
-    parser.add_argument(
-        "--memsize", type=int, default=get_system_memsize_gb(), help="memory size in GB"
-    )
+    global SERVER_CMD_OPTIONS
+    SERVER_CMD_OPTIONS = args_utils.add_common_server_args(parser)
     parser.add_argument(
         "--num-servers",
         type=int,
@@ -387,61 +387,10 @@ def init_parser():
         help="number of TaoBench server instances",
     )
     parser.add_argument(
-        "--nic-channel-ratio",
-        type=float,
-        default=0.5,
-        help="ratio of # NIC channels to # logical cores",
-    )
-    parser.add_argument(
-        "--fast-threads-ratio",
-        type=float,
-        default=0.75,
-        help="ratio of # fast threads to # logical cores",
-    )
-    parser.add_argument(
-        "--dispatcher-to-fast-ratio",
-        type=float,
-        default=0.25,
-        help="ratio of # dispatchers to # fast threads",
-    )
-    parser.add_argument(
-        "--slow-to-fast-ratio",
-        type=float,
-        default=3,
-        help="ratio of # fast threads to # slow threads",
-    )
-    parser.add_argument(
-        "--slow-threads-use-semaphore",
-        type=int,
-        default=0,
-        help="use semaphore instead of nanosleep to wait for slow requests, set to 1 to turn on",
-    )
-    parser.add_argument(
-        "--pin-threads",
-        type=int,
-        default=0,
-        help="pin threads to dedicated cores, set to 1 to turn on",
-    )
-    parser.add_argument(
-        "--interface-name",
-        type=str,
-        default="eth0",
-        help="name of the NIC interface",
-    )
-    parser.add_argument(
         "--port-number-start",
         type=int,
         default=11211,
         help="starting port number of the servers",
-    )
-    parser.add_argument(
-        "--warmup-time",
-        type=int,
-        default=0,
-        help="warmup time in seconds, default is max(5 * memsize, 1200)",
-    )
-    parser.add_argument(
-        "--test-time", type=int, default=720, help="test time in seconds"
     )
     parser.add_argument(
         "--num-clients",
@@ -483,6 +432,13 @@ def init_parser():
         + "If `--clients-per-thread` is set to a positive number, this parameter will be ignored. ",
     )
     parser.add_argument(
+        "--client-wait-after-warmup",
+        type=int,
+        default=-1,
+        help="time in seconds for the client to wait after warmup before starting the test. "
+        + " If set to 0 or positive, this will be used in the client instructions.",
+    )
+    parser.add_argument(
         "--bind-cpu",
         type=int,
         default=1,
@@ -503,7 +459,7 @@ def init_parser():
         default=0,
         help="sanity check for the network bandwidth and latency between the server and the client.",
     )
-    parser.add_argument("--real", action="store_true", help="for real")
+
     # functions
     parser.set_defaults(func=run_server)
     return parser
@@ -516,4 +472,6 @@ if __name__ == "__main__":
         args.num_servers = get_default_num_servers()
     if args.memsize == 0:
         args.memsize = get_system_memsize_gb()
+    if args.warmup_time == 0:
+        args.warmup_time = get_warmup_time(args)
     args.func(args)
