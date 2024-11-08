@@ -94,6 +94,9 @@ def init_parser():
         default=5000,
         help="interval of stats reporting in ms",
     )
+    parser.add_argument(
+        "--disable-tls", type=int, default=0, help="set to non-zero to disable TLS"
+    )
     args = parser.parse_args()
     return args
 
@@ -121,7 +124,7 @@ def launch_server():
         --port-number-start={args.port_number_start} --bind-cpu={args.bind_cpu} \
         --bind-mem {args.bind_mem} --memsize={args.memsize} --num-clients={args.num_clients} \
         --interface-name=lo --stats-interval={args.stats_interval} \
-        --client-wait-after-warmup=0 --timeout-buffer=0"
+        --client-wait-after-warmup=0 --timeout-buffer=0 --disable-tls={args.disable_tls}"
     stdout, stderr, exitcode = exec_cmd(cmd)
     print(stdout)
 

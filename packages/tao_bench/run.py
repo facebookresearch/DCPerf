@@ -102,8 +102,6 @@ def run_server(args):
     s_binary = os.path.join(TAO_BENCH_DIR, "tao_bench_server")
     extended_options = [
         "lru_crawler",
-        f"ssl_chain_cert={os.path.join(TAO_BENCH_DIR, 'certs/example.crt')}",
-        f"ssl_key={os.path.join(TAO_BENCH_DIR, 'certs/example.key')}",
         f"tao_it_gen_file={os.path.join(TAO_BENCH_DIR, 'leader_sizes.json')}",
         "tao_max_item_size=65536",
         "tao_gen_payload=0",
@@ -119,6 +117,11 @@ def run_server(args):
         f"tao_slow_use_semaphore={args.slow_threads_use_semaphore}",
         f"tao_pin_threads={args.pin_threads}",
     ]
+    if not args.disable_tls:
+        extended_options += [
+            f"ssl_chain_cert={os.path.join(TAO_BENCH_DIR, 'certs/example.crt')}",
+            f"ssl_key={os.path.join(TAO_BENCH_DIR, 'certs/example.key')}",
+        ]
     server_cmd = [
         s_binary,
         "-c",
@@ -135,7 +138,10 @@ def run_server(args):
         str(port_num),
         "-I",
         "16m",
-        "-Z",
+    ]
+    if not args.disable_tls:
+        server_cmd.append("-Z")
+    server_cmd += [
         "-o",
         ",".join(extended_options),
     ]
@@ -182,10 +188,6 @@ def get_client_cmd(args, n_seconds):
         str(server_port_num),
         "-P",
         "memcache_binary",
-        f"--cert={s_cert}",
-        f"--key={s_key}",
-        "--tls",
-        "--tls-skip-verify",
         "--key-pattern=R:R",
         "--distinct-client-seed",
         "--randomize",
@@ -204,6 +206,13 @@ def get_client_cmd(args, n_seconds):
         "--key-bytes=220",
         f"--test-time={n_seconds}",
     ]
+    if not args.disable_tls:
+        client_cmd += [
+            f"--cert={s_cert}",
+            f"--key={s_key}",
+            "--tls",
+            "--tls-skip-verify",
+        ]
     return client_cmd
 
 

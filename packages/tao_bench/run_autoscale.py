@@ -157,6 +157,8 @@ def gen_client_instructions(args):
                 client_args["sanity"] = args.sanity
             if args.client_wait_after_warmup >= 0:
                 client_args["wait_after_warmup"] = args.client_wait_after_warmup
+            if args.disable_tls != 0:
+                client_args["disable_tls"] = 1
             clients[c] += (
                 " ".join(
                     [
@@ -187,6 +189,8 @@ def gen_client_instructions(args):
                 client_args["sanity"] = args.sanity
             if args.client_wait_after_warmup >= 0:
                 client_args["wait_after_warmup"] = args.client_wait_after_warmup
+            if args.disable_tls != 0:
+                client_args["disable_tls"] = 1
             clients[i] += (
                 " ".join(
                     [
@@ -459,7 +463,6 @@ def init_parser():
         default=0,
         help="sanity check for the network bandwidth and latency between the server and the client.",
     )
-
     # functions
     parser.set_defaults(func=run_server)
     return parser

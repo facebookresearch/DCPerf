@@ -435,6 +435,7 @@
         - '--test-time={test_time}'
         - '--stats-interval={stats_interval}'
         - '--timeout-buffer={timeout_buffer}'
+        - '--disable-tls={disable_tls}'
         - '--real'
       vars:
         - 'interface_name=eth0'
@@ -444,6 +445,7 @@
         - 'test_time=360'
         - 'stats_interval=5000'
         - 'timeout_buffer=120'
+        - 'disable_tls=0'
     client:
       args:
         - 'client'
@@ -459,6 +461,7 @@
         - '--test-time={test_time}'
         - '--sanity={sanity}'
         - '--wait-after-warmup={wait_after_warmup}'
+        - '--disable-tls={disable_tls}'
         - '--real'
       vars:
         - 'server_hostname'
@@ -471,6 +474,7 @@
         - 'data_size_max=8193'
         - 'wait_after_warmup=5'
         - 'sanity=0'
+        - 'disable_tls=0'
   hooks:
     - hook: copymove
       options:
@@ -503,6 +507,7 @@
     - '--stats-interval={stats_interval}'
     - '--timeout-buffer={timeout_buffer}'
     - '--client-wait-after-warmup={client_wait_after_warmup}'
+    - '--disable-tls={disable_tls}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -521,6 +526,7 @@
     - 'stats_interval=5000'
     - 'timeout_buffer=120'
     - 'client_wait_after_warmup=5'
+    - 'disable_tls=0'
   hooks:
     - hook: tao_instruction
     - hook: copymove
@@ -596,6 +602,7 @@
     - '--client-cores={client_cores}'
     - '--conns-per-server-core={conns_per_server_core}'
     - '--stats-interval={stats_interval}'
+    - '--disable-tls={disable_tls}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -613,6 +620,7 @@
     - 'client_cores=0'
     - 'conns_per_server_core=85'
     - 'stats_interval=5000'
+    - 'disable_tls=0'
   hooks:
     - hook: tao_instruction
     - hook: copymove

@@ -110,6 +110,9 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
     server_parser.add_argument(
         "--test-time", type=int, default=360, help="test time in seconds"
     )
+    server_parser.add_argument(
+        "--disable-tls", type=int, default=0, help="set to non-zero to disable TLS"
+    )
     server_parser.add_argument("--real", action="store_true", help="for real")
 
     return get_opt_strings(server_parser)
@@ -175,6 +178,9 @@ def add_common_client_args(client_parser: ArgumentParser) -> List[Tuple[str, str
     )
     client_parser.add_argument(
         "--test-time", type=int, default=360, help="test time in seconds"
+    )
+    client_parser.add_argument(
+        "--disable-tls", type=int, default=0, help="set to non-zero to disable TLS"
     )
     client_parser.add_argument("--real", action="store_true", help="for real")
 
