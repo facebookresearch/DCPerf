@@ -127,14 +127,29 @@ inline addrinfo *ResolveHost(std::string hostname, uint16_t port) {
   return result;
 }
 
+// Fast random number-generator
+// Not cryptographically-safe
+inline uint64_t xor128() {
+  thread_local static uint64_t x = 123456789;
+  thread_local static uint64_t y = 362436069;
+  thread_local static uint64_t z = 521288629;
+  thread_local static uint64_t w = 88675123;
+  uint64_t t;
+  t = x ^ (x << 11);
+  x = y;
+  y = z;
+  z = w;
+  return w = w ^ (w >> 19) ^ (t ^ (t >> 8));
+}
+
 inline std::string RandomString(size_t length) {
   auto randchar = []() -> char {
-    const char charset[] =
+    static const char charset[] =
         "0123456789"
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "abcdefghijklmnopqrstuvwxyz";
     const size_t max_index = (sizeof(charset) - 1);
-    return charset[rand() % max_index];
+    return charset[xor128() % max_index];
   };
   std::string str(length, 0);
   std::generate_n(str.begin(), length, randchar);
