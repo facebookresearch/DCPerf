@@ -19,9 +19,11 @@ export LD_LIBRARY_PATH="/opt/local/hhvm-3.30/lib:$LD_LIBRARY_PATH"
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y libevent-dev zlib1g zlib1g-dev
   apt install -y php-common php-cli php-dev
+  apt install -y unzip
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y libevent-devel zlib-devel
   dnf install -y php-common php-cli php-devel
+  dnf install -y unzip
 fi
 
 # 2. Make sure hhvm 3.30.12 is installed
@@ -141,6 +143,6 @@ echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
 # 10. MariaDB tuning
 sudo cp "${TEMPLATES_DIR}/my.cnf" "/etc/my.cnf"
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo mkdir /etc/my.cnf.d
+  sudo mkdir -p /etc/my.cnf.d
 fi
 sudo systemctl restart mariadb

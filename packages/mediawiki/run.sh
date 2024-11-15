@@ -157,6 +157,7 @@ function main() {
       s)
         lg_path="${OPTARG}"
         lg_path="$(which ${lg_path})"
+        lg_path="$(readlink -f "${lg_path}")"
         if ! [[ -x "$lg_path" ]]; then
           echo "Specified load generator ${lg_path} is not an executable or does not exist."
           exit 1
