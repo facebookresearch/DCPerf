@@ -57,7 +57,8 @@ Usage: ${0##*/} [-h] [-t <thrift_threads>] [-c <ranking_cpu_threads>]
     -a When searching for the optimal QPS, automatically adjust the number of cliient driver threads by
        min(requested_qps / 4, $(nproc) / 5) in each iteration (experimental feature).
     -q Number of QPS to request. If this is present, feedsim will run a fixed-QPS experiment instead of searching
-       for a QPS that meets latency target.
+       for a QPS that meets latency target. If multiple comma-separated values are specified, a fixed-QPS experiment
+       will be run for each QPS value.
     -d Duration of fixed-QPS load testing experiment, in seconds. Default: 300
     -w Duration of warmup in fixed-QPS experiment, in seconds. Default: 120
     -p Port to use by the LeafNodeRank server and the load drievrs. Default: 11222
