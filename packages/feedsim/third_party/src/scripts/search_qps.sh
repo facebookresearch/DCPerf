@@ -316,8 +316,23 @@ if [ "$warmup_time" -gt 0 ]; then
 fi
 
 if [[ -n "$fixed_qps" ]]; then
-  run_loadtest measured_qps measured_latency $fixed_qps
-  printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
+  fixed_qps_array=$(echo $fixed_qps | sed "s/,/ /g") # split fixed_qps by commas
+  fixed_qps_count=$(echo $fixed_qps_array | wc -w) # count the number of fixed qps values provided
+
+  if [ $fixed_qps_count -eq 1 ]; then
+    benchreps_tell_state "before fixed_qps_single"
+    run_loadtest measured_qps measured_latency $fixed_qps
+    printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
+    benchreps_tell_state "after fixed_qps_single"
+  else
+    for fixed_qps_el in $fixed_qps_array; do
+      benchreps_tell_state "before fixed_qps_iter $fixed_qps_el"
+      run_loadtest measured_qps measured_latency $fixed_qps_el
+      printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps_el $measured_qps $measured_latency
+      benchreps_tell_state "after fixed_qps_iter $fixed_qps_el"
+      sleep 7 # wait between iterations
+    done
+  fi
   exit 0
 fi
 
