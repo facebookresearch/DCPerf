@@ -13,6 +13,7 @@ HHVM_VERSION="3.30.12"
 MARIADB_PWD="password"
 WRK_VERSION="4.2.0"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
+OLD_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH="/opt/local/hhvm-3.30/lib:$LD_LIBRARY_PATH"
 
 # 1. Install prerequisite packages
@@ -133,8 +134,9 @@ cp "${TEMPLATES_DIR}/multi-request-txt.lua" ./scripts/multi-request-txt.lua
 # shellcheck disable=SC2046
 curl -O https://getcomposer.org/installer
 mv installer composer-setup.php
-
+export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
 php composer-setup.php --2.2
+export LD_LIBRARY_PATH="/opt/local/hhvm-3.30/lib:$LD_LIBRARY_PATH"
 yes | $HHVM composer.phar install || true
 
 # 9. Basic tuning
