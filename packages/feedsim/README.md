@@ -268,18 +268,17 @@ Please refer to `./benchmarks/feedsim/run.sh -h` to see other available
 parameters that you can supply to the `extra_args` parameter:
 
 ```
-Usage: run.sh [-h] [-t <thrift_threads>] [-c <ranking_cpu_threads>]
-                [-e <io_threads>]
+Usage: run.sh [OPTION]...
 
     -h Display this help and exit
     -t Number of threads to use for thrift serving. Large dataset kept per thread. Default: 216
     -c Number of threads to use for fanout ranking work. Heavy CPU work. Default: 134
     -s Number of threads to use for task-based serialization cpu work. Default: 55
-    -a When searching for the optimal QPS, automatically adjust the number of cliient driver threads by
+    -a When searching for the optimal QPS, automatically adjust the number of client driver threads by
        min(requested_qps / 4, 384 / 5) in each iteration (experimental feature).
     -q Number of QPS to request. If this is present, feedsim will run a fixed-QPS experiment instead of searching
        for a QPS that meets latency target.
     -d Duration of each load testing experiment, in seconds. Default: 300
-    -p Port to use by the LeafNodeRank server and the load drievrs. Default: 11222
+    -p Port to use by the LeafNodeRank server and the load drivers. Default: 11222
     -o Result output file name. Default: "feedsim_results.txt"
 ```

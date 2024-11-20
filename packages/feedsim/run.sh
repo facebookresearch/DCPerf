@@ -47,28 +47,29 @@ fi
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [-t <thrift_threads>] [-c <ranking_cpu_threads>]
-                [-e <io_threads>]
+Usage: ${0##*/} [OPTION]...
 
     -h Display this help and exit
     -t Number of threads to use for thrift serving. Large dataset kept per thread. Default: $THRIFT_THREADS_DEFAULT
     -c Number of threads to use for fanout ranking work. Heavy CPU work. Default: $RANKING_THREADS_DEFAULT
     -s Number of threads to use for task-based serialization cpu work. Default: $SRV_IO_THREADS_DEFAULT
-    -a When searching for the optimal QPS, automatically adjust the number of cliient driver threads by
+    -a When searching for the optimal QPS, automatically adjust the number of client driver threads by
        min(requested_qps / 4, $(nproc) / 5) in each iteration (experimental feature).
     -q Number of QPS to request. If this is present, feedsim will run a fixed-QPS experiment instead of searching
        for a QPS that meets latency target.
-    -d Duration of fixed-QPS load testing experiment, in seconds. Default: 300
-    -w Duration of warmup in fixed-QPS experiment, in seconds. Default: 120
-    -p Port to use by the LeafNodeRank server and the load drievrs. Default: 11222
+    -d Duration of each load testing experiment, in seconds. Default: 300
+    -p Port to use by the LeafNodeRank server and the load drivers. Default: 11222
     -o Result output file name. Default: "feedsim_results.txt"
 EOF
 }
 
 cleanup() {
+  # remove trap handler
   trap - SIGINT SIGTERM ERR EXIT
-
-  kill -SIGINT $LEAF_PID || true # Ignore exit status code of kill
+  # Check if child process has already been started
+  if [ -n "$LEAF_PID" ]; then
+    kill -SIGKILL $LEAF_PID || true # Ignore exit status code of kill
+  fi
 }
 
 msg() {
@@ -115,7 +116,7 @@ main() {
     fi
     benchreps_tell_state "start"
 
-    while :; do
+    while [ $# -ne 0 ]; do
         case $1 in
             -t)
                 thrift_threads="$2"
@@ -144,25 +145,25 @@ main() {
             -o)
                 result_filename="$2"
                 ;;
-            -h)
+            -h|--help)
                 show_help >&2
                 exit 1
                 ;;
             *)  # end of input
-                echo "Unsupported arg $1"
+                echo "Unsupported arg '$1'" 1>&2
                 break
         esac
 
         case $1 in
             -t|-c|-s|-d|-p|-q|-o|-w)
                 if [ -z "$2" ]; then
-                    echo "Invalid option: $1 requires an argument" 1>&2
+                    echo "Invalid option: '$1' requires an argument" 1>&2
                     exit 1
                 fi
                 shift   # Additional shift for the argument
                 ;;
         esac
-        shift
+        shift # pop the previously read argument
     done
 
     set -u  # Enable unbound variables check from here onwards
@@ -226,7 +227,7 @@ main() {
     else
         # Adjust the number of workers according to QPS
         # If DRIVER_THREADS * connections is too large compared to qps, the driver may not be able
-        # to accurately fullfill the requested QPS
+        # to accurately fulfill the requested QPS
         num_connections=4
         num_workers=$((fixed_qps / num_connections))
         if [ "$num_workers" -lt 1 ]; then
@@ -236,10 +237,10 @@ main() {
         fi
         benchreps_tell_state "before fixed_qps_exp"
         scripts/search_qps.sh -s 95p -t "$fixed_qps_duration" \
-            -m "$warmup_time" \
-            -q "$fixed_qps" \
-            -o "${FEEDSIM_ROOT}/${result_filename}" \
-            -- build/workloads/ranking/DriverNodeRank \
+           -m "$warmup_time" \
+           -q "$fixed_qps" \
+           -o "${FEEDSIM_ROOT}/${result_filename}" \
+           -- build/workloads/ranking/DriverNodeRank \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
                 --threads="${num_workers}" \
@@ -248,7 +249,7 @@ main() {
     fi
 
     sleep 5 # wait for queue to drain
-    kill -SIGINT $LEAF_PID  # SIGINT so exits cleanly
+    kill -SIGINT $LEAF_PID || true > /dev/null # SIGINT so exits cleanly
 }
 
 main "$@"
