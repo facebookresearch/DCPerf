@@ -7,7 +7,11 @@
 import re
 import statistics
 
+from benchpress.lib.baseline import BASELINES
+
 from benchpress.lib.parser import Parser
+
+VIDEO_TRANSCODE_SVT_BASELINE = BASELINES["video_transcode_svt"]
 
 
 class FfmpegParser(Parser):
@@ -23,9 +27,12 @@ class FfmpegParser(Parser):
     def parse(self, stdout, stderr, returncode):
         metrics = {}
         throughputs = []
+        encoder = ""
         for line in stdout:
             if re.search("total_data_encoded", line):
                 total_data_encoded = float(line.split()[-2])
+            elif re.search("^encoder", line):
+                encoder = line.split("=")[1]
             elif re.search("res_level", line):
                 level = line.split(":")[0][4:]
                 level_time = level + "_time_secs"
@@ -44,10 +51,10 @@ class FfmpegParser(Parser):
                 metrics[level_throughput] = total_data_encoded * 1024 / float(time)
                 throughputs.append(metrics[level_throughput])
 
-        metrics["throughput_all_levels_hmean_MBps"] = statistics.harmonic_mean(
-            throughputs
-        )
-        metrics["throughput_all_levels_geomean_MBps"] = statistics.geometric_mean(
-            throughputs
-        )
+        throughput_hmean = statistics.harmonic_mean(throughputs)
+        metrics["throughput_all_levels_hmean_MBps"] = throughput_hmean
+        throughput_gmean = statistics.geometric_mean(throughputs)
+        metrics["throughput_all_levels_geomean_MBps"] = throughput_gmean
+        if encoder == "svt":
+            metrics["score"] = throughput_hmean / VIDEO_TRANSCODE_SVT_BASELINE
         return metrics

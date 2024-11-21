@@ -199,6 +199,7 @@ main() {
 
     total_size_GB=$(echo "$total_size / 1024 / 1024 / 1024" | bc -l | awk '{printf "%.2f", $0}')
 
+    echo "encoder=${encoder}"
     echo "total_data_encoded: ${total_size_GB} GB"
     for num in $(seq "${low}" "${high}"); do
         filename="time_enc_${num}.log"

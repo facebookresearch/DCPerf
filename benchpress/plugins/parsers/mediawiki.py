@@ -18,4 +18,7 @@ class MediawikiParser(JSONParser):
             if "Siege RPS" in metrics["Combined"]:
                 rps = metrics["Combined"]["Siege RPS"]
                 metrics["score"] = float(rps) / MEDIAWIKI_MLP_BASELINE
+            elif "Wrk RPS" in metrics["Combined"]:
+                rps = metrics["Combined"]["Wrk RPS"]
+                metrics["score"] = float(rps) / MEDIAWIKI_MLP_BASELINE
         return metrics
