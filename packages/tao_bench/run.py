@@ -116,6 +116,7 @@ def run_server(args):
         f"tao_stats_sleep_ms={args.stats_interval}",
         f"tao_slow_use_semaphore={args.slow_threads_use_semaphore}",
         f"tao_pin_threads={args.pin_threads}",
+        f"tao_smart_nanosleep={args.smart_nanosleep}",
     ]
     if not args.disable_tls:
         extended_options += [

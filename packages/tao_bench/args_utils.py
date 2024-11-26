@@ -113,6 +113,12 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
     server_parser.add_argument(
         "--disable-tls", type=int, default=0, help="set to non-zero to disable TLS"
     )
+    server_parser.add_argument(
+        "--smart-nanosleep",
+        type=int,
+        default=0,
+        help="randomized nanosleep with exponential backoff",
+    )
     server_parser.add_argument("--real", action="store_true", help="for real")
 
     return get_opt_strings(server_parser)

@@ -436,6 +436,7 @@
         - '--stats-interval={stats_interval}'
         - '--timeout-buffer={timeout_buffer}'
         - '--disable-tls={disable_tls}'
+        - '--smart-nanosleep={smart_nanosleep}'
         - '--real'
       vars:
         - 'interface_name=eth0'
@@ -446,6 +447,7 @@
         - 'stats_interval=5000'
         - 'timeout_buffer=120'
         - 'disable_tls=0'
+        - 'smart_nanosleep=0'
     client:
       args:
         - 'client'
@@ -508,6 +510,7 @@
     - '--timeout-buffer={timeout_buffer}'
     - '--client-wait-after-warmup={client_wait_after_warmup}'
     - '--disable-tls={disable_tls}'
+    - '--smart-nanosleep={smart_nanosleep}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -527,6 +530,7 @@
     - 'timeout_buffer=120'
     - 'client_wait_after_warmup=5'
     - 'disable_tls=0'
+    - 'smart_nanosleep=0'
   hooks:
     - hook: tao_instruction
     - hook: copymove

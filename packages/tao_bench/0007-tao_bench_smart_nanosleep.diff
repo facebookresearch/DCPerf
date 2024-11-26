@@ -1,0 +1,194 @@
+diff --git a/db_provider.c b/db_provider.c
+index e5b4e70..fff5206 100644
+--- a/db_provider.c
++++ b/db_provider.c
+@@ -9,6 +9,7 @@
+ #include <stdlib.h>
+ #include <lz4.h>
+ #include <unistd.h>
++#include <threads.h>
+ 
+ #include "memcached.h"
+ #include "named_thread.h"
+@@ -218,6 +219,7 @@ bool add_slow_request(char* k, unsigned int nk, conn* c, uint64_t cas) {
+ void *slow_thread_dispatcher(void* queue_index) {
+     uint32_t thread_queue_index = 0;
+     uint32_t req_queue_index = *((uint32_t*)queue_index);
++    bool slept_consecutive = false;
+ 
+     bind_thread_to_next_cpu();
+ 
+@@ -226,10 +228,8 @@ void *slow_thread_dispatcher(void* queue_index) {
+         // Every task should start with a good sleep.
+         // Maybe not needed when waking up.
+         if (settings.tao_dispatcher_sleep_ns > 0) {
+-            struct timespec t_sleep, t_slept;
+-            t_sleep.tv_sec = 0;
+-            t_sleep.tv_nsec = settings.tao_dispatcher_sleep_ns;
+-            nanosleep(&t_sleep, &t_slept);
++            struct timespec t_slept;
++            my_nanosleep(settings.tao_dispatcher_sleep_ns, &t_slept, &slept_consecutive);
+         }
+ 
+         slow_request *req_to_dispatch = NULL;
+@@ -244,6 +244,7 @@ void *slow_thread_dispatcher(void* queue_index) {
+         }
+ 
+         if (req_to_dispatch) {
++            slept_consecutive = false;
+             // Detach the request from the queue
+             req_to_dispatch->next_request = NULL;
+ 
+@@ -341,6 +342,7 @@ item *add_item_to_cache(slow_request *req, int nbytes, char *payload) {
+ 
+ void *handle_slow_request(void *arg) {
+     uint32_t ret = 0;
++    bool slept_consecutive = false;
+ 
+     bind_thread_to_next_cpu();
+ 
+@@ -357,10 +359,8 @@ void *handle_slow_request(void *arg) {
+             sem_wait(&slow_req_sems[idx_queue]);
+         } else {
+             if (settings.tao_slow_sleep_ns > 0) {
+-                struct timespec t_sleep, t_slept;
+-                t_sleep.tv_sec = 0;
+-                t_sleep.tv_nsec = settings.tao_slow_sleep_ns;
+-                nanosleep(&t_sleep, &t_slept);
++                struct timespec t_slept;
++                my_nanosleep(settings.tao_slow_sleep_ns, &t_slept, &slept_consecutive);
+             }
+         }
+         // Holds connection information and key
+@@ -376,6 +376,7 @@ void *handle_slow_request(void *arg) {
+ 
+         if (req != NULL)
+         {
++            slept_consecutive = false;
+             // Finalize detaching the request from the queue
+             req->next_request = NULL;
+ 
+diff --git a/memcached.c b/memcached.c
+index 87b6147..da29559 100644
+--- a/memcached.c
++++ b/memcached.c
+@@ -51,6 +51,7 @@
+ #include <assert.h>
+ #include <sysexits.h>
+ #include <stddef.h>
++#include <threads.h>
+ 
+ #ifdef HAVE_GETOPT_LONG
+ #include <getopt.h>
+@@ -351,6 +352,7 @@ static void settings_init(void) {
+     settings.tao_stats_sleep_ms = 5000;
+     settings.tao_slow_use_semaphore = 1;
+     settings.tao_pin_threads = 0;
++    settings.tao_smart_nanosleep = 0;
+ #ifdef MEMCACHED_DEBUG
+     settings.relaxed_privileges = false;
+ #endif
+@@ -8444,6 +8446,8 @@ static void usage(void) {
+             settings.tao_slow_use_semaphore);
+     printf("   - tao_pin_threads:     if non-zero, pin each thread to dedicated cpu core. (default: %d)\n",
+             settings.tao_pin_threads);
++    printf("   - tao_smart_nanosleep: if non-zero, use randomized nanosleep duration with exponential backoff. (default: %d)\n",
++            settings.tao_pin_threads);
+     verify_default("tail_repair_time", settings.tail_repair_time == TAIL_REPAIR_TIME_DEFAULT);
+     verify_default("lru_crawler_tocrawl", settings.lru_crawler_tocrawl == 0);
+     verify_default("idle_timeout", settings.idle_timeout == 0);
+@@ -9158,6 +9162,7 @@ int main (int argc, char **argv) {
+         TAO_STATS_SLEEP_MS,
+         TAO_SLOW_USE_SEMAPHORE,
+         TAO_PIN_THREADS,
++        TAO_SMART_NANOSLEEP,
+ #ifdef TLS
+         SSL_CERT,
+         SSL_KEY,
+@@ -9241,6 +9246,7 @@ int main (int argc, char **argv) {
+         [TAO_STATS_SLEEP_MS] = "tao_stats_sleep_ms",
+         [TAO_SLOW_USE_SEMAPHORE] = "tao_slow_use_semaphore",
+         [TAO_PIN_THREADS] = "tao_pin_threads",
++        [TAO_SMART_NANOSLEEP] = "tao_smart_nanosleep",
+ #ifdef TLS
+         [SSL_CERT] = "ssl_chain_cert",
+         [SSL_KEY] = "ssl_key",
+@@ -10167,6 +10173,16 @@ int main (int argc, char **argv) {
+                     return 1;
+                 }
+                 break;
++            case TAO_SMART_NANOSLEEP:
++                if (subopts_value == NULL) {
++                    fprintf(stderr, "Missing tao_smart_nanosleep argument\n");
++                    return 1;
++                }
++                if (!safe_strtoul(subopts_value, &settings.tao_smart_nanosleep)) {
++                    fprintf(stderr, "could not parse argument to tao_smart_nanosleep\n");
++                    return 1;
++                }
++                break;
+             case TAO_DISPATCHER_SLEEP_NS:
+                 if (subopts_value == NULL) {
+                     fprintf(stderr, "Missing tao_dispatcher_sleep_ns argument\n");
+@@ -10352,6 +10368,7 @@ int main (int argc, char **argv) {
+     fprintf(stdout, "Stats threads sleep time = %u ms.\n", settings.tao_stats_sleep_ms);
+     fprintf(stdout, "Slow threads use semaphore = %u.\n", settings.tao_slow_use_semaphore);
+     fprintf(stdout, "Pin threads to dedicated cores = %u.\n", settings.tao_pin_threads);
++    fprintf(stdout, "Smart nanosleep = %u.\n", settings.tao_smart_nanosleep);
+ 
+     if (settings.tao_pin_threads) {
+         init_cpu_list();
+@@ -10868,3 +10885,32 @@ int main (int argc, char **argv) {
+ 
+     return retval;
+ }
++
++void my_nanosleep(const uint32_t target_ns, struct timespec *remaining, bool *consecutive) {
++    static thread_local long initial_ns = 0;
++    static thread_local long curr_ns = 0;
++    static const long max_sleep_ns = 250000;
++    long min_ns = target_ns / 2, max_ns = target_ns * 2;
++    struct timespec sleep_ns = {
++        .tv_sec = 0,
++        .tv_nsec = target_ns
++    };
++    if (settings.tao_smart_nanosleep == 0) {
++        nanosleep(&sleep_ns, remaining);
++        return;
++    }
++    if (initial_ns == 0) {
++        initial_ns = min_ns + (rand() % (max_ns - min_ns + 1));
++    }
++    if (!(*consecutive)) {
++        curr_ns = initial_ns;
++    } else {
++        curr_ns = curr_ns * 2;
++        if (curr_ns > max_sleep_ns) {
++            curr_ns = max_sleep_ns;
++        }
++    }
++    sleep_ns.tv_nsec = curr_ns;
++    nanosleep(&sleep_ns, remaining);
++    *consecutive = true;
++}
+diff --git a/memcached.h b/memcached.h
+index db4835a..d1c7e98 100644
+--- a/memcached.h
++++ b/memcached.h
+@@ -468,6 +468,7 @@ struct settings {
+     uint32_t tao_stats_sleep_ms; /* Number of milliseconds to sleep on tao stats thread. */
+     uint32_t tao_slow_use_semaphore; /* Use semaphore instad of nanosleep to wait for slow requests. */
+     uint32_t tao_pin_threads;
++    uint32_t tao_smart_nanosleep; /* Randomized nanosleep duration and exponential backoff */
+ #ifdef EXTSTORE
+     unsigned int ext_io_threadcount; /* number of IO threads to run. */
+     unsigned int ext_page_size; /* size in megabytes of storage pages. */
+@@ -889,6 +890,8 @@ void slab_stats_aggregate(struct thread_stats *stats, struct slab_stats *out);
+ void append_stat(const char *name, ADD_STAT add_stats, conn *c,
+                  const char *fmt, ...);
+ 
++void my_nanosleep(const uint32_t target_ns, struct timespec *remaining, bool *consecutive);
++
+ enum store_item_type store_item(item *item, int comm, conn *c);
+ 
+ #if HAVE_DROP_PRIVILEGES
