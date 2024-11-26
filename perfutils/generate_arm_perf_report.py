@@ -107,6 +107,21 @@ def concat_series(metrics, shortest_length_series):
     return pd.concat(series, axis=1).reset_index()
 
 
+def get_num_sockets(group):
+    socket_series = group.socket
+    return len(socket_series.reset_index().groupby("socket").index)
+
+
+def get_duration_series(group):
+    ts_series = group.timestamp
+    num_sockets = get_num_sockets(group)
+    prev_ts_series = pd.Series(
+        [0.0] * num_sockets + list(ts_series.iloc[:-num_sockets])
+    )
+    prev_ts_series.index = ts_series.index
+    return ts_series.sub(prev_ts_series)
+
+
 @skip_if_missing
 def timestamp(grouped_df):
     ts_series = grouped_df.get_group("cycles").timestamp
@@ -130,13 +145,23 @@ def duration(grouped_df):
 @skip_if_missing
 def mips(grouped_df):
     inst_series = grouped_df.get_group("instructions").counter_value
-    return {"name": "MIPS", "series": inst_series, "prefix": 10**-6}
+    duration_series = get_duration_series(grouped_df.get_group("instructions"))
+    return {
+        "name": "MIPS",
+        "series": inst_series.astype("float").div(duration_series),
+        "prefix": 10**-6,
+    }
 
 
 @skip_if_missing
 def muopps(grouped_df):
     inst_series = grouped_df.get_group("r3A").counter_value
-    return {"name": "MuOPPS", "series": inst_series, "prefix": 10**-6}
+    duration_series = get_duration_series(grouped_df.get_group("r3A"))
+    return {
+        "name": "MuOPPS",
+        "series": inst_series.astype("float").div(duration_series),
+        "prefix": 10**-6,
+    }
 
 
 @skip_if_missing
