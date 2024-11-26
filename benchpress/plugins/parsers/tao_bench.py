@@ -11,7 +11,7 @@ TAO_BENCH_BASELINE = BASELINES["taobench"]
 
 
 class TaoBenchServerSnapshot:
-    KEYS = ["fast_qps", "hit_rate", "slow_qps", "slow_qps_oom"]
+    KEYS = ["fast_qps", "hit_rate", "slow_qps", "slow_qps_oom", "nanosleeps_per_sec"]
 
     def __init__(self, line):
         if line.strip().startswith("OUT OF MEMORY"):
@@ -85,7 +85,9 @@ class TaoBenchParser(Parser):
 
     def generate_server_csv(self, server_snapshots):
         lines = []
-        lines.append("seq,total_qps,fast_qps,hit_rate,slow_qps,is_oom,slow_qps_oom")
+        lines.append(
+            "seq,total_qps,fast_qps,hit_rate,slow_qps,is_oom,slow_qps_oom,nanosleeps_per_sec\n"
+        )
 
         seq = 0
         for snapshot in server_snapshots:
@@ -93,10 +95,11 @@ class TaoBenchParser(Parser):
             slow_qps = snapshot.get("slow_qps")
             is_oom = 1 if snapshot.is_oom else 0
             total_qps = fast_qps + slow_qps
+            nanosleeps_per_sec = snapshot.get("nanosleeps_per_sec")
             lines.append(
                 f"{seq},{total_qps},{fast_qps},"
                 + f"{snapshot.get('hit_rate')},{slow_qps},{is_oom},"
-                + f"{snapshot.get('slow_qps_oom')}\n"
+                + f"{snapshot.get('slow_qps_oom')},{nanosleeps_per_sec}\n"
             )
             seq += 1
 

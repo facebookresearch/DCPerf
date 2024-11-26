@@ -109,6 +109,7 @@ patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0002-tao_bench_memcached_oom_handling.diff
 patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0003-tao_bench_thread_pool_naming.diff"
 patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0006-tao_bench_slow_thread_use_semaphore.diff"
 patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0007-tao_bench_smart_nanosleep.diff"
+patch -p1 -i "${BPKGS_TAO_BENCH_ROOT}/0008-tao_bench_count_nanosleeps.diff"
 
 # Find the path to folly and fmt
 FOLLY_INSTALLED_PATH="${FOLLY_BUILD_ROOT}/installed/folly"

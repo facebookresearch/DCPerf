@@ -1,0 +1,83 @@
+diff --git a/memcached.c b/memcached.c
+index da29559..b7ab659 100644
+--- a/memcached.c
++++ b/memcached.c
+@@ -150,6 +150,8 @@ struct stats_state stats_state;
+ struct settings settings;
+ time_t process_started;     /* when the process was started */
+ conn **conns;
++#define NS_COUNTERS_SIZE 1024
++uint64_t nanosleep_counters[NS_COUNTERS_SIZE];
+ 
+ struct slab_rebalance slab_rebal;
+ volatile int slab_rebalance_signal;
+@@ -400,13 +402,21 @@ static void compute_tao_stats_snapshot(bool print_stats) {
+         uint32_t num_pending_slows = thread_stats.tao_slow_requests -
+             get_slow_reqs_count() - thread_stats.tao_slow_responses;
+ 
++        static uint64_t prev_total_ns = 0;
++        uint64_t total_ns = 0;
++        for (int i = 0; i < NS_COUNTERS_SIZE; ++i) {
++            total_ns += nanosleep_counters[i];
++        }
++        double ns_per_sec = 1.0 * (total_ns - prev_total_ns) / (double)elapsed_time;
++        prev_total_ns = total_ns;
++
+         if (print_stats) {
+             fprintf(stdout, "fast_qps = %.1lf, hit_rate = %.3lf, slow_qps = %.1lf, wh_qps = %.1lf, curr_it = %.2lfM, slow_qps_oom =  %.1lf, ",
+                 fast_qps, fast_hit_rate, slow_qps, wh_qps, crnt_items, slow_qps_oom);
+ 
+-            fprintf(stdout, "crnt_conn = %lu, slow_th = %u, slow_reqs = %u, slow_resp = %u\n",
++            fprintf(stdout, "crnt_conn = %lu, slow_th = %u, slow_reqs = %u, slow_resp = %u, nanosleeps_per_sec = %.2lf\n",
+                 stats_state.curr_conns, get_slow_thread_count(), get_slow_reqs_count(),
+-                num_pending_slows);
++                num_pending_slows, ns_per_sec);
+         }
+     }
+ }
+@@ -7339,6 +7349,7 @@ static void drive_machine(conn *c) {
+     int nreqs = settings.reqs_per_event;
+     int res;
+     const char *str;
++    bool slept_consecutive = false;
+ #ifdef HAVE_ACCEPT4
+     static int  use_accept4 = 1;
+ #else
+@@ -7642,13 +7653,12 @@ static void drive_machine(conn *c) {
+             // Wait a bit, maybe the response arrives and we don't
+             // go to connection close state
+             if (settings.tao_worker_sleep_ns > 0) {
+-                struct timespec t_sleep, t_slept;
+-                t_sleep.tv_sec = 0;
+-                t_sleep.tv_nsec = settings.tao_worker_sleep_ns;
+-                nanosleep(&t_sleep, &t_slept);
++                struct timespec t_slept;
++                my_nanosleep(settings.tao_worker_sleep_ns, &t_slept, &slept_consecutive);
+             }
+ 
+             if (c->slow_response_first != NULL) {
++                slept_consecutive = false;
+                 pthread_mutex_lock(&c->lock_response_queue);
+                 if (c->slow_response_first != NULL) {
+                     // Fetch the first response in the queue
+@@ -10889,12 +10899,20 @@ int main (int argc, char **argv) {
+ void my_nanosleep(const uint32_t target_ns, struct timespec *remaining, bool *consecutive) {
+     static thread_local long initial_ns = 0;
+     static thread_local long curr_ns = 0;
++    static thread_local pid_t tid = 0;
+     static const long max_sleep_ns = 250000;
+     long min_ns = target_ns / 2, max_ns = target_ns * 2;
+     struct timespec sleep_ns = {
+         .tv_sec = 0,
+         .tv_nsec = target_ns
+     };
++
++    // count per-thread nanosleep
++    if (tid == 0) {
++        tid = gettid();
++    }
++    nanosleep_counters[tid % NS_COUNTERS_SIZE]++;
++
+     if (settings.tao_smart_nanosleep == 0) {
+         nanosleep(&sleep_ns, remaining);
+         return;
