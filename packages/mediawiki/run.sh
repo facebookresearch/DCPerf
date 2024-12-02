@@ -37,7 +37,7 @@ Any other options that oss-performance perf.php script could accept can be
 passed in as extra arguments appending two hyphens '--' followed by the
 arguments. Example:
 
-${0##*/} -- --mediawiki --wrk-duration 600 --exec-after-benchmark time
+${0##*/} -- --mediawiki --wrk-duration 10m --exec-after-benchmark time
 
 EOF
 }

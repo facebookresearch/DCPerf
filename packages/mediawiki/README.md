@@ -121,7 +121,8 @@ We provide the following optional parameters for `oss_performance_mediawiki_mlp`
   - `client_threads`: The number of threads that the load generator should spawn.
   Can be used for manually specifying how many wrk/siege client threads to launch if you
   don't want the benchmark to automatically scale.
-  - `duration`: The duration of the benchmarking phase, in seconds. Default is 600.
+  - `duration`: The duration of the benchmarking phase. This parameter can accept a time
+  unit such as `h`, `m` or `s`. Default is `10m`.
   - `timeout`: Time-out limit for the load generator in the benchmarking phase. This
   parameter can accept time units. Default is `11m`.
 
@@ -150,7 +151,7 @@ Mediawiki benchmark performance.
     "-c0",
     "--",
     "--mediawiki-mlp",
-    "--client-duration=600",
+    "--client-duration=10m",
     "--client-timeout=11m",
     "--run-as-root",
     "--i-am-not-benchmarking",

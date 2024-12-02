@@ -20,7 +20,7 @@
   vars:
     - 'load_generator=wrk'
     - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
-    - 'duration=600'
+    - 'duration=10m'
     - 'timeout=11m'
     - 'extra_args='
 
@@ -46,7 +46,7 @@
     - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
     - 'scale_out=0'
     - 'client_threads=0'
-    - 'duration=600'
+    - 'duration=10m'
     - 'timeout=11m'
     - 'extra_args='
 
@@ -73,7 +73,7 @@
     - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
     - 'scale_out=0'
     - 'client_threads=0'
-    - 'duration=600'
+    - 'duration=10m'
     - 'timeout=11m'
     - 'extra_args='
 
@@ -99,7 +99,7 @@
     - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
     - 'scale_out=0'
     - 'client_threads=0'
-    - 'duration=600'
+    - 'duration=10m'
     - 'timeout=11m'
     - 'extra_args='
 
