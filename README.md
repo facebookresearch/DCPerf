@@ -244,7 +244,7 @@ Enable EPEL and PowerTools/CRB repos:
 ```bash
 dnf install epel-release
 dnf install 'dnf-command(config-manager)'
-dnf config-manager --set-enabled CRB
+dnf config-manager --set-enabled crb
 ```
 
 #### On Ubuntu 22.04
