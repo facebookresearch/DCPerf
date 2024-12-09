@@ -117,7 +117,7 @@ def list2ranges(core_list):
     return range_str
 
 
-def gen_client_instructions(args):
+def gen_client_instructions(args, to_file=True):
     instruction_text = "Please run the following commands **simultaneously** on all the client machines.\n"
     clients = [""] * args.num_clients
     # If '--client-cores' not specified, assume the client machine has
@@ -147,7 +147,7 @@ def gen_client_instructions(args):
             client_args = {
                 "server_hostname": server_hostname,
                 "server_memsize": args.memsize / args.num_servers,
-                "warmup_time": get_warmup_time(args),
+                "warmup_time": args_utils.get_warmup_time(args),
                 "test_time": args.test_time,
                 "server_port_number": args.port_number_start + i,
             }
@@ -179,7 +179,7 @@ def gen_client_instructions(args):
             client_args = {
                 "server_hostname": server_hostname,
                 "server_memsize": args.memsize / args.num_servers,
-                "warmup_time": get_warmup_time(args),
+                "warmup_time": args_utils.get_warmup_time(args),
                 "test_time": args.test_time,
                 "server_port_number": args.port_number_start + s,
             }
@@ -209,8 +209,11 @@ def gen_client_instructions(args):
         instruction_text += f"Client {i+1}:\n"
         instruction_text += clients[i] + "\n"
 
-    with open(os.path.join(TAO_BENCH_BM_DIR, "client_instructions.txt"), "w") as f:
-        f.write(instruction_text)
+    if to_file:
+        with open(os.path.join(TAO_BENCH_BM_DIR, "client_instructions.txt"), "w") as f:
+            f.write(instruction_text)
+    else:
+        return instruction_text
 
 
 def distribute_cores(n_parts):
@@ -301,7 +304,9 @@ def run_server(args):
         procs.append(p)
     # wait for servers to finish - add extra minute to make sure
     # post-processing will finish
-    timeout = get_warmup_time(args) + args.test_time + args.timeout_buffer + 60
+    timeout = (
+        args_utils.get_warmup_time(args) + args.test_time + args.timeout_buffer + 60
+    )
     for p in procs:
         try:
             (out, err) = p.communicate(timeout=timeout)
@@ -346,37 +351,6 @@ def run_server(args):
     print(json.dumps(overall, indent=4))
 
 
-def get_proc_meminfo():
-    results = {}
-    with open("/proc/meminfo", "r") as f:
-        for line in f:
-            key, value = line.split(":", maxsplit=1)
-            vals = value.strip().split(" ", maxsplit=1)
-            numeric = int(vals[0])
-            if len(vals) > 1 and vals[1].lower() == "kb":
-                numeric *= 1024
-            results[key] = numeric
-    return results
-
-
-def get_system_memsize_gb():
-    meminfo = get_proc_meminfo()
-    return meminfo["MemTotal"] / (1024**3)
-
-
-def get_default_num_servers(max_cores_per_inst=72):
-    ncores = len(os.sched_getaffinity(0))
-    return (ncores + max_cores_per_inst - 1) // max_cores_per_inst
-
-
-def get_warmup_time(args, secs_per_gb=5, min_time=1200):
-    if args.warmup_time > 0:
-        return args.warmup_time
-    else:
-        time_to_fill = int(secs_per_gb * args.memsize)
-        return max(time_to_fill, min_time)
-
-
 def init_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -387,7 +361,7 @@ def init_parser():
     parser.add_argument(
         "--num-servers",
         type=int,
-        default=get_default_num_servers(),
+        default=args_utils.get_default_num_servers(),
         help="number of TaoBench server instances",
     )
     parser.add_argument(
@@ -472,9 +446,9 @@ if __name__ == "__main__":
     parser = init_parser()
     args = parser.parse_args()
     if args.num_servers == 0:
-        args.num_servers = get_default_num_servers()
+        args.num_servers = args_utils.get_default_num_servers()
     if args.memsize == 0:
-        args.memsize = get_system_memsize_gb()
+        args.memsize = args_utils.get_system_memsize_gb()
     if args.warmup_time == 0:
-        args.warmup_time = get_warmup_time(args)
+        args.warmup_time = args_utils.get_warmup_time(args)
     args.func(args)

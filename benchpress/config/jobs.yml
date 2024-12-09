@@ -554,7 +554,6 @@
     - '--memsize={memsize}'
     - '--fast-threads-ratio={fast_threads_ratio}'
     - '--slow-to-fast-ratio={slow_to_fast_ratio}'
-    - '--port-number-start=11211'
     - '--warmup-time={warmup_time}'
     - '--test-time={test_time}'
     - '--num-clients={num_clients}'
@@ -562,6 +561,8 @@
     - '--bind-cpu={bind_cpu}'
     - '--bind-mem={bind_mem}'
     - '--stats-interval={stats_interval}'
+    - '--port-number-start={port_number_start}'
+    - '--disable-tls={disable_tls}'
   vars:
     - 'num_servers=0'
     - 'memsize=0'
@@ -574,6 +575,8 @@
     - 'bind_cpu=1'
     - 'bind_mem=1'
     - 'stats_interval=5000'
+    - 'port_number_start=11211'
+    - 'disable_tls=0'
   hooks:
     - hook: copymove
       options:

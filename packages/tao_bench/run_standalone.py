@@ -11,47 +11,67 @@ import subprocess
 import threading
 import time
 
-import run_autoscale
+import args_utils
+
+from run_autoscale import gen_client_instructions
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "packages", "tao_bench")
 TAO_BENCH_BM_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
 
 
+# User setting either server_port_number or port_number_start will result in the same port number between client and server
+class SyncPortAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        if self.dest == "server_port_number":
+            namespace.port_number_start = values
+        elif self.dest == "port_number_start":
+            namespace.server_port_number = values
+
+
+# User setting either server_port_number or port_number_start will result in the same port number between client and server
+class SyncMemsizeAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        if self.dest == "server_memsize":
+            namespace.memsize = values
+        elif self.dest == "memsize":
+            namespace.server_memsize = values
+
+
+SERVER_CMD_OPTIONS = []  # To be initialized in init_parser()
+
+
 def init_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--memsize",
-        type=float,
-        default=run_autoscale.get_system_memsize_gb(),
-        help="memory size in GB",
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        conflict_handler="resolve",
     )
+    global SERVER_CMD_OPTIONS
+    SERVER_CMD_OPTIONS = args_utils.add_common_server_args(parser)
+    args_utils.add_common_client_args(parser)
+
+    # Override the default values for server-side arguments
+    parser.add_argument("--server-hostname", type=str, help="server hostname")
+    parser.add_argument(
+        "--server-memsize",
+        type=float,
+        help="server memory size, e.g. 64, 96",
+        action=SyncMemsizeAction,
+    )
+
+    for action in parser._actions:
+        if action.dest == "server_port_number":
+            action.__class__ = SyncPortAction
+        elif action.dest == "memsize":
+            action.__class__ = SyncMemsizeAction
+
     parser.add_argument(
         "--num-servers",
         type=int,
-        default=run_autoscale.get_default_num_servers(),
+        default=args_utils.get_default_num_servers(),
         help="number of TaoBench server instances",
-    )
-    parser.add_argument(
-        "--fast-threads-ratio",
-        type=float,
-        default=0.75,
-        help="ratio of # fast threads to # logical cores",
-    )
-    parser.add_argument(
-        "--slow-to-fast-ratio",
-        type=float,
-        default=3,
-        help="ratio of # fast threads to # slow threads",
-    )
-    parser.add_argument(
-        "--warmup-time",
-        type=int,
-        default=0,
-        help="warmup time in seconds, default is max(5 * memsize, 1200)",
-    )
-    parser.add_argument(
-        "--test-time", type=int, default=720, help="test time in seconds"
     )
     parser.add_argument(
         "--num-clients",
@@ -60,18 +80,11 @@ def init_parser():
         help="number of clients to use. This parameter is used for generating client side commands and instructions.",
     )
     parser.add_argument(
-        "--clients-per-thread",
-        type=int,
-        default=0,
-        help="number of client connections per thread on the client side. "
-        + "This parameater is also used for generating client side commands and instructions. "
-        + "Can override the '--conns-per-server-core' parameter.",
-    )
-    parser.add_argument(
         "--port-number-start",
         type=int,
         default=11211,
         help="starting port number of the servers",
+        action=SyncPortAction,
     )
     parser.add_argument(
         "--bind-cpu",
@@ -89,19 +102,36 @@ def init_parser():
         + "Please set this to 0 if you would like to test hetereogeneous memory systems such as CXL.",
     )
     parser.add_argument(
-        "--stats-interval",
+        "--clients-per-thread",
         type=int,
-        default=5000,
-        help="interval of stats reporting in ms",
+        default=args_utils.sanitize_clients_per_thread(380),
+        help="Number of clients per thread",
     )
     parser.add_argument(
-        "--disable-tls", type=int, default=0, help="set to non-zero to disable TLS"
+        "--client-cores",
+        type=int,
+        default=0,
+        help="number of logical CPU cores on the client machine. "
+        + "If not specified, we will assume the client machine has the same number of cores as this server machine. "
+        + "This parameter is used for suggesting clients_per_thread parameter on the client side in accompany with "
+        + "'--conns-per-server-core'.",
     )
-    args = parser.parse_args()
-    return args
-
-
-args = init_parser()
+    parser.add_argument(
+        "--conns-per-server-core",
+        type=int,
+        default=0,
+        help="number of client connections per server core to impose. When set to a positive number"
+        + "this is used for calculating clients_per_thread parameter to be used on the client side. "
+        + "If `--clients-per-thread` is set to a positive number, this parameter will be ignored. ",
+    )
+    parser.add_argument(
+        "--client-wait-after-warmup",
+        type=int,
+        default=-1,
+        help="time in seconds for the client to wait after warmup before starting the test. "
+        + " If set to 0 or positive, this will be used in the client instructions.",
+    )
+    return parser
 
 
 def exec_cmd(cmd):
@@ -117,42 +147,58 @@ def exec_cmd(cmd):
 
 
 def launch_server():
-    cmd = f"{TAO_BENCH_DIR}/run_autoscale.py --real --server-hostname=localhost \
-        --clients-per-thread={args.clients_per_thread} --num-servers={args.num_servers} \
-        --fast-threads-ratio={args.fast_threads_ratio} --slow-to-fast-ratio={args.slow_to_fast_ratio}\
-        --warmup-time={args.warmup_time} --test-time={args.test_time} \
-        --port-number-start={args.port_number_start} --bind-cpu={args.bind_cpu} \
-        --bind-mem {args.bind_mem} --memsize={args.memsize} --num-clients={args.num_clients} \
-        --interface-name=lo --stats-interval={args.stats_interval} \
-        --client-wait-after-warmup=0 --timeout-buffer=0 --disable-tls={args.disable_tls}"
-    stdout, stderr, exitcode = exec_cmd(cmd)
+    script_args = {
+        optstr: getattr(args, argkey) for optstr, argkey in SERVER_CMD_OPTIONS
+    }
+    script_args["--interface-name"] = "lo"
+    script_args["--client-wait-after-warmup"] = 0
+    script_args["--timeout-buffer"] = 0
+    cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
+
+    for argname, argval in script_args.items():
+        if isinstance(argval, bool):
+            if argval:
+                cmd.append(argname)
+        elif argval is not None:
+            cmd.extend([argname, str(argval)])
+
+    cmd_str = " ".join(cmd)
+    stdout, stderr, exitcode = exec_cmd(cmd_str)
     print(stdout)
-
-
-t_server = threading.Thread(target=launch_server, args=())
-t_server.start()
-time.sleep(2)
-
-with open(os.path.join(TAO_BENCH_BM_DIR, "client_instructions.txt"), "r") as f:
-    lines = f.readlines()
-clients = []
-for line in lines:
-    if "benchpress_cli" in line:
-        clients.append(line.strip())
 
 
 def launch_client(cmd):
     stdout, stderr, exitcode = exec_cmd(cmd)
 
 
-t_clients = []
-for client in clients:
-    cmd = str(BENCHPRESS_ROOT) + client[1:]
-    tc = threading.Thread(target=launch_client, args=(cmd,))
-    tc.start()
-    t_clients.append(tc)
+if __name__ == "__main__":
+    parser = init_parser()
+    args = parser.parse_args()
+    if args.num_servers == 0:
+        args.num_servers = args_utils.get_default_num_servers()
+    if args.memsize == 0:
+        args.memsize = args_utils.get_system_memsize_gb()
+    if args.warmup_time == 0:
+        args.warmup_time = args_utils.get_warmup_time(args)
+    args.server_memsize = args.memsize
 
-for thread in t_clients:
-    thread.join()
+    t_server = threading.Thread(target=launch_server, args=())
+    t_server.start()
 
-t_server.join()
+    cmds = gen_client_instructions(args, to_file=False)
+    clients = []
+    for cmd in cmds.split("\n"):
+        if "benchpress_cli" in cmd:
+            clients.append(cmd.strip())
+
+    t_clients = []
+    for client in clients:
+        cmd = str(BENCHPRESS_ROOT) + client[1:]
+        tc = threading.Thread(target=launch_client, args=(cmd,))
+        tc.start()
+        t_clients.append(tc)
+
+    for thread in t_clients:
+        thread.join()
+
+    t_server.join()

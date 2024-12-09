@@ -12,6 +12,37 @@ MAX_CLIENT_CONN = 32768
 MEM_USAGE_FACTOR = 0.75  # to prevent OOM
 
 
+def get_default_num_servers(max_cores_per_inst=72):
+    ncores = len(os.sched_getaffinity(0))
+    return (ncores + max_cores_per_inst - 1) // max_cores_per_inst
+
+
+def get_warmup_time(args, secs_per_gb=5, min_time=1200):
+    if args.warmup_time > 0:
+        return args.warmup_time
+    else:
+        time_to_fill = int(secs_per_gb * args.memsize)
+        return max(time_to_fill, min_time)
+
+
+def get_proc_meminfo():
+    results = {}
+    with open("/proc/meminfo", "r") as f:
+        for line in f:
+            key, value = line.split(":", maxsplit=1)
+            vals = value.strip().split(" ", maxsplit=1)
+            numeric = int(vals[0])
+            if len(vals) > 1 and vals[1].lower() == "kb":
+                numeric *= 1024
+            results[key] = numeric
+    return results
+
+
+def get_system_memsize_gb():
+    meminfo = get_proc_meminfo()
+    return meminfo["MemTotal"] / (1024**3)
+
+
 def sanitize_clients_per_thread(val=380):
     ncores = len(os.sched_getaffinity(0))
     max_clients_per_thread = MAX_CLIENT_CONN // ncores
@@ -111,7 +142,10 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
         "--test-time", type=int, default=360, help="test time in seconds"
     )
     server_parser.add_argument(
-        "--disable-tls", type=int, default=0, help="set to non-zero to disable TLS"
+        "--disable-tls",
+        type=int,
+        default=0,
+        help="set to non-zero to disable TLS",
     )
     server_parser.add_argument(
         "--smart-nanosleep",
@@ -186,7 +220,10 @@ def add_common_client_args(client_parser: ArgumentParser) -> List[Tuple[str, str
         "--test-time", type=int, default=360, help="test time in seconds"
     )
     client_parser.add_argument(
-        "--disable-tls", type=int, default=0, help="set to non-zero to disable TLS"
+        "--disable-tls",
+        type=int,
+        default=0,
+        help="set to non-zero to disable TLS",
     )
     client_parser.add_argument("--real", action="store_true", help="for real")
 
