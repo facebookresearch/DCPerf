@@ -15,6 +15,7 @@ from benchpress.lib.history import History
 from benchpress.lib.hook_factory import HookFactory
 from benchpress.lib.job import get_target_jobs
 from benchpress.lib.reporter_factory import ReporterFactory
+from benchpress.lib.util import verify_install
 
 from .command import BenchpressCommand
 
@@ -131,6 +132,9 @@ class RunCommand(BenchpressCommand):
                 exit(1)
 
         for job in jobs:
+            if not verify_install(job.install_script):
+                click.echo("Benchmark {} not installed".format(job.name))
+                continue
             click.echo('Running "{}": {}'.format(job.name, job.description))
 
             if args.dry_run:
