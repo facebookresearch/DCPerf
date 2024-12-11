@@ -117,9 +117,9 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
    <td>multi-thread (locks, mutex, etc.)</td>
   </tr>
   <tr>
-   <td> </td>
-   <td> </td>
-   <td></td>
+   <td>ProtocolBench </td>
+   <td>evaluates performance of various thrift RPC protocol operations</td>
+   <td>single_core, all_core</td>
   </tr>
 </table>
 

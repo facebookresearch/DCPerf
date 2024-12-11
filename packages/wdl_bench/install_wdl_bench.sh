@@ -16,7 +16,7 @@ declare -A REPOS=(
 
 declare -A TAGS=(
     ['folly']='v2024.08.12.00'
-    ['fbthrift']='v2024.08.12.00'
+    ['fbthrift']='v2024.12.09.00'
     ['lzbench']='d138844ea56b36ff1c1c43b259c866069deb64ad'
     ['openssl']='openssl-3.3.1'
 )
@@ -109,12 +109,10 @@ build_fbthrift()
     pushd "${WDL_SOURCE}"
     clone "$lib" || echo "Failed to clone $lib"
     cd "$lib" || exit
-    git apply "${BPKGS_WDL_ROOT}/0002-fbthrift.patch"
 
     sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
 
     python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --scratch-path "${WDL_BUILD}"
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages test fbthrift || true
 
     popd || exit
 }
@@ -160,7 +158,7 @@ build_openssl()
 pushd "${WDL_ROOT}"
 
 build_folly
-#build_fbthrift
+build_fbthrift
 build_lzbench
 build_openssl
 
@@ -172,9 +170,9 @@ for benchmark in $folly_benchmark_list; do
   cp "$WDL_BUILD/build/folly/$benchmark" "$WDL_ROOT/$benchmark"
 done
 
-#for benchmark in $fbthrift_benchmark_list; do
-#  cp "$WDL_BUILD/build/fbthrift/$benchmark" "$WDL_ROOT/$benchmark"
-#done
+for benchmark in $fbthrift_benchmark_list; do
+  cp "$WDL_BUILD/build/fbthrift/bin/$benchmark" "$WDL_ROOT/$benchmark"
+done
 
 
 cp "${BPKGS_WDL_ROOT}/run.sh" ./
