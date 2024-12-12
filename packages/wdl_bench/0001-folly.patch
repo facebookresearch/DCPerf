@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index f23670dcc..82ef57242 100644
+index bc99ce33b..8723c2059 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -552,8 +552,8 @@ install(
+@@ -560,8 +560,8 @@ install(
    COMPONENT dev
  )
  
@@ -13,57 +13,57 @@ index f23670dcc..82ef57242 100644
  option(BUILD_BROKEN_TESTS "If enabled, compile tests that are known to be broken." OFF)
  option(BUILD_HANGING_TESTS "If enabled, compile tests that are known to hang." OFF)
  option(BUILD_SLOW_TESTS "If enabled, compile tests that take a while to run in debug mode." OFF)
-@@ -648,10 +648,10 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-       TEST simd_any_of_test SOURCES SimdAnyOfTest.cpp
-       TEST unroll_utils_test SOURCES UnrollUtilsTest.cpp
+@@ -658,10 +658,10 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+       TEST algorithm_simd_detail_simd_traits_test SOURCES TraitsTest.cpp
+       TEST algorithm_simd_detail_unroll_utils_test SOURCES UnrollUtilsTest.cpp
  
 -    DIRECTORY algorithm/simd/test/
--      TEST find_fixed_test SOURCES FindFixedTest.cpp
--      TEST movemask_test SOURCES MovemaskTest.cpp
--      TEST simd_for_each_test SOURCES SimdForEachTest.cpp
+-      TEST algorithm_simd_contains_test SOURCES ContainsTest.cpp
+-      TEST algorithm_simd_find_fixed_test SOURCES FindFixedTest.cpp
+-      TEST algorithm_simd_movemask_test SOURCES MovemaskTest.cpp
 +    #DIRECTORY algorithm/simd/test/
-+      #TEST find_fixed_test SOURCES FindFixedTest.cpp
-+      #TEST movemask_test SOURCES MovemaskTest.cpp
-+      #TEST simd_for_each_test SOURCES SimdForEachTest.cpp
++      #TEST algorithm_simd_contains_test SOURCES ContainsTest.cpp
++      #TEST algorithm_simd_find_fixed_test SOURCES FindFixedTest.cpp
++      #TEST algorithm_simd_movemask_test SOURCES MovemaskTest.cpp
  
      DIRECTORY chrono/test/
        TEST chrono_conv_test WINDOWS_DISABLED
-@@ -670,6 +670,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-       TEST access_test SOURCES AccessTest.cpp
-       TEST array_test SOURCES ArrayTest.cpp
-       BENCHMARK bit_iterator_benchmark SOURCES BitIteratorBench.cpp
+@@ -681,6 +681,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+     DIRECTORY container/test/
+       TEST container_access_test SOURCES AccessTest.cpp
+       TEST container_array_test SOURCES ArrayTest.cpp
 +      BENCHMARK hash_maps_bench SOURCES HashMapsBench.cpp
-       TEST bit_iterator_test SOURCES BitIteratorTest.cpp
-       TEST enumerate_test SOURCES EnumerateTest.cpp
-       BENCHMARK evicting_cache_map_benchmark SOURCES EvictingCacheMapBench.cpp
-@@ -876,6 +877,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+       BENCHMARK container_bit_iterator_bench SOURCES BitIteratorBench.cpp
+       TEST container_bit_iterator_test SOURCES BitIteratorTest.cpp
+       TEST container_enumerate_test SOURCES EnumerateTest.cpp
+@@ -900,6 +901,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
      DIRECTORY io/test/
-       TEST fs_util_test SOURCES FsUtilTest.cpp
-       TEST iobuf_test WINDOWS_DISABLED SOURCES IOBufTest.cpp
+       TEST io_fs_util_test SOURCES FsUtilTest.cpp
+       TEST io_iobuf_test WINDOWS_DISABLED SOURCES IOBufTest.cpp
 +      BENCHMARK iobuf_benchmark WINDOWS_DISABLED SOURCES IOBufBenchmark.cpp
-       TEST iobuf_cursor_test SOURCES IOBufCursorTest.cpp
-       TEST iobuf_queue_test SOURCES IOBufQueueTest.cpp
-       TEST record_io_test WINDOWS_DISABLED SOURCES RecordIOTest.cpp
-@@ -909,6 +911,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-           # The async signal handler is not supported on Windows.
-           #AsyncSignalHandlerTest.cpp
-       TEST async_timeout_test SOURCES AsyncTimeoutTest.cpp
+       TEST io_iobuf_cursor_test SOURCES IOBufCursorTest.cpp
+       TEST io_iobuf_queue_test SOURCES IOBufQueueTest.cpp
+       TEST io_record_io_test WINDOWS_DISABLED SOURCES RecordIOTest.cpp
+@@ -932,6 +934,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+       # TODO: Refactor EventHandlerTest to not use eventfd so it can work on Mac OS X.
+       #TEST io_async_event_handler_test WINDOWS_DISABLED SOURCES EventHandlerTest.cpp
+       TEST io_async_async_timeout_test SOURCES AsyncTimeoutTest.cpp
 +      BENCHMARK event_base_benchmark SOURCES EventBaseBenchmark.cpp
-       TEST AsyncUDPSocketTest APPLE_DISABLED WINDOWS_DISABLED
+       TEST io_async_async_udp_socket_test APPLE_DISABLED WINDOWS_DISABLED
          SOURCES AsyncUDPSocketTest.cpp
-       TEST DelayedDestructionTest SOURCES DelayedDestructionTest.cpp
-@@ -1022,6 +1025,10 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-       TEST atomic_struct_test SOURCES AtomicStructTest.cpp
-       TEST small_locks_test SOURCES SmallLocksTest.cpp
-       TEST atomic_util_test SOURCES AtomicUtilTest.cpp
+       TEST io_async_delayed_destruction_test SOURCES DelayedDestructionTest.cpp
+@@ -1042,6 +1045,10 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+       TEST synchronization_semaphore_test WINDOWS_DISABLED
+         SOURCES SemaphoreTest.cpp
+       TEST synchronization_small_locks_test SOURCES SmallLocksTest.cpp
 +      BENCHMARK small_locks_benchmark SOURCES SmallLocksBenchmark.cpp
 +
 +    DIRECTORY test/function_benchmark/
 +      BENCHMARK function_benchmark SOURCES main.cpp benchmark_impl.cpp test_functions.cpp
  
-     DIRECTORY test/
-       TEST ahm_int_stress_test SOURCES AHMIntStressTest.cpp
-@@ -1085,6 +1092,8 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+     DIRECTORY synchronization/detail/test/
+       TEST synchronization_detail_hardware_test SOURCES HardwareTest.cpp
+@@ -1123,6 +1130,8 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
        TEST locks_test SOURCES SpinLockTest.cpp
        TEST math_test SOURCES MathTest.cpp
        TEST memcpy_test SOURCES MemcpyTest.cpp
@@ -72,7 +72,7 @@ index f23670dcc..82ef57242 100644
        TEST memory_idler_test SOURCES MemoryIdlerTest.cpp
        TEST memory_test WINDOWS_DISABLED
          SOURCES MemoryTest.cpp
-@@ -1110,6 +1119,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -1149,6 +1158,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
          SOURCES ProducerConsumerQueueTest.cpp
        BENCHMARK range_find_benchmark SOURCES RangeFindBenchmark.cpp
        TEST random_test SOURCES RandomTest.cpp
@@ -80,19 +80,19 @@ index f23670dcc..82ef57242 100644
        TEST range_test SOURCES RangeTest.cpp
        TEST replaceable_test WINDOWS_DISABLED SOURCES ReplaceableTest.cpp
        TEST scope_guard_test WINDOWS_DISABLED SOURCES ScopeGuardTest.cpp
-@@ -1158,6 +1168,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -1211,6 +1221,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
        DIRECTORY crypto/test/
-         TEST blake2xb_test SOURCES Blake2xbTest.cpp
-         TEST lt_hash_test SOURCES LtHashTest.cpp
+         TEST crypto_blake2xb_test SOURCES Blake2xbTest.cpp
+         TEST crypto_lt_hash_test SOURCES LtHashTest.cpp
 +        BENCHMARK lt_hash_benchmark SOURCES LtHashBenchmark.cpp
      )
    endif()
  
 diff --git a/folly/concurrency/test/ConcurrentHashMapBench.cpp b/folly/concurrency/test/ConcurrentHashMapBench.cpp
-index 25e37cf58..b74bf3f54 100644
+index ba7686036..199d4f8e3 100644
 --- a/folly/concurrency/test/ConcurrentHashMapBench.cpp
 +++ b/folly/concurrency/test/ConcurrentHashMapBench.cpp
-@@ -212,7 +212,7 @@ void benches() {
+@@ -213,7 +213,7 @@ void benches() {
              << std::endl;
    std::cout << "Test name                         Max time  Avg time  Min time"
              << std::endl;

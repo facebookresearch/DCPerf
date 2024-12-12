@@ -15,7 +15,7 @@ declare -A REPOS=(
 )
 
 declare -A TAGS=(
-    ['folly']='v2024.08.12.00'
+    ['folly']='v2024.12.09.00'
     ['fbthrift']='v2024.12.09.00'
     ['lzbench']='d138844ea56b36ff1c1c43b259c866069deb64ad'
     ['openssl']='openssl-3.3.1'
@@ -162,7 +162,7 @@ build_fbthrift
 build_lzbench
 build_openssl
 
-folly_benchmark_list="concurrent_hash_map_benchmark hash_benchmark hash_maps_bench digest_builder_benchmark fibers_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark event_base_benchmark iobuf_benchmark function_benchmark random_benchmark small_locks_benchmark"
+folly_benchmark_list="concurrency_concurrent_hash_map_bench hash_hash_benchmark hash_maps_bench stats_digest_builder_benchmark fibers_fibers_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark event_base_benchmark iobuf_benchmark function_benchmark random_benchmark small_locks_benchmark range_find_benchmark"
 
 fbthrift_benchmark_list="ProtocolBench"
 

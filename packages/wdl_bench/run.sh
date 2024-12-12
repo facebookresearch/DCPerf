@@ -29,11 +29,11 @@ Usage: ${0##*/} [-h] [--type single_core|all_core|multi_thread]
 EOF
 }
 
-folly_benchmark_list_single="hash_benchmark hash_maps_bench fibers_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark event_base_benchmark iobuf_benchmark function_benchmark random_benchmark ProtocolBench"
+folly_benchmark_list_single="hash_hash_benchmark hash_maps_bench fibers_fibers_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark event_base_benchmark iobuf_benchmark function_benchmark random_benchmark range_find_benchmark ProtocolBench"
 
-folly_benchmark_list_all="hash_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark random_benchmark ProtocolBench"
+folly_benchmark_list_all="hash_hash_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark random_benchmark ProtocolBench"
 
-folly_benchmark_list_multi="concurrent_hash_map_benchmark digest_builder_benchmark small_locks_benchmark"
+folly_benchmark_list_multi="concurrency_concurrent_hash_map_bench stats_digest_builder_benchmark small_locks_benchmark"
 
 run_list=""
 
