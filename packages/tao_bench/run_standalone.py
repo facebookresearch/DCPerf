@@ -181,6 +181,7 @@ if __name__ == "__main__":
     if args.warmup_time == 0:
         args.warmup_time = args_utils.get_warmup_time(args)
     args.server_memsize = args.memsize
+    args.server_hostname = "localhost"
 
     t_server = threading.Thread(target=launch_server, args=())
     t_server.start()
