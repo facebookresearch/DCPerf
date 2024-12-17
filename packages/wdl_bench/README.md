@@ -52,12 +52,12 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
    <td>catagories</td>
   </tr>
   <tr>
-   <td>concurrent_hash_map_benchmark</td>
+   <td>concurrency_concurrent_hash_map_benchmark</td>
    <td>multiple common operations of the folly::ConcurrentHashMap data structure</td>
    <td>multi-thread (locks, mutex, etc.)</td>
   </tr>
   <tr>
-   <td>digest_builder_benchmark </td>
+   <td>stats_digest_builder_benchmark </td>
    <td>append operations to a single DigestBuilder buffer from multiple threads</td>
    <td>multi-thread (locks, mutex, etc.)</td>
   </tr>
@@ -67,7 +67,7 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
    <td>single_core</td>
   </tr>
   <tr>
-   <td>fibers_benchmark </td>
+   <td>fibers_fibers_benchmark </td>
    <td> multiple common operations of FiberManager, which allows semi-parallel task execution on the same thread</td>
    <td>single_core</td>
   </tr>
@@ -77,7 +77,7 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
    <td>single_core</td>
   </tr>
   <tr>
-   <td>hash_benchmark </td>
+   <td>hash_hash_benchmark </td>
    <td>evaluates speed of three hash functions: SpookyHashV2, FNV64, and MurmurHash</td>
    <td>single_core</td>
   </tr>

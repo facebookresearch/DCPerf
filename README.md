@@ -115,7 +115,7 @@ specific [README](packages/wdl_bench/README.md).
   <tr>
    <td>WDLBench </td>
    <td>C++ </td>
-   <td>folly, zstd, openssl</td>
+   <td>folly, fbthrift, zstd, openssl</td>
    <td>Widely distributed functions across different workloads</td>
   </tr>
 </table>
