@@ -37,7 +37,10 @@ class CPUFreq(Monitor):
 
     def collector(self):
         while self.supported and self.run_freq_collector:
-            self.do_collect()
+            try:
+                self.do_collect()
+            except ValueError:
+                pass
             time.sleep(self.interval)
 
     def run(self):

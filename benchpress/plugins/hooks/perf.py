@@ -4,8 +4,10 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
 import os
 import sys
+import traceback
 
 from benchpress.lib.hook import Hook
 
@@ -50,6 +52,8 @@ AVAIL_MONITORS = {
     "power": power.Power,
 }
 
+logger = logging.getLogger(__name__)
+
 
 class Perf(Hook):
     def before_job(self, opts, job):
@@ -66,12 +70,24 @@ class Perf(Hook):
 
         self.monitors = []
         for mon_name in AVAIL_MONITORS.keys():
-            MonitorClass = AVAIL_MONITORS[mon_name]
-            init_args = self.opts[mon_name]
-            self.monitors.append(MonitorClass(job_uuid=job.uuid, **init_args))
+            try:
+                MonitorClass = AVAIL_MONITORS[mon_name]
+                init_args = self.opts[mon_name]
+                self.monitors.append(MonitorClass(job_uuid=job.uuid, **init_args))
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load the perf monitor {mon_name} due to the following exception:"
+                )
+                logger.warning(traceback.print_exception(type(e), e, e.__traceback__))
 
         for monitor in self.monitors:
-            monitor.run()
+            try:
+                monitor.run()
+            except Exception as e:
+                logger.warning(
+                    f"Could not run perf monitor {mon_name} due to the following exception:"
+                )
+                logger.warning(traceback.print_exception(type(e), e, e.__traceback__))
 
     def after_job(self, opts, job):
         for monitor in self.monitors:

@@ -311,9 +311,12 @@ class ARMPerfUtil(Monitor):
             )
 
     def install_if_not_available(self):
-        proc = subprocess.run(["topdown-tool", "--help"], capture_output=True)
-        if proc.returncode == 0:
-            return True
+        try:
+            proc = subprocess.run(["topdown-tool", "--help"], capture_output=True)
+            if proc.returncode == 0:
+                return True
+        except FileNotFoundError:
+            pass
 
         logger.warning("ARM topdown-tool is not available, trying to install...")
         try:
