@@ -4,7 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import List, Mapping
+from typing import List, Mapping, Optional
 
 import tabulate
 
@@ -33,7 +33,7 @@ def get_tag_str(tags: Mapping[str, List[str]]) -> str:
 def create_job_listing(
     jobs: List[Mapping],
     table_format: str,
-    group_key: str = None,
+    group_key: Optional[str] = None,
 ) -> str:
     headers = TABLE_HEADERS_TAG
     sections = {"default": []}

@@ -76,6 +76,7 @@ class RunCommand(BenchpressCommand):
         os_release_data = sys_specs.get_os_release_data()
         kernel_cmdline = sys_specs.get_kernel_cmdline()
         dmidecode_data = sys_specs.get_dmidecode_data()
+        sys_packages = []
         if "id" in os_release_data:
             os_id = os_release_data["id"].lower()
             if os_id in ("centos", "rhel", "fedora"):
