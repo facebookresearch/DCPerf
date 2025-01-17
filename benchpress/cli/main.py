@@ -12,7 +12,13 @@ import sys
 import typing
 
 import click
-from benchpress import config, logging_config, PROJECT, VERSION
+from benchpress import config, logging_config
+
+try:
+    # pyre-ignore[21]
+    from benchpress import PROJECT, VERSION  # @manual
+except ImportError:
+    from benchpress.version import __PROJECT__ as PROJECT, __VERSION__ as VERSION
 from benchpress.lib.job import Job, JobSuiteBuilder
 from benchpress.lib.job_listing import create_job_listing
 from benchpress.lib.reporter import JSONFileReporter, ScoreReporter, StdoutReporter
@@ -242,27 +248,20 @@ def load_config(args) -> config.BenchpressConfig:
     If either `--jobs` or `--benchmarks` paths have been provided,
     override default configs to use those instead.
     """
-    override_benchmark = False
-
     try:
-        with config.BENCHMARKS_CONFIG_PATH as bench_path:
-            benchmarks_specs = bench_path.open()
-            if args.benchmarks:
-                benchmarks_specs_path = os.path.abspath(args.benchmarks)
+        override_benchmark = False
+        if args.benchmarks and args.benchmarks in config.ALT_BENCHMARKS_CONFIGS:
+            logger.info(f"Using alternative benchmark suite {args.benchmarks}.")
+            bm_config_path = config.ALT_BENCHMARKS_CONFIGS[args.benchmarks]
+            override_benchmark = True
+        else:
+            bm_config_path = config.BENCHMARKS_CONFIG_PATH
 
-                # benchmarks file name overriding logic
-                if (not os.path.exists(benchmarks_specs_path)) and (
-                    "/" not in args.benchmarks
-                ):
-                    override_benchmark = True
-                    logger.info(
-                        'benchmarks file with name "{}" not found, overriding it'.format(
-                            args.benchmarks
-                        )
-                    )
-                    benchmarks_specs_path = os.path.abspath(
-                        "./benchpress/config/benchmarks_" + args.benchmarks + ".yml"
-                    )
+        # pyre-fixme[16]: `Iterator` has no attribute `__enter__`.
+        with bm_config_path as bench_path:
+            benchmarks_specs = bench_path.open()
+            if args.benchmarks and not override_benchmark:
+                benchmarks_specs_path = os.path.abspath(args.benchmarks)
 
                 # benchmarks file path existence check
                 if not os.path.exists(benchmarks_specs_path):
@@ -281,19 +280,16 @@ def load_config(args) -> config.BenchpressConfig:
                     # Reads everything into memory
                     benchmarks_specs = bs.read()
 
-        with config.JOBS_CONFIG_PATH as jobs_path:
+        if override_benchmark:
+            job_config_path = config.ALT_JOBS_CONFIGS[args.benchmarks]
+        else:
+            job_config_path = config.JOBS_CONFIG_PATH
+
+        with job_config_path as jobs_path:
             jobs_specs = jobs_path.open()
-            if override_benchmark:
-                args.jobs_file = args.benchmarks
 
             if args.jobs_file:
                 jobs_specs_path = os.path.abspath(args.jobs_file)
-
-                # jobs file name overriding logic
-                if not os.path.exists(jobs_specs_path) or override_benchmark:
-                    jobs_specs_path = os.path.abspath(
-                        "./benchpress/config/jobs_" + args.benchmarks + ".yml"
-                    )
 
                 # jobs file path existence check
                 if not os.path.exists(jobs_specs_path):

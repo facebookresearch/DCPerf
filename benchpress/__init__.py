@@ -7,3 +7,5 @@ from .version import __PROJECT__, __VERSION__
 
 PROJECT = __PROJECT__
 VERSION = __VERSION__
+
+is_opensource = True

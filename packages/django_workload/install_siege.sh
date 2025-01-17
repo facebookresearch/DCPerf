@@ -19,7 +19,7 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 if [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y autoconf automake zlib-devel
 elif [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt install -y autoconf automake zlib1g-dev 
+  apt install -y autoconf automake zlib1g-dev
 fi
 
 SIEGE_INSTALLATION_PREFIX="${BENCHMARKS_DIR}/siege"

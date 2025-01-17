@@ -4,6 +4,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+from benchpress.lib import open_source
+
 from .copy import CopyMoveHook
 from .cpu_limit import CpuLimit
 from .cpu_mpstat import CpuMpstat
@@ -15,6 +17,11 @@ from .shell import ShellHook
 from .tao_instruction import TaoInstructionHook
 from .toplev import Toplev
 from .user_script import UserScript
+
+if not open_source:
+    from .fb_chef_off import FBChefOff
+    from .fb_chef_off_turbo_on import FBChefOffTurboOn
+    from .fb_turbo_driver import FBTurboDriver
 
 
 def register_hooks(factory):
@@ -29,3 +36,8 @@ def register_hooks(factory):
     factory.register("tao_instruction", TaoInstructionHook)
     factory.register("toplev", Toplev)
     factory.register("user-script", UserScript)
+
+    if not open_source:
+        factory.register("fb_chef_off", FBChefOff)
+        factory.register("fb_chef_off_turbo_on", FBChefOffTurboOn)
+        factory.register("fb_turbo_driver", FBTurboDriver)

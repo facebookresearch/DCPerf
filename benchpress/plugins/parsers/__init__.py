@@ -4,6 +4,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+from benchpress.lib import open_source
+
 from .benchdnn import BenchdnnParser
 from .cachebench import CacheBenchParser
 from .checkmark import CheckmarkParser
@@ -44,6 +46,9 @@ from .tailbench import TailBenchParser
 from .tao_bench import TaoBenchParser
 from .tao_bench_autoscale import TaoBenchAutoscaleParser
 from .wdl import WDLParser
+
+if not open_source:
+    from .adsim import AdSimParser
 
 
 def register_parsers(factory):
@@ -89,3 +94,6 @@ def register_parsers(factory):
     factory.register("cloudsuite_graph", CloudSuiteGraphParser)
     factory.register("video_transcode_bench", FfmpegParser)
     factory.register("wdl_bench", WDLParser)
+
+    if not open_source:
+        factory.register("adsim", AdSimParser)
