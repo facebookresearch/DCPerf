@@ -14,17 +14,13 @@ import socket
 import subprocess
 import sys
 from datetime import datetime
+from parser import TaoBenchParser
 
 import args_utils
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "packages", "tao_bench")
 TAO_BENCH_BM_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
-
-
-# Import Benchpress's tao_bench result parser
-sys.path.insert(0, str(BENCHPRESS_ROOT))
-from benchpress.plugins.parsers.tao_bench import TaoBenchParser
 
 
 def find_numa_nodes():
@@ -141,6 +137,11 @@ def gen_client_instructions(args, to_file=True):
     else:
         server_hostname = socket.gethostname()
 
+    if os.path.exists(os.path.join(BENCHPRESS_ROOT, "benchpress_cli.py")):
+        benchpress = "./benchpress_cli.py"
+    else:
+        benchpress = "./benchpress"
+
     if args.num_servers > args.num_clients:
         for i in range(args.num_servers):
             c = i % args.num_clients
@@ -162,7 +163,7 @@ def gen_client_instructions(args, to_file=True):
             clients[c] += (
                 " ".join(
                     [
-                        "./benchpress_cli.py",
+                        benchpress,
                         "run",
                         "tao_bench_custom",
                         "-r",
@@ -194,7 +195,7 @@ def gen_client_instructions(args, to_file=True):
             clients[i] += (
                 " ".join(
                     [
-                        "./benchpress_cli.py",
+                        benchpress,
                         "run",
                         "tao_bench_custom",
                         "-r",

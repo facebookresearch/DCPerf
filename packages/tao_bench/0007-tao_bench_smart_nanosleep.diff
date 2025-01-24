@@ -1,3 +1,7 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 diff --git a/db_provider.c b/db_provider.c
 index e5b4e70..fff5206 100644
 --- a/db_provider.c
