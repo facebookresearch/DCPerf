@@ -9,49 +9,6 @@
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/utils_base.bash"
 
-################################################################################
-# System Functions
-################################################################################
-
-install_system_packages () {
-  if [ $# -le 0 ]; then
-    echo "Usage: ${FUNCNAME[0]} PACKAGE_NAME ... "
-    echo "Example(s):"
-    echo "    ${FUNCNAME[0]} miopen-hip miopen-hip-dev"
-    return 1
-  fi
-
-  test_network_connection || return 1
-
-  if which sudo; then
-    local update_cmd=(sudo)
-    local install_cmd=(sudo)
-  else
-    local update_cmd=()
-    local install_cmd=()
-  fi
-
-  if which apt-get; then
-    update_cmd+=(apt update -y)
-    install_cmd+=(apt install -y "$@")
-  elif which yum; then
-    update_cmd+=(yum update -y)
-    install_cmd+=(yum install -y "$@")
-  else
-    echo "[INSTALL] Could not find a system package installer to install packages!"
-    return 1
-  fi
-
-  echo "[INSTALL] Updating system repositories ..."
-  # shellcheck disable=SC2068
-  (exec_with_retries 3 ${update_cmd[@]}) || return 1
-
-  # shellcheck disable=SC2145
-  echo "[INSTALL] Installing system package(s): $@ ..."
-  # shellcheck disable=SC2068
-  (exec_with_retries 3 ${install_cmd[@]}) || return 1
-}
-
 free_disk_space () {
   echo "################################################################################"
   echo "# Free Disk Space"

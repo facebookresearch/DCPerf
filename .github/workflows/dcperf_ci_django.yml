@@ -1,0 +1,80 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# This workflow is used for DCPerf CI.
+name: DCPerf Django CI
+
+on:
+  # PR Trigger
+  #
+  pull_request:
+    branches:
+      - main
+
+  # Push Trigger (enable to catch errors coming out of multiple merges)
+  #
+  push:
+    branches:
+      - main
+
+  # Manual Trigger
+  #
+  workflow_dispatch:
+
+concurrency:
+  # Cancel previous runs in the PR if a new commit is pushed
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Build on CPU hosts (generic GitHub runners)
+  build_artifact:
+    runs-on: ${{ matrix.host-machine.instance }}
+    container:
+      image: ubuntu:22.04
+      options: --user root --privileged --pid=host
+      volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+    defaults:
+      run:
+        shell: bash
+    env:
+      PRELUDE: .github/scripts/setup_env.bash
+      BUILD_ENV: build_env
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        host-machine: [
+          { arch: x86, instance: "ubuntu-latest" },
+        ]
+        python-version: [ "3.12" ]
+
+    steps:
+    - name: Setup Build Container
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget
+
+    - name: Checkout the Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Free Disk Space on Host
+      run: . $PRELUDE; free_disk_space_on_host
+
+    - name: Display System Info
+      run: . $PRELUDE; print_system_info
+
+    - name: Setup Miniconda
+      run: . $PRELUDE; setup_miniconda $HOME/miniconda
+
+    - name: Create Conda Environment
+      run: . $PRELUDE; create_conda_environment $BUILD_ENV ${{ matrix.python-version }}
+
+    - name: Install Python Tools
+      run: . $PRELUDE; install_build_tools $BUILD_ENV
+
+    - name: Install Django
+      run: . $PRELUDE; install_django $BUILD_ENV

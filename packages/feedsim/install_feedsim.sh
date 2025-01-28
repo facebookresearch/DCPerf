@@ -106,7 +106,7 @@ if ! [ -d "boost_1_71_0" ] && ! grep -i 'centos stream release 9' /etc/*-release
     cd ../
 elif grep -i 'centos stream release 9' /etc/*-release; then
     # On CentOS 9 let's just use boost 1.75 that comes with the system
-    sudo dnf install -y boost-devel
+    dnf install -y boost-devel
 else
     msg "[SKIPPED] boost_1_71_0"
 fi
