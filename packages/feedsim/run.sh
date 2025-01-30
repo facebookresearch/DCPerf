@@ -112,6 +112,9 @@ main() {
     local result_filename
     result_filename="feedsim_results.txt"
 
+    local icache_iterations
+    icache_iterations="1600000"
+
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
     fi
@@ -146,6 +149,9 @@ main() {
             -o)
                 result_filename="$2"
                 ;;
+            -i)
+                icache_iterations="$2"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -156,7 +162,7 @@ main() {
         esac
 
         case $1 in
-            -t|-c|-s|-d|-p|-q|-o|-w)
+            -t|-c|-s|-d|-p|-q|-o|-w|-i)
                 if [ -z "$2" ]; then
                     echo "Invalid option: '$1' requires an argument" 1>&2
                     exit 1
@@ -192,7 +198,7 @@ main() {
         --num_objects=2000 \
         --graph_max_iters=1 \
         --noaffinity \
-        --min_icache_iterations=1600000 &
+        --min_icache_iterations="$icache_iterations" &
 
     LEAF_PID=$!
 

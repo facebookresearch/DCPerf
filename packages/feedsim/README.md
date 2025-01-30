@@ -62,6 +62,12 @@ would like to collect system and microarch metrics for performance analysis,
 collect those during the last 5 minutes of the benchmark. We expect the CPU
 utilization during this period to be in the range of 60%~75%.
 
+### Running on ARM Platforms
+If running on ARM platforms, please use the job `feedsim_autoscale_arm` (other usages will be the same):
+```
+./benchpress_cli.py run feedsim_autoscale_arm
+```
+
 ## Reporting and Measurement
 
 After the feedsim benchmark finishing, benchpress will report the results in

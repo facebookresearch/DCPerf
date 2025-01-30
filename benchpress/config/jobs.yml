@@ -294,10 +294,40 @@
     spawns multiple workload instances at 100 cores per
     instance (rounded up).
   args:
-    - '{num_instances}'
+    - '-n {num_instances}'
     - '{extra_args}'
   vars:
-    - 'num_instances='
+    - 'num_instances=-1'
+    - 'extra_args='
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+
+
+- name: feedsim_autoscale_arm
+  benchmark: feedsim_autoscale
+  description: >
+    Aggregator like workload. Latency sensitive.
+    Finds maximum QPS that system can sustain while keeping
+    95th percentile latency <= 500 msecs. Automatically
+    spawns multiple workload instances at 100 cores per
+    instance (rounded up). Parameters tuned for arm.
+  args:
+    - '-n {num_instances}'
+    - '-i {icache_iterations}'
+    - '{extra_args}'
+  vars:
+    - 'num_instances=-1'
+    - 'icache_iterations=400000'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
