@@ -42,12 +42,12 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   sudo apt install -y cmake autoconf automake flex bison \
     nasm clang patch git \
-    tar unzip perl openssl
+    tar unzip perl openssl python3-dev
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   sudo dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch \
-    git tar unzip perl openssl-devel
+    git tar unzip perl openssl-devel python3-devel
 fi
 
 

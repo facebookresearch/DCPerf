@@ -4,6 +4,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-unsafe
+
 # main functionality is actually provided in cli/main.py
 from benchpress.cli.main import main
 from benchpress.lib.reporter import JSONFileReporter, StdoutReporter
