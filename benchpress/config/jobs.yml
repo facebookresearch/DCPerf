@@ -745,3 +745,17 @@
         is_move: true
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+
+- benchmark: health_check
+  name: health_check
+  description: Default run for health_check
+  roles:
+    server:
+      args:
+        - -r server
+        - '-c {clients}'
+      vars:
+        - 'clients'
+    client:
+      args:
+        - '-r client'

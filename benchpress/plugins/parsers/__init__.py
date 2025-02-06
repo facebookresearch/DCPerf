@@ -25,6 +25,7 @@ from .fio import FioParser
 from .gapbs import GAPBSParser
 from .generic import JSONParser
 from .graph500 import Graph500Parser
+from .health_check import HealthCheckParser
 from .iperf import IperfParser
 from .ltp import LtpParser
 from .mediawiki import MediawikiParser
@@ -96,6 +97,7 @@ def register_parsers(factory):
     factory.register("cloudsuite_graph", CloudSuiteGraphParser)
     factory.register("video_transcode_bench", FfmpegParser)
     factory.register("wdl_bench", WDLParser)
+    factory.register("health_check", HealthCheckParser)
 
     if not open_source:
         factory.register("adsim", AdSimParser)
