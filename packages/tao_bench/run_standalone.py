@@ -177,7 +177,9 @@ if __name__ == "__main__":
     if args.num_servers == 0:
         args.num_servers = args_utils.get_default_num_servers()
     if args.memsize == 0:
-        args.memsize = args_utils.get_system_memsize_gb()
+        # Set memory size to 75% of system memory in the standalone mode to avoid OOM,
+        # because the clients will also use memory on the same system
+        args.memsize = args_utils.get_system_memsize_gb() * 0.75
     if args.warmup_time == 0:
         args.warmup_time = args_utils.get_warmup_time(args)
     args.server_memsize = args.memsize
@@ -189,7 +191,7 @@ if __name__ == "__main__":
     cmds = gen_client_instructions(args, to_file=False)
     clients = []
     for cmd in cmds.split("\n"):
-        if "benchpress_cli" in cmd:
+        if "benchpress" in cmd:
             clients.append(cmd.strip())
 
     t_clients = []
