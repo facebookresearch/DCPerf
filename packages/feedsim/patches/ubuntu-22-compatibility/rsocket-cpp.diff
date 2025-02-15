@@ -2,6 +2,19 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 79750f7b..6eb9186c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -170,7 +170,7 @@ if (COMPILER_HAS_W_NOEXCEPT_TYPE)
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-noexcept-type")
+ endif()
+
+-if (NOT MSVC)
++if (NOT MSVC AND NOT (CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13))
+   set(EXTRA_CXX_FLAGS ${EXTRA_CXX_FLAGS} -Werror)
+ endif()
+
 diff --git a/yarpl/Refcounted.h b/yarpl/Refcounted.h
 index e88886f..ac0a495 100644
 --- a/yarpl/Refcounted.h
