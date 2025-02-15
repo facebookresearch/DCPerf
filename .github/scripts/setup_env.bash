@@ -15,3 +15,5 @@
 . "$( dirname -- "$BASH_SOURCE"; )/utils_conda.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_django.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_feedsim.bash"
