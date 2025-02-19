@@ -55,7 +55,7 @@ major production workloads listed as follows:
   <tr>
    <td>Benchmarks </td>
    <td>Programming Languages</td>
-   <td>LIbraries / SW Stack</td>
+   <td>Libraries / SW Stack</td>
    <td>Application domain they represent</td>
   </tr>
   <tr>
@@ -99,7 +99,7 @@ major production workloads listed as follows:
   </tr>
 </table>
 
-Also, DCPerf includes micro-benchmarks focusing on hot and commons functions/routines in the datacenter.
+Also, DCPerf includes micro-benchmarks focusing on hot and common functions/routines in the datacenter.
 
 **Note:** WDLBench has different usages than other benchmarks. To use it, please first go
 through this README, and then go to WDLBench's
@@ -128,7 +128,7 @@ workloads. In other words, micro-architecture
 and system optimizations that show improvement in DCPerf benchmark scores can
 potentially help improve performance of production workloads. We establish such representativeness in three levels:
 
-* **Gen-over-gen Performance Improvment**: The extent of performance improvement
+* **Gen-over-gen Performance Improvement**: The extent of performance improvement
 on a newer, more powerful compute platform seen in DCPerf benchmarks is close
 to the improvement that will show in the production application.
 * **Hot Function Composition**: DCPerf benchmarks have the similar types of top
@@ -511,7 +511,7 @@ sufficiently stressed the system.
   work on evaluating and improving memory representativeness in these benchmarks.
 
 2. **Software Optimization Reflection.** When benchmarks in DCPerf were designed and
-  implemented, they were referenced and evaluated based on earler versions of production applications.
+  implemented, they were referenced and evaluated based on earlier versions of production applications.
   Therefore, they may not reflect software optimizations that occurred later on for some more modern
   ISAs. We will actively update these benchmarks to catch up with the constantly evolving production
   applications.
