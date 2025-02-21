@@ -19,7 +19,7 @@ declare -A REPOS=(
 declare -A TAGS=(
     ['aom']='v3.8.2'
     ['ffmpeg']='n7.0.1'
-    ['SVT-AV1']='v2.1.2'
+    ['SVT-AV1']='v3.0.0'
     ['vmaf']='v3.0.0'
     ['aom-testing']='master'
     ['x264']='4613ac3c15fd75cebc4b9f65b7fb95e70a3acce1'
@@ -130,6 +130,8 @@ build_ffmpeg()
     lib='ffmpeg'
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
+    git apply "${BPKGS_FFMPEG_ROOT}/0001-ffmpeg.patch"
+    git apply "${BPKGS_FFMPEG_ROOT}/0002-ffmpeg.patch"
     mkdir -p _build && cd _build || exit
     if [ -v PKG_CONFIG_PATH ]; then
         PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib/x86_64-linux-gnu/pkgconfig:$FFMPEG_BUILD/lib/aarch64-linux-gnu/pkgconfig \
@@ -167,7 +169,6 @@ build_ffmpeg()
 
     fi
 
-    git apply "${BPKGS_FFMPEG_ROOT}/0001-ffmpeg.patch"
     make -j "$(nproc)" && make install
     popd || exit
 }
