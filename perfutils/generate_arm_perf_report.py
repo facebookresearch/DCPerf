@@ -368,7 +368,7 @@ def l1_icache_mpki(grouped_df):
 
     icache_refill_series.index = instructions_series.index
     return {
-        "name": "L1 ICache MPKI",
+        "name": "L1 iCache MPKI",
         "series": icache_refill_series.div(instructions_series / 1000.0),
     }
 
@@ -386,7 +386,7 @@ def l1_icache_miss_rate(grouped_df):
     l1_icache_miss_rate_series = l1_icache_miss_rd_series / l1_icache_rd_series
 
     return {
-        "name": "L1i Cache Miss Rate %",
+        "name": "L1 iCache Miss Rate %",
         "series": l1_icache_miss_rate_series,
         "prefix": 100,
     }
@@ -399,7 +399,7 @@ def l1_dcache_mpki(grouped_df):
 
     dcache_refill_series.index = instructions_series.index
     return {
-        "name": "L1 DCache MPKI",
+        "name": "L1 dCache MPKI",
         "series": dcache_refill_series.div(instructions_series / 1000.0),
     }
 
@@ -417,7 +417,7 @@ def l1_dcache_miss_rate(grouped_df):
     l1_dcache_miss_rate_series = l1_dcache_miss_rd_series / l1_dcache_rd_series
 
     return {
-        "name": "L1d Cache Miss Rate %",
+        "name": "L1 dCache Miss Rate %",
         "series": l1_dcache_miss_rate_series,
         "prefix": 100,
     }
