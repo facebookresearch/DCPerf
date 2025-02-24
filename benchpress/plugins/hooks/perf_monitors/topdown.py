@@ -77,6 +77,11 @@ def get_cpu_vendor_from_dmi():
         logger.error("Error while running dmidecode: " + str(e))
         return ""
     out, err = p.communicate()
+
+    if "Permission denied" in err:
+        logger.error("Error with permissions: " + err)
+        return ""
+
     out = out.splitlines()[0].strip()
     match = re.search(r"([\w\s]+)", out)
     if match:
