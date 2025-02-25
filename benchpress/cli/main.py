@@ -35,7 +35,7 @@ from .commands.install import InstallCommand
 from .commands.list import ListCommand
 from .commands.report import ReportCommand
 from .commands.run import RunCommand
-
+from .commands.system_check import SystemCheckCommand
 
 logging_config.create_logger()
 logger = logging.getLogger(__name__)
@@ -162,6 +162,7 @@ def setup_parser():
         InstallCommand(),
         CleanCommand(),
         InfoCommand(),
+        SystemCheckCommand(),
     ]
 
     parser = argparse.ArgumentParser()
