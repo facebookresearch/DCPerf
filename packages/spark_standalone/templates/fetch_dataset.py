@@ -36,7 +36,7 @@ def fetch_file(dst_path, filename, for_real):
 
 
 def fetch_dataset(dst_path, file_list, for_real):
-    with open(file_list, "rt") as fp:
+    with open(file_list) as fp:
         metadata = json.load(fp)
     dir_list = metadata["dirs"]
     file_list = metadata["files"]

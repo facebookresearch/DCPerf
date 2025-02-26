@@ -79,11 +79,11 @@ urlpatterns = [
 
     with open("urls_template.txt", "w") as fo:
         for i in range(num_endpoints):
-            fo.write("http://localhost:8000/feed_timeline{} 26\n".format(i))
-            fo.write("http://localhost:8000/timeline{} 25\n".format(i))
-            fo.write("http://localhost:8000/bundle_tray{} 25\n".format(i))
-            fo.write("http://localhost:8000/inbox{} 19\n".format(i))
-            fo.write("http://localhost:8000/seen{} POST <seen.json 5\n".format(i))
+            fo.write(f"http://localhost:8000/feed_timeline{i} 26\n")
+            fo.write(f"http://localhost:8000/timeline{i} 25\n")
+            fo.write(f"http://localhost:8000/bundle_tray{i} 25\n")
+            fo.write(f"http://localhost:8000/inbox{i} 19\n")
+            fo.write(f"http://localhost:8000/seen{i} POST <seen.json 5\n")
 
 
 if "__main__" == __name__:

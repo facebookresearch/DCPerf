@@ -110,8 +110,8 @@ def _parse_dmidecode(dmidecode_output: str):
 
 
 def _parse_dmihandle_record(
-    dmihandle_lines: typing.List[str],
-) -> typing.Dict[str, typing.Any]:
+    dmihandle_lines: list[str],
+) -> dict[str, typing.Any]:
     dmihandle_data = collections.OrderedDict()
     dmihandle_data["_title"] = dmihandle_lines[1]
     list_acc = []

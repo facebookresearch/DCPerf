@@ -9,11 +9,10 @@ import os
 import pathlib
 import platform
 import subprocess
-from typing import Dict, List, Optional
 
 
 def exec_cmd(
-    cmd: List[str],
+    cmd: list[str],
     for_real: bool,
     print_cmd: bool = True,
 ) -> None:
@@ -35,13 +34,13 @@ def launch_proc(cmd, cwd, stdout, stderr, env):
 
 
 def run_cmd(
-    cmd: List[str],
+    cmd: list[str],
     cwd: str,
-    outfile: Optional[str],
-    env: Dict[str, str],
+    outfile: str | None,
+    env: dict[str, str],
     for_real: bool,
     print_cmd: bool = True,
-) -> Optional[str]:
+) -> str | None:
     env_setting = [f"{k}={v}" for k, v in env.items()]
     if print_cmd:
         print(" ".join(env_setting + cmd))
@@ -50,7 +49,7 @@ def run_cmd(
         for k, v in env.items():
             exec_env[k] = v
         if outfile:
-            with open(outfile, "wt") as fp:
+            with open(outfile, "w") as fp:
                 proc = launch_proc(cmd, cwd, fp, fp, exec_env)
                 proc.wait()
             return None
@@ -61,7 +60,7 @@ def run_cmd(
     return None
 
 
-def read_sys_configs() -> Dict[str, int]:
+def read_sys_configs() -> dict[str, int]:
     # cpu core
     cmd = ["lscpu", "--json"]
     stdout = run_cmd(cmd, cwd=".", outfile=None, env={}, for_real=True, print_cmd=False)
@@ -119,7 +118,7 @@ def find_java_home() -> str:
     return java_home
 
 
-def read_environ() -> Dict[str, str]:
+def read_environ() -> dict[str, str]:
     # default env values
     env_vars = {}
     env_vars["PROJ_ROOT"] = "/".join(os.path.abspath(__file__).split("/")[:-2])
@@ -145,7 +144,7 @@ def read_environ() -> Dict[str, str]:
 def get_os_release() -> dict[str, str]:
     if not os.path.exists("/etc/os-release"):
         return {}
-    with open("/etc/os-release", "r") as f:
+    with open("/etc/os-release") as f:
         os_release_text = f.read()
     os_release = {}
     for line in os_release_text.splitlines():

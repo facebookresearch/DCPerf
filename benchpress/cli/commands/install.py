@@ -58,15 +58,11 @@ class InstallCommand(BenchpressCommand):
             for hook in job.hooks:
                 retcode = install_tool(hook[0])
                 if retcode > 0:
-                    click.echo(
-                        "Installing required tool {} for {}".format(hook[0], job.name)
-                    )
+                    click.echo(f"Installing required tool {hook[0]} for {job.name}")
                 elif retcode == 0:
-                    click.echo("Tool {} already installed".format(hook[0]))
+                    click.echo(f"Tool {hook[0]} already installed")
             if args.force or not verify_install(job.install_script):
-                click.echo(
-                    "Installing benchmark for {}: {}".format(job.name, job.description)
-                )
+                click.echo(f"Installing benchmark for {job.name}: {job.description}")
                 # TODO(cltorres) Filter inherited environment vars
                 env = os.environ
                 env = initialize_env_vars(job, env=env, toolchain=args.toolchain)
@@ -76,4 +72,4 @@ class InstallCommand(BenchpressCommand):
                     click.echo(f"{var}={env[var]}")
                 install_benchmark(job.install_script, env=env)
             else:
-                click.echo("Benchmark for {} already installed".format(job.name))
+                click.echo(f"Benchmark for {job.name} already installed")

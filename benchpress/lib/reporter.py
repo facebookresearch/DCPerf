@@ -13,7 +13,7 @@ from abc import ABCMeta, abstractmethod
 from benchpress.lib import baseline, util
 
 
-class Reporter(object, metaclass=ABCMeta):
+class Reporter(metaclass=ABCMeta):
     """A Reporter is used to record job results in your infrastructure."""
 
     @abstractmethod

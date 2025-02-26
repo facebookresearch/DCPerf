@@ -11,7 +11,6 @@ import pathlib
 import shlex
 import subprocess
 import time
-from typing import List
 
 import args_utils
 
@@ -29,7 +28,7 @@ def get_affinitize_nic_path():
 
 
 def run_cmd(
-    cmd: List[str],
+    cmd: list[str],
     timeout=None,
     for_real=True,
 ) -> str:

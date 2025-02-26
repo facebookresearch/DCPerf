@@ -29,9 +29,10 @@ Constants:
 
 import importlib.resources
 import logging
+from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import IO, Iterator, Union
+from typing import IO
 
 import yaml
 from benchpress.lib import open_source
@@ -78,9 +79,9 @@ class BenchpressConfig:
 
     def load(
         self,
-        benchmarks_specs_stream: Union[bytes, IO[bytes], str, IO[str]],
-        jobs_specs_stream: Union[bytes, IO[bytes], str, IO[str]],
-        toolchain_specs_stream: Union[bytes, IO[bytes], str, IO[str]],
+        benchmarks_specs_stream: bytes | IO[bytes] | str | IO[str],
+        jobs_specs_stream: bytes | IO[bytes] | str | IO[str],
+        toolchain_specs_stream: bytes | IO[bytes] | str | IO[str],
     ):
         self.benchmarks_specs = yaml.safe_load(benchmarks_specs_stream)
         self.jobs_specs = yaml.safe_load(jobs_specs_stream)

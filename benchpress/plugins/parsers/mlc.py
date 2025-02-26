@@ -58,7 +58,7 @@ class MlcParser(Parser):
             func_name = "parse_" + key.replace(" ", "_")
             sub_metrics = getattr(self, func_name)(stdout[start_idx:end_idx])
         except Exception as e:
-            logger.error("Error thrown while parsing '{}': {}".format(key, str(e)))
+            logger.error(f"Error thrown while parsing '{key}': {str(e)}")
         return sub_metrics
 
     @staticmethod

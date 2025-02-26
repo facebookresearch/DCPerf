@@ -6,7 +6,7 @@
 
 import os
 from argparse import _HelpAction, ArgumentParser
-from typing import List, Sequence, Tuple
+from collections.abc import Sequence
 
 MAX_CLIENT_CONN = 32768
 MEM_USAGE_FACTOR = 0.75  # to prevent OOM
@@ -27,7 +27,7 @@ def get_warmup_time(args, secs_per_gb=5, min_time=1200):
 
 def get_proc_meminfo():
     results = {}
-    with open("/proc/meminfo", "r") as f:
+    with open("/proc/meminfo") as f:
         for line in f:
             key, value = line.split(":", maxsplit=1)
             vals = value.strip().split(" ", maxsplit=1)
@@ -58,7 +58,7 @@ def find_long_option_string(option_strings: Sequence[str]) -> str:
     return ""
 
 
-def get_opt_strings(parser: ArgumentParser) -> List[Tuple[str, str]]:
+def get_opt_strings(parser: ArgumentParser) -> list[tuple[str, str]]:
     res = []
     for action in parser._actions:
         if isinstance(action, _HelpAction):
@@ -71,7 +71,7 @@ def get_opt_strings(parser: ArgumentParser) -> List[Tuple[str, str]]:
     return res
 
 
-def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str]]:
+def add_common_server_args(server_parser: ArgumentParser) -> list[tuple[str, str]]:
     server_parser.add_argument(
         "--memsize", type=float, required=True, help="memory size, e.g. 64 or 96"
     )
@@ -158,7 +158,7 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
     return get_opt_strings(server_parser)
 
 
-def add_common_client_args(client_parser: ArgumentParser) -> List[Tuple[str, str]]:
+def add_common_client_args(client_parser: ArgumentParser) -> list[tuple[str, str]]:
     client_parser.add_argument(
         "--server-hostname", type=str, required=True, help="server hostname"
     )

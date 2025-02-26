@@ -10,7 +10,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import typing
 from subprocess import CalledProcessError
 
 import click
@@ -153,12 +152,12 @@ class Job:
     def check_role(self, role, role_input):
         """move complex if else for role check here"""
         if len(self.role_args) == 0 and role != "":
-            logger.error("the job {} does not have roles".format(self.name))
+            logger.error(f"the job {self.name} does not have roles")
             exit(1)
         elif len(self.role_args) == 0 and role == "":
             self.substitude_vars(role, role_input)
         elif len(self.role_args) > 0 and role == "":
-            logger.error("you must select a role in {} job".format(self.name))
+            logger.error(f"you must select a role in {self.name} job")
             exit(1)
         elif len(self.role_args) > 0 and role != "":
             if role not in self.role_args:
@@ -187,7 +186,7 @@ class Job:
     def start_hooks(self):
         """Executes hooks before job starts."""
         # take care of preprocessing setup via hook
-        logger.info('Running setup hooks for "{}"'.format(self.name))
+        logger.info(f'Running setup hooks for "{self.name}"')
         for _name, hook, opts in self.hooks:
             logger.info("Running %s %s", hook, opts)
             hook.before_job(opts, self)
@@ -206,9 +205,9 @@ class Job:
         self.check_role(role, role_input)
 
         try:
-            logger.info('Starting "{}"'.format(self.name))
+            logger.info(f'Starting "{self.name}"')
             cmd = get_safe_cmd([self.binary] + self.args)
-            click.echo("Job execution command: {}".format(cmd))
+            click.echo(f"Job execution command: {cmd}")
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -256,7 +255,7 @@ class Job:
             stderr_storage.close()
 
             if self.stdout:
-                with open(self.stdout, "r") as metrics_file:
+                with open(self.stdout) as metrics_file:
                     stdout = metrics_file.read()
             self._print_output_summary(stdout, stderr)
             logger.info(f"stderr output: {stderr}")
@@ -270,7 +269,7 @@ class Job:
                 exit(1)
                 # raise CalledProcessError(process.returncode, cmd, output)
             self.copy_output(stderr, stdout)
-            logger.info('Parsing results for "{}"'.format(self.name))
+            logger.info(f'Parsing results for "{self.name}"')
             try:
                 return self.parser.parse(
                     stdout.splitlines(), stderr.splitlines(), returncode
@@ -279,11 +278,11 @@ class Job:
                 logger.error(
                     "Failed to parse results, this might mean the" " benchmark failed"
                 )
-                logger.error("stdout:\n{}".format(stdout))
-                logger.error("stderr:\n{}".format(stderr))
+                logger.error(f"stdout:\n{stdout}")
+                logger.error(f"stderr:\n{stderr}")
                 raise
         except OSError as e:
-            logger.error('"{}" failed ({})'.format(self.name, e))
+            logger.error(f'"{self.name}" failed ({e})')
             if e.errno == errno.ENOENT:
                 logger.error("Binary not found, did you forget to install it?")
             raise  # make sure it passes the exception up the chain
@@ -293,7 +292,7 @@ class Job:
 
     def stop_hooks(self):
         """Stops hooks after job is finished."""
-        logger.info('Running cleanup hooks for "{}"'.format(self.name))
+        logger.info(f'Running cleanup hooks for "{self.name}"')
         # run hooks in reverse this time so it operates like a stack
         for _name, hook, opts in reversed(self.hooks):
             hook.after_job(opts, self)
@@ -330,7 +329,7 @@ class JobSuiteBuilder:
                     self.suites[tag] = []
                 self.suites[tag].append(job.name)
 
-    def get_suites(self) -> typing.Dict[str, str]:
+    def get_suites(self) -> dict[str, str]:
         return self.suites
 
 
@@ -339,7 +338,7 @@ def get_target_jobs(all_jobs, args_jobs):
     job_objs = {}
     for name in picked_jobs:
         if name not in all_jobs:
-            logger.error('No job "{}" found'.format(name))
+            logger.error(f'No job "{name}" found')
             exit(1)
         if hasattr(all_jobs[name], "config"):
             job_objs[name] = all_jobs[name]

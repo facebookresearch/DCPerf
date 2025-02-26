@@ -7,7 +7,7 @@
 from abc import ABCMeta, abstractmethod
 
 
-class Hook(object, metaclass=ABCMeta):
+class Hook(metaclass=ABCMeta):
     """Hook allows jobs to run some Python code before/after a job runs."""
 
     @abstractmethod

@@ -31,7 +31,7 @@ class CleanCommand(BenchpressCommand):
             # Clean out benchmark dependencies regardless if it's installed or not
             if job.cleanup_script != "":
                 clean_benchmark(job.cleanup_script, job.install_script)
-                click.echo("Cleaning out dependencies of {} job".format(job.name))
+                click.echo(f"Cleaning out dependencies of {job.name} job")
             else:
                 click.echo(
                     f"Job {job.name} doesn't have a cleanup script in the jobs.yml file"

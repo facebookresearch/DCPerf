@@ -7,7 +7,7 @@
 from abc import ABCMeta, abstractmethod
 
 
-class Parser(object, metaclass=ABCMeta):
+class Parser(metaclass=ABCMeta):
     """Parser is the link between benchmark output and the rest of the system.
     A Parser is given the benchmark's stdout and stderr and returns the exported
     metrics.

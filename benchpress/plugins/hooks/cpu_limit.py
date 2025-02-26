@@ -26,7 +26,7 @@ class CpuLimit(Hook):
         try:
             int(mask, 16)
         except ValueError:
-            raise ValueError("{} is not a valid CPU mask".format(mask))
+            raise ValueError(f"{mask} is not a valid CPU mask")
 
         # modify the job config to run taskset with the given mask instead of
         # directly running the benchmark binary

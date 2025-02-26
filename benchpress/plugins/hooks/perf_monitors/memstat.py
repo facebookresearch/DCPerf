@@ -23,14 +23,14 @@ MULTIPLIERS = {
 
 class MemStat(Monitor):
     def __init__(self, interval, job_uuid, additional_counters=()):
-        super(MemStat, self).__init__(interval, "mem-stat", job_uuid)
+        super().__init__(interval, "mem-stat", job_uuid)
         counters = {"MemTotal", "MemFree", "MemAvailable", "SwapTotal", "SwapFree"}
         self.counters = counters.union(set(additional_counters))
         self.run_collector = False
 
     def do_collect(self):
         meminfo = {}
-        with open("/proc/meminfo", "r") as f:
+        with open("/proc/meminfo") as f:
             for line in f:
                 cells = line.split()
                 key = cells[0].strip(":")

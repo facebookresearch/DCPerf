@@ -45,7 +45,7 @@ class Emon(Hook):
         iteration_num = job.iteration_num
         self.default_stdout_path = os.path.join(
             self.benchmark_metrics_dir,
-            "{}_emon_hook_output_{}.dat".format(job_name, iteration_num),
+            f"{job_name}_emon_hook_output_{iteration_num}.dat",
         )
         self.stdout = None
         self.bg_emon_proc = self._start_background_emon(opts)
@@ -88,7 +88,7 @@ class Emon(Hook):
                     items = line.split("=")
                     env[items[0]] = items[1]
         except Exception as e:
-            logger.warning("Is Emon being installed correctly? ({:s})".format(str(e)))
+            logger.warning(f"Is Emon being installed correctly? ({str(e):s})")
         return env
 
     def _fetch_event_file(self, dst_dir, opts):
@@ -102,9 +102,7 @@ class Emon(Hook):
                 shutil.copyfile(src_xml_file, dst_xml_file)
                 return dst_event_file
             else:
-                logger.error(
-                    "{} or {} does not exist!".format(src_event_file, src_xml_file)
-                )
+                logger.error(f"{src_event_file} or {src_xml_file} does not exist!")
         else:
             logger.error("arch_event_file & arch_xml options are required for emon!")
         return None
@@ -127,5 +125,5 @@ class Emon(Hook):
                 proc.wait()
             return True
         except Exception as e:
-            logger.warning("Is Emon being installed correctly? ({:s})".format(str(e)))
+            logger.warning(f"Is Emon being installed correctly? ({str(e):s})")
         return False

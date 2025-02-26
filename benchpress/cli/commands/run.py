@@ -68,7 +68,7 @@ class RunCommand(BenchpressCommand):
 
         jobs = get_target_jobs(jobs, args.jobs).values()
 
-        click.echo("Will run {} job(s)".format(len(jobs)))
+        click.echo(f"Will run {len(jobs)} job(s)")
 
         history = History(args.results)
         now = datetime.now(timezone.utc)
@@ -136,9 +136,9 @@ class RunCommand(BenchpressCommand):
 
         for job in jobs:
             if not verify_install(job.install_script):
-                click.echo("Benchmark {} not installed".format(job.name))
+                click.echo(f"Benchmark {job.name} not installed")
                 continue
-            click.echo('Running "{}": {}'.format(job.name, job.description))
+            click.echo(f'Running "{job.name}": {job.description}')
 
             if args.dry_run:
                 job_cmd = job.dry_run(args.role, role_in)
@@ -178,7 +178,7 @@ class RunCommand(BenchpressCommand):
             final_metrics["benchmark_name"] = job.name
             final_metrics["benchmark_desc"] = job.description
             # Hooks structured as: hook_name: hook_options
-            job_hooks = ["{}: {}".format(hook[0], hook[2]) for hook in job.hooks]
+            job_hooks = [f"{hook[0]}: {hook[2]}" for hook in job.hooks]
             final_metrics["benchmark_hooks"] = job_hooks
 
             try:

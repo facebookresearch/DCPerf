@@ -55,7 +55,7 @@ class Toplev(Hook):
         iteration_num = job.iteration_num
         self.default_stdout_path = os.path.join(
             benchmark_metrics_dir,
-            "{}_toplev_hook_output_{}".format(job_name, iteration_num),
+            f"{job_name}_toplev_hook_output_{iteration_num}",
         )
 
         if "background_mode" in opts and opts["background_mode"]:

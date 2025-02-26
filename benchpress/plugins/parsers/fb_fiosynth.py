@@ -29,8 +29,6 @@ class Fiosynth_Parser(Parser):
             fiosynth_reader = csv.DictReader(io.StringIO(stdout))
             fiosynth_data = [metrics for metrics in fiosynth_reader]
         except Exception as e:
-            logger.error(
-                "Error thrown while parsing the fb_fiosynth csv file: {}".format(e)
-            )
+            logger.error(f"Error thrown while parsing the fb_fiosynth csv file: {e}")
 
         return fiosynth_data

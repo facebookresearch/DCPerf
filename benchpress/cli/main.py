@@ -11,7 +11,6 @@ import logging
 import os
 import shlex
 import sys
-import typing
 
 import click
 from benchpress import config, logging_config
@@ -45,12 +44,12 @@ class Benchpress:
     def __init__(
         self,
         config: config.BenchpressConfig,
-        uuid: typing.Optional[str] = None,
-        timestamp: typing.Optional[int] = None,
+        uuid: str | None = None,
+        timestamp: int | None = None,
         iteration_num: int = 1,
-        override_job_args: typing.Optional[str] = None,
-        hook_bg_duration: typing.Optional[str] = None,
-        hook_path: typing.Optional[str] = None,
+        override_job_args: str | None = None,
+        hook_bg_duration: str | None = None,
+        hook_path: str | None = None,
     ):
         self.config = config
         self.uuid = uuid
@@ -237,10 +236,8 @@ def parse_override_job_args(override_job_args):
         return (job, args)
     except Exception:
         click.echo(
-            (
-                "Could not properly parse --override_job_args flag. "
-                "Run ./automark exec -h to see an example of what to pass in."
-            )
+            "Could not properly parse --override_job_args flag. "
+            "Run ./automark exec -h to see an example of what to pass in."
         )
         raise
 
@@ -276,9 +273,7 @@ def load_config(args) -> config.BenchpressConfig:
                     exit(1)
 
                 logger.warning("Overriding default benchmarks!")
-                logger.info(
-                    'Loading benchmarks from "{}"'.format(benchmarks_specs_path)
-                )
+                logger.info(f'Loading benchmarks from "{benchmarks_specs_path}"')
                 with open(benchmarks_specs_path) as bs:
                     # Reads everything into memory
                     benchmarks_specs = bs.read()
@@ -296,13 +291,11 @@ def load_config(args) -> config.BenchpressConfig:
 
                 # jobs file path existence check
                 if not os.path.exists(jobs_specs_path):
-                    logger.error(
-                        'jobs file with name "{}" not found'.format(jobs_specs_path)
-                    )
+                    logger.error(f'jobs file with name "{jobs_specs_path}" not found')
                     exit(1)
 
                 logger.warning("Overriding default jobs!")
-                logger.info('Loading jobs from "{}"'.format(jobs_specs_path))
+                logger.info(f'Loading jobs from "{jobs_specs_path}"')
                 with open(jobs_specs_path) as jb:
                     # Reads everything into memory
                     jobs_specs = jb.read()
@@ -312,9 +305,7 @@ def load_config(args) -> config.BenchpressConfig:
             if args.toolchain_file:
                 toolchain_specs_path = os.path.abspath(args.toolchain_file)
                 logger.warning("Overriding default toolchain config!")
-                logger.info(
-                    'Loading toolchain config from "{}"'.format(toolchain_specs_path)
-                )
+                logger.info(f'Loading toolchain config from "{toolchain_specs_path}"')
                 with open(toolchain_specs_path) as ts:
                     toolchain_specs = ts.read()
 

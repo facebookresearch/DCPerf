@@ -15,7 +15,7 @@ from . import logger, Monitor
 
 class CPUFreq(Monitor):
     def __init__(self, interval, job_uuid):
-        super(CPUFreq, self).__init__(interval, "cpufreq_scaling", job_uuid)
+        super().__init__(interval, "cpufreq_scaling", job_uuid)
         self.run_freq_collector = False
         self.supported = os.path.exists(
             "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
@@ -28,7 +28,7 @@ class CPUFreq(Monitor):
         freqs = []
         for cpu in self.cpus:
             with open(
-                f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_cur_freq", "r"
+                f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_cur_freq"
             ) as f:
                 freqs.append(float(f.read()))
 

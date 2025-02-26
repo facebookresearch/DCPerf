@@ -63,16 +63,16 @@ class History:
         rootdir = os.path.join(self.path, job_name)
         for directory, _, files in os.walk(rootdir):
             for f in files:
-                with open(os.path.join(directory, f), "r") as record:
+                with open(os.path.join(directory, f)) as record:
                     record = json.load(record)
                     try:
                         entry = HistoryEntry(record)
                         results.append(entry)
                     except KeyError as e:
-                        logger.error("Invalid entry format (missing {})".format(e))
+                        logger.error(f"Invalid entry format (missing {e})")
                         raise e
 
-        logger.info("Loaded {} results from {}".format(len(results), self.path))
+        logger.info(f"Loaded {len(results)} results from {self.path}")
         # sort by most recent first
         return sorted(results, key=lambda r: r.timestamp, reverse=True)
 

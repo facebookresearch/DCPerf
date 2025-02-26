@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import socket
-from typing import Dict
 
 from utils import read_sys_configs
 
@@ -157,16 +156,16 @@ def check_platform(platform: str) -> None:
         exit(1)
 
 
-def get_hardware_info(platform: str) -> Dict:
+def get_hardware_info(platform: str) -> dict:
     check_platform(platform)
     return ALL_HARDWARE_INFO[platform]
 
 
-def get_standalone_cli_args(platform: str) -> Dict:
+def get_standalone_cli_args(platform: str) -> dict:
     check_platform(platform)
     return STANDALONE_CLI_ARGS[platform]
 
 
-def get_standalone_configs(platform: str) -> Dict:
+def get_standalone_configs(platform: str) -> dict:
     check_platform(platform)
     return STANDALONE_CONFIGS[platform]
