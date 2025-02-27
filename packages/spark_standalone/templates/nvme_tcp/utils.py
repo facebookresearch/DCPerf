@@ -8,6 +8,7 @@ import logging
 import logging.config
 import os
 import subprocess
+from typing import Dict, List
 
 
 CommandLogFormat = "\033[36m>>>> %(message)s\033[0m"
@@ -48,7 +49,7 @@ def exec_cmd(
 
 
 def run_cmd(
-    cmd: list[str],
+    cmd: List[str],
     for_real: bool,
     print_cmd: bool = True,
 ) -> str:
@@ -61,10 +62,10 @@ def run_cmd(
     return ""
 
 
-def get_os_release() -> dict[str, str]:
+def get_os_release() -> Dict[str, str]:
     if not os.path.exists("/etc/os-release"):
         return {}
-    with open("/etc/os-release") as f:
+    with open("/etc/os-release", "r") as f:
         os_release_text = f.read()
     os_release = {}
     for line in os_release_text.splitlines():

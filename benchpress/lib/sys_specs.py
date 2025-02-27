@@ -48,7 +48,7 @@ def get_os_kernel():
 def get_kernel_cmdline():
     if not os.path.exists("/proc/cmdline"):
         return []
-    with open("/proc/cmdline") as f:
+    with open("/proc/cmdline", "r") as f:
         kern_cmdline = f.read()
     return shlex.split(kern_cmdline)
 
@@ -68,7 +68,7 @@ def get_sysctl_data():
     kernel_params_dict = {}
     for kernel_param in kernel_params:
         if "=" in kernel_param:
-            param, param_val = (param.strip() for param in kernel_param.split("="))
+            param, param_val = [param.strip() for param in kernel_param.split("=")]
             kernel_params_dict[param] = param_val
 
     return kernel_params_dict
@@ -116,7 +116,7 @@ def get_cpu_mem_data():
     cpu_mem_dict = {}
     for mem_stat in cpu_mem_data:
         if ":" in mem_stat:
-            mem, stat = (mem.strip() for mem in mem_stat.split(":"))
+            mem, stat = [mem.strip() for mem in mem_stat.split(":")]
             if (
                 " " in stat
             ):  # Change units of CPU mem due to some legacy issue in RedHat
@@ -151,7 +151,7 @@ def get_os_release_data():
     os_release_data_dict = {}
     for os_info in os_release_data:
         if "=" in os_info:
-            param, param_val = (param.strip() for param in os_info.split("="))
+            param, param_val = [param.strip() for param in os_info.split("=")]
             param = param.lower()
             param_val = param_val.replace('"', "")
             os_release_data_dict[param] = param_val

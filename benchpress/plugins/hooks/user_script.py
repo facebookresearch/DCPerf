@@ -32,7 +32,7 @@ class UserScript(Hook):
         iteration_num = job.iteration_num
         self.default_stdout_path = os.path.join(
             benchmark_metrics_dir,
-            f"{job_name}_{hook_name}_hook_output_{iteration_num}",
+            "{}_{}_hook_output_{}".format(job_name, hook_name, iteration_num),
         )
 
         if "background_mode" in opts and opts["background_mode"]:

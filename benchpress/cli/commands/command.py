@@ -12,7 +12,7 @@ from abc import ABCMeta, abstractmethod
 TABLE_FORMAT = "plain"
 
 
-class BenchpressCommand(metaclass=ABCMeta):
+class BenchpressCommand(object, metaclass=ABCMeta):
     @abstractmethod
     def populate_parser(self, parser):
         pass

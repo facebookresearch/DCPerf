@@ -35,18 +35,20 @@ class Power(Monitor):
             ):
                 sensor = {}
                 sensor["path"] = os.path.join("/sys/class/hwmon/", hwmon, "device")
-                with open(os.path.join(sensor["path"], "power1_oem_info")) as oem_info:
+                with open(
+                    os.path.join(sensor["path"], "power1_oem_info"), "r"
+                ) as oem_info:
                     sensor["name"] = oem_info.read().strip()
                 with open(
-                    os.path.join(sensor["path"], "power1_average_interval")
+                    os.path.join(sensor["path"], "power1_average_interval"), "r"
                 ) as interval:
                     sensor["original_interval"] = int(interval.read().strip())
                 with open(
-                    os.path.join(sensor["path"], "power1_average_interval_min")
+                    os.path.join(sensor["path"], "power1_average_interval_min"), "r"
                 ) as min_interval:
                     sensor["interval_min"] = int(min_interval.read().strip())
                 with open(
-                    os.path.join(sensor["path"], "power1_average_interval_max")
+                    os.path.join(sensor["path"], "power1_average_interval_max"), "r"
                 ) as max_interval:
                     sensor["interval_max"] = int(max_interval.read().strip())
                 sensors.append(sensor)
@@ -71,14 +73,14 @@ class Power(Monitor):
         Get the average power of the given sensor, in watts
         Note, the unit of the raw value in power1_average is microWatt
         """
-        with open(os.path.join(sensor["path"], "power1_average")) as f:
+        with open(os.path.join(sensor["path"], "power1_average"), "r") as f:
             try:
                 return float(f.read()) / 1e6
             except OSError as e:
                 return f"<err{e.errno}>"
 
     def __init__(self, job_uuid, interval=1.0, sensor_interval_ms=None):
-        super().__init__(interval, "power", job_uuid)
+        super(Power, self).__init__(interval, "power", job_uuid)
         self.power_sensors = self.search_sensors()
         if sensor_interval_ms is None:
             sensor_interval_ms = 1000 * self.interval

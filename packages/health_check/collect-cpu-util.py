@@ -11,7 +11,7 @@ cpu_util = {}
 
 
 def get_cpu_ticks():
-    with open("/proc/stat") as f:
+    with open("/proc/stat", "r") as f:
         cpu = f.readline()
     curr_ticks = [int(x) for x in cpu.split()[1:]]
     return curr_ticks

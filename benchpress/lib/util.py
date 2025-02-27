@@ -54,7 +54,7 @@ def issue_background_command(cmd, stdout, stderr, env=None):
 
 def verify_install(install_script):
     if os.path.exists("benchmark_installs.txt"):
-        with open("benchmark_installs.txt") as benchmark_installs:
+        with open("benchmark_installs.txt", "r") as benchmark_installs:
             for benchmark_install in benchmark_installs:
                 if install_script.strip() == benchmark_install.strip():
                     return True
@@ -104,7 +104,7 @@ def install_tool(tool_name):
 
 
 def create_benchmark_metrics_dir(run_id):
-    benchmark_metrics_dir = f"benchmark_metrics_{run_id}"
+    benchmark_metrics_dir = "benchmark_metrics_{}".format(run_id)
     try:
         os.mkdir(benchmark_metrics_dir)
     except OSError as exc:
@@ -120,7 +120,7 @@ def clean_benchmark(clean_script, install_script):
     clean_benchmark_proc.wait()
     if clean_benchmark_proc.returncode == 0:
         if os.path.exists("benchmark_installs.txt"):
-            with open("benchmark_installs.txt") as benchmark_installs_fp:
+            with open("benchmark_installs.txt", "r") as benchmark_installs_fp:
                 lines = benchmark_installs_fp.readlines()
             with open("benchmark_installs.txt", "w") as benchmark_installs_fp:
                 for line in lines:
@@ -152,9 +152,9 @@ def generate_run_id():
 
 def initialize_env_vars(
     job,
-    env: typing.Mapping[str, str | None],
+    env: typing.Mapping[str, typing.Optional[str]],
     toolchain: str,
-) -> dict[str, str]:
+) -> typing.Dict[str, str]:
     """
     Populates the installer enviornment variables with Benchpress default vars.
 

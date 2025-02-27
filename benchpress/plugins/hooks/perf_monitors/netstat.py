@@ -15,7 +15,7 @@ from . import logger, Monitor
 
 class NetStat(Monitor):
     def __init__(self, interval, job_uuid, additional_counters=()):
-        super().__init__(interval, "net-stat", job_uuid)
+        super(NetStat, self).__init__(interval, "net-stat", job_uuid)
         counters = {"rx_bytes", "rx_packets", "tx_bytes", "tx_packets"}
         self.counters = counters.union(set(additional_counters))
         self.run_collector = False
@@ -36,7 +36,7 @@ class NetStat(Monitor):
                     logger.warning("unsupported net counter - " + counter)
                     bad_counters.append(counter)
                     continue
-                with open(fpath) as f:
+                with open(fpath, "r") as f:
                     value = float(f.read())
                 result[netif][counter] = value
         if len(bad_counters) > 0:

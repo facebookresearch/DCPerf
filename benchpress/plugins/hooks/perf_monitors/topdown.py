@@ -108,7 +108,7 @@ def get_amd_zen_generation(cpuinfo: dict):
 
 class IntelPerfSpect(Monitor):
     def __init__(self, job_uuid, interval=125, perfspect_path=None):
-        super().__init__(interval, "perfspect", job_uuid)
+        super(IntelPerfSpect, self).__init__(interval, "perfspect", job_uuid)
         if perfspect_path is None:
             self.perfspect_path = os.path.join(BP_BASEPATH, "perfspect")
         else:
@@ -143,7 +143,7 @@ class IntelPerfSpect(Monitor):
         self.proc = subprocess.Popen(
             args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8"
         )
-        super().run()
+        super(IntelPerfSpect, self).run()
 
     def terminate(self):
         if not self.supported:
@@ -187,7 +187,7 @@ class BasePerfUtil(Monitor):
         perfutils_path=None,
         perf_postproc_args=None,
     ):
-        super().__init__(0, name, job_uuid)
+        super(BasePerfUtil, self).__init__(0, name, job_uuid)
         if perfutils_path is None:
             self.perfutils_path = os.path.join(BP_BASEPATH, "perfutils")
         else:
@@ -213,7 +213,7 @@ class BasePerfUtil(Monitor):
             return
         cmd = [perf_collect_script]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, encoding="utf-8")
-        super().run()
+        super(BasePerfUtil, self).run()
 
     def gen_csv(self):
         pass
@@ -306,7 +306,7 @@ class ARMPerfUtil(Monitor):
     )
 
     def __init__(self, job_uuid, interval=5):
-        super().__init__(interval, "arm-perf-collector", job_uuid)
+        super(ARMPerfUtil, self).__init__(interval, "arm-perf-collector", job_uuid)
         self.avail = self.install_if_not_available()
         if not self.avail:
             logger.warning(
@@ -358,7 +358,7 @@ class ARMPerfUtil(Monitor):
             stderr=subprocess.PIPE,
             encoding="utf-8",
         )
-        super().run()
+        super(ARMPerfUtil, self).run()
 
     def write_csv(self):
         """
@@ -386,7 +386,7 @@ class ARMPerfUtil(Monitor):
 
 class NVPerfUtil(BasePerfUtil):
     def __init__(self, job_uuid, **kwargs):
-        super().__init__(
+        super(NVPerfUtil, self).__init__(
             job_uuid,
             "nv-perf-collector",
             perf_collect_script_name="collect_nvda_neoversev2_perf_counters.sh",
