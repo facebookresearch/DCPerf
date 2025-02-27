@@ -11,8 +11,8 @@ import logging
 import multiprocessing
 import os
 import re
-from collections.abc import Iterable
 from itertools import cycle
+from typing import Dict, Iterable, List, Optional, Set
 
 from lib.schedule_lib import cpu_info, Scheduler
 
@@ -30,7 +30,7 @@ FILTERED_WORDS = {
 }
 
 
-def int_to_bitlist(mask: int) -> list[int]:
+def int_to_bitlist(mask: int) -> List[int]:
     """
     @param int mask the mask as an integer
     @return list bits set in the mask
@@ -121,7 +121,7 @@ def write_cpumask(filename: str, mask: int, dry_run: bool = False) -> None:
         LOG.debug('Writing "%x" to %s - skip, already correct', mask, filename)
         return
 
-    LOG.info(f'Writing "{mask:x}" to {filename}')
+    LOG.info('Writing "{:x}" to {}'.format(mask, filename))
     if dry_run:
         return
     with open(filename, "w") as f:
@@ -135,12 +135,12 @@ def get_queues(netdev):
 
     Return /sys paths to the RX,TX queues for the given network device.
     """
-    rx_queues = glob.glob(f"{netdev}/queues/rx-*")
-    tx_queues = glob.glob(f"{netdev}/queues/tx-*")
+    rx_queues = glob.glob("{}/queues/rx-*".format(netdev))
+    tx_queues = glob.glob("{}/queues/tx-*".format(netdev))
     return (rx_queues, tx_queues)
 
 
-def get_node_to_cpus_map() -> dict[int, list[int]]:
+def get_node_to_cpus_map() -> Dict[int, List[int]]:
     """
     @return dict indexed by node with list of CPUs as values
 
@@ -156,7 +156,7 @@ def get_node_to_cpus_map() -> dict[int, list[int]]:
     return nodes
 
 
-def get_cpu_to_node_map() -> dict[int, int]:
+def get_cpu_to_node_map() -> Dict[int, int]:
     """
     @return dict cpu number to NUMA node
 
@@ -170,7 +170,7 @@ def get_cpu_to_node_map() -> dict[int, int]:
     return cpu2node
 
 
-def get_cpu_thread_siblings(cpu: int) -> list[int]:
+def get_cpu_thread_siblings(cpu: int) -> List[int]:
     """
     @param int cpu id to get siblings of
     @return list all siblings of given CPU (including that CPU)
@@ -202,7 +202,7 @@ def is_using_msix_dir(netdev):
     we are using modern NICs and all of em supports msi. so this is basic
     sanity checking that this dir exists under /sys/class/net/<dev>
     """
-    return os.path.exists(f"{netdev}/device/msi_irqs/")
+    return os.path.exists("{}/device/msi_irqs/".format(netdev))
 
 
 def collect_msix_dir_interrupts(netdev):
@@ -213,7 +213,7 @@ def collect_msix_dir_interrupts(netdev):
     helper function which returns all the irq numbers which are being used
     by network device
     """
-    dnames = glob.glob(f"{netdev}/device/msi_irqs/*")
+    dnames = glob.glob("{}/device/msi_irqs/*".format(netdev))
     irqs = [int(d) for d in [os.path.basename(p) for p in dnames]]
     return irqs
 
@@ -257,7 +257,7 @@ def collect_netdev_irqs(netdev):
     devname = os.path.basename(netdev).lower()
     irqs = []
 
-    r = re.compile(rf"\s+(\d+):.*MSI.*{devname}(.*[TtRr]x|-\d+)")
+    r = re.compile(r"\s+(\d+):.*MSI.*{}(.*[TtRr]x|-\d+)".format(devname))
     for line in read_interrupts():
         m = r.match(line)
         if m:
@@ -287,7 +287,7 @@ def configure_smp_affinity(
     iterate_physical_cores: bool,
     ordered: bool,
     dry_run: bool,
-    cores: list[int] | None = None,
+    cores: Optional[List[int]] = None,
 ):
     """Update cpu affinity masks for IRQs of the given netdev's queues
 
@@ -311,7 +311,7 @@ def configure_smp_affinity(
         ncpus = get_cpu_count()
         max_cpus = min(max_cpus, ncpus) if max_cpus > 0 else ncpus
 
-    LOG.info(f"{devname} uses following irqs: {irqs}")
+    LOG.info("{} uses following irqs: {}".format(devname, irqs))
     LOG.info(
         "Assigning {} interrupts to {} cpus out of {} available cpus.".format(
             devname, max_cpus, get_cpu_count()
@@ -331,7 +331,7 @@ def configure_smp_affinity(
 
     for irq_index in range(len(irqs)):
         cpu = next(cpus)
-        affinity_file = f"/proc/irq/{irqs[irq_index]}/smp_affinity"
+        affinity_file = "/proc/irq/{}/smp_affinity".format(irqs[irq_index])
         write_cpumask(affinity_file, 1 << cpu, dry_run)
 
 
@@ -351,7 +351,7 @@ def configure_rps(netdev, policy, dry_run=False):
         node_mask = bitlist_to_int(nodes[0])
 
         for rxq in rx_queues:
-            write_cpumask(f"{rxq}/rps_cpus", node_mask, dry_run)
+            write_cpumask("{}/rps_cpus".format(rxq), node_mask, dry_run)
 
     elif policy == "all-nodes":
         node_masks = {}
@@ -361,10 +361,10 @@ def configure_rps(netdev, policy, dry_run=False):
         node_iter = itertools.cycle(node_masks.keys())
         for rxq in rx_queues:
             m = node_masks[next(node_iter)]
-            write_cpumask(f"{rxq}/rps_cpus", m, dry_run)
+            write_cpumask("{}/rps_cpus".format(rxq), m, dry_run)
 
 
-def __get_irq_affinities(irqs: list[int]) -> dict[int, list[int]]:
+def __get_irq_affinities(irqs: List[int]) -> Dict[int, List[int]]:
     """
     @param irqs list of interrupts to get affinity for
     @return dict from irq number to list of its CPUs
@@ -379,7 +379,7 @@ def __get_irq_affinities(irqs: list[int]) -> dict[int, list[int]]:
     return affinities
 
 
-def __cpuset_num_nodes(node2cpus: dict[int, list[int]], cpuset: set[int]) -> int:
+def __cpuset_num_nodes(node2cpus: Dict[int, List[int]], cpuset: Set[int]) -> int:
     """
     @param dict node2cpus mapping node ids to list of their cpus
     @param set cpuset set of cpus which want to count nodes for
@@ -395,7 +395,7 @@ def __cpuset_num_nodes(node2cpus: dict[int, list[int]], cpuset: set[int]) -> int
 
 
 def __convert_cpu2queue_to_queue_cpu_mask(
-    cpu2queue: dict[int, Iterable[int]], ntxqs: int
+    cpu2queue: Dict[int, Iterable[int]], ntxqs: int
 ) -> int:
     """
     @param dict cpu2queue map of cpus to their dedicated queues
@@ -412,7 +412,7 @@ def __convert_cpu2queue_to_queue_cpu_mask(
     return queue2cpu_mask
 
 
-def __calculate_xps(netdev: str, ntxqs: int) -> dict[int, int]:
+def __calculate_xps(netdev: str, ntxqs: int) -> Dict[int, int]:
     """
     @param string netdev path to network device in sysfs
     @param int ntxqs number of tx queues
@@ -523,7 +523,7 @@ def rebalance_interrupts(netdev, mapping):
 
     for k in range(len(irqs)):
         i = next(mapping)
-        affinity_file = f"/proc/irq/{irqs[k]}/smp_affinity"
+        affinity_file = "/proc/irq/{}/smp_affinity".format(irqs[k])
         write_cpumask(affinity_file, 1 << i)
 
 
@@ -539,7 +539,7 @@ def configure_netdev(
     ordered: bool,
     xps: bool,
     dry_run: bool,
-    cores: list[int] | None = None,
+    cores: Optional[List[int]] = None,
 ):
     """
     @param str netdev: /sys path to a given network device
@@ -583,7 +583,7 @@ def netdev_state(netdev):
     helper function which read sysfs to determine the state of specified network
     device. could return "up" or "down"
     """
-    fd = open(f"{netdev}/operstate")
+    fd = open("{}/operstate".format(netdev))
     state = fd.readline().strip()
     fd.close()
     return state
@@ -596,7 +596,7 @@ def get_numa_node_for_netdev(netdev: str) -> int:
 
     helper function which read sysfs to determine the NUMA node of a device
     """
-    fd = open(f"{netdev}/device/numa_node")
+    fd = open("{}/device/numa_node".format(netdev))
     node = fd.readline().strip()
     fd.close()
     return int(node)

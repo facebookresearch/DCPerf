@@ -24,7 +24,7 @@ class WDLParser(Parser):
         for benchmark in benchmarks:
             out_file = "benchmarks/wdl_bench/out_" + benchmark + ".json"
 
-            with open(out_file) as out_f:
+            with open(out_file, "r") as out_f:
                 out = json.load(out_f)
                 for k, v in out.items():
                     metrics[benchmark + k] = v

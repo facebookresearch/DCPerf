@@ -188,7 +188,7 @@ def run(args):
             if "IOPS" in line and "write" in line:
                 value = iops()
                 total_iops_write += value
-        with open(f"{WORK_DIR}/results.txt", "a") as fp:  # internal
+        with open(f"{WORK_DIR}/results.txt", "at") as fp:  # internal
             fp.write(f"total_iops_read : {total_iops_read}\n")
             fp.write(f"total_iops_write : {total_iops_write}\n")
     exec_cmd(f"mkdir -p {DATASET_DIR}")

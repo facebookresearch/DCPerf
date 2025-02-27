@@ -35,7 +35,7 @@ class TaoInstructionHook(Hook):
             if os.path.exists(instruction_path):
                 break
         time.sleep(1)
-        with open(instruction_path) as f:
+        with open(instruction_path, "r") as f:
             instruction_text = f.read()
         logger.warning(instruction_text)
         os.remove(instruction_path)

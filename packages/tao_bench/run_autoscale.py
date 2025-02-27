@@ -28,7 +28,7 @@ def find_numa_nodes():
     for node_dir in os.listdir("/sys/devices/system/node"):
         if node_dir.startswith("node"):
             node_id = node_dir[4]
-            with open(f"/sys/devices/system/node/{node_dir}/cpulist") as f:
+            with open(f"/sys/devices/system/node/{node_dir}/cpulist", "r") as f:
                 numa_nodes[node_id] = f.read().strip()
     return numa_nodes
 
@@ -222,7 +222,7 @@ def distribute_cores(n_parts):
     # check for SMT
     is_smt_active = False
     try:
-        with open("/sys/devices/system/cpu/smt/active") as f:
+        with open("/sys/devices/system/cpu/smt/active", "r") as f:
             smt = f.read().strip()
             if smt == "1":
                 is_smt_active = True
@@ -334,7 +334,7 @@ def run_server(args):
 
     for i in range(args.num_servers):
         logpath = servers[i][2]
-        with open(logpath) as log:
+        with open(logpath, "r") as log:
             parser = TaoBenchParser(f"server_{i}.csv")
             res = parser.parse(log, None, procs[i].returncode)
             if "role" in res and res["role"] == "server":

@@ -40,7 +40,7 @@ def unpack_perf_stat_line(line, delim=","):
 
 class PerfStat(Monitor):
     def __init__(self, interval, job_uuid, additional_events=(), delim=","):
-        super().__init__(interval, "perf-stat", job_uuid)
+        super(PerfStat, self).__init__(interval, "perf-stat", job_uuid)
         self.events = ["instructions", "cycles"] + list(additional_events)
         self.delim = delim
 
@@ -94,4 +94,4 @@ class PerfStat(Monitor):
             "1",
         ]
         self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, encoding="utf-8")
-        super().run()
+        super(PerfStat, self).run()

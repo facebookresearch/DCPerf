@@ -13,13 +13,13 @@ from . import Monitor
 
 class MPStat(Monitor):
     def __init__(self, interval, job_uuid):
-        super().__init__(interval, "mpstat", job_uuid)
+        super(MPStat, self).__init__(interval, "mpstat", job_uuid)
         self.headers = []
 
     def run(self):
         args = ["mpstat", "-u", f"{self.interval}"]
         self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, encoding="utf-8")
-        super().run()
+        super(MPStat, self).run()
 
     def process_output(self, line):
         """

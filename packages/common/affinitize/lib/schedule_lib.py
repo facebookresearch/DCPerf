@@ -7,8 +7,8 @@
 import glob
 import os
 import re
-from collections.abc import Iterator, Sequence
 from itertools import cycle, islice, repeat
+from typing import Dict, Iterator, List, Sequence, Tuple
 
 
 class NestedDict(dict):
@@ -60,10 +60,12 @@ def walk(n: NestedDict):
     / threads in numerical order.
     """
     if next(iter(n.values())) == 1:
-        yield from sorted(n.keys())
+        for c in sorted(n.keys()):
+            yield c
     else:
         for v in sorted(n.values()):
-            yield from walk(v)
+            for c in walk(v):
+                yield c
 
 
 def perf_walk(n: NestedDict):
@@ -75,7 +77,8 @@ def perf_walk(n: NestedDict):
     second threads etc.
     """
     if next(iter(n.values())) == 1:
-        yield from sorted(n.keys())
+        for c in sorted(n.keys()):
+            yield c
     else:
         stop_at = None
         # Note: values are sorted, so we start allocating from cores with fewest
@@ -104,15 +107,15 @@ def mask(iter: Iterator, n: int):
 
 def get_siblings_for_cpu(cpu_path: str) -> str:
     siblings = ""
-    with open(os.path.join(cpu_path, "topology", "thread_siblings_list")) as f:
+    with open(os.path.join(cpu_path, "topology", "thread_siblings_list"), "r") as f:
         siblings = f.read()
     return siblings
 
 
 def filter_single_thread_per_core(
-    cpus: list[list[tuple[int, str]]],
-    cpu_to_siblings_map: dict[int, str],
-) -> list[tuple[int, str]]:
+    cpus: List[List[Tuple[int, str]]],
+    cpu_to_siblings_map: Dict[int, str],
+) -> List[Tuple[int, str]]:
     """
     Ideally, we would like to iterate over the physical cores and
     not over all the CPUs because there could be many CPUs per
@@ -132,8 +135,8 @@ def filter_single_thread_per_core(
 
 
 def filter_sort_cpus(
-    cpu_paths: list[str], iterate_physical_cores: bool, ordered: bool
-) -> list[tuple[int, str]]:
+    cpu_paths: List[str], iterate_physical_cores: bool, ordered: bool
+) -> List[Tuple[int, str]]:
     """
     Filters and sorts the CPU information.
     """

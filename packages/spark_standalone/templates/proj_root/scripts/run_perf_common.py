@@ -13,6 +13,7 @@ import shutil
 import socket
 import time
 from os.path import join as joinpath
+from typing import Dict, List, Tuple
 
 from config_spark import (
     get_hardware_info,
@@ -61,34 +62,34 @@ def run_spark_sql(
     return None
 
 
-def write_sql_create_db(args) -> list[str]:
+def write_sql_create_db(args) -> List[str]:
     # print("writing create_db.sql")
     sql_files = []
     filename = joinpath(WORK_PATH, "create_db.sql")
-    with open(filename, "w") as fp:
+    with open(filename, "wt") as fp:
         fp.write(f"CREATE DATABASE IF NOT EXISTS {args.database};")
     sql_files.append(filename)
     return sql_files
 
 
-def write_sql_create_tables(args) -> list[str]:
+def write_sql_create_tables(args) -> List[str]:
     # print("writing create_tables.sql")
     table_list = []
     dataset_path = joinpath(DATA_PATH, args.database)
-    with open(joinpath(dataset_path, "release_info_suite.json")) as fp:
+    with open(joinpath(dataset_path, "release_info_suite.json"), "rt") as fp:
         query_tests_info = json.load(fp)
         for test_idx, test_info in query_tests_info.items():
             if test_info["status"] != "good":
                 continue
             query_dir = joinpath(dataset_path, f"table_{test_idx}")
             table_info_file = joinpath(query_dir, "release_info_test.json")
-            with open(table_info_file) as fp:
+            with open(table_info_file, "rt") as fp:
                 all_lines = fp.readlines()
                 for line in all_lines:
                     table_list.append((json.loads(line), query_dir))
     sql_files = []
     filename = joinpath(WORK_PATH, "create_tables.sql")
-    with open(filename, "w") as fp:
+    with open(filename, "wt") as fp:
         fp.write(f"""USE {args.database};""")
         for table_info, query_dir in table_list:
             table_name = table_info["name"]
@@ -112,7 +113,7 @@ def write_sql_create_tables(args) -> list[str]:
 
 def list_tests(args) -> None:
     dataset_path = joinpath(DATA_PATH, args.database)
-    with open(joinpath(dataset_path, "release_info_suite.json")) as fp:
+    with open(joinpath(dataset_path, "release_info_suite.json"), "rt") as fp:
         query_tests_info = json.load(fp)
     for test_idx, test_info in query_tests_info.items():
         if test_info["status"] == "good":
@@ -120,10 +121,10 @@ def list_tests(args) -> None:
             print(to_print)
 
 
-def write_sql_tests(args) -> list[str]:
+def write_sql_tests(args) -> List[str]:
     sql_files = []
     dataset_path = joinpath(DATA_PATH, args.database)
-    with open(joinpath(dataset_path, "release_info_suite.json")) as fp:
+    with open(joinpath(dataset_path, "release_info_suite.json"), "rt") as fp:
         query_tests_info = json.load(fp)
     for test_idx, test_info in query_tests_info.items():
         query_dir = joinpath(dataset_path, f"table_{test_idx}")
@@ -149,9 +150,9 @@ def create(args) -> None:
 
 def parse_per_stage_runtime(
     logfile: str, worker_cores: int
-) -> dict[str, list[datetime.datetime]]:
+) -> Dict[str, List[datetime.datetime]]:
     loglines = []
-    with open(logfile) as f:
+    with open(logfile, "r") as f:
         loglines = f.readlines()
 
     timelines = {}
@@ -200,7 +201,7 @@ def run(args) -> None:
             args.numa,
         ]
     )
-    with open("results.txt", "a") as fp:  # internal
+    with open("results.txt", "at") as fp:  # internal
         if args.real:
             fp.write(f"{args.database} tests:\n")
             fp.write(f"worker-cores : {sum(worker_cores)}\n")
@@ -336,7 +337,7 @@ def install(args) -> None:
     stop(args)
 
 
-def get_worker_resource(args) -> tuple[list[int]]:
+def get_worker_resource(args) -> Tuple[List[int]]:
     total_cores = int(SPARK_CONFIGS["spark.cores.max"])
     num_workers = args.num_workers
     if args.worker_cores:
@@ -375,8 +376,8 @@ def write_spark_env(args, worker_idx: int) -> None:
     # print(f"writing {env_dst_bak}")
     if worker_idx >= 0:
         print(f"worker cores={env_cores} memory={env_mem}")
-    with open(env_dstfile, "w") as fout:
-        with open(env_srcfile) as fin:
+    with open(env_dstfile, "wt") as fout:
+        with open(env_srcfile, "rt") as fin:
             for line in fin.readlines():
                 line = line.replace("__TEMPLATE_SHUFFLE_LOC__", shuffle_loc)
                 line = line.replace("__TEMPLATE_WORKER_CORES__", str(env_cores))

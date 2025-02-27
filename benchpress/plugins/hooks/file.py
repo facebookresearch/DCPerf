@@ -27,13 +27,15 @@ class FileHook(Hook):
     def before_job(self, opts, job):
         for opt in opts:
             path = opt["path"]
-            logger.info(f'Creating "{path}"')
+            logger.info('Creating "{}"'.format(path))
             if opt["type"] == "dir":
                 try:
                     os.makedirs(path)
                 except OSError as e:
                     if e.errno == errno.EEXIST:
-                        logger.warning(f'"{path}" already exists, proceeding anyway')
+                        logger.warning(
+                            '"{}" already exists, proceeding anyway'.format(path)
+                        )
                     else:
                         # other errors should be fatal
                         raise
@@ -43,7 +45,7 @@ class FileHook(Hook):
     def after_job(self, opts, job):
         for opt in opts:
             path = opt["path"]
-            logger.info(f'Deleting "{path}"')
+            logger.info('Deleting "{}"'.format(path))
             if opt["type"] == "dir":
                 shutil.rmtree(path)
             if opt["type"] == "file":
