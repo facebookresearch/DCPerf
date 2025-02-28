@@ -29,7 +29,7 @@ each can run on a single core or all cores.
 
 for `folly`, the user can choose to run them all together (i.e., run all microbenchmarks with one DCPerf run) or individually (i.e., one microbenchmark per DCPerf run) with different jobs.
 ```
-./benchpress_cli.py  -b wdl run folly_single_core|folly_all_core|folly_multi-thread
+./benchpress_cli.py  -b wdl run folly_single_core|folly_all_core|folly_multi_thread
 
 ./benchpress_cli.py  -b wdl run folly_individual -i '{"name": "function_name"}'
 ```
@@ -54,12 +54,12 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
   <tr>
    <td>concurrency_concurrent_hash_map_benchmark</td>
    <td>multiple common operations of the folly::ConcurrentHashMap data structure</td>
-   <td>multi-thread (locks, mutex, etc.)</td>
+   <td>multi_thread (locks, mutex, etc.)</td>
   </tr>
   <tr>
    <td>stats_digest_builder_benchmark </td>
    <td>append operations to a single DigestBuilder buffer from multiple threads</td>
-   <td>multi-thread (locks, mutex, etc.)</td>
+   <td>multi_thread (locks, mutex, etc.)</td>
   </tr>
   <tr>
    <td> event_base_benchmark</td>
@@ -113,8 +113,8 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
   </tr>
   <tr>
    <td>small_locks_benchmark </td>
-   <td>evaluates performance of multi-thread locks, mutex, atomic operations, etc. </td>
-   <td>multi-thread (locks, mutex, etc.)</td>
+   <td>evaluates performance of multi_thread locks, mutex, atomic operations, etc. </td>
+   <td>multi_thread (locks, mutex, etc.)</td>
   </tr>
   <tr>
    <td>ProtocolBench </td>
