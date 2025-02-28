@@ -250,8 +250,8 @@
       vars:
         - 'db_addr'
         - 'server_workers'
-        - '-m {ib_min}'
-        - '-M {ib_max}'
+        - 'ib_min=100000'
+        - 'ib_max=200000'
     db:
       args:
         - '-r db'
