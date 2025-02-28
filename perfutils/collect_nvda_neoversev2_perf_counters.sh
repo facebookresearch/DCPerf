@@ -119,7 +119,7 @@ trap wrapup SIGINT SIGTERM
 perf_stat() {
   local ev="$1"
   local interval_ms="$2"
-  perf stat -e "$ev" -x, -I "${interval_ms}" --per-socket -a --log-fd 1 &
+  perf stat $ev -x, -I "${interval_ms}" --per-socket -a --log-fd 1 &
   PERF_PID="$!"
   wait "$PERF_PID"
 }
@@ -132,7 +132,16 @@ collect_counters() {
     interval="$INTERVAL_SECS"
   fi
   interval_ms="$((interval * 1000))"
-  events="${CPU_GROUP_MUX},${SCF_LOCAL_MEM_GROUP},${SCF_REMOTE_MEM_GROUP}"
+  # Separate core and memory PMU events to avoid scaling issues
+  # reported in previous analyses. This ensures that the core
+  # events and memory events are collected independently
+  #
+  # SCF_REMOTE_MEM_GROUP is removed because:
+  # (1) It cannot co-exist with local memory events due to potential
+  #     conflicts in event collection.
+  # (2) We are using a single socket system, making remote memory
+  #     events irrelevant as they would always report zero activity.
+  events="-e ${CPU_GROUP_MUX} -e ${SCF_LOCAL_MEM_GROUP}"
   perf_stat "$events" "$interval_ms"
 }
 
