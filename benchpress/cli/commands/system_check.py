@@ -20,8 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 def run_cmd(cmd):
-    p = subprocess.run(shlex.split(cmd), capture_output=True)
-    return p.stdout.decode().strip()
+    p = subprocess.run(cmd, capture_output=True, shell=True)
+    if p.returncode == 0:
+        return p.stdout.decode().strip()
+    else:
+        return f"Error: {p.stderr.decode().strip()}"
 
 
 def get_cpuinfo():
