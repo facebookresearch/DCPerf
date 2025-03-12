@@ -59,13 +59,13 @@ major production workloads listed as follows:
    <td>Application domain they represent</td>
   </tr>
   <tr>
-   <td>Mediawiki</td>
+   <td><a href="packages/mediawiki/README.md">Mediawiki</a></td>
    <td>PHP, Hack</td>
    <td>HHVM-3.30, Mediawiki, Memcached, MySQL, Nginx, Siege</td>
    <td>Web Serving (Facebook) </td>
   </tr>
   <tr>
-   <td>FeedSim</td>
+   <td><a href="packages/feedsim/README.md">FeedSim</a></td>
    <td>C++</td>
    <td>Oldisim Library, ZLIB, Boost, OpenSSL, BZIP2, LZ4, Snappy,
        libevent, jemalloc, lzma, libsodium, rsocket, fmt, FBThrift,
@@ -74,25 +74,27 @@ major production workloads listed as follows:
    <td>Object Aggregation, Ranking/Inference </td>
   </tr>
   <tr>
-   <td>TaoBench</td>
+   <td><a href="packages/tao_bench/README.md">TaoBench</a></td>
    <td>C++</td>
    <td>Memcached, Memtier, Folly</td>
    <td>Caching, Look-through Cache</td>
   </tr>
   <tr>
-   <td>SparkBench</td>
+   <td><a href="packages/spark_standalone/README.md">SparkBench</a></td>
    <td>Java, SQL</td>
    <td>Apache Spark, OpenJDK</td>
    <td>Data Analytics, Query Engine </td>
   </tr>
   <tr>
-   <td>DjangoBench </td>
+   <td><a href="packages/django_workload/README.md">DjangoBench</a> </td>
    <td>Python, C++ </td>
    <td>Django framework, UWSGI, Apache Cassandra, Memcached, Siege</td>
    <td>Web Serving (Instagram) </td>
   </tr>
   <tr>
-   <td>VideoTranscodeBench </td>
+   <td>
+   <a href="packages/video_transcode_bench/README.md">VideoTranscodeBench</a>
+   </td>
    <td>C++ </td>
    <td>ffmpeg, svt-av1, libaom, x264</td>
    <td>Video Processing </td>
@@ -113,7 +115,9 @@ specific [README](packages/wdl_bench/README.md).
    <td>Application domain they represent</td>
   </tr>
   <tr>
-   <td>WDLBench </td>
+   <td>
+    <a href="packages/wdl_bench/README.md">WDLBench</a>
+   </td>
    <td>C++ </td>
    <td>folly, fbthrift, zstd, openssl</td>
    <td>Widely distributed functions across different workloads</td>
@@ -140,7 +144,9 @@ applications show bottleneck and need optimization.
 
 ## Versioning
 
-DCPerf adopts [semantics versioning](https://semver.org/) for its releases:
+To start, we recommend you use the latest commit in the main branch and
+regularly pull new commits to enjoy the feature improvements and bug fixes.
+When making formal releases, DCPerf adopts [semantics versioning](https://semver.org/):
 
 * Version number is represented as X.Y.Z, where X denotes MAJOR version, Y denotes
   MINOR version and Z denotes PATCH version
@@ -171,6 +177,9 @@ please feel free to use the following Table of Contents:
     - [On CentOS 9](#on-centos-9)
     - [On Ubuntu 22.04](#on-ubuntu-22.04)
 - [**Using Benchpress**](#using-benchpress)
+- [**Sanity Check on the System**](#sanity-check-on-the-system)
+  - [System check command](#system-check-command)
+  - [Health check](#health-check)
 - [**Install and Run Benchmarks**](#install-and-run-benchmarks)
   - [Installation](#installation)
   - [Uninstall](#uninstall)
@@ -178,6 +187,7 @@ please feel free to use the following Table of Contents:
   - [Getting results](#getting-results)
 - [**Getting DCPerf Score**](#getting-dcperf-score)
 - [**Monitoring system performance metrics**](#monitoring-system-performance-metrics)
+- [**Profiling**](#profiling)
 - [**Expected CPU Utilization**](#expected-cpu-utilization)
 
 ### System Requirements
@@ -186,7 +196,7 @@ please feel free to use the following Table of Contents:
 - OS: CentOS Stream 8/9, Ubuntu 22.04
 - Running as the root user
 - Have access to the internet
-- Please set `ulimit -n` to at least 65536. For permanent change please
+- Please set the open file limit (`ulimit -n`) to at least 65536. For permanent change please
   edit `/etc/security/limits.conf`
 
 ### Install Prerequisites
@@ -307,6 +317,77 @@ Hooks         [{'hook': 'copymove',
 
 This allows you to learn what roles does the benchmark job have and what parameters the
 benchmark job accepts.
+
+### Sanity Check on the System
+
+Before executing benchmarks, we recommend running `system_check` sub-command and the
+health-check benchmark to see if your system meets the [requirements](#system-requirements).
+
+#### System Check command
+
+Benchpress provides a `system_check` sub-command to check a number of system configuration
+that are most relevant to performance outcomes of DCPerf benchmarks. To perform the system
+check, simply run the following:
+
+```
+./benchpress_cli.py system_check
+```
+
+System check will look for these system software and hardware configurations:
+
+- System firmware
+  - BIOS version and release date
+  - NIC vendor, model and firmware version
+  - BMC firmware (if exists)
+- Kernel configurations
+  - Kernel version
+  - SELinux status (should be disabled)
+  - Existence of `nvme-tcp` kernel module
+  - Open file limit
+  - Transparent Hugepage (THP) status
+- Hardware configurations
+  - Number of NUMA nodes
+  - CPU Turbo Boost status (x86 only)
+  - CPU Determinism (AMD only)
+  - Memory speed
+  - CPU base frequency
+  - Hyperthreading / SMT status
+
+An example output of the `system_check` subcommand can be as follows:
+
+```
+[root@hostname ~/benchpress]# ./benchpress_cli.py system_check
+**** System Software ****
+BIOS Version       F0EG3A06.sign
+BIOS Release Date  05/23/2023
+NIC Vendor         Broadcom Inc. and subsidiaries
+NIC Product        BCM57504 NetXtreme-E 10Gb/25Gb/40Gb/50Gb/100Gb/200Gb Ethernet
+NIC Firmware       223.0.164.0
+BMC Firmware       23.13
+**** Kernel Configurations ****
+Kernel Version    6.8.0-51-generic
+SELinux Status    Disabled          [OK]
+NVME-TCP Module   Present           [OK]
+Open Files Limit  65535             [OK]
+THP Status        madvise
+**** Hardware Configurations ****
+NUMA Nodes      1
+CXL             Not Present
+Boost Status    Enabled      [OK]
+Determinism     "Power"
+Memory Speed    4800 MT/s
+Base Frequency  1200 MHz
+SMT             Enabled
+```
+
+#### Health check
+
+Health Check is a preliminary benchmark that runs a number of basic performance tests,
+such as memory performance, network latency & bandwidth and system call throughput.
+It's a good idea to run Health Check as a sanity test before spending more time to
+run other time-consuming benchmarks to get an idea of whether the system is good.
+
+To run Health Check, please see the instructions in its [README](packages/health_check/README.md).
 
 ### Install and Run Benchmarks
 
@@ -454,6 +535,19 @@ some micro-architecture telemetries while running DCPerf benchmarks.
 
 Regarding how to use this hook and what functionalities it can provide, please refer
 to this [README](benchpress/plugins/hooks/perf_monitors/README.md).
+
+### Profiling
+
+DCPerf supports recording function profiles using `perf record` during the steady
+state of the benchmark executions. To enable profiling, simply set the environment
+variable `DCPERF_PERF_RECORD=1`. For example:
+
+```
+DCPERF_PERF_RECORD=1 ./benchpress_cli.py run oss_performance_mediawiki_mlp
+```
+
+After the benchmark finishes, the profile `perf.data` will be available in the
+`benchmark_metrics_<uuid>` folder. (`benchmark_metrics_<uuid>/work` for SparkBench)
 
 ### Expected CPU Utilization
 

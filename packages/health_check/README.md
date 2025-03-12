@@ -4,18 +4,21 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 -->
-# HealthCheckBench
+# Health Check
 
-This is a benchmark that performs a series of health checks on the machine. It measures memory bandwith
-with [mm-mem](https://github.com/pkuwangh/mm-mem), network latency with ping, network bandwith with iperf3
-and multithread nanosleep overhead with nanosleep microbench. HealthCheckBench requires to run on a server and a
-set of clients.
+Health Check is a benchmark that performs some basic performance
+tests on the machine and enables users to spot performance bottlenecks
+in advance before spending more time on the actual benchmarks.
+Currently it measures performance in these aspects:
 
-
+- Memory bandwidth and latency ([mm-mem](https://github.com/pkuwangh/mm-mem))
+- Network ping latency (ping)
+- Network bandwidth (iperf3)
+- System calls and scheduling overhead (multi-threaded nanosleep microbench)
 
 ## Install HealthCheckBench
 
-On server and clients machines:
+On all machines that will run DCPerf benchmarks:
 
 ```
 ./benchpress_cli.py install health_check
@@ -23,27 +26,64 @@ On server and clients machines:
 
 ## Run HealthCheckBench
 
-### Start the client
+### Start the client(s)
 
-On the client machine:
+On the machine(s) you would like to use as client and auxiliary
+machines for other DCPerf benchmarks:
 
 ```
 ./benchpress_cli.py run health_check -r client
 ```
+Or, simply start iperf3 server
+```
+iperf3 -s
+```
+
 ### Start benchmarking
 
-On the server machine:
+On the machine that will act as the server or main machine in other
+DCPerf benchmarks:
 
 ```
 ./benchpress run health_check -r server -i '{"clients": "client1,client2,..."}'
 ```
+
+`clients` parameter can accept multiple hostnames or IP addresses of the
+other client / auxiliary machines to be involved in other DCPerf benchmarks.
+Please separate the hostnames or addresses in commas. This parameter is required
+for running the network related tests.
+
+## Guidance on interpreting results
+
+### Memory bandwidth and latency
+
+Please check if the measured memory bandwidth and latency matches the peak
+performance that your system can achieve. If you see significantly lower
+peak bandwidth or higher latency, there might be something wrong with your
+system's hardware or some other resource-intensive program running at the same
+time.
+
+### Network latency and bandwidth
+
+Please refer to the system requirements of
+[TaoBench](../tao_bench/README.md), [DjangoBench](../django_workload/README.md)
+and [SparkBench](../spark_standalone/README.md) to see if your systems are good
+to run these benchmarks.
+
+### Nanosleep microbench
+
+The reported total CPU utilization should be under 50%, with the IRQ% portion under
+30%. Calls per second per thread (reported calls per second divide by (2.5 * nproc))
+should be higher than 15k.  If you see very low calls per second per thread and
+high CPU utilization, it's likely you'll encounter performance bottleneck in TaoBench
+due to nanosleep() and/or task scheduling.
 
 ## Reporting
 
 Once the benchmark finishes on the server benchmarking machine, benchpress will
 report the results in JSON format like the following:
 
-```
+```json
 {
   "benchmark_args": [
     "-r server",

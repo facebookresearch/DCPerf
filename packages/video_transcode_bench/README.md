@@ -18,13 +18,32 @@ Installing VideoTranscodeBench involves two steps.
 ```
 
 ### 2. Download and prepare datasets
-We recommend using the `El Fuente Test Sequence` from [CDVL](https://www.cdvl.org/). the CDVL website requires (free) registration, so this step is not included in the install script. After registering and logging in, search for  `ElFuente Shots for SI/TI, Y4M format, 1080p 29.96fps` and download the zip file to your local machine. We recommend `p7zip` for decompression (and please ignore the header error during decompression). After decompression, move all the `.y4m` files to the folder `./benchmarks/video_transcode_bench/datasets/cuts`, which has been created in step 1.
+We recommend using the `El Fuente Test Sequence` from
+[CDVL](https://www.cdvl.org/). the CDVL website requires (free) registration, so
+this step is not included in the install script. After registering and logging
+in, search for  `ElFuente Shots for SI/TI, Y4M format, 1080p 29.96fps` and
+download the zip file to your local machine. We recommend `p7zip` for
+decompression (and please ignore the header error during decompression). After
+decompression, move all the `.y4m` files to the folder
+`./benchmarks/video_transcode_bench/datasets/cuts`, which has been created in
+step 1. The command to decompress and copy is the following:
+
+```bash
+# CentOS
+dnf install -y p7zip
+# Ubuntu
+apt install -y p7zip-full
+# Extract the video cuts
+7za x NETFLIX_ElFuente_for_SITI_y4m.zip
+cp frames_y4m/*.y4m <path_to_DCPerf>/benchmarks/video_transcode_bench/datasets/cuts/
+```
 
 ## Run VideoTranscodeBench
 
 ### Example job - `video_transcode_bench_svt`
 
-`video_transcode_bench_svt` is the version of VideoTranscodeBench that use all CPU cores to conduct video encoding with `SVT-AV1` encoder.
+`video_transcode_bench_svt` is the version of VideoTranscodeBench that use all
+CPU cores to conduct video encoding with `SVT-AV1` encoder.
 
 To run VideoTranscodeBench, simply execute the following command
 
