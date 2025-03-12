@@ -260,6 +260,12 @@
       vars:
         - 'concur_writes'
         - 'bind_ip=default'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/django_workload/django-workload/client/perf.data'
 
 - name: feedsim_default
   benchmark: feedsim
@@ -284,6 +290,7 @@
         is_move: true
         after:
           - 'benchmarks/feedsim/feedsim_results.txt'
+          - 'benchmarks/feedsim/src/perf.data'
 
 - name: feedsim_autoscale
   benchmark: feedsim_autoscale
@@ -311,6 +318,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/src/perf.data'
 
 
 - name: feedsim_autoscale_arm
@@ -341,6 +349,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/src/perf.data'
 
 
 - benchmark: spark_standalone
@@ -444,6 +453,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server.csv'
+          - 'perf.data'
 
 - benchmark: tao_bench
   name: tao_bench_custom
@@ -513,6 +523,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server.csv'
+          - 'perf.data'
 
 - benchmark: tao_bench_autoscale
   name: tao_bench_autoscale
@@ -569,6 +580,7 @@
         after:
           - 'benchmarks/tao_bench/server*.csv'
           - 'tao-bench-server-*.log'
+          - 'perf.data'
 
 - benchmark: tao_bench_standalone
   name: tao_bench_standalone
@@ -614,6 +626,7 @@
         after:
           - 'benchmarks/tao_bench/server*.csv'
           - 'tao-bench-server-*.log'
+          - 'perf.data'
 
 - benchmark: tao_bench_autoscale
   name: tao_bench_autoscale_v2_beta
@@ -666,6 +679,7 @@
         after:
           - 'benchmarks/tao_bench/server*.csv'
           - 'tao-bench-server-*.log'
+          - 'perf.data'
 
 
 - name: video_transcode_bench_svt
@@ -693,6 +707,7 @@
         is_move: true
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+          - 'benchmarks/video_transcode_bench/perf.data'
 
 - name: video_transcode_bench_aom
   benchmark: video_transcode_bench
@@ -719,6 +734,7 @@
         is_move: true
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+          - 'benchmarks/video_transcode_bench/perf.data'
 
 - name: video_transcode_bench_x264
   benchmark: video_transcode_bench
@@ -745,6 +761,7 @@
         is_move: true
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+          - 'benchmarks/video_transcode_bench/perf.data'
 
 - benchmark: health_check
   name: health_check

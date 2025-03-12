@@ -37,6 +37,15 @@ delete_replicas() {
     fi
 }
 
+collect_perf_record() {
+    sleep 60
+    if [ -f "perf.data" ]; then
+    benchreps_tell_state "collect_perf_record: already exist"
+        return 0
+    fi
+    benchreps_tell_state "collect_perf_record: collect perf"
+    perf record -a -g -- sleep 5 >> /tmp/perf-record.log 2>&1
+}
 
 main() {
     local encoder
@@ -184,6 +193,9 @@ main() {
 
     #run
     benchreps_tell_state "start"
+    if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
+        collect_perf_record &
+    fi
     ./"${run_sh}"
     benchreps_tell_state "done"
     #generate output

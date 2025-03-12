@@ -5,11 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import multiprocessing
 import os
 import pathlib
 import shlex
 import subprocess
+import threading
 import time
 from typing import List
 
@@ -18,6 +18,7 @@ import args_utils
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
+SERVER_PROFILING_DELAY = 120
 
 
 def get_affinitize_nic_path():
@@ -44,6 +45,16 @@ def run_cmd(
         except subprocess.TimeoutExpired:
             proc.terminate()
             proc.wait()
+
+
+def profile_server():
+    # check if an existing profile data already exists
+    if os.path.exists("perf.data"):
+        return
+    p_prof = subprocess.run(
+        ["perf", "record", "-a", "-g", "-o", "perf.data", "--", "sleep", "5"]
+    )
+    return p_prof
 
 
 def affinitize_nic(args):
@@ -146,8 +157,18 @@ def run_server(args):
         "-o",
         ",".join(extended_options),
     ]
+    if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
+        profiler_wait_time = (
+            args.warmup_time + args.timeout_buffer + SERVER_PROFILING_DELAY
+        )
+        t_prof = threading.Timer(profiler_wait_time, profile_server)
+        t_prof.start()
+
     timeout = args.warmup_time + args.test_time + args.timeout_buffer
     run_cmd(server_cmd, timeout, args.real)
+
+    if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
+        t_prof.cancel()
 
 
 def get_client_cmd(args, n_seconds):

@@ -9,6 +9,9 @@ trap cleanup SIGINT SIGTERM ERR EXIT
 
 BREPS_LFILE=/tmp/feedsim_log.txt
 
+SCRIPT_NAME="$(basename "$0")"
+echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
+
 function benchreps_tell_state () {
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }

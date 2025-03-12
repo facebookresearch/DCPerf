@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 declare OLD_CWD
 OLD_CWD="$( pwd )"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)"
 
 BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
 NPROC="$(nproc)"
@@ -112,6 +113,7 @@ function run_benchmark() {
     --scale-out "${HHVM_SERVERS}" \
     --delay-check-health 30 \
     --hhvm-extra-arguments='-vEval.ProfileHWEnable=0' \
+    --exec-after-warmup="${SCRIPT_DIR}/perf-record.sh" \
     ${extra_args}
   cd "${OLD_CWD}" || exit
 }

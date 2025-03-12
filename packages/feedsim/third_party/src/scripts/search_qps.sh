@@ -17,6 +17,9 @@
 
 BREPS_LFILE=/tmp/feedsim_log.txt
 
+SCRIPT_NAME="$(basename "$0")"
+echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
+
 function benchreps_tell_state () {
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
@@ -192,6 +195,16 @@ run_loadtest() {
   eval $__output_latency="'$latency'"
 }
 
+collect_perf_record() {
+    sleep 30
+    if [ -f "perf.data" ]; then
+	benchreps_tell_state "collect_perf_record: already exist"
+        return 0
+    fi
+    benchreps_tell_state "collect_perf_record: collect perf"
+    perf record -a -g -- sleep 5 >> /tmp/perf-record.log 2>&1
+}
+
 # Initialize our own variables:
 experiment_time=120
 wait_time=5
@@ -321,6 +334,9 @@ if [[ -n "$fixed_qps" ]]; then
 
   if [ $fixed_qps_count -eq 1 ]; then
     benchreps_tell_state "before fixed_qps_single"
+    if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
+        collect_perf_record &
+    fi
     run_loadtest measured_qps measured_latency $fixed_qps
     printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
     benchreps_tell_state "after fixed_qps_single"
@@ -422,7 +438,6 @@ while [[ $loop_cond -eq 1 ]]; do
 done
 benchreps_tell_state "after gap_qps"
 
-
 if [[ -n "$IS_AUTOSCALE_RUN" ]] && [[ "$IS_AUTOSCALE_RUN" -gt 1 ]]; then
     NUM_INSTANCES=$IS_AUTOSCALE_RUN
     num_ready_inst=$(grep --count "after gap_qps" $BREPS_LFILE)
@@ -440,6 +455,9 @@ fi
 # do final measurement
 benchreps_tell_state "before final_qps"
 experiment_time=$final_experiment_time
+if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
+    collect_perf_record &
+fi
 run_loadtest measured_qps measured_latency $cur_qps
 printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 

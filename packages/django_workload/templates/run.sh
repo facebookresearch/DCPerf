@@ -69,6 +69,14 @@ For role "db":
 EOF
 }
 
+collect_perf_record() {
+    sleep 30
+    if [ -f "perf.data" ]; then
+        return 0
+    fi
+    perf record -a -g -- sleep 5 >> /tmp/perf-record.log 2>&1
+}
+
 run_benchmark() {
   core_factor=1.2
   local _num_workers=$1
@@ -84,6 +92,11 @@ run_benchmark() {
 
   cd "${SCRIPT_ROOT}/../django-workload/client" || exit
   ./gen-urls-file
+
+  if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
+      collect_perf_record &
+  fi
+
   WORKERS="$_num_workers" \
   DURATION="$_duration" \
   LOG="$_siege_logs_path" \

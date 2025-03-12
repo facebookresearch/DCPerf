@@ -5,11 +5,14 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import datetime
 import os
 import pathlib
 import re
 import shlex
 import subprocess
+import threading
+import time
 
 SRC_DATASET = "bpc_t93586_s2_synthetic"
 
@@ -18,6 +21,7 @@ SPARK_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "spark_standalone")
 WORK_DIR = os.path.join(SPARK_DIR, "work")
 DATASET_DIR = os.path.join(SPARK_DIR, "dataset")
 CURRENT_DIR = os.getcwd()
+run_profiler_thread = False
 
 
 def exec_cmd(cmd, for_real=True):
@@ -75,7 +79,77 @@ def install_database(args):
     os.chdir(CURRENT_DIR)
 
 
+def profile_server():
+    # check if an existing profile data already exists
+    if os.path.exists("perf.data"):
+        print("perf.data already exists!")
+        return
+    p_prof = subprocess.run(
+        ["perf", "record", "-a", "-g", "-o", "perf.data", "--", "sleep", "5"]
+    )
+    return p_prof
+
+
+def profiling_thread():
+    BM_LOG_PATH = os.path.join(WORK_DIR, "release_test_93586.log")
+    while not os.path.exists(BM_LOG_PATH):
+        print(f"Sparkbench work log {BM_LOG_PATH} not found yet, waiting")
+        time.sleep(5)
+    print(f"Found Sparkbench work log: {BM_LOG_PATH}")
+    print(f"run_profiler_thread={run_profiler_thread}")
+    bmlog = open(BM_LOG_PATH, "r", buffering=1)
+    bmlog_size = os.fstat(bmlog.fileno()).st_size
+    while run_profiler_thread:
+        while True:
+            line = bmlog.readline()
+            if not line:
+                break
+            bmlog_size = os.fstat(bmlog.fileno()).st_size
+            # extract log timestamp: continue if the log entry is too old
+            # (potentially from past runs)
+            ts_match = re.search(r"^(\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})", line)
+            if not ts_match:
+                print(f"No timestamp found in log entry: {line}")
+                continue
+            ts_str = ts_match.group(1)
+            ts = datetime.datetime.strptime(ts_str, "%y/%m/%d %H:%M:%S")
+            now = datetime.datetime.now()
+            delta = now - ts
+            if delta.seconds > 10:
+                print(
+                    f"Log entry timestamp: {ts_str} is too old ({delta.seconds}), ignoring."
+                )
+                continue
+
+            if "stage 2.0" in line:
+                print("Detected stage 2.0, start profiling...")
+                time.sleep(10)
+                profile_server()
+                bmlog.close()
+                return
+        # handle if the file is truncated/replaced
+        try:
+            curr_ino = os.fstat(bmlog.fileno()).st_ino
+            new_fsize = os.stat(BM_LOG_PATH).st_size
+            if curr_ino != os.stat(BM_LOG_PATH).st_ino:
+                print(f"Sparkbench work log {BM_LOG_PATH} is replaced, reopening")
+                newfile = open(BM_LOG_PATH, "r", buffering=1)
+                bmlog.close()
+                bmlog = newfile
+            if new_fsize < bmlog_size:
+                print(
+                    f"Sparkbench work log {BM_LOG_PATH} has been truncated, seek to start."
+                )
+                bmlog.seek(0, 0)
+                bmlog_size = new_fsize
+        except IOError:
+            pass
+        time.sleep(1)
+    bmlog.close()
+
+
 def run_test(args):
+    global run_profiler_thread
     os.chdir(WORK_DIR)
     print("Run tests")
     cmd_list = [
@@ -97,9 +171,21 @@ def run_test(args):
     if args.aggressive > 0:
         cmd_list.append(f"--aggressive {args.aggressive}")
     cmd_list.append("--real")
+
+    if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
+        print("DCPERF_PERF_RECORD=1, starting profiling thread...")
+        run_profiler_thread = True
+        t_prof = threading.Thread(target=profiling_thread, name="spark_prof")
+        t_prof.start()
+
     exec_cmd(" ".join(cmd_list), args.real)
     exec_cmd("cat results.txt", args.real)
     os.chdir(CURRENT_DIR)
+
+    if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
+        print("DCPERF_PERF_RECORD=1, ending profiling thread...")
+        run_profiler_thread = False
+        t_prof.join()
 
 
 def setup(args):

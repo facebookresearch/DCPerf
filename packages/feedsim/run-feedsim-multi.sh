@@ -21,6 +21,9 @@ NUM_INSTANCES="$(( ( NCPU + 99 ) / 100 ))"
 
 NUM_ICACHE_ITERATIONS="1600000"
 
+SCRIPT_NAME="$(basename "$0")"
+echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
+
 while [ $# -ne 0 ]; do
     case $1 in
         -n)
