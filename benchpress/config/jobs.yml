@@ -538,7 +538,7 @@
     - '--fast-threads-ratio={fast_threads_ratio}'
     - '--slow-to-fast-ratio={slow_to_fast_ratio}'
     - '--interface-name={interface_name}'
-    - '--port-number-start=11211'
+    - '--port-number-start={port_number_start}'
     - '--warmup-time={warmup_time}'
     - '--test-time={test_time}'
     - '--server-hostname={server_hostname}'
@@ -556,6 +556,7 @@
   vars:
     - 'num_servers=0'
     - 'memsize=0'
+    - 'port_number_start=11211'
     - 'fast_threads_ratio=0.75'
     - 'slow_to_fast_ratio=3'
     - 'interface_name=eth0'
@@ -626,6 +627,7 @@
         after:
           - 'benchmarks/tao_bench/server*.csv'
           - 'tao-bench-server-*.log'
+          - 'client_*.log'
           - 'perf.data'
 
 - benchmark: tao_bench_autoscale

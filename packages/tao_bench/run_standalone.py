@@ -7,9 +7,9 @@
 import argparse
 import os
 import pathlib
+import re
 import subprocess
 import threading
-import time
 
 import args_utils
 
@@ -134,25 +134,30 @@ def init_parser():
     return parser
 
 
-def exec_cmd(cmd):
+def exec_cmd(cmd, output_file=subprocess.PIPE):
     p = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        cmd, shell=True, stdout=output_file, stderr=output_file, text=True, bufsize=1
     )
     stdout, stderr = p.communicate()
     exitcode = p.returncode
     if exitcode != 0:
+        print("Command exited with non-zero: " + cmd)
         print("ERROR: " + str(stderr))
         print("STDOUT: " + str(stdout))
     return stdout, stderr, exitcode
 
 
-def launch_server():
+def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
     script_args = {
         optstr: getattr(args, argkey) for optstr, argkey in SERVER_CMD_OPTIONS
     }
     script_args["--interface-name"] = "lo"
     script_args["--client-wait-after-warmup"] = 0
     script_args["--timeout-buffer"] = 0
+    if port_number_start > 0:
+        script_args["--port-number-start"] = port_number_start
+    script_args["--bind-cpu"] = bind_cpu
+    script_args["--bind-mem"] = bind_mem
     cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
 
     for argname, argval in script_args.items():
@@ -167,8 +172,19 @@ def launch_server():
     print(stdout)
 
 
-def launch_client(cmd):
-    stdout, stderr, exitcode = exec_cmd(cmd)
+def launch_client(cmd, n=1):
+    # Use benchpress dry-run to get the real client command
+    stdout, stderr, exitcode = exec_cmd(cmd + " --dry-run")
+    match = re.search(r"Execution command: (.*)$", stdout)
+    if not match:
+        print("ERROR: Unable to find the real client command in the output")
+        print("STDOUT: " + str(stdout))
+        print("STDERR: " + str(stderr))
+        exit(1)
+    real_cmd = match.group(1)
+    with open(f"client_{n}.log", "w") as f:
+        _, _, exitcode = exec_cmd(real_cmd, output_file=f)
+    return exitcode
 
 
 if __name__ == "__main__":
@@ -185,7 +201,14 @@ if __name__ == "__main__":
     args.server_memsize = args.memsize
     args.server_hostname = "localhost"
 
-    t_server = threading.Thread(target=launch_server, args=())
+    t_server = threading.Thread(
+        target=launch_server,
+        args=(
+            args.port_number_start,
+            args.bind_cpu,
+            args.bind_mem,
+        ),
+    )
     t_server.start()
 
     cmds = gen_client_instructions(args, to_file=False)
@@ -195,9 +218,15 @@ if __name__ == "__main__":
             clients.append(cmd.strip())
 
     t_clients = []
-    for client in clients:
+    for n, client in enumerate(clients):
         cmd = str(BENCHPRESS_ROOT) + client[1:]
-        tc = threading.Thread(target=launch_client, args=(cmd,))
+        tc = threading.Thread(
+            target=launch_client,
+            args=(
+                cmd,
+                n,
+            ),
+        )
         tc.start()
         t_clients.append(tc)
 

@@ -105,6 +105,8 @@ This job provides the following optional parameters that you may be interested i
     and the client. The default is 0 which is not running the sanity check.
     Please set this to 1 if you would like to run the sanity check and measure
     network bandwidth and latency.
+  - `port_number_start`: The starting port number for TaoBench server to listen to. Optional,
+    default is 11211.
 
 The following parameters are used for generating client side instructions and will not
 have substantial effects on the server:
