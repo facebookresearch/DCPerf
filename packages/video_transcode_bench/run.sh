@@ -14,6 +14,9 @@ function benchreps_tell_state () {
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
 
+if [ "${DCPERF_PERF_RECORD:-unset}" = "unset" ]; then
+    export DCPERF_PERF_RECORD=0
+fi
 
 # Constants
 FFMPEG_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
