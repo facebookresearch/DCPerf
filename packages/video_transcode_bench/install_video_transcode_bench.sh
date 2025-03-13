@@ -19,10 +19,10 @@ declare -A REPOS=(
 declare -A TAGS=(
     ['aom']='v3.8.2'
     ['ffmpeg']='n7.0.1'
-    ['SVT-AV1']='v3.0.0'
+    ['SVT-AV1']='v3.0.1'
     ['vmaf']='v3.0.0'
-    ['aom-testing']='master'
-    ['x264']='4613ac3c15fd75cebc4b9f65b7fb95e70a3acce1'
+    ['aom-testing']='81b0dbfc2e357518c23071eb44860ed8637402c2'
+    ['x264']='570f6c70808287fc78e3f8f5372a095ec6ef7878'
 )
 
 
