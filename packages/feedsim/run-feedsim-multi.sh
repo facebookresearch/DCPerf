@@ -39,7 +39,6 @@ while [ $# -ne 0 ]; do
             exit 1
             ;;
         *)  # end of input
-            echo "Unsupported arg '$1'" 1>&2
             break
     esac
 
