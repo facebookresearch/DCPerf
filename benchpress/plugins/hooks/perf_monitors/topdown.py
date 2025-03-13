@@ -91,19 +91,34 @@ def get_cpu_vendor_from_dmi():
 
 def get_amd_zen_generation(cpuinfo: dict):
     """
-    Get the Zen generation of AMD CPU based on "Model name" of `lscpu` output.
-    Assume the model name follows the format of "AMD EPYC <model-number> XX-Core Processor",
-    extract the fourth digit of "<model-number>". Model-number can be of 4 or 5 digits and
-    may contain numbers or letter "H", "F" or "P".
+    Get the Zen generation of AMD CPU based on "Model name" and "CPU family" of `lscpu` output.
     """
-    model_name = cpuinfo["Model name"]
-    match = re.search(r"AMD EPYC (\w{4,5})", model_name)
-    if match:
-        model_num = match.group(1)
-        return int(model_num[3])
-    else:
-        logger.warning(f"Failed to parse AMD Zen generation from {model_name}")
+    cpu_family = cpuinfo.get("CPU family")
+    model_name = cpuinfo.get("Model name")
+
+    if not cpu_family or not model_name:
+        logger.warning(f"Failed to parse AMD Zen generation from {cpuinfo}")
         return 0
+
+    zen5_models = [
+        "AMD EPYC",
+        "100-000000976-14",
+        "100-000001458-01",
+        "100-000001460-02",
+        "100-000001537-04",
+        "100-000001463-04",
+        "100-000001535-05",
+    ]
+
+    if cpu_family == "25" or "zen4" in model_name.lower():
+        return "zen4"
+    elif cpu_family == "26":
+        for model in zen5_models:
+            if model in model_name:
+                return "zen5"
+        return "zen5es"
+    else:
+        return "zen3"
 
 
 class IntelPerfSpect(Monitor):
@@ -258,21 +273,14 @@ class AMDPerfUtil:
         self.cpu_vendor = get_cpu_vendor(self.cpuinfo)
         if self.cpu_vendor != "amd":
             raise Exception("Not an AMD processor!")
-        if get_amd_zen_generation(self.cpuinfo) >= 4:
-            self.is_zen4 = True
-        # Provide an user option to override the default behavior of detecting Zen4
-        # This is to support engineering sample CPUs who don't have formal CPU model names
-        elif "is_zen4" in kwargs and kwargs["is_zen4"]:
-            self.is_zen4 = True
-        else:
-            self.is_zen4 = False
+        self.amd_gen = get_amd_zen_generation(self.cpuinfo)
         self.perfutil = BasePerfUtil(
             job_uuid,
             "amd-perf-collector",
             perf_collect_script_name="collect_amd_perf_counter.sh",
             perf_postproc_script_name="generate_amd_perf_report.py",
         )
-        if self.is_zen4:
+        if self.amd_gen == "zen4":
             self.perfutil_zen4 = BasePerfUtil(
                 job_uuid,
                 "amd-zen4-perf-collector",
@@ -280,15 +288,31 @@ class AMDPerfUtil:
                 perf_postproc_script_name="generate_amd_perf_report.py",
                 perf_postproc_args=["--arch", "zen4"],
             )
+        elif self.amd_gen == "zen5":
+            self.perfutil = BasePerfUtil(
+                job_uuid,
+                "amd-zen5-perf-collector",
+                perf_collect_script_name="collect_amd_zen5_perf_counters.sh",
+                perf_postproc_script_name="generate_amd_perf_report.py",
+                perf_postproc_args=["--arch", "zen5"],
+            )
+        elif self.amd_gen == "zen5es":
+            self.perfutil = BasePerfUtil(
+                job_uuid,
+                "amd-zen5-perf-collector",
+                perf_collect_script_name="collect_amd_zen5_perf_counters.sh",
+                perf_postproc_script_name="generate_amd_perf_report.py",
+                perf_postproc_args=["--arch", "zen5es"],
+            )
 
     def run(self):
         self.perfutil.run()
-        if self.is_zen4:
+        if self.amd_gen == "zen4":
             self.perfutil_zen4.run()
 
     def terminate(self):
         self.perfutil.terminate()
-        if self.is_zen4:
+        if self.amd_gen == "zen4":
             self.perfutil_zen4.terminate()
 
     def gen_csv(self):
@@ -296,7 +320,7 @@ class AMDPerfUtil:
 
     def write_csv(self):
         self.perfutil.write_csv()
-        if self.is_zen4:
+        if self.amd_gen == "zen4":
             self.perfutil_zen4.write_csv()
 
 
