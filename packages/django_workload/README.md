@@ -148,6 +148,14 @@ Check JAVA_HOME and PATH environment variables". This is because Cassandra
 could not find JVM in your system. If this happens, please manually export
 the environment variable `JAVA_HOME` setting it to the path to your JVM.
 
+
+You may also encounter the error message "The stack size specified is too small, Specify at least 456k".
+To resolve this issue, add the following configuration to the end of `benchmarks/django_workload/apache-cassandra/conf/cassandra-env.sh`:
+```shell
+JVM_OPTS="$JVM_OPTS -Xss512k"
+```
+This adjustment will increase the stack size to a sufficient value.
+
 ### Cassandra IP binding
 
 By default, Django benchmark decides which IP address to have Cassandra bind by

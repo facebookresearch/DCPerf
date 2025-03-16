@@ -246,7 +246,7 @@ scl enable gcc-toolset-11 bash
 Install git, click, pyyaml and tabulate using DNF, then install Pandas with pip:
 
 ```bash
-dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip
+dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel
 pip-3.9 install pandas
 ```
 
