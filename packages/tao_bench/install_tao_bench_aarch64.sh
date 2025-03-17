@@ -175,10 +175,6 @@ cp memtier_benchmark "${TAO_BENCH_ROOT}/tao_bench_client"
 popd # memtier_client
 popd # $TAO_BENCH_ROOT
 
-if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-    cp build-deps/lib/libcrypto.so.1.1 /lib/aarch64-linux-gnu/
-fi
-
 # Extract certificates
 tar -zxf "${COMMON_DIR}/certs.tar.gz" -C "${TAO_BENCH_ROOT}/"
 popd

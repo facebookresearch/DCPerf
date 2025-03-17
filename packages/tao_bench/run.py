@@ -7,6 +7,7 @@
 import argparse
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import threading
@@ -27,6 +28,28 @@ def get_affinitize_nic_path():
         return default_path
     else:
         return os.path.join(TAO_BENCH_DIR, "affinitize/affinitize_nic.py")
+
+
+def get_os_release_info():
+    os_release = {}
+    with open("/etc/os-release") as f:
+        for line in f:
+            matching = re.search(r"^(\w+)=\"?(\w+)\"?$", line)
+            if matching:
+                key = matching.group(1)
+                value = matching.group(2)
+                os_release[key] = value
+    return os_release
+
+
+def is_ubuntu():
+    os_release = get_os_release_info()
+    id_likes = []
+    if "ID_LIKE" in os_release:
+        id_likes.extend(os_release["ID_LIKE"].split(" "))
+    if "ID" in os_release:
+        id_likes.append(os_release["ID"])
+    return "ubuntu" in id_likes
 
 
 def run_cmd(
@@ -163,6 +186,13 @@ def run_server(args):
         )
         t_prof = threading.Timer(profiler_wait_time, profile_server)
         t_prof.start()
+
+    # If running on Ubuntu, we should explicitly export LD_LIBRARY_PATH
+    # to be benchmarks/tao_bench/build-deps/lib to workaround a bug that
+    # TaoBench server will try to load the libcrypto in system even though we
+    # tried letting it link to the one in benchmarks/tao_bench/build-deps/lib
+    if is_ubuntu():
+        os.environ["LD_LIBRARY_PATH"] = os.path.join(TAO_BENCH_DIR, "build-deps/lib")
 
     timeout = args.warmup_time + args.test_time + args.timeout_buffer
     run_cmd(server_cmd, timeout, args.real)
