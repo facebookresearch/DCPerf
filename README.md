@@ -536,6 +536,11 @@ some micro-architecture telemetries while running DCPerf benchmarks.
 Regarding how to use this hook and what functionalities it can provide, please refer
 to this [README](benchpress/plugins/hooks/perf_monitors/README.md).
 
+To accurately collect micro-architectural telemetries, we highly recommend you stop
+any other services and tools that will read the PMU or use the `perf` tool. This is
+also _necessary_ if you use Intel PerfSpect 3.x as the backend tool to collect topdown
+metrics on Intel platforms.
+
 ### Profiling
 
 DCPerf supports recording function profiles using `perf record` during the steady

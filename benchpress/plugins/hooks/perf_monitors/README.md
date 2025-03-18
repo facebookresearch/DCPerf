@@ -32,6 +32,11 @@ TaoBench, with custom parameters:
 ./benchpress_cli.py run tao_bench_autoscale -i '{"num_servers": 4, "memsize": 512, "interface_name": "enP8s6"}' -k perf
 ```
 
+To accurately collect micro-architectural telemetries, we highly recommend you stop
+any other services and tools that will read the PMU or use the `perf` tool. This is
+also _necessary_ if you use Intel PerfSpect 3.x as the backend tool for the [topdown](#topdown)
+monitor.
+
 ### Supplying custom parameters for `perf` hook
 
 If you need to supply custom parameters to one or more of the perf monitors to
@@ -283,9 +288,11 @@ the benchmark. We currently support the following processors:
 #### Requirements
 
 * `perf` tool
+* Please disable other services or tools that use PMU. This is required for
+  Intel PerfSpect 3.x and highly recommended for other platforms and tools.
 * For Intel systems, please download the latest release of
-  [PerfSpect](https://github.com/intel/PerfSpect), extract the package and copy
-  `perf-collect` and `perf-postprocess` to `<DCPerf-path>/perfspect` directory.
+  [PerfSpect](https://github.com/intel/PerfSpect) and then extract the
+  content to the folder where DCPerf resides.
 * For AMD and NVIDIA systems, we require `pandas` python package for
   post-processing
 * For NVIDIA systems, please use Linux kernel 6.4.3 or later and make sure the
@@ -308,7 +315,7 @@ the benchmark. We currently support the following processors:
 Note: all files discussed in this section are under `benchmark_metrics_<run_id>`
 folder
 
-Intel:
+Intel PerfSpect 1.x:
 
 * `topdown-intel.html`: An interactive webpage where you can view the collected
   metrics in browser. It includes bottleneck analysis, time-series graph in CPU,
@@ -319,6 +326,15 @@ Intel:
 * `topdown-intel.sys.csv`: A time-series sheet recording the microarch metrics
   every 5 seconds during the benchmark.
 * `perf-collect.csv`: Raw perf event data collected by Perfspect during benchmark
+
+Intel PerfSpect 3.x:
+
+* `topdown-intel.sys.csv`: A time-series sheet recording the microarch metrics
+  every 5 seconds during the benchmark.
+* `<hostname>_metrics_summary.csv`: A summary spreadsheet showing the average,
+  min, max and stddev of the microarch metrics throughout the entire benchmark.
+* `<hostname>_metrics_summary.html`: An interactive webpage where you can view
+  the collected metrics in browser.
 
 AMD:
 
@@ -374,6 +390,9 @@ said, we expect the `topdown` monitor to collect enough micro-arch metrics so
 you don't need to use this in particular. You may use this if the `topdown` monitor
 is not compatible with the CPU you are experimenting with or you would like to monitor
 certain events that `topdown` does not include.
+
+**NOTE**: This monitor will not run if you use the [Topdown](#topdown) monitor with
+Intel PerfSpect 3.x.
 
 #### Requirements
 

@@ -23,6 +23,7 @@ from .user_script import UserScript
 if not open_source:
     from .fb_chef_off import FBChefOff
     from .fb_chef_off_turbo_on import FBChefOffTurboOn
+    from .fb_stop_dynologd import FBStopDynologd
     from .fb_turbo_driver import FBTurboDriver
 
 
@@ -43,3 +44,4 @@ def register_hooks(factory):
         factory.register("fb_chef_off", FBChefOff)
         factory.register("fb_chef_off_turbo_on", FBChefOffTurboOn)
         factory.register("fb_turbo_driver", FBTurboDriver)
+        factory.register("fb_stop_dynologd", FBStopDynologd)

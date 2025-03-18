@@ -8,6 +8,7 @@
 
 import os
 import re
+import socket
 import subprocess
 
 import numpy as np
@@ -122,8 +123,10 @@ def get_amd_zen_generation(cpuinfo: dict):
 
 
 class IntelPerfSpect(Monitor):
-    def __init__(self, job_uuid, interval=125, perfspect_path=None):
-        super(IntelPerfSpect, self).__init__(interval, "perfspect", job_uuid)
+    def __init__(self, job_uuid, mux_interval_msecs=125, perfspect_path=None):
+        # PerfSpect 1.x does not support specifying interval
+        super(IntelPerfSpect, self).__init__(1, "perfspect", job_uuid)
+        self.mux_interval_msecs = mux_interval_msecs
         if perfspect_path is None:
             self.perfspect_path = os.path.join(BP_BASEPATH, "perfspect")
         else:
@@ -151,7 +154,7 @@ class IntelPerfSpect(Monitor):
         args = [
             os.path.join(self.perfspect_path, "perf-collect"),
             "-m",
-            str(self.interval),
+            str(self.mux_interval_msecs),
             "-o",
             self.collect_output_path,
         ]
@@ -190,6 +193,72 @@ class IntelPerfSpect(Monitor):
         exitcode = self.proc.wait()
         if exitcode != 0:
             logger.warning(f"perf-postprocess failed with exit code {exitcode}")
+
+
+class IntelPerfSpect3(Monitor):
+    def __init__(
+        self,
+        job_uuid,
+        report_interval_secs=5,
+        mux_interval_msecs=125,
+        perfspect_path=None,
+    ):
+        super(IntelPerfSpect3, self).__init__(
+            report_interval_secs, "perfspect3", job_uuid
+        )
+        self.mux_interval_msecs = mux_interval_msecs
+        if perfspect_path is None:
+            self.perfspect_path = os.path.join(BP_BASEPATH, "perfspect")
+        else:
+            self.perfspect_path = perfspect_path
+        self.collect_output_path = os.path.join(
+            BP_BASEPATH, "benchmark_metrics_" + self.job_uuid
+        )
+        self.postprocess_output_path = os.path.join(
+            BP_BASEPATH, "benchmark_metrics_" + self.job_uuid, "topdown-intel.sys.csv"
+        )
+        if os.path.exists(os.path.join(self.perfspect_path, "perfspect")):
+            self.supported = True
+        else:
+            self.supported = False
+            logger.warning(
+                f"{self.perfspect_path} does not have perfspect binary.\n"
+                f"Please download PerfSpect and extract the `perfspect` executable to {self.perfspect_path}."
+            )
+
+    def run(self):
+        if not self.supported:
+            return
+        args = [
+            os.path.join(self.perfspect_path, "perfspect"),
+            "metrics",
+            "--interval",
+            str(self.interval),
+            "--muxinterval",
+            str(self.mux_interval_msecs),
+            "--output",
+            self.collect_output_path,
+        ]
+        self.proc = subprocess.Popen(
+            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8"
+        )
+        super(IntelPerfSpect3, self).run()
+
+    def write_csv(self):
+        # In PerfSpect 3, there is no need to do post-processing
+        # We just rename the output CSV to a standardized name so that PerfPub can easily recognize it
+        if not self.supported:
+            return
+        original_name = os.path.join(
+            self.collect_output_path, f"{socket.gethostname()}_metrics.csv"
+        )
+        new_name = self.postprocess_output_path
+        if os.path.exists(original_name):
+            os.rename(original_name, new_name)
+        else:
+            logger.warning(
+                f"{original_name} does not exist. was collection successful?"
+            )
 
 
 class BasePerfUtil(Monitor):
@@ -435,10 +504,23 @@ class DummyPerfUtil:
         pass
 
 
+def choose_perfspect():
+    perfspect_dir = os.path.join(BP_BASEPATH, "perfspect")
+    perfspect3_bin = os.path.join(perfspect_dir, "perfspect")
+    perfspect1_bin1 = os.path.join(perfspect_dir, "perf-collect")
+    perfspect1_bin2 = os.path.join(perfspect_dir, "perf-postprocess")
+    if os.path.exists(perfspect3_bin):
+        return IntelPerfSpect3
+    elif os.path.exists(perfspect1_bin1) and os.path.exists(perfspect1_bin2):
+        return IntelPerfSpect
+    else:
+        return DummyPerfUtil
+
+
 cpuinfo = get_cpuinfo()
 cpu_vendor = get_cpu_vendor(cpuinfo)
 if cpu_vendor == "intel":
-    TopDown = IntelPerfSpect
+    TopDown = choose_perfspect()
 elif cpu_vendor == "amd":
     TopDown = AMDPerfUtil
 elif cpu_vendor == "arm":

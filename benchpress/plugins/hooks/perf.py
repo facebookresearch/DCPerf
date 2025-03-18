@@ -70,12 +70,21 @@ class Perf(Hook):
         if not os.path.isdir(self.benchmark_metrics_dir):
             os.mkdir(self.benchmark_metrics_dir)
 
+        should_run_perf_stat = True
         self.monitors = []
         for mon_name in AVAIL_MONITORS.keys():
             try:
                 MonitorClass = AVAIL_MONITORS[mon_name]
                 init_args = self.opts[mon_name]
-                self.monitors.append(MonitorClass(job_uuid=job.uuid, **init_args))
+                monitor = MonitorClass(job_uuid=job.uuid, **init_args)
+                # We should disable PerfStat (and not run anything that uses PMU)
+                # if IntelPerfSpect3 is enabled.
+                if isinstance(monitor, topdown.IntelPerfSpect3) and monitor.supported:
+                    logger.info(
+                        "Disabling PerfStat to avoid conflict with IntelPerfSpect3"
+                    )
+                    should_run_perf_stat = False
+                self.monitors.append(monitor)
             except Exception as e:
                 logger.warning(
                     f"Failed to load the perf monitor {mon_name} due to the following exception:"
@@ -84,6 +93,8 @@ class Perf(Hook):
 
         for monitor in self.monitors:
             try:
+                if isinstance(monitor, perfstat.PerfStat) and not should_run_perf_stat:
+                    continue
                 monitor.run()
             except Exception as e:
                 logger.warning(
