@@ -23,10 +23,12 @@ FFMPEG_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]
+Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]|[--parallelism 0-6]|[--procs {number of jobs}]
 
     -h Display this help and exit
     --encoder encoder name. Default: svt
+    --parallelism encoder's level of parallelism. Default: 1
+    --procs number of parallel jobs. Default: -1
     -output Result output file name. Default: "ffmpeg_video_workload_results.txt"
 EOF
 }
@@ -77,6 +79,12 @@ main() {
             --runtime)
                 runtime="$2"
                 ;;
+            --parallelism)
+                lp="$2"
+                ;;
+            --procs)
+                procs="$2"
+                ;;
             -h)
                 show_help >&2
                 exit 1
@@ -87,7 +95,7 @@ main() {
         esac
 
         case $1 in
-            --levels|--encoder|--output|--runtime)
+            --levels|--encoder|--output|--runtime|--parallelism|--procs)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -112,6 +120,10 @@ main() {
                 echo "Invalid runtime, available options are short, medium, and long"
                 exit 1
             fi
+        fi
+        if [ $lp -gt 6 ]; then
+            echo "Invalid level of parallelism, available options range is [-1, 6]"
+            exit 1
         fi
     elif [ "$encoder" = "aom" ]; then
         if [ "$levels" = "0:0" ]; then
@@ -152,6 +164,7 @@ main() {
     #Customize the script to genrate commands
     sed -i "/^ENC/d" ./generate_commands_all.py
     sed -i "/^num_pool/d" ./generate_commands_all.py
+    sed -i "/^lp_number/d" ./generate_commands_all.py
     if [ "$encoder" = "svt" ]; then
         sed -i '/^bitstream\_folders/a ENCODER\=\"ffmpeg-svt\"' ./generate_commands_all.py
         run_sh="ffmpeg-svt-1p-run-all-paral.sh"
@@ -180,11 +193,21 @@ main() {
     num_files=$(find ./datasets/cuts/ | wc -l)
     num_files=$(echo "$num_files * 8" | bc -l | awk '{print int($0)}')
     num_proc=$(nproc)
-    if [ "$num_files" -lt "$num_proc" ]; then
-        num_pool="num_pool = $num_files"
+    if [ -z "$procs" ] || [ $procs -eq -1 ]; then
+        if [ "$num_files" -lt "$num_proc" ]; then
+            num_pool="num_pool = $num_files"
+        else
+            num_pool="num_pool = $num_proc"
+        fi
     else
-        num_pool="num_pool = $(nproc)"
+        num_pool="num_pool = $procs"
     fi
+
+    lp_number="lp_number = 1"
+    if [ ! -z "$lp" ]; then
+        lp_number="lp_number = $lp"
+    fi
+    sed -i "/^CLIP\_DIRS/a ${lp_number}" ./generate_commands_all.py
 
     sed -i "/^CLIP\_DIRS/a ${range}" ./generate_commands_all.py
     sed -i "/^CLIP\_DIRS/a ${num_pool}" ./generate_commands_all.py
