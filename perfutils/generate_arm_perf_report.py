@@ -723,7 +723,7 @@ def nvidia_scf_mem_read_bw_MBps(grouped_df):
     local_mem_read_series = cmem_rd_data_series * 32
     local_mem_bw_read_series = local_mem_read_series.div(dt_series)
     return {
-        "name": "SFC Local Memory Read Bandwidth (MBps)",
+        "name": "SCF Local Memory Read Bandwidth (MBps)",
         "series": local_mem_bw_read_series,
         "prefix": 1000,
     }
@@ -747,7 +747,7 @@ def nvidia_scf_mem_write_bw_MBps(grouped_df):
 
     local_mem_bw_write_series = cmem_wr_bytes_series.div(dt_series)
     return {
-        "name": "SFC Local Memory Write Bandwidth (MBps)",
+        "name": "SCF Local Memory Write Bandwidth (MBps)",
         "series": local_mem_bw_write_series,
         "prefix": 1000,
     }
@@ -780,7 +780,7 @@ def nvidia_scf_mem_latency_ns(grouped_df):
         cmem_rd_outstanding_series.div(cmem_rd_access_series)
     ) / (sfc_cycles_series.div(dt_series))
     return {
-        "name": "SFC Local Memory Read Latency (nsecs)",
+        "name": "SCF Local Memory Read Latency (nsecs)",
         "series": local_mem_read_lat_ns_series,
     }
 

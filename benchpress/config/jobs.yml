@@ -693,11 +693,15 @@
     - '--levels {levels}'
     - '--output {output}'
     - '--runtime {runtime}'
+    - '--parallelism {parallelism}'
+    - '--procs {procs}'
   vars:
     - 'encoder=svt'
     - 'levels=0:0'
     - 'output=video_transcode_bench_results.txt'
     - 'runtime=medium'
+    - 'parallelism=1'
+    - 'procs=-1'
   hooks:
     - hook: cpu-mpstat
       options:
