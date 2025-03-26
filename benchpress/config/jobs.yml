@@ -23,6 +23,12 @@
     - 'duration=10m'
     - 'timeout=11m'
     - 'extra_args='
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'oss-performance/perf.data'
 
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mlp
@@ -49,6 +55,12 @@
     - 'duration=10m'
     - 'timeout=11m'
     - 'extra_args='
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'oss-performance/perf.data'
 
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mlp_no_jit
@@ -76,6 +88,12 @@
     - 'duration=10m'
     - 'timeout=11m'
     - 'extra_args='
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'oss-performance/perf.data'
 
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mem
@@ -102,6 +120,12 @@
     - 'duration=10m'
     - 'timeout=11m'
     - 'extra_args='
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'oss-performance/perf.data'
 
 - benchmark: django_workload
   name: django_workload_default
