@@ -5,4 +5,4 @@
 # LICENSE file in the root directory of this source tree.
 
 __PROJECT__ = "DCPerf"
-__VERSION__ = "0.2.0"
+__VERSION__ = "1.0"
