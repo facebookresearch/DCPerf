@@ -21,14 +21,23 @@ elif [ "$LINUX_DIST_ID" = "centos" ]; then
 fi
 
 cd "$HEALTH_ROOT"
+# mm-mem: memory latency and bandwidth benchmark
 git clone "https://github.com/pkuwangh/mm-mem.git"
 cd mm-mem
 ./scripts/install_deps.py
 make
+cd ..
+
+# loaded-latency: memory latency and bandwidth benchmark for ARM
+git clone "https://github.com/ARM-software/infra-microbenchmarks"
+pushd infra-microbenchmarks/loaded-latency
+make
+popd
+
+# sleepbench: nanosleep overhead benchmark
 mkdir "$HEALTH_ROOT/sleepbench"
 cp "${BENCHPRESS_ROOT}/packages/health_check/sleepbench.cpp" "${HEALTH_ROOT}/sleepbench"
 cp "${BENCHPRESS_ROOT}/packages/health_check/collect-cpu-util.py" "${HEALTH_ROOT}/sleepbench"
-
 cd "$HEALTH_ROOT/sleepbench"
 g++ -o sleepbench -O2 -lpthread sleepbench.cpp
 cp "${BENCHPRESS_ROOT}/packages/health_check/run.sh" "${HEALTH_ROOT}/run.sh"

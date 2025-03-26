@@ -11,7 +11,8 @@ tests on the machine and enables users to spot performance bottlenecks
 in advance before spending more time on the actual benchmarks.
 Currently it measures performance in these aspects:
 
-- Memory bandwidth and latency ([mm-mem](https://github.com/pkuwangh/mm-mem))
+- Memory bandwidth and latency ([mm-mem](https://github.com/pkuwangh/mm-mem) for x86_64
+and [loaded-latency](https://github.com/ARM-software/infra-microbenchmarks/tree/main/loaded-latency) for aarch64)
 - Network ping latency (ping)
 - Network bandwidth (iperf3)
 - System calls and scheduling overhead (multi-threaded nanosleep microbench)
