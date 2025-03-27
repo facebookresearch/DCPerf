@@ -36,7 +36,7 @@ system is in good state, including:
 
 ## New Features and Enhancements
 
-### TaoBench:
+### TaoBench
 
 * **Sanity Check**: Introduced an optional sanity check in TaoBench to measure
 network bandwidth and latency and provide some clue on potential bottlenecks.
@@ -56,88 +56,109 @@ configured with short execution times.
     performance analysis.
 * **Code Refactor**: Refactored the run scripts to reduce code repetition and
 launch time.
-* **Feedsim**:
-    * **Dual-socket System Support**: Replaced `rand()` with `xor128()` to
-    prevent lock contention, improving performance on dual-socket systems.
-    * **Sweep-QPS Support**: Added support for multiple QPS values in fixed-QPS
-    experiments, allowing sequential runs with a single setup and warmup period.
-    * **ARM Support**: Added an ARM-specific job for feedsim to address
-    differences in ICacheBuster behavior between ARM and x86 architectures,
-    ensuring consistent performance metrics.
-    * **Configurability**: Made the warmup period customizable in fixed-QPS runs
-* **Mediawiki**:
-    * **Load Generator Robustness**: Added support for `wrk` as the load
-    generator in the Mediawiki benchmark, and used it as default to address
-    issues with Siege hanging on systems with a large number of CPU cores.
-    * **Configurability**: Consistently support time notation (h, m, s) in the
-    benchmark duration parameter regardless of using Siege or Wrk.
-* **Video Transcode Bench**:
-    * **New Encode**r: Added support for the x264 encoder; upgraded SVT-AV1
-    encoder version;
-    * **Representativeness**: Improved the representativeness to Prod by
-    increasing clip length, balancing workloads across resolutions, and
-    ensuring full CPU utilization;
-    * **Robustness**: Adjusted task distribution logics to avoid OOM on
-    machines with limited memory;
-    * **Score Reporting**: Added baseline and score calculation for this
-    benchmark.
-* **SparkBench**:
-    * **Sanity Check**: Introduced an optional sanity check in SparkBench which
-    measures data drive IOPS, allowing users to check if disk I/O is a
-    bottleneck to the benchmark.
-* **Perf Monitoring Hook**:
-    * **Generic ARM Support**: Introduced support for ARM’s
-    [topdown-tool](https://learn.arm.com/install-guides/topdown-tool/) in the
-    <code>[topdown](https://github.com/facebookresearch/DCPerf/blob/main/benchpress/plugins/hooks/perf_monitors/README.md#topdown)</code>
-    monitor, enabling core uArch metrics collection on non-NVIDIA ARM CPUs;
-    * **AMD Zen5 Support**: Incorporated AMD's latest performance monitoring
-    script for Zen5 and Zen5ES processors, ensuring accurate detection and
-    performance analysis on experimental servers.
-    * **Intel PerfSpect 3.x Support**: Added support for Intel PerfSpect 3.x
-    in DCPerf's Perf hook, enhancing the ability to collect micro-architectural
-    telemetries on Intel platforms.
+
+### Feedsim
+
+* **Dual-socket System Support**: Replaced `rand()` with `xor128()` to
+prevent lock contention, improving performance on dual-socket systems.
+* **Sweep-QPS Support**: Added support for multiple QPS values in fixed-QPS
+experiments, allowing sequential runs with a single setup and warmup period.
+* **ARM Support**: Added an ARM-specific job for feedsim to address
+differences in ICacheBuster behavior between ARM and x86 architectures,
+ensuring consistent performance metrics.
+* **Configurability**: Made the warmup period customizable in fixed-QPS runs
+
+### Mediawiki
+
+* **Load Generator Robustness**: Added support for `wrk` as the load
+generator in the Mediawiki benchmark, and used it as default to address
+issues with Siege hanging on systems with a large number of CPU cores.
+* **Configurability**: Consistently support time notation (h, m, s) in the
+benchmark duration parameter regardless of using Siege or Wrk.
+
+### Video Transcode Bench
+
+* **New Encode**r: Added support for the x264 encoder; upgraded SVT-AV1
+encoder version;
+* **Representativeness**: Improved the representativeness to Prod by
+increasing clip length, balancing workloads across resolutions, and
+ensuring full CPU utilization;
+* **Robustness**: Adjusted task distribution logics to avoid OOM on
+machines with limited memory;
+* **Score Reporting**: Added baseline and score calculation for this
+benchmark.
+
+### SparkBench
+
+* **Sanity Check**: Introduced an optional sanity check in SparkBench which
+measures data drive IOPS, allowing users to check if disk I/O is a
+bottleneck to the benchmark.
+
+### Perf Monitoring Hook
+
+* **Generic ARM Support**: Introduced support for ARM’s [topdown-tool](https://learn.arm.com/install-guides/topdown-tool/) in the <code>[topdown](https://github.com/facebookresearch/DCPerf/blob/main/benchpress/plugins/hooks/perf_monitors/README.md#topdown)</code> monitor, enabling core uArch metrics collection on non-NVIDIA ARM CPUs;
+* **AMD Zen5 Support**: Incorporated AMD's latest performance monitoring
+script for Zen5 and Zen5ES processors, ensuring accurate detection and
+performance analysis on experimental servers.
+* **Intel PerfSpect 3.x Support**: Added support for Intel PerfSpect 3.x
+in DCPerf's Perf hook, enhancing the ability to collect micro-architectural
+telemetries on Intel platforms.
 * **System Check**: Added a new `system_check` Benchpress subcommand to DCPerf,
 which performs a series of common system configuration checks and provides a
 report. This feature helps users check if their system is properly configured
 for optimal performance.
-* **Profiling Support**: Enabled `perf record` collection during the steady
+
+### Profiling Support
+
+Enabled `perf record` collection during the steady
 state of benchmarks when the environment variable `DCPERF_PERF_RECORD` is set
 to 1. This allows for detailed function profiling during benchmark execution.
-* **Miscellaneous**:
-    * Updated README documentations to reflect the up-to-date codebase
-    * Ensured that Benchpress will not attempt to run a benchmark if it has not
-    been successfully installed, providing clear error messages.
-    * Started developing integration tests for DCPerf benchmark installations
-    deployed in Github CI
+
+### Miscellaneous
+
+* Updated README documentations to reflect the up-to-date codebase
+* Ensured that Benchpress will not attempt to run a benchmark if it has not
+been successfully installed, providing clear error messages.
+* Started developing integration tests for DCPerf benchmark installations
+deployed in Github CI
 
 
 ## Bug Fixes
 
-* **Ubuntu Support:**
-    * Addressed several benchmark installation and execution issues on Ubuntu
-* **TaoBench:**
-    * **Robustness**: Set the default `memsize` parameter to be 75% of system
-    memory in standalone mode to avoid OOM situations caused by memory
-    competition between clients and server.
-    * **Parameters**: Fixed a bug in TaoBench standalone mode to properly
-    recognize `bind_cpu` and `bind_mem` parameters.
-* **Feedsim**:
-    * **Parameters**: Resolved an issue in feedsim's fixed-QPS runs where the
-    test duration (`-d`) option was not honored;
-    * **Error Handling**: Removed the useless "Unsupported arg" warning when
-    supplying extra parameters to the `feedsim_autoscale` benchmark.
-    * **Clean Up**: Fixed termination of detached processes in FeedSim to ensure
-    proper cleanup after pressing Ctrl+C.
-* **Mediawiki**:
-    * **Parameters**: Fixed  the `client_threads` parameter in Mediawiki to
-    ensure proper functionality.
-* **Perf Monitoring Hook**
-    * **Correctness:** Fixed the correctness of several PMU counter addresses
-    and uArch metric formulas.
-    * **ARM Accuracy**: Separated core and memory PMU events to different event
-    groups in ARM’s perf scripts for better accuracy.
-    * **Error Handling**: Print out proper error message in the event of
-    “Permission Denied” error, instead of “index out of range” exception.
+### Ubuntu Support
+
+* Addressed several benchmark installation and execution issues on Ubuntu
+
+### TaoBench
+
+* **Robustness**: Set the default `memsize` parameter to be 75% of system
+memory in standalone mode to avoid OOM situations caused by memory
+competition between clients and server.
+* **Parameters**: Fixed a bug in TaoBench standalone mode to properly
+recognize `bind_cpu` and `bind_mem` parameters.
+
+### Feedsim
+
+* **Parameters**: Resolved an issue in feedsim's fixed-QPS runs where the
+test duration (`-d`) option was not honored;
+* **Error Handling**: Removed the useless "Unsupported arg" warning when
+supplying extra parameters to the `feedsim_autoscale` benchmark.
+* **Clean Up**: Fixed termination of detached processes in FeedSim to ensure
+proper cleanup after pressing Ctrl+C.
+
+### Mediawiki
+
+* **Parameters**: Fixed  the `client_threads` parameter in Mediawiki to
+ensure proper functionality.
+
+### Perf Monitoring Hook
+
+* **Correctness:** Fixed the correctness of several PMU counter addresses
+and uArch metric formulas.
+* **ARM Accuracy**: Separated core and memory PMU events to different event
+groups in ARM’s perf scripts for better accuracy.
+* **Error Handling**: Print out proper error message in the event of
+“Permission Denied” error, instead of “index out of range” exception.
 
 # v0.2.0
 
