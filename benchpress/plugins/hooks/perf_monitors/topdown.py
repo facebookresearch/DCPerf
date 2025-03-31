@@ -346,7 +346,7 @@ class AMDPerfUtil:
         self.perfutil = BasePerfUtil(
             job_uuid,
             "amd-perf-collector",
-            perf_collect_script_name="collect_amd_perf_counter.sh",
+            perf_collect_script_name="collect_amd_perf_counters.sh",
             perf_postproc_script_name="generate_amd_perf_report.py",
         )
         if self.amd_gen == "zen4":
