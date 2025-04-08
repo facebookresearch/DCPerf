@@ -5,11 +5,11 @@ In addition to DCPerf, these scripts can be used in a standalone way. A typical 
 
 # Supported Architectures
 ## AMD Zen3
-- Data Collection: collect_amd_perf_counter.sh
+- Data Collection: collect_amd_perf_counters.sh
 - Data Processing: generate_amd_perf_report.py --arch zen3
 ## AMD Zen4
 - Data Collection:
-collect_amd_perf_counter.sh
+collect_amd_perf_counters.sh and
 collect_amd_zen4_perf_counters.sh
 - Data Processing: generate_amd_perf_report.py --arch zen4
 ## AMD Zen5
