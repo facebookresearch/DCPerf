@@ -125,6 +125,8 @@ cd oss-performance || exit 1
 # templates/oss-performance-mediawiki/0001-oss-performance-scalable-hhvm.diff
 git apply --check "${TEMPLATES_DIR}/0001-oss-performance-scalable-hhvm.diff" \
     && git apply "${TEMPLATES_DIR}/0001-oss-performance-scalable-hhvm.diff"
+git apply --check "${TEMPLATES_DIR}/0005-scale-out-memcached.diff" \
+    && git apply "${TEMPLATES_DIR}/0005-scale-out-memcached.diff"
 
 # Copy wrk related stuff
 cp "${TEMPLATES_DIR}/Wrk.php" ./base/Wrk.php

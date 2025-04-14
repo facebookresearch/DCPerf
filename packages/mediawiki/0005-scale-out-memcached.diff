@@ -1,0 +1,113 @@
+diff --git a/base/MemcachedDaemon.php b/base/MemcachedDaemon.php
+index 1cd4968..14b7b57 100644
+--- a/base/MemcachedDaemon.php
++++ b/base/MemcachedDaemon.php
+@@ -14,9 +14,18 @@ final class MemcachedDaemon extends Process {
+ 
+   public function __construct(
+     private PerfOptions $options,
+-    private PerfTarget $target,
++    private int $port = 0,
++    private Vector<Pair> $cpuCoreRanges = Vector {},
+   ) {
+     parent::__construct($this->options->memcached);
++
++    if ($cpuCoreRanges->count() > 0) {
++      $rangeList = Vector {};
++      foreach($cpuCoreRanges as $range) {
++        $rangeList->add($range[0].'-'.$range[1]);
++      }
++      $this->cpuRange = implode(",", $rangeList);
++    }
+   }
+ 
+   public function start(): void {
+@@ -60,6 +69,7 @@ final class MemcachedDaemon extends Process {
+       $this->cpuRange = $this->options->helperProcessors;
+     }
+     $processUser = posix_getpwuid(posix_geteuid());
++    $use_port = $this->port === 0 ? $this->options->memcachedPort : $this->port;
+     return Vector {
+       '-m',
+       (string) $this->maxMemory,
+@@ -68,7 +78,7 @@ final class MemcachedDaemon extends Process {
+       '-c',
+       '32768',
+       '-p',
+-      (string) $this->options->memcachedPort,
++      (string) $use_port,
+       '-P', # pid file
+       $this->getPidFilePath(),
+       '-u',
+diff --git a/base/PerfRunner.php b/base/PerfRunner.php
+index 5201a2d..afb51f3 100644
+--- a/base/PerfRunner.php
++++ b/base/PerfRunner.php
+@@ -86,7 +86,9 @@ final class PerfRunner {
+     );
+ 
+     $php_engines = Vector {};
++    $memcached_instances = Vector {};
+     $options = $options_list->get(0);
++    $memcached_port = $options->memcachedPort;
+ 
+     if ($options->hhvm) {
+       $is_smt_active = file_get_contents('/sys/devices/system/cpu/smt/active');
+@@ -119,21 +121,26 @@ final class PerfRunner {
+         }
+         $hhvm_daemon = new HHVMDaemon($options_list->get($i), PerfSettings::BackendPorts($i), PerfSettings::BackendAdminPorts($i), $coreRange);
+         $php_engines->add($hhvm_daemon);
++        $options_list->get($i)->memcachedPort = $memcached_port + $i;
++        $memcached = new MemcachedDaemon($options_list->get($i), $memcached_port + $i, $coreRange);
++        $memcached_instances->add($memcached);
+       }
+     } else if ($options->php5) {
+       $php_engines->add(new PHP5Daemon($options));
++      $memcached_instances->add(new MemcachedDaemon($options));
+     }
+ 
+     foreach ($php_engines as $engine) {
+       invariant($engine !== null, 'failed to initialize a PHP engine');
+     }
+ 
+-    return self::RunWithOptionsAndEngines($options_list, $php_engines);
++    return self::RunWithOptionsAndEngines($options_list, $php_engines, $memcached_instances);
+   }
+ 
+   private static function RunWithOptionsAndEngines(
+     Vector<PerfOptions> $options_list,
+     Vector<PHPEngine> $engines,
++    Vector<MemcachedDaemon> $memcached_instances,
+   ): PerfResult {
+     $options = $options_list->get(0);
+     $targets = Vector {};
+@@ -179,11 +186,12 @@ final class PerfRunner {
+     invariant($nginx->isRunning(), 'Failed to start nginx');
+ 
+     if ($options->useMemcached && $target->supportsMemcached()) {
+-      $memcached = new MemcachedDaemon($options, $target);
+-      self::PrintProgress('Starting Memcached ('.
+-                          $memcached->getNumThreads().' threads)');
+-      Process::sleepSeconds($options->delayMemcachedStartup);
+-      $memcached->start();
++      foreach($memcached_instances as $memcached) {
++        self::PrintProgress('Starting Memcached ('.
++                            $memcached->getNumThreads().' threads)');
++        Process::sleepSeconds($options->delayMemcachedStartup);
++        $memcached->start();
++      }
+     }
+ 
+     foreach ($engines as $php_engine) {
+@@ -307,7 +315,10 @@ final class PerfRunner {
+       fread(STDIN, 1);
+     }
+     foreach ($engines as $php_engine) {
+-        $php_engine->stop();
++      $php_engine->stop();
++    }
++    foreach ($memcached_instances as $memcached) {
++      $memcached->stop();
+     }
+ 
+     if ($options->tearDownTest != null) {

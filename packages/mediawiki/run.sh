@@ -13,7 +13,7 @@ HHVM_SERVERS="$(( (NPROC + 99) / 100 ))"
 SERVER_THREADS=$(echo "${BC_MAX_FN}; max(200, (2.8 * $(nproc)) / ${HHVM_SERVERS})" | bc)  # Divides by integer 1 to truncate decimal
 SIEGE_CLIENT_THREADS=$(echo "${BC_MAX_FN}; max(200, (150 * ${HHVM_SERVERS}))" | bc)
 WRK_CLIENT_THREADS=$(( 2 * NPROC ))
-MEMCACHE_THREADS=$(( 8 * HHVM_SERVERS ))
+MEMCACHE_THREADS=8
 
 export LD_LIBRARY_PATH=/opt/local/hhvm-3.30/lib
 
