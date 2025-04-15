@@ -122,6 +122,24 @@ def get_amd_zen_generation(cpuinfo: dict):
         return "zen3"
 
 
+def get_os_release():
+    if not os.path.exists("/etc/os-release"):
+        return "Unknown"
+    with open("/etc/os-release", "r") as f:
+        lines = f.readlines()
+    os_release = None
+    for line in lines:
+        if line.startswith("NAME="):
+            os_release = line.strip().split("=")[1].strip('"')
+            break
+    if "CentOS" in os_release:
+        return "CentOS"
+    elif "Ubuntu" in os_release:
+        return "Ubuntu"
+    else:
+        return "Unknown"
+
+
 class IntelPerfSpect(Monitor):
     def __init__(self, job_uuid, mux_interval_msecs=125, perfspect_path=None):
         # PerfSpect 1.x does not support specifying interval
@@ -422,7 +440,13 @@ class ARMPerfUtil(Monitor):
         try:
             subprocess.run(["git", "clone", self.TOPDOWN_TOOL_URL], check=True)
             os.chdir("telemetry-solution/tools/topdown_tool")
-            subprocess.run(["sudo", "pip-3.9", "install", "."], check=True)
+            if get_os_release() == "CentOS":
+                subprocess.run(["sudo", "pip-3.9", "install", "."], check=True)
+            elif get_os_release() == "Ubuntu":
+                subprocess.run(["sudo", "pip3", "install", "."], check=True)
+            else:
+                logger.warning("Unsupported OS for installing topdown-tool")
+                return False
             subprocess.run(["topdown-tool", "--help"], capture_output=True, check=True)
         except subprocess.CalledProcessError as e:
             print(
