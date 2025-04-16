@@ -56,6 +56,7 @@ Usage: ${0##*/} [OPTION]...
     -t Number of threads to use for thrift serving. Large dataset kept per thread. Default: $THRIFT_THREADS_DEFAULT
     -c Number of threads to use for fanout ranking work. Heavy CPU work. Default: $RANKING_THREADS_DEFAULT
     -s Number of threads to use for task-based serialization cpu work. Default: $SRV_IO_THREADS_DEFAULT
+    -l Number of threads to use for load generation in the drivers. Default: $DRIVER_THREADS
     -a When searching for the optimal QPS, automatically adjust the number of client driver threads by
        min(requested_qps / 4, $(nproc) / 5) in each iteration (experimental feature).
     -q Number of QPS to request. If this is present, feedsim will run a fixed-QPS experiment instead of searching
@@ -97,6 +98,9 @@ main() {
     local srv_io_threads
     srv_io_threads="$SRV_IO_THREADS_DEFAULT"
 
+    local driver_threads
+    driver_threads="$DRIVER_THREADS"
+
     local auto_driver_threads
     auto_driver_threads=""
 
@@ -134,6 +138,9 @@ main() {
             -s)
                 srv_io_threads="$2"
                 ;;
+            -l)
+                driver_threads="$2"
+                ;;
             -a)
                 auto_driver_threads="1"
                 ;;
@@ -165,7 +172,7 @@ main() {
         esac
 
         case $1 in
-            -t|-c|-s|-d|-p|-q|-o|-w|-i)
+            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l)
                 if [ -z "$2" ]; then
                     echo "Invalid option: '$1' requires an argument" 1>&2
                     exit 1
@@ -207,7 +214,7 @@ main() {
 
     # FIXME(cltorres)
     # Remove sleep, expose an endpoint or print a message to notify service is ready
-    sleep 90
+    sleep 30
 
     # FIXME(cltorres)
     # Skip ParentNode for now, and talk directly to LeafNode
@@ -224,7 +231,7 @@ main() {
             build/workloads/ranking/DriverNodeRank \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
-                --threads="${DRIVER_THREADS}" \
+                --threads="${driver_threads}" \
                 --connections=4
         benchreps_tell_state "after search_qps"
     elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
@@ -236,14 +243,14 @@ main() {
         benchreps_tell_state "after search_qps"
     else
         # Adjust the number of workers according to QPS
-        # If DRIVER_THREADS * connections is too large compared to qps, the driver may not be able
+        # If driver_threads * connections is too large compared to qps, the driver may not be able
         # to accurately fulfill the requested QPS
         num_connections=4
         num_workers=$((fixed_qps / num_connections))
         if [ "$num_workers" -lt 1 ]; then
             num_workers=1
-        elif [ "$num_workers" -gt "$DRIVER_THREADS" ]; then
-            num_workers=$DRIVER_THREADS
+        elif [ "$num_workers" -gt "$driver_threads" ]; then
+            num_workers=$driver_threads
         fi
         benchreps_tell_state "before fixed_qps_exp"
         scripts/search_qps.sh -s 95p -t "$fixed_qps_duration" \
