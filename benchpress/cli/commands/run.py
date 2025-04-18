@@ -113,6 +113,8 @@ class RunCommand(BenchpressCommand):
         machine_data["cpu_architecture"] = os_kernel_data.get("machine", "")
         machine_data["cpu_model"] = cpu_topology.get("Model name", "")
         machine_data["num_logical_cpus"] = cpu_topology.get("CPU(s)", "")
+        machine_data["num_cpus_usable"] = len(os.sched_getaffinity(0))
+        machine_data["threads_per_core"] = cpu_topology.get("Thread(s) per core", "")
         machine_data["mem_total_kib"] = mem_data.get("MemTotal", "")
         final_metrics["machines"].append(machine_data)
 

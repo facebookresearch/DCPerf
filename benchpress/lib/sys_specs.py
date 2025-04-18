@@ -23,6 +23,7 @@ def get_cpu_topology():
     lscpu_data = lscpu_data.decode("utf-8").split("\n")
 
     lscpu_dict = {}
+    lscpu_dict["sched_getaffinity"] = list(os.sched_getaffinity(0))
     for cpu_stat in lscpu_data:
         if ":" in cpu_stat:
             stat, val = [stat.strip() for stat in cpu_stat.split(":")][:2]
