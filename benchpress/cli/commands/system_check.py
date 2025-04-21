@@ -6,6 +6,7 @@
 
 # pyre-unsafe
 
+import json
 import logging
 import re
 import shlex
@@ -13,15 +14,16 @@ import subprocess
 
 import click
 import tabulate
+import yaml
 
 from .command import BenchpressCommand, TABLE_FORMAT
 
 logger = logging.getLogger(__name__)
 
 
-def run_cmd(cmd):
+def run_cmd(cmd, ignore_error=False):
     p = subprocess.run(cmd, capture_output=True, shell=True)
-    if p.returncode == 0:
+    if p.returncode == 0 or ignore_error:
         return p.stdout.decode().strip()
     else:
         return f"Error: {p.stderr.decode().strip()}"
@@ -43,6 +45,16 @@ class SystemCheckCommand(BenchpressCommand):
             "system_check",
             help="system_check is a subcommand that can check a series of system configurations, provide a brief report and provide suggestions",
         )
+        parser.add_argument(
+            "--config",
+            type=str,
+            help="config file(s) to use, comma separated list, if multiple",
+        )
+
+        parser.add_argument(
+            "--run-fixes", type=bool, help="config file to use", default=False
+        )
+
         parser.set_defaults(command=self)
 
     def system_software(self):
@@ -174,7 +186,203 @@ class SystemCheckCommand(BenchpressCommand):
 
         click.echo(tabulate.tabulate(table, tablefmt=TABLE_FORMAT))
 
+    def success(self, name, value):
+        click.echo(click.style("[OK]    ", fg="green") + f"{name:50s}{value}")
+
+    def fail(self, name, value, expected, match_type):
+        click.echo(
+            click.style(
+                "[BAD]   ",
+                fg="red",
+            )
+            + f"{name:50s}"
+            + f"Mismatch `{value}' and `{expected}' (type={match_type})"
+        )
+
+    def skip(self, name, msg):
+        click.echo(click.style("[SKIP]  ", fg="yellow") + f"{name:50s}{msg}")
+
+    def warn(self, msg):
+        click.echo(click.style(f"{msg}", fg="yellow"))
+
+    def handle_validation_failure(self, args, check, value_found) -> bool:
+        fixes_available: bool = False
+
+        self.fail(check["name"], value_found, check["value"], check["match_type"])
+
+        if args.run_fixes:
+            if "fix" in check:
+                self.warn(f"\tFixing {check['name']} with `{check['fix']}`")
+                run_cmd(check["fix"])
+        elif "fix" in check:
+            fixes_available = True
+
+        return fixes_available
+
+    def validate_system_serf(self, check, ignore_error):
+        result_raw = run_cmd(
+            "serf get $(hostname) --fields '" + check["fields"] + "' --format json"
+        )
+        value_found = ""
+        failed = True
+
+        result_json = json.loads(result_raw)
+
+        for item in result_json:
+            if check["key_name"] not in item:
+                raise Exception(f"{check['key_name']} not found")
+
+            if item[check["key_name"]] == check["key"]:
+                value_found = item[check["value_name"]]
+                failed = value_found != check["value"]
+                break
+
+        check["match_type"] = "serf"
+
+        return (
+            value_found,
+            failed,
+        )
+
+    def validate_system_shell(self, check, ignore_error):
+        result = run_cmd(check["command"], ignore_error).split("\n")[0]
+        value_found = result
+        failed = False
+        if check["match_type"] == "ignore":
+            failed = False
+        elif check["match_type"] == "endswith":
+            failed = not result.endswith(check["value"])
+        elif check["match_type"] == "startswith":
+            failed = not result.startswith(check["value"])
+        elif check["match_type"] == "exact":
+            failed = result != check["value"]
+        elif check["match_type"] == "any_exact":
+            failed = result not in check["value"]
+        elif check["match_type"] == "any_startswith":
+            failed = not any(result.startswith(v) for v in check["value"])
+        elif check["match_type"] == "regex":
+            match = re.search(check["regex"], result)
+            if match:
+                value_found = match.group()
+                failed = match.group() != check["value"]
+            else:
+                value_found = "<no match>"
+                failed = True
+        else:
+            raise Exception(f"Unknown match type: {check['match_type']}")
+
+        return (
+            value_found,
+            failed,
+        )
+
+    def validate_system_eth(self, check, ignore_error):
+        if "interface" not in check:
+            raise Exception("interface is required for eth check")
+        if "field" not in check:
+            raise Exception("field is required for eth check")
+        if "value" not in check:
+            raise Exception("value is required for eth check")
+
+        value_found: str = ""
+        failed: bool = False
+
+        result_raw = run_cmd(f"ethtool --json {check['options']} {check['interface']}")
+        result_list = json.loads(result_raw)
+        assert len(result_list) == 1
+        result = result_list[0]
+
+        check["match_type"] = "eth"
+
+        if check["field"] not in result:
+            failed = True
+            value_found = "<not present>"
+        else:
+            value_found = result[check["field"]]
+
+            failed = result[check["field"]] != check["value"]
+
+        return (
+            value_found,
+            failed,
+        )
+
+    def is_predicate_true(self, check) -> bool:
+        if "predicate" in check:
+            if "predicate_desc" not in check:
+                raise Exception("predicate_desc is required if predicate is present")
+            if "predicate_value" not in check:
+                raise Exception("predicate_value is required if predicate is present")
+
+            predicate = check["predicate"]
+            predicate_result = run_cmd(predicate)
+            return predicate_result == check["predicate_value"]
+        else:
+            return True
+
+    def validate_system(self, file, args):
+        tests_stats = {
+            "passed": 0,
+            "failed": 0,
+        }
+
+        fixes_are_available: bool = False
+        config: str = ""
+
+        click.echo(f"**** Validating from {file} ****")
+        with open(file) as f:
+            config = yaml.safe_load(f)
+
+        value_found: str = ""
+        for check in config:
+            failed: bool = False
+            ignore_error: bool = False
+            if "ignore_error" in check:
+                ignore_error = check["ignore_error"]
+
+            if not self.is_predicate_true(check):
+                self.skip(check["name"], check["predicate_desc"])
+                continue
+
+            if check["type"] == "serf":
+                value_found, failed = self.validate_system_serf(check, ignore_error)
+            elif check["type"] == "shell":
+                value_found, failed = self.validate_system_shell(check, ignore_error)
+            elif check["type"] == "eth":
+                value_found, failed = self.validate_system_eth(check, ignore_error)
+            else:
+                raise Exception(f"Unknown check type: {check['type']}")
+
+            if failed:
+                fixes_are_available |= self.handle_validation_failure(
+                    args, check, value_found
+                )
+                tests_stats["failed"] += 1
+            else:
+                self.success(check["name"], value_found)
+                tests_stats["passed"] += 1
+
+        tests_stats["fixes_are_available"] = fixes_are_available
+
+        return tests_stats
+
     def run(self, args, jobs):
+        if args.config:
+            for file in args.config.split(","):
+                tests_stats = self.validate_system(file, args)
+
+                click.echo(
+                    click.style(
+                        f"Passed: {tests_stats['passed']}, Failed: {tests_stats['failed']}",
+                        fg="green" if tests_stats["failed"] == 0 else "red",
+                    )
+                )
+
+                if tests_stats["fixes_are_available"]:
+                    self.warn(
+                        "Fixes are available. Run with --run-fixes to apply them."
+                    )
+
         self.system_software()
         self.kernel_config()
         self.hardware_config()
