@@ -45,6 +45,7 @@ from .small_locks_bench import SmallLocksParser
 from .spark_standalone import SparkStandaloneParser
 from .spec_cpu2006 import SPECCPU2006Parser
 from .stream import StreamParser
+from .syscall import SyscallParser
 from .tailbench import TailBenchParser
 from .tao_bench import TaoBenchParser
 from .tao_bench_autoscale import TaoBenchAutoscaleParser
@@ -98,6 +99,7 @@ def register_parsers(factory):
     factory.register("video_transcode_bench", FfmpegParser)
     factory.register("wdl_bench", WDLParser)
     factory.register("health_check", HealthCheckParser)
+    factory.register("syscall", SyscallParser)
 
     if not open_source:
         factory.register("adsim", AdSimParser)
