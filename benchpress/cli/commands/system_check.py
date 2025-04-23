@@ -300,7 +300,11 @@ class SystemCheckCommand(BenchpressCommand):
         else:
             value_found = result[check["field"]]
 
-            failed = result[check["field"]] != check["value"]
+            if "sub-field" in check:
+                value_found = result[check["field"]][check["sub-field"]]
+                failed = value_found != check["value"]
+            else:
+                failed = result[check["field"]] != check["value"]
 
         return (
             value_found,
