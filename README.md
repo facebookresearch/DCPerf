@@ -618,3 +618,16 @@ sufficiently stressed the system.
 ## LICENSE
 
 This source code is licensed under the MIT license found in the LICENSE file in the root directory of this source tree.
+
+## Related Publication
+
+Please cite the following paper if you use DCPerf in your work:
+
+```bibtex
+@inproceedings {su-dcperf,
+author = {Su, Wei and Dhanotia, Abhishek and Torres, Carlos and Gandhi, Jayneel and Gholkar, Neha and Kanaujia, Shobhit and Naumov, Maxim and Subramanian, Kalyan and Andrei, Valentin and Yuan, Yifan and Tang, Chunqiang},
+title = {DCPerf: An open-source, battle-tested performance benchmark suite for datacenter workloads},
+booktitle = {Proceedings of the 48th IEEE/ACM International Symposium on Computer Architecture (ISCA'25)},
+year = {2025},
+}
+```
