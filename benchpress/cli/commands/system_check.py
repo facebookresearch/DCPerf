@@ -345,7 +345,9 @@ class SystemCheckCommand(BenchpressCommand):
                 ignore_error = check["ignore_error"]
 
             if not self.is_predicate_true(check):
-                self.skip(check["name"], check["predicate_desc"])
+                self.skip(
+                    check["name"], "Predicate not true: " + check["predicate_desc"]
+                )
                 continue
 
             if check["type"] == "serf":
