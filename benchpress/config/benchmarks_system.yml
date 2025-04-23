@@ -1,0 +1,16 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+syscall:
+  parser: syscall
+  install_script: ./packages/syscall/install_syscall.sh
+  cleanup_script: ./packages/syscall/cleanup_syscall.sh
+  path: ./packages/syscall/syscall
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics: []

@@ -1,0 +1,40 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+- name: syscall_single_core
+  benchmark: syscall
+  description: >
+    single core syscall benchmarks
+  args:
+    - '-workers={workers}'
+    - '-duration_s={duration_s}'
+    - '-nanosleep_ns={nanosleep_ns}'
+    - '-syscalls={syscalls}'
+    - '-base_port={base_port}'
+  vars:
+    - 'workers=1'
+    - 'duration_s=60'
+    - 'nanosleep_ns=100'
+    - 'syscalls='
+    - 'base_port=16500'
+  hooks: []
+
+- name: syscall_autoscale
+  benchmark: syscall
+  description: >
+    Benchmark all cores
+  args:
+    - '-workers={workers}'
+    - '-duration_s={duration_s}'
+    - '-nanosleep_ns={nanosleep_ns}'
+    - '-syscalls={syscalls}'
+    - '-base_port={base_port}'
+  vars:
+    - 'workers=-1'
+    - 'duration_s=60'
+    - 'nanosleep_ns=100'
+    - 'syscalls='
+    - 'base_port=16500'
+  hooks: []
