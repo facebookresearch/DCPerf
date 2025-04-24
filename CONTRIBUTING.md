@@ -6,11 +6,11 @@ possible.
 We actively welcome your pull requests.
 
 1. Fork the repo and create your branch from `v2-beta`. If your PR is about bug fix, please use `main`. 
-3. If you've added code that should be tested, add tests.
-4. If you've changed APIs, update the documentation.
-5. Ensure the test suite passes.
-6. Make sure your code lints.
-7. If you haven't already, complete the Contributor License Agreement ("CLA").
+2. If you've added code that should be tested, add tests.
+3. If you've changed APIs, update the documentation.
+4. Ensure the test suite passes.
+5. Make sure your code lints.
+6. If you haven't already, complete the Contributor License Agreement ("CLA").
 
 ## Contributor License Agreement ("CLA")
 In order to accept your pull request, we need you to submit a CLA. You only need
