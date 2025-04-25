@@ -53,6 +53,9 @@ def issue_background_command(cmd, stdout, stderr, env=None):
 
 
 def verify_install(install_script):
+    if not install_script:
+        # install_script not set means this "benchmark" does not need installation
+        return True
     if os.path.exists("benchmark_installs.txt"):
         with open("benchmark_installs.txt", "r") as benchmark_installs:
             for benchmark_install in benchmark_installs:
