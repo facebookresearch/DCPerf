@@ -8,6 +8,7 @@ import csv
 import functools
 import io
 import itertools
+import typing
 
 import click
 import pandas as pd
@@ -804,7 +805,7 @@ def nvidia_scf_mem_latency_ns(grouped_df):
 )
 def main(
     perf_csv_file: click.Path,
-    series: click.File,
+    series: typing.TextIO,
     format: click.Choice,
 ) -> None:
     df = read_csv(perf_csv_file)
