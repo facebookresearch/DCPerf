@@ -72,6 +72,12 @@ clone()
         echo "Clone failed because the folder ${lib} exists"
         return 1
     fi
+
+    if ! [ -d "$lib" ]; then
+        echo "Clone failed (Can this machine reach GitHub?). Exiting."
+        exit 1
+    fi
+
     pushd "$lib" || exit 1
     tag=${TAGS[$lib]}
     git checkout "$tag" || exit 1
@@ -86,7 +92,7 @@ build_x264()
     cd "$lib" || exit
     mkdir -p _build && cd _build || exit
     CC="clang" ../configure --prefix="${FFMPEG_BUILD}" --enable-static --extra-cflags="${platform_cc_flags}"
-    make -j "$(nproc)" && make install
+    make -j "$(nproc)" && make install -j "$(nproc)"
     popd || exit
 }
 
@@ -98,7 +104,7 @@ build_svtav1()
     cd "$lib" || exit
     mkdir -p _build && cd _build || exit
     cmake .. -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${FFMPEG_BUILD}"  -DBUILD_SHARED_LIBS=off -DCMAKE_BUILD_TYPE=Release
-    make -j "$(nproc)" && make install
+    make -j "$(nproc)" && make install -j "$(nproc)"
     popd
 }
 
@@ -114,7 +120,7 @@ build_aom()
     else
         cmake .. -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${FFMPEG_BUILD}"  -DBUILD_SHARED_LIBS=off -DCMAKE_BUILD_TYPE=Release -DAOM_TARGET_CPU=arm64
     fi
-    make -j "$(nproc)" && make install
+    make -j "$(nproc)" && make install -j "$(nproc)"
     popd || exit
 }
 
@@ -125,7 +131,7 @@ build_vmaf()
     clone $lib || echo "Failed to clone $lib"
     cd "$lib/libvmaf" || exit
     meson setup _build --prefix="${FFMPEG_BUILD}" --default-library static --buildtype release
-    ninja -vC _build install
+    ninja -vC _build install -j "$(nproc)"
     popd || exit
 }
 
@@ -174,7 +180,7 @@ build_ffmpeg()
 
     fi
 
-    make -j "$(nproc)" && make install
+    make -j "$(nproc)" && make install -j "$(nproc)"
     popd || exit
 }
 
