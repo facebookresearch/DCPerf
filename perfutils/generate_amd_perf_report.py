@@ -9,6 +9,7 @@ import functools
 import io
 import itertools
 import subprocess
+import typing
 
 import click
 import pandas as pd
@@ -2376,7 +2377,7 @@ def get_memory_info():
 )
 def main(
     amd_perf_csv_file: click.Path,
-    series: click.File,
+    series: typing.TextIO,
     format: click.Choice,
     arch: click.Choice,
 ) -> None:
