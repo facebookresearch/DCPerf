@@ -146,3 +146,8 @@ health_check:
   cleanup_script: ./packages/health_check/cleanup_health_check.sh
   path: ./benchmarks/health_check/run.sh
   metrics: []
+
+sleep:
+  path: /usr/bin/sleep
+  parser: returncode
+  metrics: []

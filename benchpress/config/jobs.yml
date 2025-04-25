@@ -806,3 +806,13 @@
     client:
       args:
         - '-r client'
+
+- benchmark: sleep
+  name: sleep
+  description: >
+    Sleep for a period of time. Can be used to leverage Benchpress's Perf
+    Monitoring Hook to monitor some external workloads.
+  args:
+    - '{duration}'
+  vars:
+    - 'duration'
