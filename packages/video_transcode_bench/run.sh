@@ -217,6 +217,9 @@ main() {
 
     head -n -6 "./${run_sh}" > temp.sh && mv temp.sh "./${run_sh}" && chmod +x ./${run_sh}
 
+    export LD_LIBRARY_PATH="${FFMPEG_ROOT}/ffmpeg_build/lib64/"
+    ldconfig
+
     #run
     benchreps_tell_state "start"
     if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
@@ -224,6 +227,10 @@ main() {
     fi
     ./"${run_sh}"
     benchreps_tell_state "done"
+
+    unset LD_LIBRARY_PATH
+    ldconfig
+
     #generate output
     if [ -f "${result_filename}" ]; then
         rm "${result_filename}"
