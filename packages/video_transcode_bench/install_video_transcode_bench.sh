@@ -19,7 +19,7 @@ declare -A REPOS=(
 declare -A TAGS=(
     ['aom']='v3.8.2'
     ['ffmpeg']='n7.0.1'
-    ['SVT-AV1']='v3.0.1'
+    ['SVT-AV1']='v3.0.2'
     ['vmaf']='v3.0.0'
     ['aom-testing']='81b0dbfc2e357518c23071eb44860ed8637402c2'
     ['x264']='570f6c70808287fc78e3f8f5372a095ec6ef7878'
@@ -91,7 +91,7 @@ build_x264()
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
     mkdir -p _build && cd _build || exit
-    CC="clang" ../configure --prefix="${FFMPEG_BUILD}" --enable-static --extra-cflags="${platform_cc_flags}"
+    CC="clang" CXX="clang++" ../configure --prefix="${FFMPEG_BUILD}" --enable-static --extra-cflags="${platform_cc_flags}"
     make -j "$(nproc)" && make install -j "$(nproc)"
     popd || exit
 }
@@ -103,7 +103,7 @@ build_svtav1()
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
     mkdir -p _build && cd _build || exit
-    cmake .. -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${FFMPEG_BUILD}"  -DBUILD_SHARED_LIBS=off -DCMAKE_BUILD_TYPE=Release
+    CC="clang" CXX="clang++" cmake .. -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${FFMPEG_BUILD}" -DCMAKE_BUILD_TYPE=Release
     make -j "$(nproc)" && make install -j "$(nproc)"
     popd
 }
@@ -146,7 +146,7 @@ build_ffmpeg()
     mkdir -p _build && cd _build || exit
     if [ -v PKG_CONFIG_PATH ]; then
         PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib/x86_64-linux-gnu/pkgconfig:$FFMPEG_BUILD/lib/aarch64-linux-gnu/pkgconfig \
-            ../configure --ld="g++" \
+            ../configure --ld="clang++" \
             --enable-gpl --enable-nonfree --enable-version3 \
             --enable-static --disable-shared \
             --pkg-config-flags=--static \
@@ -163,7 +163,7 @@ build_ffmpeg()
 
     else
         PKG_CONFIG_PATH=$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib/x86_64-linux-gnu/pkgconfig:$FFMPEG_BUILD/lib/aarch64-linux-gnu/pkgconfig \
-            ../configure --ld="g++" \
+            ../configure --ld="clang++" \
             --enable-gpl --enable-nonfree --enable-version3 \
             --enable-static --disable-shared \
             --pkg-config-flags=--static \
