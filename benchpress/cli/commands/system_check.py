@@ -40,6 +40,9 @@ def get_cpuinfo():
 
 
 class SystemCheckCommand(BenchpressCommand):
+    def __init__(self):
+        self.run_cmd = run_cmd
+
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser(
             "system_check",
@@ -60,11 +63,11 @@ class SystemCheckCommand(BenchpressCommand):
     def system_software(self):
         table = []
         click.echo("**** System Software ****")
-        bios_version = run_cmd("dmidecode -s bios-version")
+        bios_version = self.run_cmd("dmidecode -s bios-version")
         table.append(["BIOS Version", bios_version])
-        bios_release_date = run_cmd("dmidecode -s bios-release-date")
+        bios_release_date = self.run_cmd("dmidecode -s bios-release-date")
         table.append(["BIOS Release Date", bios_release_date])
-        nic = run_cmd("lshw -c network")
+        nic = self.run_cmd("lshw -c network")
         match_venfor = re.search(r"vendor: (.+)", nic)
         if match_venfor:
             nic_vendor = match_venfor.group(1)
@@ -80,7 +83,7 @@ class SystemCheckCommand(BenchpressCommand):
             nic_firmware = match_firmeware.group(1)
             table.append(["NIC Firmware", nic_firmware])
 
-        bmc_firmware = run_cmd("ipmitool mc info")
+        bmc_firmware = self.run_cmd("ipmitool mc info")
         match = re.search(r"Firmware Revision\s+: (\d+\.\d+)", bmc_firmware)
         if match:
             bmc_firmware = match.group(1)
@@ -90,9 +93,9 @@ class SystemCheckCommand(BenchpressCommand):
     def kernel_config(self):
         table = []
         click.echo("**** Kernel Configurations ****")
-        kernel_version = run_cmd("uname -r")
+        kernel_version = self.run_cmd("uname -r")
         table.append(["Kernel Version", kernel_version])
-        setlinux_status = run_cmd("getenforce")
+        setlinux_status = self.run_cmd("getenforce")
         row = ["SELinux Status", setlinux_status, ""]
         if setlinux_status == "Disabled":
             row[-1] = click.style("[OK]", fg="green")
@@ -109,7 +112,7 @@ class SystemCheckCommand(BenchpressCommand):
             row[-2] = "Present"
         table.append(row)
 
-        open_files_limit = run_cmd("ulimit -n")
+        open_files_limit = self.run_cmd("ulimit -n")
         row = ["Open Files Limit", open_files_limit, ""]
         if int(open_files_limit) < 65535:
             row[-1] = click.style("[BAD]", fg="red")
@@ -118,7 +121,7 @@ class SystemCheckCommand(BenchpressCommand):
         table.append(row)
 
         thp_status = (
-            run_cmd("cat /sys/kernel/mm/transparent_hugepage/enabled")
+            self.run_cmd("cat /sys/kernel/mm/transparent_hugepage/enabled")
             .split("[")[1]
             .split("]")[0]
         )
@@ -132,7 +135,7 @@ class SystemCheckCommand(BenchpressCommand):
         numa_nodes = cpuinfo["NUMA node(s)"]
         table.append(["NUMA Nodes", numa_nodes])
 
-        lscpu = run_cmd("lscpu")
+        lscpu = self.run_cmd("lscpu")
         matches = re.findall(r"NUMA node\d CPU\(s\):\s+(\d+)", lscpu)
         if len(matches) == int(numa_nodes):
             table.append(["CXL", "Not Present"])
@@ -141,7 +144,7 @@ class SystemCheckCommand(BenchpressCommand):
 
         arch = cpuinfo["Architecture"]
         if arch == "x86_64":
-            boost_status = run_cmd("cat /sys/devices/system/cpu/cpufreq/boost")
+            boost_status = self.run_cmd("cat /sys/devices/system/cpu/cpufreq/boost")
             row = ["Boost Status", "", ""]
             if boost_status == "0":
                 row[-1] = click.style("[BAD]", fg="red")
@@ -161,18 +164,18 @@ class SystemCheckCommand(BenchpressCommand):
                     uefi = 'uefisettings get "Determinism Slider"'
                 else:
                     uefi = 'uefisettings get "Determinism Enable"'
-                uefi = run_cmd(uefi)
+                uefi = self.run_cmd(uefi)
                 match = re.search(r"answer:\s+(.+),", uefi)
                 if match:
                     table.append(["Determinism", match.group(1)])
 
-        memory_speed = run_cmd("dmidecode -t memory")
+        memory_speed = self.run_cmd("dmidecode -t memory")
         match = re.search(r"Speed: (\d+ MT/s)", memory_speed)
         if match:
             speed = match.group(1)
             table.append(["Memory Speed", speed])
 
-        base_frequency = run_cmd("dmidecode -t processor")
+        base_frequency = self.run_cmd("dmidecode -t processor")
         match = re.search(r"Current Speed: (\d+ MHz)", base_frequency)
         if match:
             base_frequency = match.group(1)
@@ -213,14 +216,14 @@ class SystemCheckCommand(BenchpressCommand):
         if args.run_fixes:
             if "fix" in check:
                 self.warn(f"\tFixing {check['name']} with `{check['fix']}`")
-                run_cmd(check["fix"])
+                self.run_cmd(check["fix"])
         elif "fix" in check:
             fixes_available = True
 
         return fixes_available
 
     def validate_system_serf(self, check, ignore_error):
-        result_raw = run_cmd(
+        result_raw = self.run_cmd(
             "serf get $(hostname) --fields '" + check["fields"] + "' --format json"
         )
         value_found = ""
@@ -245,7 +248,7 @@ class SystemCheckCommand(BenchpressCommand):
         )
 
     def validate_system_shell(self, check, ignore_error):
-        result = run_cmd(check["command"], ignore_error).split("\n")[0]
+        result = self.run_cmd(check["command"], ignore_error).split("\n")[0]
         value_found = result
         failed = False
         if check["match_type"] == "ignore":
@@ -287,8 +290,19 @@ class SystemCheckCommand(BenchpressCommand):
         value_found: str = ""
         failed: bool = False
 
-        result_raw = run_cmd(f"ethtool --json {check['options']} {check['interface']}")
-        result_list = json.loads(result_raw)
+        result_raw = self.run_cmd(
+            f"ethtool --json {check['options']} {check['interface']}"
+        )
+        result_list = []
+
+        try:
+            result_list = json.loads(result_raw)
+        except json.JSONDecodeError as e:
+            self.warn(f"ethtool --json failed: {e}")
+            self.warn(f"Input JSON: {result_raw}")
+            failed = True
+            value_found = "<not present>"
+
         assert len(result_list) == 1
         result = result_list[0]
 
@@ -319,7 +333,7 @@ class SystemCheckCommand(BenchpressCommand):
                 raise Exception("predicate_value is required if predicate is present")
 
             predicate = check["predicate"]
-            predicate_result = run_cmd(predicate)
+            predicate_result = self.run_cmd(predicate)
             return predicate_result == check["predicate_value"]
         else:
             return True
