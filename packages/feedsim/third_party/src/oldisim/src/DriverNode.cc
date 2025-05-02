@@ -331,7 +331,10 @@ DriverNode::DriverNodeThread::~DriverNodeThread() {}
 
 DriverNode::DriverNodeThread::DriverNodeThread(DriverNode& _driver_node)
     : driver_node(_driver_node) {
-  node_thread.impl_->base = event_base_new();  // create event base;
+  event_config *config = event_config_new();
+  event_config_set_flag(config, EVENT_BASE_FLAG_PRECISE_TIMER);
+  node_thread.impl_->base = event_base_new_with_config(config);
+  event_config_free(config);
 }
 
 void DriverNode::DriverNodeThread::Init() {
