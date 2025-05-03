@@ -11,6 +11,7 @@ import logging
 import re
 import shlex
 import subprocess
+import sys
 
 import click
 import tabulate
@@ -226,17 +227,30 @@ class SystemCheckCommand(BenchpressCommand):
         result_raw = self.run_cmd(
             "serf get $(hostname) --fields '" + check["fields"] + "' --format json"
         )
-        value_found = ""
+        value_found = "<no match>"
         failed = True
 
-        result_json = json.loads(result_raw)
+        assert "selectors" in check
+        selectors = check["selectors"]
+        assert len(selectors) > 0
+
+        try:
+            result_json = json.loads(result_raw)
+        except json.JSONDecodeError as e:
+            self.warn(f"serf get failed: {e}")
+            self.warn(f"Input JSON: {result_raw}")
+            failed = True
+            value_found = "<not present>"
+            sys.exit(1)
 
         for item in result_json:
-            if check["key_name"] not in item:
-                raise Exception(f"{check['key_name']} not found")
+            match: bool = True
+            for selector in selectors:
+                if not item[selector["key"]] == selector["value"]:
+                    match = False
 
-            if item[check["key_name"]] == check["key"]:
-                value_found = item[check["value_name"]]
+            if match:
+                value_found = item[check["key"]]
                 failed = value_found != check["value"]
                 break
 
@@ -348,8 +362,13 @@ class SystemCheckCommand(BenchpressCommand):
         config: str = ""
 
         click.echo(f"**** Validating from {file} ****")
-        with open(file) as f:
-            config = yaml.safe_load(f)
+
+        try:
+            with open(file) as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load config file {file}:\n\t{e}")
+            sys.exit(1)
 
         value_found: str = ""
         for check in config:
