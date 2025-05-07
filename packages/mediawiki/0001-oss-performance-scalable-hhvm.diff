@@ -780,3 +780,19 @@ index 3ca1bfb..ff616de 100644
  opcache.memory_consumption=1024
  opcache.consistency_checks=0
 +
+diff --git a/base/SystemChecks.php b/base/SystemChecks.php
+index 4784108..091175c 100644
+--- a/base/SystemChecks.php
++++ b/base/SystemChecks.php
+@@ -10,9 +10,9 @@
+ 
+ class SystemChecks {
+   public static function CheckAll(PerfOptions $options): void {
+-    self::CheckNotRoot($options);
++    // self::CheckNotRoot($options);
+     self::CheckPortAvailability($options);
+-    self::CheckCPUFreq();
++    // self::CheckCPUFreq();
+     self::CheckTCPTimeWaitReuse();
+     self::CheckForAuditd($options);
+   }
