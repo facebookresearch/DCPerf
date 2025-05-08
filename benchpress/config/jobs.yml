@@ -420,6 +420,28 @@
           - 'benchmarks/spark_standalone/work'
 
 - benchmark: spark_standalone
+  name: spark_standalone_remote_5GB_Dataset
+  description: Spark standalone using remote SSDs for database and shuffling point; compute & memory bound as in prod
+  args:
+    - 'run'
+    - '--dataset-path /flash23/'
+    - '--dataset-name bpc_t93586_s2_synthetic_5GB'
+    - '--warehouse-dir /flash23/warehouse'
+    - '--shuffle-dir /flash23/spark_local_dir'
+    - '--ipv4 {ipv4}'
+    - '--real'
+    - '--sanity {sanity}'
+  vars:
+    - 'ipv4=0'
+    - 'sanity=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
+
+- benchmark: spark_standalone
   name: spark_standalone_remote_compute
   description: Spark standalone using remote SSDs for database and shuffling point; compute bound only
   args:
