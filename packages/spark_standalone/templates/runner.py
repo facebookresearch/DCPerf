@@ -31,17 +31,19 @@ def exec_cmd(cmd, for_real=True):
 
 
 def download_dataset(args):
-    dataset_path = os.path.join(DATASET_DIR, SRC_DATASET)
+    dataset_path = os.path.join(DATASET_DIR, args.dataset_name)
     if os.path.exists(dataset_path):
         print("Dataset already exists; skip downloading.")
         return
-    real_dataset_path = os.path.join(args.dataset_path, SRC_DATASET)
+    real_dataset_path = os.path.join(args.dataset_path, args.dataset_name)
     if not os.path.exists(real_dataset_path):
         manifold_path = (
-            f"benchpress_artifacts/tree/spark_standalone/dataset/{SRC_DATASET}/"
+            f"benchpress_artifacts/tree/spark_standalone/dataset/{args.dataset_name}/"
         )
         print("Download dataset from manifold")
-        exec_cmd(f"manifold getr {manifold_path} {args.dataset_path}", args.real)
+        exec_cmd(
+            f"manifold getr {manifold_path} {args.dataset_path}", args.real
+        )  # TODO: is not a bug, it does not put dataset in /flash23
     else:
         print("Dataset exists but symlink broken; just fixing symlink")
     exec_cmd(f"rm -f {dataset_path}", args.real)
@@ -50,7 +52,7 @@ def download_dataset(args):
 
 def install_database(args):
     metadata_dir = os.path.join(SPARK_DIR, "spark-2.4.5-bin-hadoop2.7", "metastore_db")
-    database_dir = os.path.join(args.warehouse_dir, f"{SRC_DATASET}.db")
+    database_dir = os.path.join(args.warehouse_dir, f"{args.dataset_name}.db")
     if os.path.exists(metadata_dir) and os.path.exists(database_dir):
         print("Database already created; directly run test")
         return
@@ -59,7 +61,7 @@ def install_database(args):
         "../scripts/run_perf_common.py",
         "install",
         "-d",
-        SRC_DATASET,
+        args.dataset_name,
         "-l",
         args.warehouse_dir,
         "-k",
@@ -156,7 +158,7 @@ def run_test(args):
         "../scripts/run_perf_common.py",
         "exp",
         "-d",
-        SRC_DATASET,
+        args.dataset_name,
         "-l",
         args.warehouse_dir,
         "-k",
@@ -303,6 +305,12 @@ def init_parser():
         type=str,
         default=SPARK_DIR,
         help="where to download the dataset",
+    )
+    run_parser.add_argument(
+        "--dataset-name",
+        type=str,
+        default=SRC_DATASET,
+        help="name of the dataset",
     )
     run_parser.add_argument(
         "--warehouse-dir",
