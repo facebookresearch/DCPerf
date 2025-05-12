@@ -48,7 +48,10 @@ jobs:
       fail-fast: false
       matrix:
         host-machine: [
-          { arch: x86, instance: "ubuntu-latest" },
+          { arch: x86, instance: "ubuntu-latest", container: "ubuntu:22.04", type: "ubuntu" },
+          { arch: aarch64, instance: "ubuntu-24.04-arm", container: "ubuntu:22.04", type: "ubuntu" },
+          { arch: x86, instance: "ubuntu-latest", container: "quay.io/centos/centos:stream9", type: "centos" },
+          { arch: aarch64, instance: "ubuntu-24.04-arm", container: "quay.io/centos/centos:stream9", type: "centos" },
         ]
         python-version: [ "3.12" ]
 
