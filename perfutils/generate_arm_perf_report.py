@@ -683,6 +683,72 @@ def backend_bound_slots(grouped_df):
     }
 
 
+"""
+Important Note: The stall_slot_backend and stall_slot_frontend events are not reliable for accurately
+measuring backend and frontend boundness on NVIDIA Grace. For more information, refer to the ARM documentation:
+https://developer.arm.com/documentation/SDEN2332927/latest/
+These counters are also used in TopdownL1 metrics in perf, which are similarly inaccurate.
+We recommend using stall_backend and stall_frontend for better accuracy.
+Cycle-based metrics differ from stall-based metrics. Stall-based metrics increase with each slot
+that stalls in the frontend/backend, while cycle-based metrics increase when no instruction retires
+in a cycle. Thus, cycle-based metrics are generally lower, with retiring + backend + frontend + bad_speculation < 100%.
+Cycle-based metrics typically have lower values, with the sum of retiring, backend, frontend, and bad speculation being less than 100%.
+However, when adding "frontend_backend_boundness" (a combination of stall_slot_backend and stall_slot_frontend) to retiring and bad speculation, the total will equal 100%.
+"""
+
+
+@skip_if_missing
+def nvidia_grace_frontend_bound_cycles(grouped_df):
+    stall_cycles_fe_series = grouped_df.get_group(
+        "r23"  # STALL_CYCLES_FRONTEND
+    ).counter_value
+    cycles_series = grouped_df.get_group("cycles").counter_value
+
+    stall_cycles_fe_series.index = cycles_series.index
+    return {
+        "name": "NVIDIA GRACE FrontendBound %",
+        "series": stall_cycles_fe_series.div(cycles_series),
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def nvidia_grace_backend_bound_cycles(grouped_df):
+    stall_cycles_be_series = grouped_df.get_group(
+        "r24"  # STALL_CYCLES_BACKEND
+    ).counter_value
+    cycles_series = grouped_df.get_group("cycles").counter_value
+
+    stall_cycles_be_series.index = cycles_series.index
+
+    return {
+        "name": "NVIDIA GRACE BackendBound %",
+        "series": stall_cycles_be_series.div(cycles_series),
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def nvidia_grace_frontend_backend_boundness(grouped_df):
+    stall_slot_series = grouped_df.get_group(
+        "r3F"  # STALL_SLOTS
+    ).counter_value
+    br_mis_pred_series = grouped_df.get_group("r10").counter_value  # BR_MISPRED
+    cycles_series = grouped_df.get_group("cycles").counter_value
+
+    stall_slot_series.index = cycles_series.index
+    br_mis_pred_series.index = cycles_series.index
+
+    bound_series = (
+        stall_slot_series / (8 * cycles_series) - br_mis_pred_series * 4 / cycles_series
+    )
+    return {
+        "name": "NVIDIA GRACE Frontend Backend Boundness %",
+        "series": bound_series,
+        "prefix": 100,
+    }
+
+
 @skip_if_missing
 def bad_speculation(grouped_df):
     op_retired_series = grouped_df.get_group("r3A").counter_value  # OP_RETIRED
@@ -847,6 +913,9 @@ def main(
         retiring_slots(grouped_df),
         frontend_bound_slots(grouped_df),
         backend_bound_slots(grouped_df),
+        nvidia_grace_frontend_bound_cycles(grouped_df),
+        nvidia_grace_backend_bound_cycles(grouped_df),
+        nvidia_grace_frontend_backend_boundness(grouped_df),
         bad_speculation(grouped_df),
         nvidia_scf_mem_read_bw_MBps(grouped_df),
         nvidia_scf_mem_write_bw_MBps(grouped_df),
