@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index bc99ce33b..8723c2059 100644
+index 44ba37edd..6ba5a69f1 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -560,8 +560,8 @@ install(
+@@ -566,8 +566,8 @@ install(
    COMPONENT dev
  )
  
@@ -13,22 +13,7 @@ index bc99ce33b..8723c2059 100644
  option(BUILD_BROKEN_TESTS "If enabled, compile tests that are known to be broken." OFF)
  option(BUILD_HANGING_TESTS "If enabled, compile tests that are known to hang." OFF)
  option(BUILD_SLOW_TESTS "If enabled, compile tests that take a while to run in debug mode." OFF)
-@@ -658,10 +658,10 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-       TEST algorithm_simd_detail_simd_traits_test SOURCES TraitsTest.cpp
-       TEST algorithm_simd_detail_unroll_utils_test SOURCES UnrollUtilsTest.cpp
- 
--    DIRECTORY algorithm/simd/test/
--      TEST algorithm_simd_contains_test SOURCES ContainsTest.cpp
--      TEST algorithm_simd_find_fixed_test SOURCES FindFixedTest.cpp
--      TEST algorithm_simd_movemask_test SOURCES MovemaskTest.cpp
-+    #DIRECTORY algorithm/simd/test/
-+      #TEST algorithm_simd_contains_test SOURCES ContainsTest.cpp
-+      #TEST algorithm_simd_find_fixed_test SOURCES FindFixedTest.cpp
-+      #TEST algorithm_simd_movemask_test SOURCES MovemaskTest.cpp
- 
-     DIRECTORY chrono/test/
-       TEST chrono_conv_test WINDOWS_DISABLED
-@@ -681,6 +681,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -692,6 +692,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
      DIRECTORY container/test/
        TEST container_access_test SOURCES AccessTest.cpp
        TEST container_array_test SOURCES ArrayTest.cpp
@@ -36,7 +21,7 @@ index bc99ce33b..8723c2059 100644
        BENCHMARK container_bit_iterator_bench SOURCES BitIteratorBench.cpp
        TEST container_bit_iterator_test SOURCES BitIteratorTest.cpp
        TEST container_enumerate_test SOURCES EnumerateTest.cpp
-@@ -900,6 +901,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -913,6 +914,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
      DIRECTORY io/test/
        TEST io_fs_util_test SOURCES FsUtilTest.cpp
        TEST io_iobuf_test WINDOWS_DISABLED SOURCES IOBufTest.cpp
@@ -44,7 +29,7 @@ index bc99ce33b..8723c2059 100644
        TEST io_iobuf_cursor_test SOURCES IOBufCursorTest.cpp
        TEST io_iobuf_queue_test SOURCES IOBufQueueTest.cpp
        TEST io_record_io_test WINDOWS_DISABLED SOURCES RecordIOTest.cpp
-@@ -932,6 +934,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -945,6 +947,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
        # TODO: Refactor EventHandlerTest to not use eventfd so it can work on Mac OS X.
        #TEST io_async_event_handler_test WINDOWS_DISABLED SOURCES EventHandlerTest.cpp
        TEST io_async_async_timeout_test SOURCES AsyncTimeoutTest.cpp
@@ -52,7 +37,7 @@ index bc99ce33b..8723c2059 100644
        TEST io_async_async_udp_socket_test APPLE_DISABLED WINDOWS_DISABLED
          SOURCES AsyncUDPSocketTest.cpp
        TEST io_async_delayed_destruction_test SOURCES DelayedDestructionTest.cpp
-@@ -1042,6 +1045,10 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -1057,6 +1060,10 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
        TEST synchronization_semaphore_test WINDOWS_DISABLED
          SOURCES SemaphoreTest.cpp
        TEST synchronization_small_locks_test SOURCES SmallLocksTest.cpp
@@ -63,7 +48,7 @@ index bc99ce33b..8723c2059 100644
  
      DIRECTORY synchronization/detail/test/
        TEST synchronization_detail_hardware_test SOURCES HardwareTest.cpp
-@@ -1123,6 +1130,8 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -1139,6 +1146,8 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
        TEST locks_test SOURCES SpinLockTest.cpp
        TEST math_test SOURCES MathTest.cpp
        TEST memcpy_test SOURCES MemcpyTest.cpp
@@ -72,7 +57,7 @@ index bc99ce33b..8723c2059 100644
        TEST memory_idler_test SOURCES MemoryIdlerTest.cpp
        TEST memory_test WINDOWS_DISABLED
          SOURCES MemoryTest.cpp
-@@ -1149,6 +1158,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -1165,6 +1174,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
          SOURCES ProducerConsumerQueueTest.cpp
        BENCHMARK range_find_benchmark SOURCES RangeFindBenchmark.cpp
        TEST random_test SOURCES RandomTest.cpp
@@ -80,7 +65,7 @@ index bc99ce33b..8723c2059 100644
        TEST range_test SOURCES RangeTest.cpp
        TEST replaceable_test WINDOWS_DISABLED SOURCES ReplaceableTest.cpp
        TEST scope_guard_test WINDOWS_DISABLED SOURCES ScopeGuardTest.cpp
-@@ -1211,6 +1221,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -1227,6 +1237,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
        DIRECTORY crypto/test/
          TEST crypto_blake2xb_test SOURCES Blake2xbTest.cpp
          TEST crypto_lt_hash_test SOURCES LtHashTest.cpp
@@ -89,10 +74,10 @@ index bc99ce33b..8723c2059 100644
    endif()
  
 diff --git a/folly/concurrency/test/ConcurrentHashMapBench.cpp b/folly/concurrency/test/ConcurrentHashMapBench.cpp
-index ba7686036..199d4f8e3 100644
+index 770c47ed0..e1e5bf097 100644
 --- a/folly/concurrency/test/ConcurrentHashMapBench.cpp
 +++ b/folly/concurrency/test/ConcurrentHashMapBench.cpp
-@@ -213,7 +213,7 @@ void benches() {
+@@ -214,7 +214,7 @@ void benches() {
              << std::endl;
    std::cout << "Test name                         Max time  Avg time  Min time"
              << std::endl;
@@ -102,7 +87,7 @@ index ba7686036..199d4f8e3 100644
                << " threads" << " =========================" << std::endl;
      bench_ctor_dtor(nthr, 0, "CHM ctor/dtor -- empty          ");
 diff --git a/folly/lang/Hint-inl.h b/folly/lang/Hint-inl.h
-index 259051e0a..8c93efcc2 100644
+index 2c207a551..bd577ed98 100644
 --- a/folly/lang/Hint-inl.h
 +++ b/folly/lang/Hint-inl.h
 @@ -115,7 +115,7 @@ FOLLY_ALWAYS_INLINE void compiler_must_not_elide(T const& t, std::true_type) {
