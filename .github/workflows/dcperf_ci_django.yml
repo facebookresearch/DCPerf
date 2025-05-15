@@ -31,7 +31,7 @@ jobs:
   build_artifact:
     runs-on: ${{ matrix.host-machine.instance }}
     container:
-      image: ubuntu:22.04
+      image: ${{ matrix.host-machine.container }}
       options: --user root --privileged --pid=host
       volumes:
           - /var/run/docker.sock:/var/run/docker.sock
@@ -41,18 +41,25 @@ jobs:
     env:
       PRELUDE: .github/scripts/setup_env.bash
       BUILD_ENV: build_env
-    continue-on-error: true
+    continue-on-error: false
     strategy:
       fail-fast: false
       matrix:
         host-machine: [
-          { arch: x86, instance: "ubuntu-latest" },
+          { arch: x86, instance: "ubuntu-latest", container: "ubuntu:22.04", type: "ubuntu" },
+          { arch: aarch64, instance: "ubuntu-24.04-arm", container: "ubuntu:22.04", type: "ubuntu" },
+          { arch: x86, instance: "ubuntu-latest", container: "quay.io/centos/centos:stream9", type: "centos" },
+          { arch: aarch64, instance: "ubuntu-24.04-arm", container: "quay.io/centos/centos:stream9", type: "centos" },
         ]
         python-version: [ "3.12" ]
-
     steps:
-    - name: Setup Build Container
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget
+    - name: Setup Build Container (ubuntu-based)
+      if: ${{ matrix.host-machine.type == 'ubuntu' }}
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget libpython2-dev python3-dev
+
+    - name: Setup Build Container (centos-based)
+      if: ${{ matrix.host-machine.type == 'centos' }}
+      run: dnf update -y; dnf install -y git pciutils which python3-devel ; dnf group install -y "Development Tools"
 
     - name: Checkout the Repository
       uses: actions/checkout@v4
@@ -65,6 +72,9 @@ jobs:
     - name: Display System Info
       run: . $PRELUDE; print_system_info
 
+    - name: Install Build Tools
+      run: . $PRELUDE; install_build_tools
+
     - name: Setup Miniconda
       run: . $PRELUDE; setup_miniconda $HOME/miniconda
 
@@ -72,7 +82,7 @@ jobs:
       run: . $PRELUDE; create_conda_environment $BUILD_ENV ${{ matrix.python-version }}
 
     - name: Install Python Tools
-      run: . $PRELUDE; install_build_tools $BUILD_ENV
+      run: . $PRELUDE; install_python_tools $BUILD_ENV
 
     - name: Install Django
       run: . $PRELUDE; install_django $BUILD_ENV

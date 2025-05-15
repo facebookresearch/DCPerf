@@ -41,7 +41,7 @@ jobs:
     env:
       PRELUDE: .github/scripts/setup_env.bash
       BUILD_ENV: build_env
-    continue-on-error: true
+    continue-on-error: false
     strategy:
       fail-fast: false
       matrix:
@@ -52,15 +52,14 @@ jobs:
           { arch: aarch64, instance: "ubuntu-24.04-arm", container: "quay.io/centos/centos:stream9", type: "centos" },
         ]
         python-version: [ "3.12" ]
-
     steps:
     - name: Setup Build Container (ubuntu-based)
       if: ${{ matrix.host-machine.type == 'ubuntu' }}
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}
-      run: dnf update -y; dnf install -y git pciutils which
+      run: dnf update -y; dnf install -y git pciutils which dmidecode
 
     - name: Checkout the Repository
       uses: actions/checkout@v4
@@ -87,3 +86,4 @@ jobs:
 
     - name: Install FeedSim
       run: . $PRELUDE; install_feedsim $BUILD_ENV
+      continue-on-error: false

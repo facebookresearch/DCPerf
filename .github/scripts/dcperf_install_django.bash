@@ -30,5 +30,11 @@ install_django () {
     echo ""
   fi
 
-  echo "[TEST] TODO: Implement This!"
+
+  # shellcheck disable=SC2155
+  local env_prefix=$(env_name_or_prefix "${env_name}")
+
+  echo "[INSTALL] Installing Django ..."
+  (print_exec conda run --no-capture-output ${env_prefix} \
+    python ./benchpress_cli.py install django_workload_default) || return 1
 }
