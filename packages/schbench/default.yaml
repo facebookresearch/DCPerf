@@ -1,0 +1,17 @@
+# Simple example of Makefile only benchmark
+schbench:
+  parser: schbench
+  path: ./$OUT/bin/schbench
+  installer: ./install_schbench.sh
+  args: []
+  src:
+    - git:
+        url: https://kernel.googlesource.com/pub/scm/linux/kernel/git/mason/schbench
+        rev: abe4f968db8b3f0884f11dcf97e06565bfac7bf5
+  meta:
+    tags:
+      scope: [ kernel ]
+      component: [ cpu ]
+
+  metrics:
+    - latency: [p50, p75, p90, p95, p99, p99.5, p99.9]

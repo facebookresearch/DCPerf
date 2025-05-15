@@ -14,3 +14,22 @@ syscall:
     component:
       - cpu
   metrics: []
+
+schbench:
+  parser: schbench
+  install_script: ./packages/schbench/install_schbench.sh
+  path: ./packages/schbench/bin/schbench
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - latency:
+        - p50
+        - p75
+        - p90
+        - p95
+        - p99
+        - p99.5
+        - p99.9

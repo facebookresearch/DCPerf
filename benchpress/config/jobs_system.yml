@@ -38,3 +38,32 @@
     - 'syscalls='
     - 'base_port=16500'
   hooks: []
+
+- benchmark: schbench
+  name: schbench_default
+  description: defaults for schbench
+  args:
+    runtime: 30
+    pipe: 0
+    rps: 0
+
+- benchmark: schbench
+  name: schbench_custom
+  description: p95 latency when cpu under high load
+  args:
+    runtime: "{runtime}"
+    threads: "{threads}"
+    message-threads: "{message-threads}"
+    cache_footprint: "{cache-footprint-kb}" # - vs _
+    operations: "{operations}"
+    warmuptime: "{warmuptime}"
+  vars:
+    - 'runtime=30'
+    - 'threads=30'
+    - 'message-threads=1'
+    - 'cache-footprint-kb=256'
+    - 'operations=5'
+    - 'warmuptime=5'
+  hooks:
+    - hook: cpu-limit
+      options: 0xfffffffff
