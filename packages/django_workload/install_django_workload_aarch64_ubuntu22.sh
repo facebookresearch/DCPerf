@@ -174,7 +174,7 @@ pushd "${DJANGO_SERVER_ROOT}"
 
 # Create virtual env to run Python 3.10
 # [ ! -d venv ] && python3 -m venv venv
-python3 -m venv venv
+python3.10 -m venv venv
 
 # Allow unbound variables for active script
 set +u
