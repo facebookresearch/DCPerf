@@ -90,7 +90,7 @@ install_python_tools () {
   # shellcheck disable=SC2086
   (exec_with_retries 3 conda install ${env_prefix} -c conda-forge --override-channels -y \
     click \
-    numpy \
+    numpy=1.* \
     pandas \
     pyyaml \
     tabulate) || return 1

@@ -17,3 +17,7 @@
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_django.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_feedsim.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_tao_bench.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_spark.bash"
