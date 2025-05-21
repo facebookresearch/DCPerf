@@ -294,6 +294,17 @@ over network.
     ```
     In this case, simply mount the RAID device with `mount -t xfs /dev/md127 /flash23`
 
+    If you do not see the RAID device automatically created, you can run this command
+    to scan and assemble the RAID device:
+
+    ```
+    mdadm --assemble --scan
+    ```
+
+    If it's successfuly, you will see a message like
+    `mdadm: /dev/md/23_0 has been started with 4 drives.` and the RAID device attached
+    to remote NVMe drives. Then you can use `mount` command to mount the RAID device.
+
     3.3. If you have set up before but would like to change the setup of
     data nodes (adding more or reducing data nodes), after importing all remote
     NVMe drives please run `mdadm --manage --stop /dev/mdXXX` to stop the
@@ -319,9 +330,9 @@ to access the data in it. Below lists the steps to download the dataset:
   git lfs track
   git lfs fetch
   ```
-- Move the dataset folder `bpc_t93586_s2_synthetic`:
+- Copy the dataset folder `bpc_t93586_s2_synthetic`:
   ```
-  mv DCPerf-datasets/bpc_t93586_s2_synthetic ./bpc_t93586_s2_synthetic
+  cp -r DCPerf-datasets/bpc_t93586_s2_synthetic /flash23/
   ```
 
 5. Install and run Spark benchmark
@@ -355,7 +366,38 @@ a resolvable hostname using `local_hostname` parameter:
 ./benchpress_cli.py run spark_standalone_remote -i '{"local_hostname": "localhost"}'
 ```
 
-## Reporting
+If you run SparkBench for the first time, it will spend extra time to build
+the database before running the actual query workload; subsequent runs will be much
+faster with the already built database. Therefore, it's normal that the first run
+takes much longer time than what the benchmark eventually reports. The database will
+be stored in `/flash23/warehouse`.
+
+## Reusing database on another machine
+
+Building database takes a considerable amount of time, so it's advisable to consider
+using the same set of storage nodes and NVMe drives when running SparkBench on another
+compute node server. If you choose to reuse the Spark database in `/flash23/warehouse`,
+please also make sure to copy the folder `metastore_db` under `benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7`
+to the new machine's same location, for example:
+
+```
+# Under the DCPerf folder
+rsync -a benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7/metastore_db root@<target-hostname>:~/DCPerf/benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7/
+```
+
+If you do not copy over the `metastore_db` folder, you will see errors like the following
+in `benchmark_metrics_<run_id>/work/release_test_93586.log`
+
+```
+Error in query: Table or view not found: table__CkHRpFW2Qb5fJVQSg91UOUPBHBj8lnRjzeTRxWzuDI_; line 8 pos 27
+```
+
+```
+Database 'bpc_t93586_s2_synthetic' not found;
+```
+
+
+# Reporting
 
 After the benchmark finishing on the compute node, benchpress will output the
 results in JSON format like the following. `execution_time_test_93586` is the
