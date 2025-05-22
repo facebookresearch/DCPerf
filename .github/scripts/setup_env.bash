@@ -21,3 +21,9 @@
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_tao_bench.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_spark.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_wdl.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_health_check.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_syscall.bash"
