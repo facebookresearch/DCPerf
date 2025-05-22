@@ -631,6 +631,45 @@ def zen4_mem_write_bw_MBps(grouped_df):
 
 
 @skip_if_missing
+def zen4_frontend_bound(grouped_df):
+    de_no_dispatch_per_slot_no_ops_from_frontend_series = grouped_df.get_group(
+        "de_no_dispatch_per_slot.no_ops_from_frontend"
+    ).counter_value
+    ls_not_halted_cyc_series = grouped_df.get_group("ls_not_halted_cyc").counter_value
+    de_no_dispatch_per_slot_no_ops_from_frontend_series.index = (
+        ls_not_halted_cyc_series.index
+    )
+    frontend_bound_pct_series = (
+        de_no_dispatch_per_slot_no_ops_from_frontend_series.div(
+            ls_not_halted_cyc_series
+        )
+        * 100
+        / 6
+    )
+    return {"name": "Zen4 frontend Bound %", "series": frontend_bound_pct_series}
+
+
+def zen4_backend_bound(grouped_df):
+    de_no_dispatch_per_slot_backend_stalls_series = grouped_df.get_group(
+        "de_no_dispatch_per_slot.backend_stalls"
+    ).counter_value
+    ls_not_halted_cyc_backend_series = grouped_df.get_group(
+        "ls_not_halted_cyc_backend"
+    ).counter_value
+    de_no_dispatch_per_slot_backend_stalls_series.index = (
+        ls_not_halted_cyc_backend_series.index
+    )
+    backend_bound_pct_series = (
+        de_no_dispatch_per_slot_backend_stalls_series.div(
+            ls_not_halted_cyc_backend_series
+        )
+        * 100
+        / 6
+    )
+    return {"name": "Zen4 backend Bound %", "series": backend_bound_pct_series}
+
+
+@skip_if_missing
 def zen5_user_instr_pct(grouped_df):
     user_instr_series = grouped_df.get_group("instructions:u").counter_value
     instr_series = grouped_df.get_group("instructions").counter_value
@@ -2537,6 +2576,8 @@ def main(
     elif arch == "zen4":
         metrics.append(zen4_mem_read_bw_MBps(grouped_df))
         metrics.append(zen4_mem_write_bw_MBps(grouped_df))
+        metrics.append(zen4_frontend_bound(grouped_df))
+        metrics.append(zen4_backend_bound(grouped_df))
 
     filtered_metrics = list(itertools.filterfalse(lambda x: x is None, metrics))
     shortest_series = max(filtered_metrics, key=lambda m: m["series"].size)
