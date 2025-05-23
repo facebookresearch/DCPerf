@@ -222,6 +222,35 @@
           - 'benchmarks/django_workload/django-workload/client/perf.data'
 
 - benchmark: django_workload
+  name: django_workload_mini
+  description: A short version of django-workload, where we can load the database from a snapshot
+  tee_output: true
+  roles:
+    standalone:
+      args:
+        - '-r standalone'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c 127.0.0.1'
+        - '-m 50000'
+        - '-M 100000'
+        - '-L {snapshot_path}'
+      vars:
+        - 'duration=1M'
+        - 'iterations=1'
+        - 'reps=0'
+        - 'snapshot_path=benchmarks/django_workload/cassandra_snapshots/synthetic_dataset_snapshot'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/django_workload/django-workload/client/perf.data'
+
+- benchmark: django_workload
   name: django_workload_custom
   description: Django-workload benchmark with custom parameters
   tee_output: true
