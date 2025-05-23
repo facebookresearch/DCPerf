@@ -40,11 +40,11 @@ FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets/cuts"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y cmake autoconf automake flex bison \
+   apt install -y cmake autoconf automake flex bison \
     meson nasm clang patch git \
     python3-dev pkg-config time parallel p7zip
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y cmake autoconf automake flex bison \
+   dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch \
     git python3-devel time parallel p7zip
 fi
@@ -59,7 +59,7 @@ mkdir -p "${FFMPEG_BUILD}"
 mkdir -p "${FFMPEG_DATASETS}"
 
 if ! [ -f "/usr/local/bin/cmake" ]; then
-    sudo ln -s /usr/bin/cmake /usr/local/bin/cmake
+     ln -s /usr/bin/cmake /usr/local/bin/cmake
 fi
 
 ##################### BUILD AND INSTALL FUNCTIONS #########################
