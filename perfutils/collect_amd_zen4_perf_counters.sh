@@ -54,6 +54,9 @@ LOCAL_UMC_J_WRITE_REQS_EV='amd_df/event=0x25F,umask=0x7FF,name=umc_j_write_reque
 LOCAL_UMC_K_WRITE_REQS_EV='amd_df/event=0x29F,umask=0x7FF,name=umc_k_write_requests/'
 LOCAL_UMC_L_WRITE_REQS_EV='amd_df/event=0x2DF,umask=0x7FF,name=umc_l_write_requests/'
 
+ZEN4_FRONTEND_STALLED_SLOTS_GROUP="{cpu/de_no_dispatch_per_slot.no_ops_from_frontend,name=frontend_latency,cmask=0x6/,de_no_dispatch_per_slot.no_ops_from_frontend,ls_not_halted_cyc,de_src_op_disp.all,ex_ret_ops}"
+ZEN4_BACKEND_STALLED_SLOTS_GROUP="{cpu/ls_not_halted_cyc,name=ls_not_halted_cyc_backend/,de_no_dispatch_per_slot.backend_stalls,ex_no_retire.load_not_complete,ex_no_retire.not_complete,de_no_dispatch_per_slot.smt_contention}"
+
 
 
 SOCKET_WRITE_BW_GROUP="{${LOCAL_UMC_A_WRITE_REQS_EV},${LOCAL_UMC_B_WRITE_REQS_EV},${LOCAL_UMC_C_WRITE_REQS_EV},${LOCAL_UMC_D_WRITE_REQS_EV},${LOCAL_UMC_E_WRITE_REQS_EV},${LOCAL_UMC_F_WRITE_REQS_EV},${LOCAL_UMC_G_WRITE_REQS_EV},${LOCAL_UMC_H_WRITE_REQS_EV},${LOCAL_UMC_I_WRITE_REQS_EV},${LOCAL_UMC_J_WRITE_REQS_EV},${LOCAL_UMC_K_WRITE_REQS_EV},${LOCAL_UMC_L_WRITE_REQS_EV}}"
@@ -84,7 +87,7 @@ collect_counters() {
     interval="$INTERVAL_SECS"
   fi
   interval_ms="$((interval * 1000))"
-  events="{cycles,instructions},${L3_CACHE_GROUP},${SOCKET_READ_BW_GROUP},${SOCKET_WRITE_BW_GROUP}"
+  events="{cycles,instructions},${ZEN4_FRONTEND_STALLED_SLOTS_GROUP},${ZEN4_BACKEND_STALLED_SLOTS_GROUP},${L3_CACHE_GROUP},${SOCKET_READ_BW_GROUP},${SOCKET_WRITE_BW_GROUP}"
   perf_stat "${events}" "${interval_ms}"
 }
 
