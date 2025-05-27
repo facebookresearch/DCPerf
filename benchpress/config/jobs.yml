@@ -449,7 +449,7 @@
           - 'benchmarks/spark_standalone/work'
 
 - benchmark: spark_standalone
-  name: spark_standalone_remote_5GB_Dataset
+  name: spark_standalone_remote_mini
   description: Spark standalone using remote SSDs for database and shuffling point; compute & memory bound as in prod
   args:
     - 'run'
