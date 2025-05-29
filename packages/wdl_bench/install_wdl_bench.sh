@@ -40,12 +40,12 @@ WDL_DATASETS="${WDL_ROOT}/datasets"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y cmake autoconf automake flex bison \
+  apt install -y cmake autoconf automake flex bison \
     nasm clang patch git \
     tar unzip perl openssl python3-dev
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y cmake autoconf automake flex bison \
+  dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch \
     git tar unzip perl openssl-devel python3-devel
 fi
@@ -56,7 +56,7 @@ mkdir -p "${WDL_BUILD}"
 mkdir -p "${WDL_DATASETS}"
 
 if ! [ -f "/usr/local/bin/cmake" ]; then
-    sudo ln -s /usr/bin/cmake /usr/local/bin/cmake
+    ln -s /usr/bin/cmake /usr/local/bin/cmake
 fi
 
 ##################### BUILD AND INSTALL FUNCTIONS #########################
@@ -95,7 +95,7 @@ build_folly()
     cd "$lib" || exit
     git apply "${BPKGS_WDL_ROOT}/0001-folly.patch"
 
-    sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive
+    ./build/fbcode_builder/getdeps.py install-system-deps --recursive
 
     python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --scratch-path "${WDL_BUILD}"
 
@@ -110,7 +110,7 @@ build_fbthrift()
     clone "$lib" || echo "Failed to clone $lib"
     cd "$lib" || exit
 
-    sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
+    ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
 
     python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --scratch-path "${WDL_BUILD}"
 
