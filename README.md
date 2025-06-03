@@ -243,6 +243,13 @@ scl enable gcc-toolset-11 bash
 
 #### On CentOS 9
 
+Enable EPEL and PowerTools/CRB repos:
+```bash
+dnf install epel-release
+dnf install 'dnf-command(config-manager)'
+dnf config-manager --set-enabled crb
+```
+
 Install git, click, pyyaml and tabulate using DNF, then install Pandas with pip:
 
 ```bash
@@ -250,12 +257,6 @@ dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-
 pip-3.9 install pandas
 ```
 
-Enable EPEL and PowerTools/CRB repos:
-```bash
-dnf install epel-release
-dnf install 'dnf-command(config-manager)'
-dnf config-manager --set-enabled crb
-```
 
 #### On Ubuntu 22.04
 
