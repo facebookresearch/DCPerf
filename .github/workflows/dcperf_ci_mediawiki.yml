@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 # This workflow is used for DCPerf CI.
-name: DCPerf Tao_bench CI
+name: DCPerf Mediawiki CI
 
 on:
   # PR Trigger
@@ -84,5 +84,8 @@ jobs:
     - name: Install Python Tools
       run: . $PRELUDE; install_python_tools $BUILD_ENV
 
-    - name: Install Tao_bench
-      run: . $PRELUDE; install_tao_bench $BUILD_ENV
+    - name: Install HHVM
+      run: . $PRELUDE; install_hhvm $BUILD_ENV
+
+    - name: Install Mediawiki
+      run: . $PRELUDE; install_mediawiki $BUILD_ENV
