@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # This source code is licensed under the MIT license found in the
@@ -25,7 +25,8 @@ declare -A TAGS=(
     ['x264']='570f6c70808287fc78e3f8f5372a095ec6ef7878'
 )
 
-
+echo "clang version"
+clang --version
 ##################### SYS CONFIG AND DEPS #########################
 
 BPKGS_FFMPEG_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
@@ -40,11 +41,11 @@ FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets/cuts"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y cmake autoconf automake flex bison \
+   apt install -y cmake autoconf automake flex bison \
     meson nasm clang patch git \
     python3-dev pkg-config time parallel p7zip
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y cmake autoconf automake flex bison \
+   dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch \
     git python3-devel time parallel p7zip
 fi
@@ -59,7 +60,7 @@ mkdir -p "${FFMPEG_BUILD}"
 mkdir -p "${FFMPEG_DATASETS}"
 
 if ! [ -f "/usr/local/bin/cmake" ]; then
-    sudo ln -s /usr/bin/cmake /usr/local/bin/cmake
+     ln -s /usr/bin/cmake /usr/local/bin/cmake
 fi
 
 ##################### BUILD AND INSTALL FUNCTIONS #########################
@@ -144,6 +145,8 @@ build_ffmpeg()
     git apply "${BPKGS_FFMPEG_ROOT}/0001-ffmpeg.patch"
     git apply "${BPKGS_FFMPEG_ROOT}/0002-ffmpeg.patch"
     mkdir -p _build && cd _build || exit
+    echo "LSITING DIRECTORIES"
+    ls $FFMPEG_BUILD
     if [ -v PKG_CONFIG_PATH ]; then
         PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib/x86_64-linux-gnu/pkgconfig:$FFMPEG_BUILD/lib/aarch64-linux-gnu/pkgconfig \
             ../configure --ld="clang++" \
