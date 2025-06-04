@@ -46,7 +46,7 @@ trap 'cleanup' ERR EXIT SIGINT SIGTERM
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] [-d duration of workload] [-p number of repetitions] [-l siege logfile path] [-s urls path] [-c cassandra host ip]
+Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] [-d duration of workload] [-p number of repetitions] [-l siege logfile path] [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] [-t snapshot taking]
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
@@ -57,6 +57,7 @@ For role "server", "clientserver":
     -M          maximum icachebuster calling rounds (default 200000)
     -L          when provided snapshot loading is enabled, meaning that the database is loaded from a snapshot stored in the specifed path (default disabled)
     -t          when provided snapshot taking is enabled, meaning that the a snapshot of the generetaed database will be stored in the specifed path (default disabled)
+    -S          skip the database setup and use the snapshot stored in the Cassandra data directory (default disabled)
 
 For role "client", "clientserver":
     -x          number of client workers (default 1.2*NPROC)
@@ -260,7 +261,8 @@ start_django_server() {
       load_snapshot
       # we need to restart Cassandra after loaing an snapshot
       echo "Cassandra is loaded using the snapshot"
-    else
+    fi
+    if [ "$skip_data_setup" = false ]; then
       echo "Generating database "
       DJANGO_SETTINGS_MODULE=cluster_settings ./venv/bin/django-admin flush
       DJANGO_SETTINGS_MODULE=cluster_settings ./venv/bin/django-admin setup
@@ -378,10 +380,13 @@ main() {
   local load_a_snapshot
   load_a_snapshot=false
 
+  local skip_data_setup
+  skip_data_setup=false
+
   local snapshot_dir
   snapshot_dir="${BENCHPRESS_ROOT}/benchmarks/django_workload/cassandra_snapshots/synthetic_dataset_snapshot"
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:' OPTION "${@}"; do
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:S' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -443,6 +448,7 @@ main() {
 
       L)
         load_a_snapshot=true
+        skip_data_setup=true
         snapshot_dir="${OPTARG}"
         # Check if snapshot_dir is a relative path and prepend BENCHPRESS_ROOT if it is
         if [[ ! "${snapshot_dir}" = /* ]]; then
@@ -453,6 +459,9 @@ main() {
           echo "Error: Snapshot directory $snapshot_dir does not exist"
           exit 1
         fi
+        ;;
+      S)
+        skip_data_setup=true
         ;;
       ?)
         show_help >&2
