@@ -480,7 +480,7 @@
   args:
     - 'run'
     - '--dataset-path /flash23/'
-    - '--dataset-name bpc_t93586_s2_synthetic_5GB'
+    - '--dataset-name {dataset_name}'
     - '--warehouse-dir /flash23/warehouse'
     - '--shuffle-dir /flash23/spark_local_dir'
     - '--ipv4 {ipv4}'
@@ -489,6 +489,7 @@
   vars:
     - 'ipv4=0'
     - 'sanity=0'
+    - 'dataset_name=bpc_t93586_s2_synthetic_5GB'
   hooks:
     - hook: copymove
       options:
