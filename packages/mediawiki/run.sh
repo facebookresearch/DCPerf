@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)"
 BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
 NPROC="$(nproc)"
 HHVM_SERVERS="$(( (NPROC + 99) / 100 ))"
-SERVER_THREADS=$(echo "${BC_MAX_FN}; max(200, (2.8 * $(nproc)) / ${HHVM_SERVERS})" | bc)  # Divides by integer 1 to truncate decimal
+SERVER_THREADS=$(echo "${BC_MAX_FN}; max(200, (2.8 * ${NPROC}) / ${HHVM_SERVERS})" | bc)  # Divides by integer 1 to truncate decimal
 SIEGE_CLIENT_THREADS=$(echo "${BC_MAX_FN}; max(200, (150 * ${HHVM_SERVERS}))" | bc)
 WRK_CLIENT_THREADS=$(( 2 * NPROC ))
 MEMCACHE_THREADS=8
