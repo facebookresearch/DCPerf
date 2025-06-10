@@ -139,7 +139,7 @@ Download and Install Boost 1.67
 
 ```
 cd ${HOME}/hhvm-build
-wget -q https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.bz2
+wget -q https://archives.boost.io/release/1.67.0/source/boost_1_67_0.tar.bz2
 tar -jxvf boost_1_67_0.tar.bz2
 cd boost_1_67_0/
 
@@ -208,11 +208,10 @@ cd tbb/
 
 make -j12
 cp -r include/tbb ${HOME}/hhvm-build/build-deps/include/
-cp -r build/linux_intel64_gcc_cc8_libc2.28_kernel4.18.0_release/libtbb* \
-    ${HOME}/hhvm-build/build-deps/lib/
+cp -r build/linux_*_release/libtbb* ${HOME}/hhvm-build/build-deps/lib/
 ```
 
-Download  and Install OpenSSL 1.1.1b
+Download and Install OpenSSL 1.1.1b
 
 
 ```
@@ -231,8 +230,8 @@ Download and Install MariaDB server
 
 ```
 sudo dnf -y install mariadb-server
-sudo systemctl start mysqld
-sudo systemctl enable mysqld
+sudo systemctl start mariadb
+sudo systemctl enable mariadb
 ```
 
 Secure MariaDB
