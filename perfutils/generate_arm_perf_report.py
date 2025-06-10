@@ -31,8 +31,8 @@ def read_csv(perf_csv_file):
         perf_csv_file,
         names=[
             "timestamp",
-            "socket",
-            "numcpus",
+            # "socket",
+            # "numcpus",
             "counter_value",
             "counter_unit",
             "event_name",
@@ -109,8 +109,9 @@ def concat_series(metrics, shortest_length_series):
 
 
 def get_num_sockets(group):
-    socket_series = group.socket
-    return len(socket_series.reset_index().groupby("socket").index)
+    # socket_series = group.socket
+    # return len(socket_series.reset_index().groupby("socket").index)
+    return 1
 
 
 def get_duration_series(group):

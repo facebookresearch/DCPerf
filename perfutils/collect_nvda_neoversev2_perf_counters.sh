@@ -119,7 +119,7 @@ trap wrapup SIGINT SIGTERM
 perf_stat() {
   local ev="$1"
   local interval_ms="$2"
-  perf stat $ev -x, -I "${interval_ms}" --per-socket -a --log-fd 1 &
+  perf stat $ev -x, -I "${interval_ms}" -a --log-fd 1 &
   PERF_PID="$!"
   wait "$PERF_PID"
 }
