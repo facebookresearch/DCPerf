@@ -15,9 +15,9 @@ HEALTH_ROOT="${BENCHPRESS_ROOT}/benchmarks/health_check"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y iperf3
+  apt install -y iperf3
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y iperf3
+  dnf install -y iperf3
 fi
 
 cd "$HEALTH_ROOT"
