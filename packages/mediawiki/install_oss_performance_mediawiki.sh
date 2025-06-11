@@ -45,27 +45,29 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y nginx
 fi
-systemctl stop nginx
-
+pkill nginx &
 # 4. Install mariadb
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y mariadb-server
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y mariadb-server
 fi
-systemctl start mariadb
+mkdir -p /run/mysqld
+chown mysql:mysql /run/mysqld
+chmod 755 /run/mysqld
+mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock &
 if ! [ -x "$(command -v mysql)" ]; then
   echo >&2 "Could not install mariadb!"
   exit 1
 fi
-
-mysql -u root --password="$MARIADB_PWD" -e ";"
+sleep 10
+mysql -u root --password="$MARIADB_PWD" --socket=/var/lib/mysql/mysql.sock -e ";"
 mysql_success=$?
 if [ $mysql_success -ne 0 ]; then
-  mysql -uroot --password="" < "${TEMPLATES_DIR}/update_mariadb_pwd.sql"
+  mysql -uroot --password="" --socket=/var/lib/mysql/mysql.sock < "${TEMPLATES_DIR}/update_mariadb_pwd.sql"
 fi
 
-mysql -u root --password=$MARIADB_PWD < "${TEMPLATES_DIR}/grant_privileges.sql"
+mysql -u root --password=$MARIADB_PWD --socket=/var/lib/mysql/mysql.sock < "${TEMPLATES_DIR}/grant_privileges.sql"
 
 # 5. Install Siege
 if ! [ -x "$(command -v siege)" ]; then
@@ -149,4 +151,5 @@ sudo cp "${TEMPLATES_DIR}/my.cnf" "/etc/my.cnf"
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   sudo mkdir -p /etc/my.cnf.d
 fi
-sudo systemctl restart mariadb
+pkill mariadb
+mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock &

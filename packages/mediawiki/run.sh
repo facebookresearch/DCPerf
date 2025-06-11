@@ -52,7 +52,7 @@ function _systemd_service_status() {
 
   local status
   # shellcheck disable=2086
-  status="$(systemctl show ${service} | awk -F= '/ActiveState/{print $2}')"
+  status="$(ps aux | grep ${service} > /dev/null && echo "active" || echo "no active")"
   echo "$status"
 }
 
@@ -207,7 +207,8 @@ function main() {
   echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
 
   if [[ "$db_host" = "" ]]; then
-    systemctl restart mariadb
+    pkill mariadb
+    mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock &
     _check_local_db_running || return
     run_benchmark "${hhvm_path}" "${nginx_path}" "${load_generator}" "${lg_path}"
   else

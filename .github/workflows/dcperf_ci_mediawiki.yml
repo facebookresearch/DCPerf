@@ -1,33 +1,14 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
-# This workflow is used for DCPerf CI.
-name: DCPerf Tao_bench CI
-
+name: DCPerf Mediawiki CI
 on:
-  # PR Trigger
-  #
-  pull_request:
-
-  # Push Trigger (enable to catch errors coming out of multiple merges)
-  #
   push:
-    branches:
-      - main
-
-  # Manual Trigger
-  #
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-
 concurrency:
-  # Cancel previous runs in the PR if a new commit is pushed
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Build on CPU hosts (generic GitHub runners)
   build_artifact:
     runs-on: ${{ matrix.host-machine.instance }}
     container:
@@ -48,8 +29,7 @@ jobs:
         host-machine: [
           { arch: x86, instance: "ubuntu-latest", container: "ubuntu:22.04", type: "ubuntu" },
           { arch: aarch64, instance: "ubuntu-24.04-arm", container: "ubuntu:22.04", type: "ubuntu" },
-          { arch: x86, instance: "ubuntu-latest", container: "quay.io/centos/centos:stream9", type: "centos" },
-          { arch: aarch64, instance: "ubuntu-24.04-arm", container: "quay.io/centos/centos:stream9", type: "centos" },
+          { arch: x86, instance: "ubuntu-latest", container: "quay.io/centos/centos:stream9", type: "centos" }
         ]
         python-version: [ "3.12" ]
     steps:
@@ -84,5 +64,19 @@ jobs:
     - name: Install Python Tools
       run: . $PRELUDE; install_python_tools $BUILD_ENV
 
-    - name: Install Tao_bench
-      run: . $PRELUDE; install_tao_bench $BUILD_ENV
+    - name: Install HHVM
+      run: . $PRELUDE; install_hhvm $BUILD_ENV
+
+    - name: Install Mediawiki
+      run: . $PRELUDE; install_mediawiki $BUILD_ENV
+
+  build-centos-arm-selfhosted:
+    name: CentOS 9 Self-Hosted Runner Test
+    runs-on: [centos9-arm, self-hosted, Linux, ARM64]
+    steps:
+      - name: Print Hello
+        run: echo "Hello from CentOS 9 self-hosted runner!"
+      - name: Print OS Info
+        run: cat /etc/os-release
+      - name: Print Hostname
+        run: hostname
