@@ -236,10 +236,10 @@ If you see error messages like `accept4(): Too many open files` on some platform
 increase the file descriptor limit on your system in the following way:
 
 1. Edit `/etc/security/limits.conf` to modify the **nofile** limit of your current user
-   (typically root) to a sufficiently high number (e.g. 10485760):
+   (typically root) to a sufficiently high number (e.g. 1048576):
    ```
-    root            hard            nofile          10485760
-    root            soft            nofile          10485760
+    root            hard            nofile          1048576
+    root            soft            nofile          1048576
    ```
 2. Reboot your system
 3. Run `ulimit -n` to check the file descriptor limit, it should increase to the desired
