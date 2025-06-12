@@ -65,6 +65,12 @@ main() {
     local runtime
     runtime="medium"
 
+    local lp
+    lp="1"
+
+    local procs
+    procs="-1"
+
     while :; do
         case $1 in
             --levels)
@@ -193,7 +199,7 @@ main() {
     num_files=$(find ./datasets/cuts/ | wc -l)
     num_files=$(echo "$num_files * 8" | bc -l | awk '{print int($0)}')
     num_proc=$(nproc)
-    if [ -z "$procs" ] || [ $procs -eq -1 ]; then
+    if [ $procs -eq -1 ]; then
         if [ "$num_files" -lt "$num_proc" ]; then
             num_pool="num_pool = $num_files"
         else
@@ -203,10 +209,7 @@ main() {
         num_pool="num_pool = $procs"
     fi
 
-    lp_number="lp_number = 1"
-    if [ ! -z "$lp" ]; then
-        lp_number="lp_number = $lp"
-    fi
+    lp_number="lp_number = $lp"
     sed -i "/^CLIP\_DIRS/a ${lp_number}" ./generate_commands_all.py
 
     sed -i "/^CLIP\_DIRS/a ${range}" ./generate_commands_all.py
