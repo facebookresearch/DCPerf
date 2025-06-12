@@ -125,6 +125,10 @@ cd oss-performance || exit 1
 # templates/oss-performance-mediawiki/0001-oss-performance-scalable-hhvm.diff
 git apply --check "${TEMPLATES_DIR}/0001-oss-performance-scalable-hhvm.diff" \
     && git apply "${TEMPLATES_DIR}/0001-oss-performance-scalable-hhvm.diff"
+# apply reuse-mediawiki patch
+# templates/oss-performance-mediawiki/0006-oss-performance-reuse-mediawiki-hhvm.diff
+git apply --check "${TEMPLATES_DIR}/0006-oss-performance-reuse-mediawiki-hhvm.diff" \
+    && git apply "${TEMPLATES_DIR}/0006-oss-performance-reuse-mediawiki-hhvm.diff"
 git apply --check "${TEMPLATES_DIR}/0005-scale-out-memcached.diff" \
     && git apply "${TEMPLATES_DIR}/0005-scale-out-memcached.diff"
 
