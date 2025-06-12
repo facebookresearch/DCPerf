@@ -11,9 +11,12 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import typing
 import uuid
+
+import click
 
 
 BENCHMARKS_ROOT = "benchmarks"
@@ -64,7 +67,16 @@ def verify_install(install_script):
     return False
 
 
-def install_benchmark(install_script, args=None, env=None):
+def output_catcher(reader, writer=None):
+    for line in iter(reader.readline, ""):
+        if not line:
+            continue
+        if writer is not None:
+            writer.write(line.rstrip() + "\n")
+        click.echo(line.rstrip())
+
+
+def install_benchmark(install_script, args=None, env=None, install_log=None):
     install_benchmark_cmd = ["bash", "-x", install_script]
     if args:
         install_benchmark_cmd.extend(args)
@@ -74,8 +86,27 @@ def install_benchmark(install_script, args=None, env=None):
         install_benchmark_cmd,
         shell=False,
         env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
+    stdout_catcher = threading.Thread(
+        target=output_catcher,
+        name="stdout-catcher",
+        args=(install_benchmark_proc.stdout, install_log),
+    )
+    stderr_catcher = threading.Thread(
+        target=output_catcher,
+        name="stderr-catcher",
+        args=(install_benchmark_proc.stderr, install_log),
+    )
+
+    stdout_catcher.start()
+    stderr_catcher.start()
     install_benchmark_proc.wait()
+    stdout_catcher.join()
+    stderr_catcher.join()
+
     if install_benchmark_proc.returncode == 0:
         verify_install_cmd_1 = ["touch", "benchmark_installs.txt"]
         verify_install_proc_1 = subprocess.Popen(verify_install_cmd_1, shell=False)

@@ -46,24 +46,34 @@ class InstallCommand(BenchpressCommand):
 
     def run(self, args, jobs):
         jobs = get_target_jobs(jobs, args.jobs)
-
+        install_log = open("install.log", "w")
         for job in jobs.values():
             if not job.install_script:
                 msg = (
                     "{} does not have install script," " try running without install it"
                 )
+                install_log.write(msg.format(job.name) + "\n")
                 click.echo(msg.format(job.name))
                 continue
             # install required tools
             for hook in job.hooks:
                 retcode = install_tool(hook[0])
                 if retcode > 0:
+                    install_log.write(
+                        "Installing required tool {} for {}\n".format(hook[0], job.name)
+                    )
                     click.echo(
                         "Installing required tool {} for {}".format(hook[0], job.name)
                     )
                 elif retcode == 0:
+                    install_log.write("Tool {} already installed \n".format(hook[0]))
                     click.echo("Tool {} already installed".format(hook[0]))
             if args.force or not verify_install(job.install_script):
+                install_log.write(
+                    "Installing benchmark for {}: {}\n".format(
+                        job.name, job.description
+                    )
+                )
                 click.echo(
                     "Installing benchmark for {}: {}".format(job.name, job.description)
                 )
@@ -71,9 +81,15 @@ class InstallCommand(BenchpressCommand):
                 env = os.environ
                 env = initialize_env_vars(job, env=env, toolchain=args.toolchain)
                 # Print env variables
+                install_log.write("******** env ********\n")
                 click.echo("******** env ********")
                 for var in env:
+                    install_log.write(f"{var}={env[var]}\n")
                     click.echo(f"{var}={env[var]}")
-                install_benchmark(job.install_script, env=env)
+                install_benchmark(job.install_script, env=env, install_log=install_log)
             else:
+                install_log.write(
+                    "Benchmark for {} already installed\n".format(job.name)
+                )
                 click.echo("Benchmark for {} already installed".format(job.name))
+        install_log.close()
