@@ -1,0 +1,42 @@
+diff --git a/targets/mediawiki/MediaWikiMLPTarget.php b/targets/mediawiki/MediaWikiMLPTarget.php
+index 7fed1f7..364f7c5 100644
+--- a/targets/mediawiki/MediaWikiMLPTarget.php
++++ b/targets/mediawiki/MediaWikiMLPTarget.php
+@@ -30,10 +30,12 @@ final class MediaWikiMLPTarget extends PerfTarget {
+     if ($src_dir) {
+       Utils::CopyDirContents($src_dir, $this->getSourceRoot());
+     } else {
+-      Utils::ExtractTar(
+-         __DIR__.'/'.self::MEDIAWIKI_VERSION.'.tar.gz',
+-        $this->options->tempDir,
+-      );
++      if (!is_dir($this->options->tempDir.'/'.self::MEDIAWIKI_VERSION)) {
++        Utils::ExtractTar(
++          __DIR__.'/'.self::MEDIAWIKI_VERSION.'.tar.gz',
++          $this->options->tempDir,
++        );
++      }
+     }
+     (new DatabaseInstaller($this->options))
+       ->setDatabaseName('mw_bench')
+diff --git a/targets/mediawiki/MediaWikiTarget.php b/targets/mediawiki/MediaWikiTarget.php
+index 017daa8..64161eb 100644
+--- a/targets/mediawiki/MediaWikiTarget.php
++++ b/targets/mediawiki/MediaWikiTarget.php
+@@ -30,10 +30,12 @@ final class MediaWikiTarget extends PerfTarget {
+     if ($src_dir) {
+       Utils::CopyDirContents($src_dir, $this->getSourceRoot());
+     } else {
+-      Utils::ExtractTar(
+-        __DIR__.'/'.self::MEDIAWIKI_VERSION.'.tar.gz',
+-        $this->options->tempDir,
+-      );
++      if (!is_dir($this->options->tempDir.'/'.self::MEDIAWIKI_VERSION)) {
++        Utils::ExtractTar(
++          __DIR__.'/'.self::MEDIAWIKI_VERSION.'.tar.gz',
++          $this->options->tempDir,
++        );
++      }
+     }
+ 
+     (new DatabaseInstaller($this->options))
