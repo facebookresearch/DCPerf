@@ -1,0 +1,7 @@
+fbgemm_embedding:
+  parser: embedding
+  install_script: ./packages/fbgemm_gpu/install_embedding.sh
+  cleanup_script: ./packages/fbgemm_gpu/cleanup_embedding.sh
+  path: ./benchmarks/fbgemm_embedding/tbe_inference_benchmark
+  metrics:
+    - bandwidth

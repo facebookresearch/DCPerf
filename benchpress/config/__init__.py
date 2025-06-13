@@ -70,6 +70,7 @@ if not open_source:
     register_benchmark_suite("internal")
 register_benchmark_suite("wdl")
 register_benchmark_suite("system")
+register_benchmark_suite("ai")
 
 
 class BenchpressConfig:

@@ -1,0 +1,70 @@
+- benchmark: fbgemm_embedding
+  name: fbgemm_embedding_a_single
+  description: Embedding workload for ai benchmark with one representative table
+  args:
+    - nbit-cpu
+    - '--num-embeddings={embeddings}'
+    - '--bag-size={bag_size}'
+    - '--embedding-dim={embedding_dim}'
+    - '--batch-size={batch_size}'
+    - '--num-tables={num_tables}'
+    - '--weights-precision={weights_precision}'
+    - '--copies={copies}'
+    - '--iters={iters}'
+
+  vars:
+    - 'embeddings=40000000'
+    - 'bag_size=2'
+    - 'embedding_dim=96'
+    - 'batch_size=166'
+    - 'num_tables=1'
+    - 'weights_precision=int4'
+    - 'copies=16'
+    - 'iters=1000'
+
+- benchmark: fbgemm_embedding
+  name: fbgemm_embedding_a_spec
+  description: Embedding workload for ai benchmark with 8 representative tables having different bag sizes.
+  args:
+    - nbit-device-with-spec
+    - '--num-embeddings-list={embeddings_list}'
+    - '--bag-size-list={bag_size_list}'
+    - '--embedding-dim-list={embedding_dim_list}'
+    - '--batch-size={batch_size}'
+    - '--weights-precision={weights_precision}'
+    - '--cpu-copies={copies}'
+    - '--iters={iters}'
+    - '--use-cpu'
+
+  vars:
+    - 'embeddings_list=40000000,40000000,40000000,40000000,40000000,40000000,40000000,40000000'
+    - 'bag_size_list=1,1,1,1,1,1,1,5'
+    - 'embedding_dim_list=96,96,96,96,96,96,96,96'
+    - 'batch_size=166'
+    - 'weights_precision=int4'
+    - 'copies=16'
+    - 'iters=1000'
+
+
+- benchmark: fbgemm_embedding
+  name: fbgemm_embedding_b_spec
+  description: Embedding workload for ai benchmark with 8 representative tables having different bag sizes.
+  args:
+    - nbit-device-with-spec
+    - '--num-embeddings-list={embeddings_list}'
+    - '--bag-size-list={bag_size_list}'
+    - '--embedding-dim-list={embedding_dim_list}'
+    - '--batch-size={batch_size}'
+    - '--weights-precision={weights_precision}'
+    - '--cpu-copies={copies}'
+    - '--iters={iters}'
+    - '--use-cpu'
+
+  vars:
+    - 'embeddings_list=100000,100000,100000,100000,100000,5000000,5000000,5000000,10000,10000,14794452'
+    - 'bag_size_list=1,1,1,1,1,1,1,1,1,1,1'
+    - 'embedding_dim_list=64,64,64,64,64,64,64,64,64,64,64'
+    - 'batch_size=166'
+    - 'weights_precision=int4'
+    - 'copies=16'
+    - 'iters=1000'

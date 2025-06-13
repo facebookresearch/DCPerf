@@ -15,6 +15,7 @@ from .clang import ClangParser
 from .cloudsuite_graph import CloudSuiteGraphParser
 from .compression_parser import CompressionParser
 from .django_workload import DjangoWorkloadParser
+from .embedding import EmbeddingParser
 from .encryption import EncryptionParser
 from .fb_fiosynth import Fiosynth_Parser
 from .fbgemm import FbgemmParser
@@ -100,6 +101,7 @@ def register_parsers(factory):
     factory.register("wdl_bench", WDLParser)
     factory.register("health_check", HealthCheckParser)
     factory.register("syscall", SyscallParser)
+    factory.register("embedding", EmbeddingParser)
 
     if not open_source:
         factory.register("adsim", AdSimParser)
