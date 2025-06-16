@@ -35,6 +35,15 @@ function extract_path(url)
   return url:gsub("https?://[%w.]+:?%d*", "")
 end
 
+function print_requests(req)
+  local n = #req
+
+  print("Request sequence:")
+  for i = 1, n do
+    print(i .. ", " .. req[i]["path"])
+  end
+end
+
 -- Load URL paths from the file
 -- Format each line: <url/path> [method] [body]
 function load_request_objects_from_file(file)
@@ -113,6 +122,7 @@ init = function(args)
     os.exit()
   end
 
+  print_requests(requests)
   print("multiplerequests: Found " .. #requests .. " requests")
 end
 
