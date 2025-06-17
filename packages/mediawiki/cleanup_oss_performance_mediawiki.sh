@@ -7,6 +7,6 @@
 MW_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "$MW_ROOT/../..")"
 
-sudo systemctl stop mariadb
+pkill mariadb
 rm -rf "${BENCHPRESS_ROOT}/oss-performance"
 rm -rf "${BENCHPRESS_ROOT}/benchmarks/oss_performance_mediawiki"
