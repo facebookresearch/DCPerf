@@ -33,7 +33,7 @@ index 36cf90b..7d0cba8 100644
 -            BundleEntryModel.objects
 -            .filter(userid__in=self.request.user.following).limit(10))
 +                BundleEntryModel.objects.filter(userid__in=self.request.user.following).limit(10))
-+        logger.warning('[perf] bundle_tray::bundle_entry.objects.filter: {}'.format(time.time() - start_time))
++        logger.debug('[perf] bundle_tray::bundle_entry.objects.filter: {}'.format(time.time() - start_time))
 +
 +
          # only one bundle per user
@@ -61,7 +61,7 @@ index 36cf90b..7d0cba8 100644
 +            for user in UserModel.objects.filter(id__in=list(userids)):
 +                userinfo[user.id] = user.json_data
 +            cache.set_many(userinfo, 60 * 5)
-+        logger.warning('[perf] bundle_tray::user_model.objects.filter: {}'.format(time.time() - start_time))
++        logger.debug('[perf] bundle_tray::user_model.objects.filter: {}'.format(time.time() - start_time))
 +
          # fetch entry information
          feedentryinfo = {}
@@ -98,7 +98,7 @@ index 36cf90b..7d0cba8 100644
              }
              for b in bundles if b.id in first_bundleids
          ]}
-+        logger.warning('[perf] bundle_tray::feed_entry.objects.filter+bundle_process: {}'.format(time.time() - start_time))
++        logger.debug('[perf] bundle_tray::feed_entry.objects.filter+bundle_process: {}'.format(time.time() - start_time))
          return result
 
      def dup_sort_data(self, bundle_list, conf):

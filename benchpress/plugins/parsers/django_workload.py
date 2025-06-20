@@ -79,6 +79,8 @@ class DjangoWorkloadParser(Parser):
     Full Siege output is available in /tmp/siege_out_[N]
     """
 
+    DJANGO_MIN_AVAILABILITY = 99
+
     def parse_dw_data(self, data, metric):
         """Helper method to handle errors when extracting metrics and values"""
 
@@ -139,6 +141,9 @@ class DjangoWorkloadParser(Parser):
                 self.parse_dw_key_val(dw_line, dw_metrics)
 
         if "Transaction rate_trans/sec" in dw_metrics:
+            if dw_metrics["Availability_%"] < self.DJANGO_MIN_AVAILABILITY:
+                dw_metrics["error"] = "Too many unsuccessful requests"
+                dw_metrics["Transaction rate_trans/sec"] = 0
             rps = dw_metrics["Transaction rate_trans/sec"]
             dw_metrics["score"] = float(rps) / DJANGO_BASELINE
 
