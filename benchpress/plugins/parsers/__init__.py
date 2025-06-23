@@ -38,6 +38,7 @@ from .multichase_pingpong import MultichasePingpongParser
 from .multichase_pointer import MultichasePointerParser
 from .nginx_wrk_bench import NginxWrkParser
 from .nnpi_net4 import NNPINet4Parser
+from .rebatch import RebatchParser
 from .returncode import ReturncodeParser
 from .schbench import SchbenchParser
 from .sigrid import SigridParser
@@ -102,6 +103,7 @@ def register_parsers(factory):
     factory.register("health_check", HealthCheckParser)
     factory.register("syscall", SyscallParser)
     factory.register("embedding", EmbeddingParser)
+    factory.register("rebatch", RebatchParser)
 
     if not open_source:
         factory.register("adsim", AdSimParser)

@@ -100,3 +100,46 @@
     - 'output_dtype=fp32'
     - 'copies=16'
     - 'iters=4000'
+
+
+- benchmark: rebatch
+  name: rebatch_a
+  description: rebatch benchmark for Model A.
+  args:
+    - '--threads={threads}'
+    - '--duration={duration}'
+    - '--size-dist={size_dist}'
+    - '--tensors={tensors_num}'
+    - '--prefetch={prefetch}'
+    - '--output-tensor-size={output_tensor_size}'
+    - '--memory-pool-size={memory_pool_size}'
+
+  vars:
+    - 'threads=1'
+    - 'duration=300'
+    - 'size_dist=benchmarks/rebatch/model_a.dist'
+    - 'tensors_num=54'
+    - 'prefetch=0'
+    - 'output_tensor_size=5023008'
+    - 'memory_pool_size=4'
+
+- benchmark: rebatch
+  name: rebatch_b
+  description: rebatch benchmark for Model B.
+  args:
+    - '--threads={threads}'
+    - '--duration={duration}'
+    - '--size-dist={size_dist}'
+    - '--tensors={tensors_num}'
+    - '--prefetch={prefetch}'
+    - '--output-tensor-size={output_tensor_size}'
+    - '--memory-pool-size={memory_pool_size}'
+
+  vars:
+    - 'threads=1'
+    - 'duration=300'
+    - 'size_dist=benchmarks/rebatch/model_b.dist'
+    - 'tensors_num=53'
+    - 'prefetch=0'
+    - 'output_tensor_size=2421002'
+    - 'memory_pool_size=4'

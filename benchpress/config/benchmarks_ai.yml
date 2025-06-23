@@ -5,3 +5,12 @@ fbgemm_embedding:
   path: ./benchmarks/fbgemm_embedding/tbe_inference_benchmark
   metrics:
     - bandwidth
+
+rebatch:
+  parser: rebatch
+  install_script: ./packages/rebatch/install_rebatch.sh
+  cleanup_script: ./packages/rebatch/cleanup_rebatch.sh
+  path: ./benchmarks/rebatch/rebatchBench
+  metrics:
+    - bandwidth
+    - time_per_batch_us
