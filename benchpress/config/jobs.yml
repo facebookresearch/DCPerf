@@ -31,6 +31,36 @@
           - 'oss-performance/perf.data'
 
 - benchmark: oss_performance_mediawiki
+  name: oss_performance_mediawiki_mini
+  description: Default run for oss_performance_mediawiki
+  args:
+    - '-r/usr/local/hphpi/legacy/bin/hhvm'
+    - '-nnginx'
+    - '-L {load_generator}'
+    - '-s {lg_path}'
+    - '--'
+    - '--mediawiki'
+    - '--client-duration={duration}'
+    - '--client-timeout={timeout}'
+    - '--run-as-root'
+    - '--i-am-not-benchmarking'
+    - '--hhvm-extra-arguments="-vEval.JitRetranslateAllSeconds={warmup_seconds}"'
+    - '{extra_args}'
+  vars:
+    - 'load_generator=wrk'
+    - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
+    - 'duration=0.1m'
+    - 'timeout=2m'
+    - 'warmup_seconds=45'
+    - 'extra_args='
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'oss-performance/perf.data'
+
+- benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mlp
   description: Tuned +MLP run for oss_performance_mediawiki
   args:
