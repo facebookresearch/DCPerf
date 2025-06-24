@@ -410,7 +410,7 @@ class RebatchBenchmark {
           const auto inputNbytes = allNbytes[i];
 
           // Prefetch ahead
-          if (i + prefetchDist < tensorsSize) {
+          if (i + prefetchDist < numTensors) {
             __builtin_prefetch(allDataPtrs[i + prefetchDist]);
           }
 
