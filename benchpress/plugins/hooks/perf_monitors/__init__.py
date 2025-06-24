@@ -24,7 +24,9 @@ class Monitor:
     def gen_path(self, filename):
         return BP_BASEPATH + f"/benchmark_metrics_{self.job_uuid}/{filename}"
 
-    def __init__(self, interval, name, job_uuid):
+    def __init__(
+        self, interval: int, name: str, job_uuid: str, under_test: bool = False
+    ):
         """Initialize some common parameters and storage variables"""
         self.name = name
         self.interval = interval
@@ -33,12 +35,17 @@ class Monitor:
         # Reserved for original output of the monitoring process
         self.output = ""
         self.job_uuid = job_uuid
-        self.logpath = self.gen_path(f"{name}.log")
-        self.csvpath = self.gen_path(f"{name}.csv")
-        self.logfile = open(self.logpath, "w", buffering=1)  # noqa: P201
+        # When testing, we don't want to write to log/csv file paths, they don't exist
+        self.under_test = under_test
+
+        if not self.under_test:
+            self.logpath = self.gen_path(f"{name}.log")
+            self.csvpath = self.gen_path(f"{name}.csv")
+            self.logfile = open(self.logpath, "w", buffering=1)  # noqa: P201
 
     def __del__(self):
-        self.logfile.close()
+        if not self.under_test:
+            self.logfile.close()
 
     def process_output(self, line):
         """Define custom ways to process each line of output"""

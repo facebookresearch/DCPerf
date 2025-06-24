@@ -102,3 +102,6 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+benchmark_metrics_*
+benchmark_installs.txt

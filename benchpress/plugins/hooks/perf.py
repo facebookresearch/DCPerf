@@ -11,6 +11,8 @@ import os
 import sys
 import traceback
 
+from benchpress.lib import open_source
+
 from benchpress.lib.hook import Hook
 
 from .perf_monitors import (
@@ -23,6 +25,9 @@ from .perf_monitors import (
     power,
     topdown,
 )
+
+if not open_source:
+    from .perf_monitors import fb_power
 
 BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
 
@@ -41,6 +46,7 @@ DEFAULT_OPTIONS = {
     "memstat": {"interval": 5, "additional_counters": []},
     "topdown": {},
     "power": {"interval": 1},
+    "fb_power": {"interval": 10},
 }
 
 AVAIL_MONITORS = {
@@ -53,6 +59,9 @@ AVAIL_MONITORS = {
     "topdown": topdown.TopDown,
     "power": power.Power,
 }
+
+if not open_source:
+    AVAIL_MONITORS["fb_power"] = fb_power.FBPower
 
 logger = logging.getLogger(__name__)
 

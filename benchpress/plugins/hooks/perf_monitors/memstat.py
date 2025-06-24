@@ -57,7 +57,7 @@ class MemStat(Monitor):
 
     def run(self):
         self.run_collector = True
-        self.proc = threading.Thread(target=self.collect, name="net-stat", args=())
+        self.proc = threading.Thread(target=self.collect, name="memstat", args=())
         self.proc.start()
 
     def terminate(self):
