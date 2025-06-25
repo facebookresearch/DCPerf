@@ -101,6 +101,8 @@ major production workloads listed as follows:
   </tr>
 </table>
 
+### WDLBench
+
 Also, DCPerf includes micro-benchmarks focusing on hot and common functions/routines in the datacenter.
 
 **Note:** WDLBench has different usages than other benchmarks. To use it, please first go
@@ -124,6 +126,34 @@ specific [README](packages/wdl_bench/README.md).
   </tr>
 </table>
 
+### System Bench
+DCPerf's system bench focuses on system performance metrics (kernel scheduler and syscalls).
+
+
+<table>
+  <tr>
+   <td>Benchmarks </td>
+   <td>Programming Languages</td>
+   <td>LIbraries / SW Stack</td>
+   <td>Application domain they represent</td>
+  </tr>
+  <tr>
+   <td>
+    <a href="packages/schbench/README.md">Schbench</a>
+   </td>
+   <td>C</td>
+   <td>Kernel Scheduler Benchmark</td>
+   <td><a href="https://kernel.googlesource.com/pub/scm/linux/kernel/git/mason/schbench">Linux Kernel Schbench</a></td>
+  </tr>
+  <tr>
+   <td>
+    <a href="packages/syscall/README.md">Syscall</a>
+   </td>
+   <td>C++</td>
+   <td>clock_gettime, getpid, nanosleep, tcp-related</td>
+   <td>Common system call benchmarks</td>
+  </tr>
+</table>
 
 ## Representativeness
 
