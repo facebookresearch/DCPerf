@@ -104,7 +104,7 @@
 
 - benchmark: rebatch
   name: rebatch_a
-  description: rebatch benchmark for Model A.
+  description: Rebatch benchmark for Model A.
   args:
     - '--threads={threads}'
     - '--duration={duration}'
@@ -125,7 +125,7 @@
 
 - benchmark: rebatch
   name: rebatch_b
-  description: rebatch benchmark for Model B.
+  description: Rebatch benchmark for Model B.
   args:
     - '--threads={threads}'
     - '--duration={duration}'
@@ -143,3 +143,30 @@
     - 'prefetch=0'
     - 'output_tensor_size=2421002'
     - 'memory_pool_size=4'
+
+- benchmark: chm
+  name: chm_a
+  description: Concurrent hash map benchmark for Model A.
+  args:
+    - '--distribution_file={distribution_file}'
+    - '--num_threads={num_threads}'
+    - '--duration_seconds={duration_seconds}'
+
+  vars:
+    - 'distribution_file=benchmarks/chm/model_a.dist'
+    - 'num_threads=24'
+    - 'duration_seconds=360'
+
+
+- benchmark: chm
+  name: chm_b
+  description: Concurrent hash map benchmark for Model B.
+  args:
+    - '--distribution_file={distribution_file}'
+    - '--num_threads={num_threads}'
+    - '--duration_seconds={duration_seconds}'
+
+  vars:
+    - 'distribution_file=benchmarks/chm/model_b.dist'
+    - 'num_threads=24'
+    - 'duration_seconds=360'

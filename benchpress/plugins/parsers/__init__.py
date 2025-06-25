@@ -11,6 +11,7 @@ from benchpress.lib import open_source
 from .benchdnn import BenchdnnParser
 from .cachebench import CacheBenchParser
 from .checkmark import CheckmarkParser
+from .chm import ChmParser
 from .clang import ClangParser
 from .cloudsuite_graph import CloudSuiteGraphParser
 from .compression_parser import CompressionParser
@@ -104,6 +105,7 @@ def register_parsers(factory):
     factory.register("syscall", SyscallParser)
     factory.register("embedding", EmbeddingParser)
     factory.register("rebatch", RebatchParser)
+    factory.register("chm", ChmParser)
 
     if not open_source:
         factory.register("adsim", AdSimParser)

@@ -14,3 +14,11 @@ rebatch:
   metrics:
     - bandwidth
     - time_per_batch_us
+
+chm:
+  parser: chm
+  install_script: ./packages/chm/install_chm.sh
+  cleanup_script: ./packages/chm/cleanup_chm.sh
+  path: ./benchmarks/chm/chm_bench
+  metrics:
+    - Mops/sec
