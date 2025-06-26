@@ -15,9 +15,10 @@ DJANGO_SERVER_ROOT="${DJANGO_REPO_ROOT}/django-workload"
 DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
 
 # Install system dependencies
+dnf groupinstall "Development Tools" -y
 dnf install -y memcached libmemcached-awesome-devel zlib-devel screen \
-    python3 python3-devel
-
+    openssl-devel bzip2-devel libffi-devel wget make xz-devel
+#s
 # Clone django-workload git repository
 mkdir -p "${DJANGO_WORKLOAD_ROOT}"
 pushd "${DJANGO_WORKLOAD_ROOT}"
@@ -35,31 +36,98 @@ else
     alias wget='wget --no-clobber'
 fi
 pushd "${DJANGO_WORKLOAD_DEPS}"
-# cassandra-driver-3.19.0.tar.gz
-wget "https://files.pythonhosted.org/packages/1c/fe/e4df42a3e864b6b7b2c7f6050b66cafc7fba8b46da0dfb9d51867e171a77/cassandra-driver-3.19.0.tar.gz"
+# cassandra_driver-3.29.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+wget "https://files.pythonhosted.org/packages/cc/60/f8de88175937481be98da88eb88b4fd704093e284e5907775293c496df32/cassandra_driver-3.29.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
 # Cython-0.29.tar.gz
 wget "https://files.pythonhosted.org/packages/6c/9f/f501ba9d178aeb1f5bf7da1ad5619b207c90ac235d9859961c11829d0160/Cython-0.29.21.tar.gz"
-# Django-1.11.29-py2.py3-none-any.whl
-wget "https://files.pythonhosted.org/packages/49/49/178daa8725d29c475216259eb19e90b2aa0b8c0431af8c7e9b490ae6481d/Django-1.11.29-py2.py3-none-any.whl"
-# django-cassandra-engine-1.5.5.tar.gz
-wget "https://files.pythonhosted.org/packages/8f/73/65eb1435e95eff569c6dc0f72fced0243e1bce94dc44dc7e3091d36143ca/django-cassandra-engine-1.5.5.tar.gz"
-# django-statsd-mozilla-0.3.16.tar.gz
+# Django-5.2.tar.gz
+wget "https://files.pythonhosted.org/packages/1b/11/7aff961db37e1ea501a2bb663d27a8ce97f3683b9e5b83d3bfead8b86fa4/django-5.2.3-py3-none-any.whl"
+# django-cassandra-engine-1.6.2.tar.gz
+wget "https://files.pythonhosted.org/packages/1f/5e/438eb7f2d8b8e240701b721a43cb5a20cf970c8e9da8b3770df1de6d7c5b/django-cassandra-engine-1.6.2.tar.gz"
+# django_statsd_mozilla-0.4.0-py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/ac/54/5fa99753dab7ced46129a4c95c777596a2e4094a8b0f65c8764d60d5cff4/django_statsd_mozilla-0.4.0-py3-none-any.whl"
-# numpy-1.19.5-cp36-cp36m-manylinux1_x86_64.whl
-wget "https://files.pythonhosted.org/packages/91/11/059ef2ef98f9eea49ece6d6046bc537c3050c575108a51a624a179c8e7e3/numpy-1.19.5-cp39-cp39-manylinux2014_aarch64.whl"
+# numpy-1.26.4-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+wget "https://files.pythonhosted.org/packages/fc/a5/4beee6488160798683eed5bdb7eead455892c3b4e1f78d79d8d3f3b084ac/numpy-1.26.4-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
 # psutil-5.8.0.tar.gz
 wget "https://files.pythonhosted.org/packages/e1/b0/7276de53321c12981717490516b7e612364f2cb372ee8901bd4a66a000d7/psutil-5.8.0.tar.gz"
 # pylibmc-1.6.1-cp36-cp36m-manylinux1_x86_64.whl
 wget "https://files.pythonhosted.org/packages/a7/0c/f7a3af34b05c167a69ed1fc330b06b658dac4ab25b8632c52d1022dd5337/pylibmc-1.6.1.tar.gz"
 # pytz-2021.1-py2.py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/70/94/784178ca5dd892a98f113cdd923372024dc04b8d40abe77ca76b5fb90ca6/pytz-2021.1-py2.py3-none-any.whl"
-# six-1.15.0-py2.py3-none-any.whl
-wget "https://files.pythonhosted.org/packages/ee/ff/48bde5c0f013094d729fe4b0316ba2a24774b3ff1c52d924a8a4cb04078a/six-1.15.0-py2.py3-none-any.whl"
+# six-1.16.0-py2.py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/d9/5a/e7c31adbe875f2abbb91bd84cf2dc52d792b5a01506781dbcf25c91daf11/six-1.16.0-py2.py3-none-any.whl"
 # statsd
-# wget "https://files.pythonhosted.org/packages/2c/a8/714954464435178017e8d2f39ff418e0c9ad4411a416d4acc315298b9cea/statsd-2.1.2.tar.gz"
 wget "https://files.pythonhosted.org/packages/47/33/c824f799128dfcfce2142f18d9bc6c55c46a939f6e4250639134222d99eb/statsd-3.3.0-py2.py3-none-any.whl"
-# uWSGI-2.0.19.1.tar.gz
-wget "https://files.pythonhosted.org/packages/c7/75/45234f7b441c59b1eefd31ba3d1041a7e3c89602af24488e2a22e11e7259/uWSGI-2.0.19.1.tar.gz"
+# uwsgi-2.0.22.tar.gz
+wget "https://files.pythonhosted.org/packages/a7/4e/c4d5559b3504bb65175a759392b03cac04b8771e9a9b14811adf1151f02f/uwsgi-2.0.22.tar.gz"
+# geomet-0.2.1.post1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/c9/81/156ca48f950f833ddc392f8e3677ca50a18cb9d5db38ccb4ecea55a9303f/geomet-0.2.1.post1-py3-none-any.whl"
+# click-7.1.2.tar.gz
+wget "https://files.pythonhosted.org/packages/27/6f/be940c8b1f1d69daceeb0032fee6c34d7bd70e3e649ccac0951500b4720e/click-7.1.2.tar.gz"
+# typing_extensions-4.14.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/69/e0/552843e0d356fbb5256d21449fa957fa4eff3bbc135a74a691ee70c7c5da/typing_extensions-4.14.0-py3-none-any.whl"
+# asgiref-3.8.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/39/e3/893e8757be2612e6c266d9bb58ad2e3651524b5b40cf56761e985a28b13e/asgiref-3.8.1-py3-none-any.whl"
+# sqlparse-0.5.3-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/a9/5c/bfd6bd0bf979426d405cc6e71eceb8701b148b16c21d2dc3c261efc61c7b/sqlparse-0.5.3-py3-none-any.whl"
+# rapidfuzz-2.10.2.tar.gz
+wget "https://files.pythonhosted.org/packages/ee/92/0c0366b108f658dd29fdf7e9ae73874e9b0c36a9d7c72e7690d075132a3d/rapidfuzz-2.10.2.tar.gz"
+# scikit-learn-0.15.0.tar.gz
+wget "https://files.pythonhosted.org/packages/a2/f4/ea25fe640fadca8a8d860a397f77c427737fbdbc3edb04e8070680f850a0/scikit-learn-0.15.0.tar.gz"
+# filelock-3.12.4-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/5e/5d/97afbafd9d584ff1b45fcb354a479a3609bd97f912f8f1f6c563cb1fae21/filelock-3.12.4-py3-none-any.whl"
+# msgpack-0.5.2.tar.gz
+wget "https://files.pythonhosted.org/packages/17/99/1929902c6d0bffce866be5ceadfe6f395041813ad8004a24eb3f82231564/msgpack-0.5.2.tar.gz"
+# wheel-0.41.2-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/b8/8b/31273bf66016be6ad22bb7345c37ff350276cfd46e389a0c2ac5da9d9073/wheel-0.41.2-py3-none-any.whl"
+# setuptools-67.0.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/bf/27/969c914650fdf0d08b0b92bdbddfc08bea9df6d86aeefd75ba4730f50bc9/setuptools-67.0.0-py3-none-any.whl"
+# platformdirs-3.11.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/56/29/3ec311dc18804409ecf0d2b09caa976f3ae6215559306b5b530004e11156/platformdirs-3.11.0-py3-none-any.whl"
+# pkginfo-1.9.6-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/b3/f2/6e95c86a23a30fa205ea6303a524b20cbae27fbee69216377e3d95266406/pkginfo-1.9.6-py3-none-any.whl"
+# jsonschema-4.17.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/9f/df/824fdaa0d7228fa2e8a5171a408dbabe2c66955afd5be5211725389640b5/jsonschema-4.17.1-py3-none-any.whl"
+# keyring-24.2.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/0e/8f/5772801169cf62e8232721034f91f81e33b0cfa6e51d3bf6ff65c503af2a/keyring-24.2.0-py3-none-any.whl"
+# tomlkit-0.12.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/a0/6d/808775ed618e51edaa7bbe6759e22e1c7eafe359af6e084700c6d39d3455/tomlkit-0.12.1-py3-none-any.whl"
+# cachecontrol-0.13.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/1d/e3/a22348e6226dcd585d5a4b5f0175b3a16dabfd3912cbeb02f321d00e56c7/cachecontrol-0.13.1-py3-none-any.whl"
+# installer-0.7.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/e5/ca/1172b6638d52f2d6caa2dd262ec4c811ba59eee96d54a7701930726bce18/installer-0.7.0-py3-none-any.whl"
+# poetry-1.6.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/7d/25/f3bfda3c458d114005af99441d009936b85a34a730aeb9cf57fb2630d9f7/poetry-1.6.1-py3-none-any.whl"
+# poetry_plugin_export-1.5.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/e9/12/43553a79e1d3bf8de119125dfc3e1fcc8f4258d658b603908d02efaed256/poetry_plugin_export-1.5.0-py3-none-any.whl"
+# poetry_core-1.7.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/bf/d4/ce72ac247f414d15ff046f0926b76eb42bd743e83c1df28e856f328e3db1/poetry_core-1.7.0-py3-none-any.whl"
+# requests_toolbelt-1.0.0-py2.py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/3f/51/d4db610ef29373b879047326cbf6fa98b6c1969d6f6dc423279de2b1be2c/requests_toolbelt-1.0.0-py2.py3-none-any.whl"
+# tomli-2.0.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/97/75/10a9ebee3fd790d20926a90a2547f0bf78f371b2f13aa822c759680ca7b9/tomli-2.0.1-py3-none-any.whl"
+# cleo-2.0.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/b1/ae/0329af2a4c22836010c43760233a181a314853a97e0f2b53b02825c4c9b7/cleo-2.0.1-py3-none-any.whl"
+# requests-2.31.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/70/8e/0e2d847013cb52cd35b38c009bb167a1a26b2ce6cd6965bf26b47bc0bf44/requests-2.31.0-py3-none-any.whl"
+# hooks-1.0.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/d5/ea/9ae603de7fbb3df820b23a70f6aff92bf8c7770043254ad8d2dc9d6bcba4/pyproject_hooks-1.0.0-py3-none-any.whl"
+# shellingham-1.5.4-py2.py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl"
+# pexpect-4.8.0-py2.py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/39/7b/88dbb785881c28a102619d46423cb853b46dbccc70d3ac362d99773a78ce/pexpect-4.8.0-py2.py3-none-any.whl"
+# virtualenv-20.24.6-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/7f/19/1f0eddcb9acf00a95793ce83417f69e0fd106c192121360af499cd6fde39/virtualenv-20.24.6-py3-none-any.whl"
+# packaging-23.2-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/ec/1a/610693ac4ee14fcdf2d9bf3c493370e4f2ef7ae2e19217d7a237ff42367d/packaging-23.2-py3-none-any.whl"
+# trove_classifiers-2023.10.18-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/ec/40/05cb2725ca7e6c844c66af626c5749efd254ec4506f17a1d01ba79ae9da6/trove_classifiers-2023.10.18-py3-none-any.whl"
+# build-0.10.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/58/91/17b00d5fac63d3dca605f1b8269ba3c65e98059e1fd99d00283e42a454f0/build-0.10.0-py3-none-any.whl"
+# crashtest-0.4.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/b0/5c/3ba7d12e7a79566f97b8f954400926d7b6eb33bcdccc1315a857f200f1f1/crashtest-0.4.1-py3-none-any.whl"
+# parser_libraries-3.7.tar.gz
+wget "https://files.pythonhosted.org/packages/11/35/575091de594677e40440a24be3192c78116b69c1180a77be63d71353b9a8/parser_libraries-3.7.tar.gz"
 popd
 unalias wget 2>/dev/null || echo "[Finished] downloading dependencies"
 
@@ -105,26 +173,37 @@ popd
 # 5. Install Django and its dependencies
 pushd "${DJANGO_SERVER_ROOT}"
 
-# Create virtual env to run Python 3.9
-[ ! -d venv ] && python3.9 -m venv venv
+# Install python3.10
+if ! [ -d Python-3.10.2 ]; then
+    wget https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz
+    tar -xzf Python-3.10.2.tgz
+    cd Python-3.10.2
+    ./configure --enable-optimizations
+    make altinstall
+    cd ../
+fi
 
+# Create virtual env to run Python 3.10
+[ ! -d venv ] && Python-3.10.2/python -m venv venv
 # Allow unbound variables for active script
 set +u
 # shellcheck disable=SC1091
 source venv/bin/activate
 set -u
-
 if ! [ -f setup.py.bak ]; then
+    #sed -i 's/django-cassandra-engine/django-cassandra-engine >= 1.6, < 1.9/' setup.py
+    sed -i '/Django/s/.*//' setup.py
+    sed -i "/uwsgi/s/.*/          'uwsgi',/" setup.py
     cp setup.py setup.py.bak
 fi
+
 cp setup.py.bak setup.py
-sed -i 's/django-cassandra-engine/django-cassandra-engine >= 1.5, < 1.6/' setup.py
 
 # Install dependencies using third_party pip dependencies
-pip3 install "Cython>=0.29.21,<=0.29.32" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
-pip3 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
-pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
-pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3.10 install "Cython>=0.29.21,<=0.29.32" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3.10 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3.10 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3.10 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 
 # Configure Django and uWSGI
 cp "${TEMPLATES_DIR}/cluster_settings.py" "${DJANGO_SERVER_ROOT}/cluster_settings.py.template" || exit 1
@@ -161,13 +240,26 @@ if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
     rm -rfv build/
 fi
 
-# Apply Memcache tuning
+pushd "${BENCHPRESS_ROOT}"
+# Patch for Java
+git apply --check "${TEMPLATES_DIR}/cassandra-env.patch" && git apply "${TEMPLATES_DIR}/cassandra-env.patch"
+git apply --check "${TEMPLATES_DIR}/jvm_options.patch" && git apply "${TEMPLATES_DIR}/jvm_options.patch"
+# Patch for gen-urls-file
+git apply --check "${TEMPLATES_DIR}/gen-urls-file.patch" && git apply "${TEMPLATES_DIR}/gen-urls-file.patch"
+popd
+
 pushd "${DJANGO_SERVER_ROOT}/django_workload"
+# Patch for URLs
+git apply --check "${TEMPLATES_DIR}/urls.patch" && git apply "${TEMPLATES_DIR}/urls.patch"
+
+# Apply Memcache tuning
 git apply --check "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch" && git apply "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch"
 # Apply db caching
 git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch"
 # Remove duplicate middleware classes
 git apply --check "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch" && git apply "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch"
+# Enable Session, Authentication and Message middleware
+git apply --check "${TEMPLATES_DIR}/0005-django_middleware_settings.patch" && git apply "${TEMPLATES_DIR}/0005-django_middleware_settings.patch"
 popd
 
 deactivate
