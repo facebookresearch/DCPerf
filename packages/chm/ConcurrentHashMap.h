@@ -91,7 +91,7 @@ class ConcurrentHashMap {
     size_t shard =
         keyToSubMapIndex(key); // Determine which shard contains this key
     {
-      std::unique_lock lock{*mutexes_[shard]}; // Acquire lock for this shard
+      std::shared_lock lock{*mutexes_[shard]}; // Acquire lock for this shard
       auto iter = subMap(shard).find(key);
       if (iter != subMap(shard).end()) {
         return std::pair<data_type, bool>(iter->second, true);
