@@ -239,6 +239,7 @@ Install git, python (>= 3.7) and the following Python packages:
 - pyyaml
 - tabulate
 - pandas
+- packaging
 
 The commands are:
 

@@ -12,14 +12,25 @@ import re
 import shlex
 import subprocess
 import sys
+from dataclasses import dataclass
+from typing import Any
 
 import click
 import tabulate
 import yaml
+from packaging.version import Version
 
 from .command import BenchpressCommand, TABLE_FORMAT
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Result:
+    value: Any
+    failed: bool
+    failure_reason: str
+    expected: Any = None
 
 
 def run_cmd(cmd, ignore_error=False):
@@ -43,6 +54,7 @@ def get_cpuinfo():
 class SystemCheckCommand(BenchpressCommand):
     def __init__(self):
         self.run_cmd = run_cmd
+        self.fbk_version_regex: str = r"(\d+\.\d+\.\d+-\d+)_fbk(\d+)"
 
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser(
@@ -190,8 +202,12 @@ class SystemCheckCommand(BenchpressCommand):
 
         click.echo(tabulate.tabulate(table, tablefmt=TABLE_FORMAT))
 
-    def success(self, name, value):
-        click.echo(click.style("[OK]    ", fg="green") + f"{name:50s}{value}")
+    def success(self, name: str, value: Any, expected: Any = None) -> None:
+        desc = f"{name:50s}{value}"
+        if expected:
+            desc += f" (expected {expected})"
+
+        click.echo(click.style("[OK]    ", fg="green") + desc)
 
     def fail(self, name, value, expected, match_type):
         click.echo(
@@ -200,7 +216,7 @@ class SystemCheckCommand(BenchpressCommand):
                 fg="red",
             )
             + f"{name:50s}"
-            + f"Mismatch `{value}' and `{expected}' (type={match_type})"
+            + f"Mismatch, got `{value}', exp `{expected}' (type={match_type})"
         )
 
     def skip(self, name, msg):
@@ -209,10 +225,105 @@ class SystemCheckCommand(BenchpressCommand):
     def warn(self, msg):
         click.echo(click.style(f"{msg}", fg="yellow"))
 
-    def handle_validation_failure(self, args, check, value_found) -> bool:
+    def fatal(self, msg):
+        logger.error(msg)
+        sys.exit(1)
+
+    def fbk_to_version(self, fbk_str: str) -> Result:
+        result = Result("", False, "")
+        version_str = ""
+
+        match = re.search(self.fbk_version_regex, fbk_str)
+        if match:
+            version = match.group(0)
+            version_str += version.replace("-", ".").replace("_fbk", ".")
+            result.value = Version(version_str)
+        else:
+            result.failed = True
+            result.failure_reason = f"Could not parse fbk string `{fbk_str}`"
+
+        return result
+
+    def version_to_fbk(self, version: Version) -> str:
+        assert isinstance(version, Version), "version must be a Version object"
+        assert (
+            len(str(version)) == 4
+        ), "fbk version must be a Version object with 5 parts"
+
+        version_toks = str(version).split(".")
+
+        fbk_str = ".".join(version_toks[:3])
+        fbk_str += f"-{version_toks[3]}"
+        fbk_str += f"_fbk{version_toks[4]}"
+
+        return fbk_str
+
+    def parse_value_with_rule(self, value, parse_rule) -> Result:
+        result = Result("", True, "Unknown failure reason")
+
+        if parse_rule == "":
+            result.value = value
+            result.failed = False
+        elif parse_rule == "fbk":
+            result = self.fbk_to_version(value)
+        elif parse_rule == "hex":
+            try:
+                result.value = str(int(value, 16))
+                result.failed = False
+            except ValueError:
+                result.failure_reason = f"Could not parse value `{value}` as hex"
+        elif parse_rule.startswith("regex:"):
+            regex = parse_rule[len("regex:") :]
+            match = re.search(regex, value)
+
+            if match:
+                # Check if "parsed" is present in the match object
+                if "parsed" in match.groupdict():
+                    parsed_value = match.group("parsed")
+
+                    result.value = parsed_value.strip()
+                    result.failed = False
+                else:
+                    result.failure_reason = f"Match regex matched, but no `parsed` group found in regex `{regex}`"
+            else:
+                result.failure_reason = (
+                    f"No match found for regex `{regex}` in value `{value}`"
+                )
+
+        else:
+            result.failure_reason = f"Unknown parse rule `{parse_rule}`"
+
+        if not result.failed:
+            result.failure_reason = ""
+
+        return result
+
+    def match_value_with_rule(self, parsed_value, expected_value, match_rule) -> Result:
+        result = Result("", True, "Unknown failure reason")
+
+        if match_rule == "semantic":
+            parsed_version_number = Version(str(parsed_value))
+            expected_version_number = Version(str(expected_value))
+
+            if parsed_version_number >= expected_version_number:
+                result.failed = False
+                result.value = parsed_version_number
+            else:
+                result.failed = True
+                result.value = parsed_version_number
+                result.failure_reason = f"Expected version number >= {expected_version_number}, but got {parsed_version_number}"
+        else:
+            result.failed = True
+            result.failure_reason = f"Unknown match rule `{match_rule}`"
+
+        return result
+
+    def handle_validation_failure(
+        self, args, check, value_found, expected_value
+    ) -> bool:
         fixes_available: bool = False
 
-        self.fail(check["name"], value_found, check["value"], check["match_type"])
+        self.fail(check["name"], value_found, expected_value, check["match_type"])
 
         if args.run_fixes:
             if "fix" in check:
@@ -223,14 +334,28 @@ class SystemCheckCommand(BenchpressCommand):
 
         return fixes_available
 
-    def validate_system_serf(self, check, ignore_error):
+    def validate_system_serf(self, check, ignore_error) -> Result:
         result_raw = self.run_cmd(
             "serf get $(hostname) --fields '" + check["fields"] + "' --format json"
         )
-        value_found = "<no match>"
-        failed = True
 
-        assert "selectors" in check
+        result = Result("<no match>", True, "", check["value"])
+        check["match_type"] = "serf"
+
+        # Make sure check's fields are all present and valid
+        if ("value_parse_rule" in check) ^ ("value_match_rule" in check):
+            raise Exception(
+                "Either both or neither of value_parse_rule and value_match_rule should be present"
+            )
+        if "key" not in check:
+            self.fatal("key field is required for serf check")
+        if "value" not in check:
+            self.fatal("value field is required for serf check")
+        if "fields" not in check:
+            self.fatal("fields field is required for serf check")
+        if "selectors" not in check:
+            self.fatal("selectors field is required for serf check")
+
         selectors = check["selectors"]
         assert len(selectors) > 0
 
@@ -239,9 +364,9 @@ class SystemCheckCommand(BenchpressCommand):
         except json.JSONDecodeError as e:
             self.warn(f"serf get failed: {e}")
             self.warn(f"Input JSON: {result_raw}")
-            failed = True
-            value_found = "<not present>"
-            sys.exit(1)
+            result.failed = True
+            result.value = "<not present>"
+            self.fatal("Could not parse serf result as JSON")
 
         for item in result_json:
             match: bool = True
@@ -250,50 +375,116 @@ class SystemCheckCommand(BenchpressCommand):
                     match = False
 
             if match:
-                value_found = item[check["key"]]
-                failed = value_found != check["value"]
+                result.value = item[check["key"]]
+
+                if "value_parse_rule" in check:
+                    parse_rule_name = check["value_parse_rule"].split(":")[0]
+
+                    check["match_type"] += (
+                        f", parse={parse_rule_name}, match={check['value_match_rule']}"
+                    )
+
+                    parser_result = self.parse_value_with_rule(
+                        result.value, check["value_parse_rule"]
+                    )
+                    expected_result = self.parse_value_with_rule(
+                        check["value"], check["value_parse_rule"]
+                    )
+
+                    if parser_result.failed:
+                        result.failed = True
+                        result.failure_reason = f"Failed to parse value `{result.value}` with rule `{check['value_parse_rule']}`: {parser_result.failure_reason}"
+                    elif expected_result.failed:
+                        result.failed = True
+                        result.failure_reason = f"Failed to parse expected value `{check['value']}` with rule `{check['value_parse_rule']}`: {expected_result.failure_reason}"
+                    else:
+                        result.expected = expected_result.value
+                        match_result = self.match_value_with_rule(
+                            parser_result.value,
+                            expected_result.value,
+                            check["value_match_rule"],
+                        )
+                        if match_result.failed:
+                            result.value = match_result.value
+                            result.failed = match_result.failed
+                            result.failed = True
+                        else:
+                            result.failed = False
+                            result.value = match_result.value
+                else:
+                    result.expected = check["value"]
+                    result.failed = result.value != check["value"]
+                    if result.failed:
+                        result.failure_reason = f"Expected value `{check['value']}` but got `{result.value}`"
                 break
+        if result.failed and result.failure_reason == "":
+            result.failure_reason = (
+                f"No match found for selectors `{selectors}` in serf result"
+            )
 
-        check["match_type"] = "serf"
+        return result
 
-        return (
-            value_found,
-            failed,
-        )
-
-    def validate_system_shell(self, check, ignore_error):
-        result = self.run_cmd(check["command"], ignore_error).split("\n")[0]
-        value_found = result
+    def validate_system_shell(self, check, ignore_error: bool) -> Result:
+        run_cmd_result = self.run_cmd(check["command"], ignore_error).split("\n")[0]
+        value_found = run_cmd_result
+        expected_value = check["value"]
         failed = False
-        if check["match_type"] == "ignore":
-            failed = False
-        elif check["match_type"] == "endswith":
-            failed = not result.endswith(check["value"])
-        elif check["match_type"] == "startswith":
-            failed = not result.startswith(check["value"])
-        elif check["match_type"] == "exact":
-            failed = result != check["value"]
-        elif check["match_type"] == "any_exact":
-            failed = result not in check["value"]
-        elif check["match_type"] == "any_startswith":
-            failed = not any(result.startswith(v) for v in check["value"])
-        elif check["match_type"] == "regex":
-            match = re.search(check["regex"], result)
-            if match:
-                value_found = match.group()
-                failed = match.group() != check["value"]
-            else:
-                value_found = "<no match>"
+        failure_reason = ""
+
+        # We need to parse the value and the expected value if a parse rule is present
+        # Before we match them
+        if "parse_rule" in check:
+            assert (
+                check["match_type"] == "semantic"
+            ), "Currently only semantic match is supported with parse rules"
+
+            parser_result = self.parse_value_with_rule(value_found, check["parse_rule"])
+            if parser_result.failed:
                 failed = True
-        else:
-            raise Exception(f"Unknown match type: {check['match_type']}")
+                failure_reason = f"Failed to parse value `{value_found}` with rule `{check['parse_rule']}`: {parser_result.failure_reason}"
+            else:
+                value_found = parser_result.value
 
-        return (
-            value_found,
-            failed,
-        )
+            parser_result = self.parse_value_with_rule(
+                check["value"], check["parse_rule"]
+            )
+            if parser_result.failed:
+                failed = True
+                failure_reason = f"Failed to parse expected value `{check['value']}` with rule `{check['parse_rule']}`: {parser_result.failure_reason}"
+                expected_value = "<parse error>"
+            else:
+                expected_value = parser_result.value
 
-    def validate_system_eth(self, check, ignore_error):
+        # Now we can match the values
+        if not failed:
+            if check["match_type"] == "semantic":
+                failed = value_found < expected_value
+            elif check["match_type"] == "ignore":
+                failed = False
+            elif check["match_type"] == "endswith":
+                failed = not value_found.endswith(check["value"])
+            elif check["match_type"] == "startswith":
+                failed = not value_found.startswith(check["value"])
+            elif check["match_type"] == "exact":
+                failed = value_found != check["value"]
+            elif check["match_type"] == "any_exact":
+                failed = value_found not in check["value"]
+            elif check["match_type"] == "any_startswith":
+                failed = not any(value_found.startswith(v) for v in check["value"])
+            elif check["match_type"] == "regex":
+                match = re.search(check["regex"], value_found)
+                if match:
+                    value_found = match.group()
+                    failed = match.group() != check["value"]
+                else:
+                    value_found = "<no match>"
+                    failed = True
+            else:
+                self.fatal(f"Unknown match type: {check['match_type']}")
+
+        return Result(value_found, failed, failure_reason, expected_value)
+
+    def validate_system_eth(self, check, ignore_error: bool) -> Result:
         if "interface" not in check:
             raise Exception("interface is required for eth check")
         if "field" not in check:
@@ -301,8 +492,7 @@ class SystemCheckCommand(BenchpressCommand):
         if "value" not in check:
             raise Exception("value is required for eth check")
 
-        value_found: str = ""
-        failed: bool = False
+        result = Result(None, True, "")
 
         result_raw = self.run_cmd(
             f"ethtool --json {check['options']} {check['interface']}"
@@ -314,30 +504,32 @@ class SystemCheckCommand(BenchpressCommand):
         except json.JSONDecodeError as e:
             self.warn(f"ethtool --json failed: {e}")
             self.warn(f"Input JSON: {result_raw}")
-            failed = True
-            value_found = "<not present>"
+            result.failed = True
+            result.value = "<not present>"
 
         assert len(result_list) == 1
-        result = result_list[0]
+        result.value = result_list[0]
 
         check["match_type"] = "eth"
 
-        if check["field"] not in result:
-            failed = True
-            value_found = "<not present>"
+        if check["field"] not in result.value:
+            result.failed = True
+            result.value = "<not present>"
+            result.failure_reason = (
+                f"Field `{check['field']}` not found in ethtool result"
+            )
         else:
-            value_found = result[check["field"]]
+            result.value = result.value[check["field"]]
 
             if "sub-field" in check:
-                value_found = result[check["field"]][check["sub-field"]]
-                failed = value_found != check["value"]
+                value_found = result.value[check["sub-field"]]
+                result.failed = value_found != check["value"]
+                result.expected = check["value"]
             else:
-                failed = result[check["field"]] != check["value"]
+                result.failed = result.value != check["value"]
+                result.expected = check["value"]
 
-        return (
-            value_found,
-            failed,
-        )
+        return result
 
     def is_predicate_true(self, check) -> bool:
         if "predicate" in check:
@@ -353,6 +545,8 @@ class SystemCheckCommand(BenchpressCommand):
             return True
 
     def validate_system(self, file, args):
+        result = Result("", True, "")
+
         tests_stats = {
             "passed": 0,
             "failed": 0,
@@ -372,7 +566,6 @@ class SystemCheckCommand(BenchpressCommand):
 
         value_found: str = ""
         for check in config:
-            failed: bool = False
             ignore_error: bool = False
             if "ignore_error" in check:
                 ignore_error = check["ignore_error"]
@@ -384,21 +577,38 @@ class SystemCheckCommand(BenchpressCommand):
                 continue
 
             if check["type"] == "serf":
-                value_found, failed = self.validate_system_serf(check, ignore_error)
+                result = self.validate_system_serf(check, ignore_error)
+
+                # Format the value found for display
+                if "value_parse_rule" in check:
+                    if check["value_parse_rule"] == "hex":
+                        # Version() converts the value to an object, we need to convert it back to a string
+                        result_str = str(result.value)
+                        expected_result_str = str(result.expected)
+                        try:
+                            result.value = hex(int(result_str))
+                            result.expected = hex(int(expected_result_str))
+                        except ValueError:
+                            result.value = result_str
+                            result.failed = True
+                    elif check["value_match_rule"] == "semantic":
+                        result.value = str(result.value)
+                else:
+                    result.value = result.value
             elif check["type"] == "shell":
-                value_found, failed = self.validate_system_shell(check, ignore_error)
+                result = self.validate_system_shell(check, ignore_error)
             elif check["type"] == "eth":
-                value_found, failed = self.validate_system_eth(check, ignore_error)
+                result = self.validate_system_eth(check, ignore_error)
             else:
                 raise Exception(f"Unknown check type: {check['type']}")
 
-            if failed:
+            if result.failed:
                 fixes_are_available |= self.handle_validation_failure(
-                    args, check, value_found
+                    args, check, result.value, result.expected
                 )
                 tests_stats["failed"] += 1
             else:
-                self.success(check["name"], value_found)
+                self.success(check["name"], result.value, result.expected)
                 tests_stats["passed"] += 1
 
         tests_stats["fixes_are_available"] = fixes_are_available

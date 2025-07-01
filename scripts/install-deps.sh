@@ -12,7 +12,7 @@ centos9() {
     echo "Installing dependencies for CentOS 9"
 
     $SUDO dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel
-    pip-3.9 install pandas
+    pip-3.9 install pandas packaging
 
     $SUDO dnf install epel-release
     $SUDO dnf install 'dnf-command(config-manager)'
@@ -36,7 +36,7 @@ centos8() {
 
     $SUDO dnf install -y python38 python38-pip git
     $SUDO alternatives --set python3 /usr/bin/python3.8
-    pip-3.8 install click pyyaml tabulate pandas
+    pip-3.8 install click pyyaml tabulate pandas packaging
 
     $SUDO dnf install epel-release
     $SUDO dnf install 'dnf-command(config-manager)'
@@ -51,7 +51,7 @@ ubuntu22() {
 
     $SUDO apt update
     $SUDO apt install -y python3-pip git
-    $SUDO pip3 install click pyyaml tabulate pandas
+    $SUDO pip3 install click pyyaml tabulate pandas packaging
 }
 
 if [ -f /etc/os-release ]; then

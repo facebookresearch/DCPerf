@@ -93,10 +93,11 @@ install_python_tools () {
     numpy=1.* \
     pandas \
     pyyaml \
-    tabulate) || return 1
+    tabulate \
+    packaging) || return 1
 
   # Check Python packages are importable
-  local import_tests=( click numpy pandas tabulate )
+  local import_tests=( click numpy pandas tabulate packaging )
   for p in "${import_tests[@]}"; do
     (test_python_import_package "${env_name}" "${p}") || return 1
   done
