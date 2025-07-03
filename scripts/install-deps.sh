@@ -14,9 +14,13 @@ centos9() {
     $SUDO dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel
     pip-3.9 install pandas packaging
 
-    $SUDO dnf install epel-release
-    $SUDO dnf install 'dnf-command(config-manager)'
-    $SUDO dnf config-manager --set-enabled crb
+    # These are not necessary if it's run under internal test env
+    if ! [ "${IS_INTERNAL_TEST:-}" = "1" ]; then
+        $SUDO dnf install -y epel-release
+        $SUDO dnf install -y 'dnf-command(config-manager)'
+        $SUDO dnf config-manager --set-enabled crb
+    fi
+    $SUDO dnf group install -y "Development Tools"
 }
 
 centos8() {
@@ -38,8 +42,8 @@ centos8() {
     $SUDO alternatives --set python3 /usr/bin/python3.8
     pip-3.8 install click pyyaml tabulate pandas packaging
 
-    $SUDO dnf install epel-release
-    $SUDO dnf install 'dnf-command(config-manager)'
+    $SUDO dnf install -y epel-release
+    $SUDO dnf install -y 'dnf-command(config-manager)'
     $SUDO dnf config-manager --set-enabled PowerTools
 
     $SUDO dnf install -y gcc-toolset-11
