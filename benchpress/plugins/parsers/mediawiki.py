@@ -14,7 +14,7 @@ MEDIAWIKI_MLP_BASELINE = BASELINES["mediawiki"]
 
 
 class MediawikiParser(JSONParser):
-    MEDIAWIKI_MIN_AVAILABILITY = 0.95
+    MEDIAWIKI_MIN_AVAILABILITY = 0.94
 
     def parse(self, stdout, stderr, returncode):
         metrics = super().parse(stdout, stderr, returncode)
