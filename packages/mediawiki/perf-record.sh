@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 #
 
-sleep 30
+#sleep 30
 if [ -f "perf.data" ]; then
   exit 0;
 fi

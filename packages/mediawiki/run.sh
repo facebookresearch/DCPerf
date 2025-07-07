@@ -19,7 +19,7 @@ export LD_LIBRARY_PATH=/opt/local/hhvm-3.30/lib
 
 function show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [-H db host] [-r hhvm path] [-n nginx path] [-L siege or wrk ] [-s load generator path] [-t server threads] [-c client threads] [-m memcache thrads] [-- extra_args]
+Usage: ${0##*/} [-h] [-H db host] [-r hhvm path] [-n nginx path] [-L siege or wrk ] [-s load generator path] [-t server threads] [-c client threads] [-m memcache thrads] [-p] [-T temp-dir] [-- extra_args]
 Proxy shell script to executes oss-performance benchmark
     -h          display this help and exit
     -H          hostname or IP address to mariadb or mysql database
@@ -33,6 +33,8 @@ Proxy shell script to executes oss-performance benchmark
                 Default: 200 or floor(2.8 * logical cpus / number of HHVM servers), whichever is greater (=${SERVER_THREADS})
     -c          number of load generator threads. Default: ${SIEGE_CLIENT_THREADS} for siege, ${WRK_CLIENT_THREADS} for wrk.
     -m          number of memcache threads. Default: 8 * number of HHVM (=${MEMCACHE_THREADS})
+    -p          disable perf-record.sh execution after warmup
+    -T          specify temporary directory path
 
 Any other options that oss-performance perf.php script could accept can be
 passed in as extra arguments appending two hyphens '--' followed by the
@@ -78,6 +80,19 @@ function run_benchmark() {
   local _load_generator="$3"
   local _lg_path="$4"
   local _db_host=""
+  local _disable_perf_record="$6"
+  local _use_temp_dir="$7"
+  local _temp_dir="$8"
+  local _perf_record_arg=""
+  local _temp_dir_arg=""
+
+  if [[ "$_disable_perf_record" != "true" ]]; then
+    _perf_record_arg="--exec-after-warmup=${SCRIPT_DIR}/perf-record.sh"
+  fi
+
+  if [[ "$_use_temp_dir" = true && "$_temp_dir" != "default_no_temp_dir" ]]; then
+    _temp_dir_arg="--temp-dir ${_temp_dir}"
+  fi
 
   if [[ $# -eq 5 ]]; then
     _db_host="--db-host $5"
@@ -113,7 +128,8 @@ function run_benchmark() {
     --scale-out "${HHVM_SERVERS}" \
     --delay-check-health 30 \
     --hhvm-extra-arguments='-vEval.ProfileHWEnable=0' \
-    --exec-after-warmup="${SCRIPT_DIR}/perf-record.sh" \
+    ${_perf_record_arg} \
+    ${_temp_dir_arg} \
     ${extra_args}
   cd "${OLD_CWD}" || exit
 }
@@ -134,7 +150,13 @@ function main() {
   local lg_path
   lg_path=''
 
-  while getopts 'H:n:r:L:s:R:t:c:m:' OPTION "${@}"; do
+  local disable_perf_record
+  disable_perf_record=false
+
+  local temp_dir
+  temp_dir=""
+
+  while getopts 'H:n:r:L:s:R:t:c:m:pT:' OPTION "${@}"; do
     case "$OPTION" in
       H)
         db_host="${OPTARG}"
@@ -186,6 +208,13 @@ function main() {
       m)
         MEMCACHE_THREADS="${OPTARG}"
         ;;
+      p)
+        disable_perf_record=true
+        ;;
+      T)
+        temp_dir="${OPTARG}"
+        use_temp_dir=true
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -193,6 +222,7 @@ function main() {
     esac
   done
   shift "$((OPTIND -1))"
+
 
   # Extra arguments to pass to perf.php
   # shellcheck disable=2124
@@ -203,15 +233,18 @@ function main() {
   readonly nginx_path
   readonly load_generator
   readonly lg_path
+  readonly disable_perf_record
+  readonly use_temp_dir
+  readonly temp_dir
 
   echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
 
   if [[ "$db_host" = "" ]]; then
     systemctl restart mariadb
     _check_local_db_running || return
-    run_benchmark "${hhvm_path}" "${nginx_path}" "${load_generator}" "${lg_path}"
+    run_benchmark "${hhvm_path}" "${nginx_path}" "${load_generator}" "${lg_path}" "" "${disable_perf_record}" "${use_temp_dir}" "${temp_dir}"
   else
-    run_benchmark "${hhvm_path}" "${nginx_path}" "${load_generator}" "${lg_path}" "${db_host}"
+    run_benchmark "${hhvm_path}" "${nginx_path}" "${load_generator}" "${lg_path}" "${db_host}" "${disable_perf_record}" "${use_temp_dir}" "${temp_dir}"
   fi
 
   exit 0

@@ -6,7 +6,7 @@
 -- Module instantiation
 -- Initialize the pseudo random number generator
 -- Resource: http://lua-users.org/wiki/MathLibraryTutorial
-math.randomseed(os.time())
+math.randomseed(1000)
 math.random(); math.random(); math.random()
 
 -- Shuffle array

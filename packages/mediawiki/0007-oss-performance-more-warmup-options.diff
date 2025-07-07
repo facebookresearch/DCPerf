@@ -1,0 +1,177 @@
+diff --git a/base/HHVMDaemon.php b/base/HHVMDaemon.php
+index 2caed99..11cf525 100644
+--- a/base/HHVMDaemon.php
++++ b/base/HHVMDaemon.php
+@@ -79,8 +79,12 @@ final class HHVMDaemon extends PHPEngine {
+   }
+ 
+   <<__Override>>
+-  public function needsRetranslatePause(): bool {
++  public function needsRetranslatePause(inout ?string $status_message ): bool {
+     $status = $this->adminRequest('/warmup-status');
++
++    // Store the status message in the provided reference
++    $status_message = $status;
++
+     return $status !== '' && $status !== 'failure';
+   }
+ 
+@@ -280,6 +284,11 @@ final class HHVMDaemon extends PHPEngine {
+           continue;
+         }
+         $health = json_decode($health, /* assoc array = */ true);
++        if ($this->options->shortenHealthCheck){
++          if (array_key_exists('tc-size', $health)) {
++            return;
++          }
++        }
+         if (array_key_exists('tc-size', $health) &&
+             ($health['tc-size'] > 0 || $health['tc-hotsize'] > 0)) {
+           return;
+diff --git a/base/PHPEngine.php b/base/PHPEngine.php
+index 420014d..d8e45df 100644
+--- a/base/PHPEngine.php
++++ b/base/PHPEngine.php
+@@ -12,6 +12,6 @@ abstract class PHPEngine extends Process {
+   public abstract function __toString(): string;
+   public function writeStats(): void {}
+ 
+-  public function needsRetranslatePause(): bool { return false; }
++  public function needsRetranslatePause(inout ?string $status_message ): bool { return false; }
+   public function queueEmpty(): bool { return true; }
+ }
+diff --git a/base/PerfOptions.php b/base/PerfOptions.php
+index add42c7..7603fdf 100644
+--- a/base/PerfOptions.php
++++ b/base/PerfOptions.php
+@@ -58,6 +58,15 @@ final class PerfOptions {
+   public bool $noTimeLimit = false;
+   public bool $runAsRoot = false;
+ 
++  // Options for shortening the execution time
++  public bool $shortenHealthCheck = false;
++  public bool $skipSingleRequestWarmup = false;
++  public bool $skipSleepBetweenWarmups = false;
++  public int  $firstMultiWarmupDuration = 60;
++  public int  $subseqMultiWarmupDuration = 10;
++  public int  $numMultiReqWarmups = -1;
++
++
+   // Pause once benchmarking is complete to allow for manual inspection of the
+   // HHVM or PHP process.
+   public bool $waitAtEnd = false;
+@@ -105,6 +114,7 @@ final class PerfOptions {
+   public float $delayProcessLaunch; // secs to wait after start process
+   public float $delayCheckHealth; // secs to wait before hit /check-health
+ 
++
+   //
+   // Maximum wait times, as for example given to file_get_contents
+   // or the configuration file for nginx.  These times may be truncated
+@@ -221,6 +231,12 @@ final class PerfOptions {
+       'memcached-threads:',
+       'no-memcached', // do not use memcached (even if target supports it)
+       'scale-out:',
++      'shorten-health-check',
++      'skip-single-request-warmup',
++      'skip-sleep-between-warmups',
++      'first-multi-warmup-duration:',
++      'subseq-multi-warmup-duration:',
++      'num-multi-req-warmups:'
+     };
+     $targets = $this->getTargetDefinitions()->keys();
+     $def->addAll($targets);
+@@ -312,6 +328,14 @@ final class PerfOptions {
+     $this->applyPatches = $this->getBool('apply-patches');
+     $this->useMemcached = !$this->getBool('no-memcached');
+ 
++    $this->shortenHealthCheck = $this->getBool('shorten-health-check');
++    $this->skipSingleRequestWarmup = $this->getBool('skip-single-request-warmup');
++    $this->skipSleepBetweenWarmups = $this->getBool('skip-sleep-between-warmups');
++    $this->firstMultiWarmupDuration = $this->getInt('first-multi-warmup-duration', 60);
++    $this->subseqMultiWarmupDuration = $this->getInt('subseq-multi-warmup-duration', 10);
++    $this->numMultiReqWarmups = $this->getInt('num-multi-req-warmups', -1);
++
++
+     $fraction = $this->getFloat('cpu-fraction', 1.0);
+     if ($fraction !== 1.0) {
+       $this->cpuBind = true;
+diff --git a/base/PerfRunner.php b/base/PerfRunner.php
+index 5201a2d..09d1fb3 100644
+--- a/base/PerfRunner.php
++++ b/base/PerfRunner.php
+@@ -219,27 +219,53 @@ final class PerfRunner {
+       exec($options->scriptBeforeWarmup);
+     }
+ 
+-    if (!$options->skipWarmUp) {
++    if (!$options->skipWarmUp && !$options->skipSingleRequestWarmup) {
+       self::RunLoadGenerator(RequestModes::WARMUP, $options, $target, $engines);
+     } else {
+       self::PrintProgress('Skipping single request warmup');
+     }
+ 
+     if (!$options->skipWarmUp) {
+-      self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines);
++      self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines, $options->firstMultiWarmupDuration);
+     } else {
+-      self::PrintProgress('Skipping multi request warmup');
++      self::PrintProgress('Skipping first multi request warmup');
+     }
++    if ($options->numMultiReqWarmup >= 0){
++      self::PrintProgress('Deterministic warmpup with '.($options->numMultiReqWarmup). ' iterations');
++      for ($i = 0; $i < $options->numMultiReqWarmup; $i++){
++        self::PrintProgress(' Performing '. ($i+1). 'th multi-request warmup iteration out of '.($options->numMultiReqWarmup). ' iterations');
++        if (!$options->skipSleepBetweenWarmups){
++          sleep(3);
++        }
++        self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines, $options->subseqMultiWarmupDuration);
++
++        $status_message = null;
++        if (self::NeedsRetranslatePause($engines, inout $status_message)){
++          self::PrintProgress('Server is not done warming up. Status: ' . ($status_message ?? 'Unknown'));
++        }else{
++          self::PrintProgress('Server is done warming up.');
++        }
++      }
+ 
+-    while (!$options->skipWarmUp && self::NeedsRetranslatePause($engines)) {
+-      self::PrintProgress('Extending warmup, server is not done warming up.');
+-      sleep(3);
+-      self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines, 10);
++    }
++    else{
++      while (!$options->skipWarmUp) {
++        $status_message = null;
++        if (self::NeedsRetranslatePause($engines, inout $status_message)) {
++          self::PrintProgress('Extending warmup, server is not done warming up. Status: ' . ($status_message ?? 'Unknown'));
++          if (!$options->skipSleepBetweenWarmups){
++            sleep(3);
++          }
++          self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines, $options->subseqMultiWarmupDuration);
++        } else {
++          break;
++        }
++      }
+     }
+ 
+-    self::PrintProgress('Server warmed, checking queue status.');
++    self::PrintProgress('checking queue status.');
+     while (!$options->skipWarmUp && self::NeedsWaitingForQueue($engines)) {
+-      self::PrintProgress('Server warmed, waiting for queue to drain.');
++      self::PrintProgress('waiting for queue to drain.');
+       sleep(10);
+     }
+ 
+@@ -327,9 +353,9 @@ final class PerfRunner {
+     return $combined_stats;
+   }
+ 
+-  private static function NeedsRetranslatePause(Vector<PHPEngine> $engines) : bool {
++  private static function NeedsRetranslatePause(Vector<PHPEngine> $engines, inout ?string $status_message) : bool {
+     foreach ($engines as $php_engine) {
+-      if ($php_engine->needsRetranslatePause()) {
++      if ($php_engine->needsRetranslatePause(inout $status_message)) {
+         return true;
+       }
+     }

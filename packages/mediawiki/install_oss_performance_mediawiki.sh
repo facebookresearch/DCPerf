@@ -129,6 +129,11 @@ git apply --check "${TEMPLATES_DIR}/0001-oss-performance-scalable-hhvm.diff" \
 # templates/oss-performance-mediawiki/0006-oss-performance-reuse-mediawiki-hhvm.diff
 git apply --check "${TEMPLATES_DIR}/0006-oss-performance-reuse-mediawiki-hhvm.diff" \
     && git apply "${TEMPLATES_DIR}/0006-oss-performance-reuse-mediawiki-hhvm.diff"
+
+# apply options for mediawiki mini patch
+git apply --check "${TEMPLATES_DIR}/0007-oss-performance-more-warmup-options.diff" \
+    && git apply "${TEMPLATES_DIR}/0007-oss-performance-more-warmup-options.diff"
+
 git apply --check "${TEMPLATES_DIR}/0005-scale-out-memcached.diff" \
     && git apply "${TEMPLATES_DIR}/0005-scale-out-memcached.diff"
 
