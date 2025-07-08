@@ -97,7 +97,7 @@ index add42c7..7603fdf 100644
      if ($fraction !== 1.0) {
        $this->cpuBind = true;
 diff --git a/base/PerfRunner.php b/base/PerfRunner.php
-index 5201a2d..09d1fb3 100644
+index 5201a2d..7c44632 100644
 --- a/base/PerfRunner.php
 +++ b/base/PerfRunner.php
 @@ -219,27 +219,53 @@ final class PerfRunner {
@@ -118,10 +118,10 @@ index 5201a2d..09d1fb3 100644
 -      self::PrintProgress('Skipping multi request warmup');
 +      self::PrintProgress('Skipping first multi request warmup');
      }
-+    if ($options->numMultiReqWarmup >= 0){
-+      self::PrintProgress('Deterministic warmpup with '.($options->numMultiReqWarmup). ' iterations');
-+      for ($i = 0; $i < $options->numMultiReqWarmup; $i++){
-+        self::PrintProgress(' Performing '. ($i+1). 'th multi-request warmup iteration out of '.($options->numMultiReqWarmup). ' iterations');
++    if ($options->numMultiReqWarmups >= 0){
++      self::PrintProgress('Deterministic warmpup with '.($options->numMultiReqWarmups). ' iterations');
++      for ($i = 0; $i < $options->numMultiReqWarmups; $i++){
++        self::PrintProgress(' Performing '. ($i+1). 'th multi-request warmup iteration out of '.($options->numMultiReqWarmups). ' iterations');
 +        if (!$options->skipSleepBetweenWarmups){
 +          sleep(3);
 +        }
