@@ -170,3 +170,35 @@
     - 'distribution_file=benchmarks/chm/model_b.dist'
     - 'num_threads=24'
     - 'duration_seconds=360'
+
+
+- benchmark: deser
+  name: deser_a
+  description: Deserialization benchmark for Model A.
+  args:
+    - '--distribution_file={distribution_file}'
+    - '--num_threads={num_threads}'
+    - '--duration_seconds={duration_seconds}'
+    - '--pregenerated_copies={pregenerated_copies}'
+
+  vars:
+    - 'distribution_file=benchmarks/deser/model_a.dist'
+    - 'num_threads=16'
+    - 'duration_seconds=360'
+    - 'pregenerated_copies=10'
+
+
+- benchmark: deser
+  name: deser_b
+  description: Deserialization benchmark for Model B.
+  args:
+    - '--distribution_file={distribution_file}'
+    - '--num_threads={num_threads}'
+    - '--duration_seconds={duration_seconds}'
+    - '--pregenerated_copies={pregenerated_copies}'
+
+  vars:
+    - 'distribution_file=benchmarks/deser/model_b.dist'
+    - 'num_threads=16'
+    - 'duration_seconds=360'
+    - 'pregenerated_copies=10'

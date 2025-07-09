@@ -22,3 +22,11 @@ chm:
   path: ./benchmarks/chm/chm_bench
   metrics:
     - Mops/sec
+
+deser:
+  parser: deser
+  install_script: ./packages/deser/install_deser.sh
+  cleanup_script: ./packages/deser/cleanup_deser.sh
+  path: ./benchmarks/deser/deser_bench
+  metrics:
+    - Mops/sec

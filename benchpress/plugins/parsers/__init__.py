@@ -15,6 +15,7 @@ from .chm import ChmParser
 from .clang import ClangParser
 from .cloudsuite_graph import CloudSuiteGraphParser
 from .compression_parser import CompressionParser
+from .deser import DeserParser
 from .django_workload import DjangoWorkloadParser
 from .embedding import EmbeddingParser
 from .encryption import EncryptionParser
@@ -106,6 +107,7 @@ def register_parsers(factory):
     factory.register("embedding", EmbeddingParser)
     factory.register("rebatch", RebatchParser)
     factory.register("chm", ChmParser)
+    factory.register("deser", DeserParser)
 
     if not open_source:
         factory.register("adsim", AdSimParser)
