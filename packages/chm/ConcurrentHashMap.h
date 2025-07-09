@@ -88,17 +88,18 @@ class ConcurrentHashMap {
    * @return Pair of (value, found_flag) where found_flag is true if key exists
    */
   std::pair<data_type, bool> getValue(const key_type& key) const {
+    std::pair<data_type, bool> ret;
     size_t shard =
         keyToSubMapIndex(key); // Determine which shard contains this key
     {
       std::shared_lock lock{*mutexes_[shard]}; // Acquire lock for this shard
       auto iter = subMap(shard).find(key);
       if (iter != subMap(shard).end()) {
-        return std::pair<data_type, bool>(iter->second, true);
+        ret.first = iter->second;
+        ret.second = true;
       }
     }
-    return std::pair<data_type, bool>(
-        data_type(), false); // Return default value if not found
+    return ret; // Return default value if not found
   }
 
   /**

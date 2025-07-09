@@ -4,6 +4,9 @@ results/
 # benchmarks binaries
 benchmarks/
 
+# benchmarks install log
+benchmark_installs.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

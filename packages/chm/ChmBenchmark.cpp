@@ -1,16 +1,15 @@
 /*
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
-*/
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
 
 /**
- * ConcurrentHashMap Benchmark (ChmBench)
+ * ConcurrentHashMap Benchmark
  *
- * A benchmark for measuring ConcurrentHashMap read performance
- * with configurable access patterns based on frequency distributions.
- *
+ * Measures ConcurrentHashMap read performance with configurable
+ * access patterns based on frequency distributions.
  */
 
 #include <atomic>
@@ -29,36 +28,42 @@
 
 #include <folly/Format.h>
 #include <gflags/gflags.h>
+#include "folly/executors/CPUThreadPoolExecutor.h"
+#include "folly/synchronization/Baton.h"
 
 #include "./ConcurrentHashMap.h"
 
-// Define command line flags
+// Command line flags
 DEFINE_string(distribution_file, "", "Path to the distribution CSV file");
-DEFINE_int32(num_threads, 4, "Number of threads for benchmark");
-DEFINE_int32(duration_seconds, 10, "Duration of the benchmark in seconds");
-DEFINE_int32(
-    initial_capacity,
-    1000000,
-    "Initial capacity hint for the hash map");
-DEFINE_bool(verbose, false, "Print verbose output");
+DEFINE_int32(num_threads, 4, "Number of worker threads per batch");
+DEFINE_int32(num_batch_threads, 2, "Number of parallel batch threads");
+DEFINE_int32(duration_seconds, 10, "Benchmark duration in seconds");
+DEFINE_int32(initial_capacity, 0, "Initial hash map capacity hint");
+DEFINE_int32(batch_size, 1000, "Operations per batch");
+DEFINE_int32(hit_ratio, 40, "Desired hit ratio (0-100)");
+DEFINE_bool(verbose, false, "Enable verbose output");
 
 namespace chm_benchmark {
 
-// Type definitions
+// Performance and memory optimization constants
+constexpr uint64_t MAX_DISTRIBUTION_ENTRIES =
+    10000000; // Cap for memory efficiency
+constexpr int PROGRESS_UPDATE_INTERVAL = 10000; // Progress reporting frequency
+constexpr int PROGRESS_SLEEP_MS = 100; // Progress monitoring interval
+
+// Type definitions for clarity and maintainability
 using AdId = int64_t;
 using Clock = std::chrono::high_resolution_clock;
 using TimePoint = Clock::time_point;
 using Duration = std::chrono::milliseconds;
 
-// Structure to hold distribution data from input file
-// Each entry represents a bucket with frequency and number of keys
+// Represents frequency distribution data from CSV input
 struct DistributionEntry {
-  uint64_t frequency; // How often keys in this bucket should be accessed
-  uint64_t numKeys; // Number of keys in this bucket
+  uint64_t frequency; // Access frequency weight
+  uint64_t numKeys; // Number of keys in this frequency bucket
 };
 
-// AdData: Value type stored in the ConcurrentHashMap
-// Simulates a typical value object with an ID and associated data
+// Mock advertisement data stored as values in the hash map
 class AdData {
  public:
   explicit AdData(AdId id) : id_(id), data_("AdData-" + std::to_string(id)) {}
@@ -66,31 +71,28 @@ class AdData {
   AdId getId() const {
     return id_;
   }
-
   const std::string& getData() const {
     return data_;
   }
 
  private:
   AdId id_;
-  std::string data_;
+  std::string data_; // Simulated payload data
 };
 
 using AdDataPtr = std::shared_ptr<AdData>;
-
-// Type definition for the ConcurrentHashMap under test
-// Uses 8 shards for concurrency, F14FastMap for internal storage,
-// and SharedMutex for thread synchronization
+// ConcurrentHashMap with 8 shards, F14FastMap backend, and SharedMutex
 using ConcurrentHashMapType = ConcurrentHashMap<
-    AdId, // key type
-    AdDataPtr, // value type
-    8, // shard bits
-    folly::F14FastMap<AdId, AdDataPtr>, // internal hashmap type
-    folly::SharedMutex // internal mutex type
-    >;
+    AdId,
+    AdDataPtr,
+    8,
+    folly::F14FastMap<AdId, AdDataPtr>,
+    folly::SharedMutex>;
 
-// DistributionReader: Parses the distribution file into DistributionEntry
-// objects Format: frequency,numKeys (CSV format)
+/**
+ * Parses distribution file in CSV format (frequency,numKeys)
+ * Each line represents a frequency bucket with access weight and key count
+ */
 class DistributionReader {
  public:
   explicit DistributionReader(std::string_view filePath)
@@ -108,19 +110,8 @@ class DistributionReader {
 
     std::string line;
     while (std::getline(file, line)) {
-      std::istringstream iss(line);
-      std::string freqStr, numKeysStr;
-
-      if (std::getline(iss, freqStr, ',') && std::getline(iss, numKeysStr)) {
-        try {
-          DistributionEntry entry;
-          entry.frequency = std::stoll(freqStr);
-          entry.numKeys = std::stoll(numKeysStr);
-          distribution.push_back(entry);
-        } catch (const std::exception& e) {
-          std::cerr << "Error parsing line: " << line << " - " << e.what()
-                    << std::endl;
-        }
+      if (auto entry = parseLine(line)) {
+        distribution.push_back(*entry);
       }
     }
 
@@ -128,135 +119,140 @@ class DistributionReader {
   }
 
  private:
+  // Parse a single CSV line into a DistributionEntry
+  std::optional<DistributionEntry> parseLine(const std::string& line) const {
+    std::istringstream iss(line);
+    std::string freqStr, numKeysStr;
+
+    if (std::getline(iss, freqStr, ',') && std::getline(iss, numKeysStr)) {
+      try {
+        return DistributionEntry{
+            .frequency = static_cast<uint64_t>(std::stoll(freqStr)),
+            .numKeys = static_cast<uint64_t>(std::stoll(numKeysStr))};
+      } catch (const std::exception& e) {
+        std::cerr << "Error parsing line: " << line << " - " << e.what()
+                  << std::endl;
+      }
+    }
+    return std::nullopt;
+  }
+
   std::string filePath_;
 };
 
-// Workload generator class
+/**
+ * Generates workloads based on frequency distribution patterns
+ * Creates realistic access patterns for benchmark testing
+ */
 class WorkloadGenerator {
  public:
-  // BucketSampler: Memory-optimized sampler for O(1) random key selection
-  // Uses pre-generated distribution array and shuffled working set to:
-  // 1. Maintain exact frequency distribution from input file
-  // 2. Provide O(1) random key selection
-  // 3. Randomize key access patterns to avoid cache effects
+  /**
+   * Memory-optimized sampler for O(1) random key selection
+   * Pre-builds distribution arrays to avoid runtime computation overhead
+   */
   class BucketSampler {
    public:
-    // Bucket: Represents a range of keys with the same frequency
-    // Points to a range in the shuffled working set rather than
-    // using contiguous key ranges to avoid access patterns
+    // Represents a frequency bucket with keys range
     struct Bucket {
-      size_t startIndex; // Starting index in the shuffled workingSet
+      size_t startIndex; // Start index in shuffled working set
       uint64_t numKeys; // Number of keys in this bucket
     };
 
     BucketSampler(
         const std::vector<DistributionEntry>& distribution,
-        const std::vector<AdId>& workingSet) {
-      // Calculate total frequency for normalization
-      uint64_t totalFrequency = 0;
-      for (const auto& entry : distribution) {
-        totalFrequency += entry.frequency * entry.numKeys;
-      }
+        const std::vector<AdId>& workingSet)
+        : shuffledWorkingSet_(workingSet) {
+      initializeBuckets(distribution);
+      buildAccessDistribution(distribution);
+    }
 
-      // Create a shuffled copy of the working set to randomize key access
-      // patterns This prevents cache effects from biasing the benchmark results
-      shuffledWorkingSet_ = workingSet;
-      std::random_device rd;
-      std::mt19937 g(rd());
-      std::shuffle(shuffledWorkingSet_.begin(), shuffledWorkingSet_.end(), g);
+    // Pre-generate keys for a batch to minimize runtime overhead
+    void preGenerateKeys(
+        std::mt19937& rng,
+        int hitRatio,
+        std::vector<AdId>& keys) const {
+      for (size_t i = 0; i < keys.size(); ++i) {
+        bool shouldBeHit = (rng() % 100) < hitRatio;
+        size_t bucketIdx =
+            accessDistribution_[rng() % accessDistribution_.size()];
+        const Bucket& bucket = buckets_[bucketIdx];
+        uint64_t keyOffset = rng() % bucket.numKeys;
 
-      // Build buckets with indices into the shuffled working set
-      buckets_.reserve(distribution.size());
-      size_t currentIndex = 0;
-
-      for (const auto& entry : distribution) {
-        // Add bucket
-        Bucket bucket;
-        bucket.startIndex = currentIndex;
-        bucket.numKeys = entry.numKeys;
-        buckets_.push_back(bucket);
-
-        // Update current index
-        currentIndex += entry.numKeys;
-      }
-
-      // Pre-generate access distribution array for O(1) bucket selection
-      // First, calculate the total number of entries needed
-      // We'll scale down if needed to avoid excessive memory usage
-      constexpr uint64_t maxEntries =
-          10000000; // Cap at 10 million entries for memory efficiency
-      uint64_t totalEntries = std::min(totalFrequency, maxEntries);
-
-      // Calculate scaling factor if needed
-      double scalingFactor = static_cast<double>(totalEntries) / totalFrequency;
-
-      // Reserve space for the access distribution array
-      accessDistribution_.reserve(totalEntries);
-
-      // Fill the access distribution array
-      for (size_t i = 0; i < buckets_.size(); ++i) {
-        const auto& entry = distribution[i];
-        // Calculate how many times this bucket should appear in the array
-        uint64_t numAppearances = static_cast<uint64_t>(
-            entry.frequency * entry.numKeys * scalingFactor);
-        // Ensure each bucket appears at least once
-        numAppearances = std::max(numAppearances, uint64_t(1));
-
-        // Add bucket index to the access distribution array
-        for (uint64_t j = 0; j < numAppearances; ++j) {
-          accessDistribution_.push_back(i);
+        if (shouldBeHit) {
+          keys[i] = shuffledWorkingSet_[bucket.startIndex + keyOffset];
+        } else {
+          // Negative key indicates a miss (key not in map)
+          keys[i] = -shuffledWorkingSet_[bucket.startIndex + keyOffset];
         }
       }
-
-      // Shuffle the access distribution array to avoid patterns
-      std::shuffle(accessDistribution_.begin(), accessDistribution_.end(), g);
     }
 
-    // getRandomKey: Select a random key according to the frequency distribution
-    // - Uses standard library distributions for simplicity
-    // - Returns keys from shuffled working set to avoid access patterns
-    AdId getRandomKey(std::mt19937& rng) const {
-      if (accessDistribution_.empty() || buckets_.empty() ||
-          shuffledWorkingSet_.empty()) {
-        return 0;
-      }
-
-      // Select a random bucket index from the pre-generated distribution
-      std::uniform_int_distribution<size_t> distIdx(
-          0, accessDistribution_.size() - 1);
-      size_t bucketIdx = accessDistribution_[distIdx(rng)];
-
-      // Get the selected bucket
-      const Bucket& bucket = buckets_[bucketIdx];
-
-      // Uniformly select a key from the bucket
-      std::uniform_int_distribution<uint64_t> keyDist(0, bucket.numKeys - 1);
-      uint64_t keyOffset = keyDist(rng);
-
-      // Return the key from the shuffled working set
-      return shuffledWorkingSet_[bucket.startIndex + keyOffset];
-    }
-
-    // Get the number of buckets
     size_t numBuckets() const {
       return buckets_.size();
     }
-
-    // Get the size of the access distribution array
     size_t distributionSize() const {
       return accessDistribution_.size();
     }
 
    private:
+    // Initialize buckets and shuffle working set to avoid cache patterns
+    void initializeBuckets(const std::vector<DistributionEntry>& distribution) {
+      std::random_device rd;
+      std::mt19937 g(rd());
+      std::shuffle(shuffledWorkingSet_.begin(), shuffledWorkingSet_.end(), g);
+
+      buckets_.reserve(distribution.size());
+      size_t currentIndex = 0;
+
+      for (const auto& entry : distribution) {
+        buckets_.push_back({currentIndex, entry.numKeys});
+        currentIndex += entry.numKeys;
+      }
+    }
+
+    // Build pre-computed access distribution for O(1) bucket selection
+    void buildAccessDistribution(
+        const std::vector<DistributionEntry>& distribution) {
+      uint64_t totalFrequency = 0;
+      for (const auto& entry : distribution) {
+        totalFrequency += entry.frequency * entry.numKeys;
+      }
+
+      // Scale down if needed to limit memory usage
+      uint64_t totalEntries =
+          std::min(totalFrequency, MAX_DISTRIBUTION_ENTRIES);
+      double scalingFactor = static_cast<double>(totalEntries) / totalFrequency;
+
+      accessDistribution_.reserve(totalEntries);
+
+      // Fill distribution array based on frequency weights
+      for (size_t i = 0; i < buckets_.size(); ++i) {
+        const auto& entry = distribution[i];
+        uint64_t numAppearances = std::max(
+            static_cast<uint64_t>(
+                entry.frequency * entry.numKeys * scalingFactor),
+            uint64_t(1));
+
+        for (uint64_t j = 0; j < numAppearances; ++j) {
+          accessDistribution_.push_back(i);
+        }
+      }
+
+      // Shuffle to avoid access patterns
+      std::random_device rd;
+      std::mt19937 g(rd());
+      std::shuffle(accessDistribution_.begin(), accessDistribution_.end(), g);
+    }
+
     std::vector<Bucket> buckets_;
-    std::vector<size_t>
-        accessDistribution_; // Pre-generated distribution of bucket indices
-    std::vector<AdId> shuffledWorkingSet_; // Shuffled copy of the working set
+    std::vector<size_t> accessDistribution_; // Pre-computed bucket selection
+    std::vector<AdId> shuffledWorkingSet_; // Randomized key ordering
   };
 
   explicit WorkloadGenerator(const std::vector<DistributionEntry>& distribution)
       : distribution_(distribution) {}
 
+  // Calculate total number of keys across all frequency buckets
   uint64_t calculateWorkingSetSize() const {
     uint64_t totalKeys = 0;
     for (const auto& entry : distribution_) {
@@ -265,6 +261,7 @@ class WorkloadGenerator {
     return totalKeys;
   }
 
+  // Calculate total weighted frequency for distribution normalization
   uint64_t calculateTotalFrequency() const {
     uint64_t totalFrequency = 0;
     for (const auto& entry : distribution_) {
@@ -273,6 +270,7 @@ class WorkloadGenerator {
     return totalFrequency;
   }
 
+  // Generate sequential key IDs for the working set
   std::vector<AdId> generateWorkingSet() const {
     std::vector<AdId> workingSet;
     workingSet.reserve(calculateWorkingSetSize());
@@ -296,23 +294,32 @@ class WorkloadGenerator {
   const std::vector<DistributionEntry>& distribution_;
 };
 
-// Benchmark class
+/**
+ * Main benchmark orchestrator class
+ * Coordinates setup, insertion, and benchmark execution phases
+ */
 class ChmBenchmark {
  public:
+  // Configuration parameters for benchmark execution
   struct BenchmarkConfig {
-    int numThreads;
-    int durationSeconds;
-    int initialCapacity;
-    bool verbose;
+    int numThreads; // Worker threads per batch
+    int numBatchThreads; // Parallel batch processing threads
+    int durationSeconds; // Benchmark duration
+    int initialCapacity; // Hash map initial capacity hint
+    int batchSize; // Operations per batch
+    int hitRatio; // Desired hit ratio (0-100)
+    bool verbose; // Enable detailed output
   };
 
+  // Benchmark execution results and metrics
   struct BenchmarkResults {
-    Duration insertionTime;
-    Duration benchmarkTime;
-    uint64_t totalOperations;
-    uint64_t successfulOperations;
-    double operationsPerSecond;
-    double successRate;
+    Duration insertionTime; // Time to populate hash map
+    Duration benchmarkTime; // Total benchmark duration
+    Duration workerThreadTime; // Actual worker thread execution time
+    uint64_t totalOperations; // Total operations performed
+    uint64_t successfulOperations; // Operations that found keys
+    double operationsPerSecond; // Throughput in millions of ops/sec
+    double successRate; // Percentage of successful operations
   };
 
   ChmBenchmark(
@@ -322,44 +329,48 @@ class ChmBenchmark {
         config_(config),
         workloadGenerator_(distribution) {}
 
-  // run: Execute the complete benchmark workflow
-  // 1. Generate working set based on distribution
-  // 2. Insert keys into ConcurrentHashMap using multiple threads
-  // 3. Create bucket sampler for random key selection
-  // 4. Run worker threads to measure getValue performance
-  // 5. Calculate and return benchmark results
   BenchmarkResults run() {
     BenchmarkResults results{};
 
-    // Calculate working set size
+    // Setup phase
+    auto workingSet = setupWorkingSet();
+    ConcurrentHashMapType map(config_.initialCapacity);
+
+    // Insertion phase
+    results.insertionTime = insertKeys(map, workingSet);
+
+    // Benchmark phase
+    auto bucketSampler = workloadGenerator_.createBucketSampler(workingSet);
+    results = runBenchmark(map, bucketSampler, results);
+
+    return results;
+  }
+
+ private:
+  std::vector<AdId> setupWorkingSet() {
     int64_t workingSetSize = workloadGenerator_.calculateWorkingSetSize();
     if (config_.verbose) {
       std::cout << "Working set size: " << workingSetSize << " keys"
                 << std::endl;
     }
+    return workloadGenerator_.generateWorkingSet();
+  }
 
-    // Generate working set
-    std::vector<AdId> workingSet = workloadGenerator_.generateWorkingSet();
-
-    // Create and populate the ConcurrentHashMap
-    ConcurrentHashMapType map(config_.initialCapacity);
-
+  Duration insertKeys(
+      ConcurrentHashMapType& map,
+      const std::vector<AdId>& workingSet) {
     std::cout << "Inserting " << workingSet.size()
               << " keys into the map using " << config_.numThreads
               << " threads..." << std::endl;
+
     auto startInsert = Clock::now();
-
-    // Multi-threaded insertion phase
-    // Divides keys evenly among threads for parallel insertion
-    std::vector<std::thread> insertThreads;
     std::atomic<int64_t> insertedKeys(0);
+    std::vector<std::thread> insertThreads;
 
-    // Calculate keys per thread
     size_t totalKeys = workingSet.size();
     size_t keysPerThread = totalKeys / config_.numThreads;
     size_t remainingKeys = totalKeys % config_.numThreads;
 
-    // Launch insertion threads
     for (int i = 0; i < config_.numThreads; ++i) {
       size_t startIdx =
           i * keysPerThread + std::min(static_cast<size_t>(i), remainingKeys);
@@ -372,20 +383,20 @@ class ChmBenchmark {
               map.put(workingSet[j], std::make_shared<AdData>(workingSet[j]));
               localInsertedKeys++;
 
-              if (localInsertedKeys % 10000 == 0) {
+              if (localInsertedKeys % PROGRESS_UPDATE_INTERVAL == 0) {
                 insertedKeys.fetch_add(
                     localInsertedKeys, std::memory_order_relaxed);
                 localInsertedKeys = 0;
               }
             }
-
             insertedKeys.fetch_add(
                 localInsertedKeys, std::memory_order_relaxed);
           });
     }
 
+    // Progress monitoring
     while (insertedKeys.load(std::memory_order_relaxed) < totalKeys) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      std::this_thread::sleep_for(std::chrono::milliseconds(PROGRESS_SLEEP_MS));
       double progress =
           100.0 * insertedKeys.load(std::memory_order_relaxed) / totalKeys;
       std::cout << "\rInsertion progress: " << std::fixed
@@ -393,118 +404,213 @@ class ChmBenchmark {
     }
     std::cout << std::endl;
 
-    // Wait for all insertion threads to complete
     for (auto& thread : insertThreads) {
       thread.join();
     }
 
     auto endInsert = Clock::now();
-    results.insertionTime =
+    auto insertionTime =
         std::chrono::duration_cast<Duration>(endInsert - startInsert);
-    std::cout << "Insertion completed in " << results.insertionTime.count()
-              << " ms" << std::endl;
+    std::cout << "Insertion completed in " << insertionTime.count() << " ms"
+              << std::endl;
 
-    // Create bucket sampler for access distribution
-    auto bucketSampler = workloadGenerator_.createBucketSampler(workingSet);
+    return insertionTime;
+  }
 
+  BenchmarkResults runBenchmark(
+      const ConcurrentHashMapType& map,
+      const WorkloadGenerator::BucketSampler& bucketSampler,
+      BenchmarkResults results) {
     std::cout << "Bucket sampler created with " << bucketSampler.numBuckets()
               << " buckets and " << bucketSampler.distributionSize()
               << " distribution entries" << std::endl;
 
-    // Prepare for benchmark execution phase
-    // Sets up worker threads to continuously call getValue on random keys
-    bool shouldStop(false);
     std::atomic<uint64_t> totalOps(0);
     std::atomic<uint64_t> successfulOps(0);
-    std::vector<std::thread> threads;
+    std::atomic<uint64_t> totalWorkerTimeNs(0);
 
-    std::cout << "Starting benchmark with " << config_.numThreads
-              << " threads for " << config_.durationSeconds << " seconds..."
-              << std::endl;
+    std::cout << "Starting benchmark with " << config_.numBatchThreads
+              << " batch processing threads and " << config_.numThreads
+              << " worker threads per batch for " << config_.durationSeconds
+              << " seconds..." << std::endl;
 
-    // Start worker threads
     auto startBenchmark = Clock::now();
+    auto endTime =
+        startBenchmark + std::chrono::seconds(config_.durationSeconds);
 
-    for (int i = 0; i < config_.numThreads; ++i) {
-      threads.emplace_back(
-          &ChmBenchmark::workerThread,
-          this,
-          i,
-          std::ref(map),
-          std::ref(bucketSampler),
-          std::ref(shouldStop),
-          std::ref(totalOps),
-          std::ref(successfulOps));
+    std::vector<std::thread> batchThreads;
+    std::atomic<bool> shouldStop(false);
+
+    for (int i = 0; i < config_.numBatchThreads; ++i) {
+      batchThreads.emplace_back([this,
+                                 i,
+                                 &map,
+                                 &bucketSampler,
+                                 &totalOps,
+                                 &successfulOps,
+                                 &totalWorkerTimeNs,
+                                 endTime,
+                                 &shouldStop]() {
+        std::mt19937 rng(i + 1000);
+        std::vector<AdId> preGeneratedKeys(config_.batchSize);
+        std::vector<AdId> nextBatchKeys(config_.batchSize);
+        bucketSampler.preGenerateKeys(rng, config_.hitRatio, preGeneratedKeys);
+
+        while (!shouldStop.load(std::memory_order_relaxed) &&
+               Clock::now() < endTime) {
+          processBatch(
+              i,
+              map,
+              bucketSampler,
+              totalOps,
+              successfulOps,
+              totalWorkerTimeNs,
+              preGeneratedKeys,
+              nextBatchKeys,
+              rng);
+          preGeneratedKeys.swap(nextBatchKeys);
+        }
+      });
     }
 
-    // Sleep for the specified duration
     std::this_thread::sleep_for(std::chrono::seconds(config_.durationSeconds));
+    shouldStop.store(true, std::memory_order_relaxed);
 
-    // Stop the benchmark
-    shouldStop = true;
-
-    // Wait for all threads to finish
-    for (auto& thread : threads) {
+    for (auto& thread : batchThreads) {
       thread.join();
     }
 
     auto endBenchmark = Clock::now();
     results.benchmarkTime =
         std::chrono::duration_cast<Duration>(endBenchmark - startBenchmark);
-
-    // Calculate results
     results.totalOperations = totalOps.load();
     results.successfulOperations = successfulOps.load();
-    double durationSeconds = results.benchmarkTime.count() / 1000.0;
+    results.workerThreadTime =
+        std::chrono::milliseconds(totalWorkerTimeNs.load() / 1000000);
+
+    double workerDurationSeconds = results.workerThreadTime.count() / 1000.0;
     results.operationsPerSecond =
-        results.totalOperations / 1000000 / durationSeconds;
+        results.totalOperations / 1000000 / workerDurationSeconds;
     results.successRate = static_cast<double>(results.successfulOperations) /
         results.totalOperations * 100.0;
 
     return results;
   }
 
+ public:
+  // Display formatted benchmark results
   static void printResults(const BenchmarkResults& results) {
     std::cout << "\nBenchmark Results:" << std::endl;
     std::cout << "----------------" << std::endl;
-    std::cout << "Duration: " << results.benchmarkTime.count() / 1000.0
-              << " seconds" << std::endl;
+    std::cout << "Total Benchmark Duration: "
+              << results.benchmarkTime.count() / 1000.0 << " seconds"
+              << std::endl;
+    std::cout << "Worker Thread Time Only: "
+              << results.workerThreadTime.count() / 1000.0 << " seconds"
+              << std::endl;
     std::cout << "Total Operations: " << results.totalOperations << std::endl;
     std::cout << "Millions of Operations per Second: "
               << results.operationsPerSecond << " Mops/sec" << std::endl;
   }
 
  private:
-  // workerThread: Core benchmark function executed by each thread
-  // Continuously selects random keys and calls getValue until benchmark
-  // completes Uses thread-local counters to minimize atomic operations
-  void workerThread(
-      int threadId,
+  // Get thread pool executor for parallel batch processing
+  folly::Executor* getPreprocessRequestExecutor() const {
+    static folly::CPUThreadPoolExecutor cpuExecutor(FLAGS_num_threads);
+    return &cpuExecutor;
+  }
+
+  /**
+   * Process a single batch of operations with pre-generated keys
+   * Overlaps next batch key generation with current batch execution
+   */
+  void processBatch(
+      int batchThreadId,
       const ConcurrentHashMapType& map,
       const WorkloadGenerator::BucketSampler& bucketSampler,
-      bool& shouldStop,
+      std::atomic<uint64_t>& totalOps,
+      std::atomic<uint64_t>& successfulOps,
+      std::atomic<uint64_t>& totalWorkerTimeNs,
+      const std::vector<AdId>& preGeneratedKeys,
+      std::vector<AdId>& nextBatchKeys,
+      std::mt19937& rng) const {
+    // Synchronization barrier for batch completion
+    folly::Baton<> baton;
+    std::shared_ptr<folly::Baton<>> batonGuard(
+        &baton, [](folly::Baton<>* baton) { baton->post(); });
+
+    const int opsPerThread = config_.batchSize / config_.numThreads;
+
+    // Launch worker threads for current batch
+    for (int i = 0; i < config_.numThreads; ++i) {
+      getPreprocessRequestExecutor()->add(
+          [&, batonGuard, i, batchThreadId]() mutable {
+            const int start = i * opsPerThread;
+            int end = (i + 1) * opsPerThread;
+            if (i == (config_.numThreads - 1)) {
+              end = config_.batchSize; // Handle remainder operations
+            }
+
+            int uniqueWorkerId = batchThreadId * config_.numThreads + i;
+
+            // Time worker thread execution for accurate throughput calculation
+            auto workerStart = std::chrono::high_resolution_clock::now();
+
+            workerThread(
+                uniqueWorkerId,
+                start,
+                end,
+                map,
+                preGeneratedKeys,
+                totalOps,
+                successfulOps);
+
+            auto workerEnd = std::chrono::high_resolution_clock::now();
+            auto workerDuration =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    workerEnd - workerStart);
+
+            totalWorkerTimeNs.fetch_add(
+                workerDuration.count(), std::memory_order_relaxed);
+          });
+    }
+
+    // Generate keys for next batch while current batch executes (latency
+    // hiding)
+    bucketSampler.preGenerateKeys(rng, config_.hitRatio, nextBatchKeys);
+
+    // Wait for batch completion
+    batonGuard.reset();
+    baton.wait();
+  }
+
+  /**
+   * Core benchmark worker function
+   * Performs hash map lookups using pre-generated keys
+   */
+  void workerThread(
+      int threadId,
+      int startIdx,
+      int endIdx,
+      const ConcurrentHashMapType& map,
+      const std::vector<AdId>& preGeneratedKeys,
       std::atomic<uint64_t>& totalOps,
       std::atomic<uint64_t>& successfulOps) const {
-    // Random number generator with thread ID as seed
-    std::mt19937 rng(threadId);
-
     uint64_t localOps = 0;
     uint64_t localSuccessfulOps = 0;
 
-    while (!shouldStop) {
-      // Select a random key using the bucket sampler in O(1) time
-      AdId key = bucketSampler.getRandomKey(rng);
-
-      // Get value from the map
-      auto result = map.getValue(key);
+    // Process assigned range of operations
+    for (int i = startIdx; i < endIdx; i++) {
+      AdId key = preGeneratedKeys[i];
+      auto result = map.getValue(key); // Core benchmark operation
 
       localOps++;
-      if (result.second) {
+      if (result.second) { // Check if key was found
         localSuccessfulOps++;
       }
     }
 
-    // Update atomic counters
+    // Batch update atomic counters to reduce contention
     totalOps.fetch_add(localOps, std::memory_order_relaxed);
     successfulOps.fetch_add(localSuccessfulOps, std::memory_order_relaxed);
   }
@@ -516,6 +622,11 @@ class ChmBenchmark {
 
 } // namespace chm_benchmark
 
+/**
+ * Main entry point for the ConcurrentHashMap benchmark
+ * Parses command line arguments, loads distribution data, and executes
+ * benchmark
+ */
 int main(int argc, char* argv[]) {
   // Parse command line flags
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -527,7 +638,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // Read distribution from file
+  // Load frequency distribution data from CSV file
   chm_benchmark::DistributionReader reader(FLAGS_distribution_file);
   auto distributionOpt = reader.read();
 
@@ -536,17 +647,19 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // Configure and run benchmark
+  // Configure benchmark parameters from command line flags
   chm_benchmark::ChmBenchmark::BenchmarkConfig config{
       .numThreads = FLAGS_num_threads,
+      .numBatchThreads = FLAGS_num_batch_threads,
       .durationSeconds = FLAGS_duration_seconds,
       .initialCapacity = FLAGS_initial_capacity,
+      .batchSize = FLAGS_batch_size,
+      .hitRatio = FLAGS_hit_ratio,
       .verbose = FLAGS_verbose};
 
+  // Execute benchmark and display results
   chm_benchmark::ChmBenchmark benchmark(*distributionOpt, config);
   auto results = benchmark.run();
-
-  // Print results
   chm_benchmark::ChmBenchmark::printResults(results);
 
   return 0;

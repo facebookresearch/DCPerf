@@ -70,10 +70,12 @@ install_system_dependencies() {
     echo "Detected Ubuntu system, installing Ubuntu dependencies"
     sudo apt-get update
     sudo apt-get install -y libssl-dev
+    sudo apt-get install -y clang
   elif command -v dnf >/dev/null 2>&1; then
     # CentOS
     echo "Detected CentOS system, installing CentOS dependencies"
     sudo dnf install -y openssl-devel
+    sudo dnf install -y clang
   else
     echo "ERROR: This script only supports Ubuntu (apt-get) and CentOS (dnf)"
     exit 1
@@ -114,7 +116,7 @@ check_python_version() {
   elif command -v yum >/dev/null 2>&1; then
     # CentOS
     echo "Detected CentOS system, using yum"
-    sudo yum install -y python3 python3-devel python3-pip
+    sudo dnf install -y python3 python3-devel python3-pip
   else
     echo "ERROR: This script only supports Ubuntu (apt-get) and CentOS (yum)"
     echo "Please install Python 3.6+ manually and run this script again"
@@ -145,7 +147,7 @@ build_folly() {
   # Install system dependencies required by Folly
   sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive
   # Build Folly with system packages allowed and using our build directory
-  python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --scratch-path "${BUILD_DIR}"
+  python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --scratch-path "${BUILD_DIR}" --build-type Release
 
   popd
 }
@@ -163,7 +165,8 @@ build_benchmark() {
   cp "${BENCHPRESS_ROOT}/packages/chm/model_b.dist" "${BENCHMARKS_DIR}"
 
   # Configure CMake for optimized release build
-  cmake . -DCMAKE_BUILD_TYPE=Release
+  cmake -DCMAKE_CXX_FLAGS="-O3 -g1" .
+
   # Build using all available cores
   make -j
 
