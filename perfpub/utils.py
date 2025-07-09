@@ -85,7 +85,10 @@ def sample_avg_from_csv(
         samples = samples[metrics]
     if exclude_columns:
         for excl in exclude_columns:
-            del samples[excl]
+            if excl in samples:
+                del samples[excl]
+            else:
+                print(f"Column {excl} not found in {filename}")
     if div != 1:
         samples = samples / div
     res = samples.mean()
@@ -230,7 +233,7 @@ def read_intel_perfspect(interval, last_secs, skip_last_secs):
         interval,
         last_secs,
         skip_last_secs,
-        exclude_columns=("time",),
+        exclude_columns=("TS",),
     )
 
 
