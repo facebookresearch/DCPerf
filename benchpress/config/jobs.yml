@@ -33,6 +33,7 @@
 - benchmark: oss_performance_mediawiki
   name: oss_performance_mediawiki_mini
   description: Default run for oss_performance_mediawiki
+  execute_cmd_from_file: true
   args:
     - '-r/usr/local/hphpi/legacy/bin/hhvm'
     - '-nnginx'
@@ -49,21 +50,24 @@
     - '--shorten-health-check'
     - '--skip-single-request-warmup'
     - '--skip-sleep-between-warmups'
-    - '--hhvm-extra-arguments="-vEval.JitRetranslateAllSeconds={warmup_seconds}"'
+    - '--hhvm-extra-arguments="-vEval.JitRetranslateAllSeconds={translation_interval_seconds}"'
     - '--num-multi-req-warmups={num_multi_req_warmups}'
+    - '--no-load-if-pending-translate'
     - '--first-multi-warmup-duration={first_multi_warmup_duration}'
     - '--subseq-multi-warmup-duration={subseq_multi_warmup_duration}'
+    - '--load-gen-seed={load_generator_seed}'
     - '{extra_args}'
   vars:
     - 'load_generator=wrk'
     - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
     - 'duration=4s'
-    - 'timeout=20s'
-    - 'warmup_seconds=5'
-    - 'first_multi_warmup_duration=10'
-    - 'subseq_multi_warmup_duration=20'
+    - 'timeout=60s'
+    - 'translation_interval_seconds=5'
+    - 'first_multi_warmup_duration=25' # long enough to get a high score
+    - 'subseq_multi_warmup_duration=5'
     - 'temp_dir=default_no_temp_dir'
-    - 'num_multi_req_warmups=1'
+    - 'num_multi_req_warmups=-1' # -1 means the warmup status will define the number of iterations
+    - 'load_generator_seed=1000'
     - 'extra_args='
   hooks:
     - hook: copymove

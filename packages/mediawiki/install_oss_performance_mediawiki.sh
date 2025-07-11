@@ -140,7 +140,7 @@ git apply --check "${TEMPLATES_DIR}/0005-scale-out-memcached.diff" \
 # Copy wrk related stuff
 cp "${TEMPLATES_DIR}/Wrk.php" ./base/Wrk.php
 cp "${TEMPLATES_DIR}/WrkStats.php" ./base/WrkStats.php
-cp "${TEMPLATES_DIR}/multi-request-txt.lua" ./scripts/multi-request-txt.lua
+cp "${TEMPLATES_DIR}/multi-request-txt.lua" ./scripts/multi-request-txt.lua.template
 
 # shellcheck disable=SC2046
 curl -O https://getcomposer.org/installer

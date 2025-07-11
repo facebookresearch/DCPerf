@@ -6,6 +6,7 @@
 
 import errno
 import logging
+import os
 import subprocess
 import sys
 import tempfile
@@ -89,6 +90,7 @@ class Job:
         # if this option is a string, the output will be written to the file
         # named by this value
         self.tee_output = job_config.get("tee_output", False)
+        self.execute_cmd_from_file = job_config.get("execute_cmd_from_file", False)
 
         self.tags = formalize_tags([benchmark_config, job_config])
 
@@ -199,6 +201,22 @@ class Job:
         self.check_role(role, role_input)
         return get_safe_cmd([self.binary] + self.args)
 
+    def get_file_based_cmd(self, role=None, role_input=None, fp=None):
+        """Dump the run command in a file and execute it."""
+        logger.info('Starting "{}"'.format(self.name))
+        cmd = self.dry_run(role, role_input)
+        click.echo("Job execution command: {}".format(cmd))
+        # add string to cmd so that it dumps the stdout and strerr to different files
+        # cmd = cmd + " > benchpress_run_output.txt 2> benchpress_run_error.txt"
+
+        # write the command to a file
+        fp.write(b"#!/bin/bash\n")
+        fp.write((" ".join(cmd)).encode("utf-8"))
+        fp.write(b"\n")  # Add a newline at the end
+        fp.flush()  # Ensure the file is written to disk
+        os.chmod(fp.name, 0o755)
+        return [str(fp.name)]
+
     def run(self, role=None, role_input=None):
         """Run the benchmark and return the metrics that are reported.
         check if user type role correctly
@@ -207,14 +225,25 @@ class Job:
 
         try:
             logger.info('Starting "{}"'.format(self.name))
-            cmd = get_safe_cmd([self.binary] + self.args)
-            click.echo("Job execution command: {}".format(cmd))
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
+            if self.execute_cmd_from_file:
+                fp = tempfile.NamedTemporaryFile(delete=False)
+                cmd = self.get_file_based_cmd(role, role_input, fp)
+                fp.close()  # Close the file before executing it
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            else:
+                cmd = get_safe_cmd([self.binary] + self.args)
+                click.echo("Job execution command: {}".format(cmd))
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
             stdout_storage = tempfile.TemporaryFile(
                 mode="w+",
                 encoding="utf-8",

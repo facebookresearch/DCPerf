@@ -26,6 +26,21 @@ final class Wrk extends Process {
     } else {
       $this->logfile = tempnam($options->tempDir, 'wrk_warmup');
     }
+    if ($this->options->loadGenSeed > 0) {
+      # Create template path by adding .template suffix
+      $template_path = $this->script . '.template';
+
+      # Read the content from the template file
+      $script_content = file_get_contents($template_path);
+
+      # Find and replace the math.randomseed line with our custom seed value
+      $pattern = '/math\.randomseed\s*\(\s*os\.time\s*\(\s*\)\s*\)/';
+      $replacement = "math.randomseed(".((string)$this->options->loadGenSeed).")";
+      $modified_content = preg_replace($pattern, $replacement, $script_content);
+
+      # Write the modified content to the script file
+      file_put_contents($this->script, $modified_content);
+    }
   }
 
   public function start(): void {

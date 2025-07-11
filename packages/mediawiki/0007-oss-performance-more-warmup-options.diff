@@ -41,10 +41,10 @@ index 420014d..d8e45df 100644
    public function queueEmpty(): bool { return true; }
  }
 diff --git a/base/PerfOptions.php b/base/PerfOptions.php
-index add42c7..7603fdf 100644
+index add42c7..dfe40a6 100644
 --- a/base/PerfOptions.php
 +++ b/base/PerfOptions.php
-@@ -58,6 +58,15 @@ final class PerfOptions {
+@@ -58,6 +58,17 @@ final class PerfOptions {
    public bool $noTimeLimit = false;
    public bool $runAsRoot = false;
  
@@ -52,15 +52,17 @@ index add42c7..7603fdf 100644
 +  public bool $shortenHealthCheck = false;
 +  public bool $skipSingleRequestWarmup = false;
 +  public bool $skipSleepBetweenWarmups = false;
++  public bool $noLoadIfPendingTranslate = false;
 +  public int  $firstMultiWarmupDuration = 60;
 +  public int  $subseqMultiWarmupDuration = 10;
++  public int  $loadGenSeed = 1000;
 +  public int  $numMultiReqWarmups = -1;
 +
 +
    // Pause once benchmarking is complete to allow for manual inspection of the
    // HHVM or PHP process.
    public bool $waitAtEnd = false;
-@@ -105,6 +114,7 @@ final class PerfOptions {
+@@ -105,6 +116,7 @@ final class PerfOptions {
    public float $delayProcessLaunch; // secs to wait after start process
    public float $delayCheckHealth; // secs to wait before hit /check-health
  
@@ -68,28 +70,34 @@ index add42c7..7603fdf 100644
    //
    // Maximum wait times, as for example given to file_get_contents
    // or the configuration file for nginx.  These times may be truncated
-@@ -221,6 +231,12 @@ final class PerfOptions {
+@@ -221,6 +233,14 @@ final class PerfOptions {
        'memcached-threads:',
        'no-memcached', // do not use memcached (even if target supports it)
        'scale-out:',
 +      'shorten-health-check',
 +      'skip-single-request-warmup',
 +      'skip-sleep-between-warmups',
++      'no-load-if-pending-translate',
 +      'first-multi-warmup-duration:',
 +      'subseq-multi-warmup-duration:',
++      'load-gen-seed:',
 +      'num-multi-req-warmups:'
      };
      $targets = $this->getTargetDefinitions()->keys();
      $def->addAll($targets);
-@@ -312,6 +328,14 @@ final class PerfOptions {
+@@ -312,6 +332,18 @@ final class PerfOptions {
      $this->applyPatches = $this->getBool('apply-patches');
      $this->useMemcached = !$this->getBool('no-memcached');
  
 +    $this->shortenHealthCheck = $this->getBool('shorten-health-check');
 +    $this->skipSingleRequestWarmup = $this->getBool('skip-single-request-warmup');
 +    $this->skipSleepBetweenWarmups = $this->getBool('skip-sleep-between-warmups');
++    $this->noLoadIfPendingTranslate = $this->getBool('no-load-if-pending-translate');
 +    $this->firstMultiWarmupDuration = $this->getInt('first-multi-warmup-duration', 60);
 +    $this->subseqMultiWarmupDuration = $this->getInt('subseq-multi-warmup-duration', 10);
++    $this->loadGenSeed = $this->getInt('load-gen-seed', 1000);
++
++
 +    $this->numMultiReqWarmups = $this->getInt('num-multi-req-warmups', -1);
 +
 +
@@ -97,10 +105,10 @@ index add42c7..7603fdf 100644
      if ($fraction !== 1.0) {
        $this->cpuBind = true;
 diff --git a/base/PerfRunner.php b/base/PerfRunner.php
-index 5201a2d..7c44632 100644
+index 5201a2d..478edd3 100644
 --- a/base/PerfRunner.php
 +++ b/base/PerfRunner.php
-@@ -219,27 +219,53 @@ final class PerfRunner {
+@@ -219,27 +219,71 @@ final class PerfRunner {
        exec($options->scriptBeforeWarmup);
      }
  
@@ -113,43 +121,61 @@ index 5201a2d..7c44632 100644
  
      if (!$options->skipWarmUp) {
 -      self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines);
-+      self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines, $options->firstMultiWarmupDuration);
++      self::RunLoadGenerator(RequestModes::WARMUP_MULTI,
++        $options, $target, $engines, $options->firstMultiWarmupDuration);
      } else {
 -      self::PrintProgress('Skipping multi request warmup');
 +      self::PrintProgress('Skipping first multi request warmup');
-     }
++    }
 +    if ($options->numMultiReqWarmups >= 0){
-+      self::PrintProgress('Deterministic warmpup with '.($options->numMultiReqWarmups). ' iterations');
++      self::PrintProgress('Deterministic warmpup with '
++        .($options->numMultiReqWarmups). ' iterations');
 +      for ($i = 0; $i < $options->numMultiReqWarmups; $i++){
-+        self::PrintProgress(' Performing '. ($i+1). 'th multi-request warmup iteration out of '.($options->numMultiReqWarmups). ' iterations');
++        self::PrintProgress(' Performing '. ($i+1)
++          .'th multi-request warmup iteration out of '
++          .($options->numMultiReqWarmups));
 +        if (!$options->skipSleepBetweenWarmups){
 +          sleep(3);
 +        }
-+        self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines, $options->subseqMultiWarmupDuration);
-+
++        self::RunLoadGenerator(RequestModes::WARMUP_MULTI,
++          $options, $target, $engines, $options->subseqMultiWarmupDuration);
 +        $status_message = null;
 +        if (self::NeedsRetranslatePause($engines, inout $status_message)){
-+          self::PrintProgress('Server is not done warming up. Status: ' . ($status_message ?? 'Unknown'));
++          self::PrintProgress("Server is not done warming up.\n Status: "
++            .($status_message ?? 'Unknown'));
 +        }else{
 +          self::PrintProgress('Server is done warming up.');
 +        }
 +      }
++
+     }
++    else{
++      while (!$options->skipWarmUp) {
++        $status_message = null;
++        if (self::NeedsRetranslatePause($engines, inout $status_message)) {
++          self::PrintProgress("Extending warmup ... \n server is not done warming up. "
++            ."\n Status: " . ($status_message ?? 'Unknown'));
++          if (!$options->skipSleepBetweenWarmups){
++            sleep(3);
++          }
++          # if $status_message contains Waiting on retranslateAll(),
++          # we might only need to wait a bit longer
++          if ($options->noLoadIfPendingTranslate &&
++           $status_message !== null &&
++            strpos($status_message, "Waiting on retranslateAll()") !== false){
++            self::PrintProgress('no new load if pending translate is set,
++             waiting for retranslateAll');
++          }else{
++            self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines,
++              $options->subseqMultiWarmupDuration);
++          }
  
 -    while (!$options->skipWarmUp && self::NeedsRetranslatePause($engines)) {
 -      self::PrintProgress('Extending warmup, server is not done warming up.');
 -      sleep(3);
 -      self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines, 10);
-+    }
-+    else{
-+      while (!$options->skipWarmUp) {
-+        $status_message = null;
-+        if (self::NeedsRetranslatePause($engines, inout $status_message)) {
-+          self::PrintProgress('Extending warmup, server is not done warming up. Status: ' . ($status_message ?? 'Unknown'));
-+          if (!$options->skipSleepBetweenWarmups){
-+            sleep(3);
-+          }
-+          self::RunLoadGenerator(RequestModes::WARMUP_MULTI, $options, $target, $engines, $options->subseqMultiWarmupDuration);
-+        } else {
++        }else {
++          self::PrintProgress('Server is done warming up');
 +          break;
 +        }
 +      }
@@ -163,7 +189,7 @@ index 5201a2d..7c44632 100644
        sleep(10);
      }
  
-@@ -327,9 +353,9 @@ final class PerfRunner {
+@@ -327,9 +371,9 @@ final class PerfRunner {
      return $combined_stats;
    }
  
