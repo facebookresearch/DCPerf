@@ -18,6 +18,7 @@ syscall:
 schbench:
   parser: schbench
   install_script: ./packages/schbench/install_schbench.sh
+  cleanup_script: ./packages/schbench/cleanup_schbench.sh
   path: ./packages/schbench/bin/schbench
   tags:
     scope:
