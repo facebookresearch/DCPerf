@@ -9,7 +9,9 @@
 import json
 import logging
 import os
+import subprocess
 from datetime import datetime, timezone
+from os import path
 
 import benchpress.lib.sys_specs as sys_specs
 import click
@@ -26,6 +28,55 @@ logger = logging.getLogger(__name__)
 
 
 class RunCommand(BenchpressCommand):
+    def get_version_info(self):
+        """Get version information from various sources.
+
+        Returns:
+            dict: A dictionary containing version information with the following fields:
+                - source: "fbpkg", "git", "fixed", or "none"
+                - version: version ID
+                - uuid: full UUID representing the version
+        """
+        version_info = {"source": "none", "version": "", "uuid": ""}
+
+        # Check if METADATA file exists and is a valid JSON file
+        if path.exists("METADATA"):
+            try:
+                with open("METADATA", "r") as f:
+                    metadata = json.load(f)
+                    if "version" in metadata and "uuid" in metadata:
+                        version_info["source"] = "fbpkg"
+                        version_info["version"] = metadata["version"]
+                        version_info["uuid"] = metadata["uuid"]
+                        # Add vcs_info if available
+                        if "build" in metadata and "vcs_info" in metadata["build"]:
+                            version_info["vcs_info"] = metadata["build"]["vcs_info"]
+                        return version_info
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        # Check if current directory is a git repo
+        try:
+            git_hash = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+            ).strip()
+            if git_hash:
+                version_info["source"] = "git"
+                version_info["version"] = git_hash[:8]  # First 8 chars
+                version_info["uuid"] = git_hash
+                return version_info
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+
+        # Check if current directory is under v1 folder
+        cwd = os.getcwd()
+        if "/v1/" in cwd or cwd.endswith("/v1"):
+            version_info["source"] = "fixed"
+            version_info["version"] = "v1"
+            return version_info
+
+        return version_info
+
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser("run", help="run job(s)")
         parser.set_defaults(command=self)
@@ -176,6 +227,7 @@ class RunCommand(BenchpressCommand):
 
             final_metrics["run_id"] = job.uuid
             final_metrics["timestamp"] = job.timestamp
+            final_metrics["version_info"] = self.get_version_info()
 
             final_metrics["benchmark_name"] = job.name
             final_metrics["benchmark_desc"] = job.description
