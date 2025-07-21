@@ -1,0 +1,777 @@
+{
+  "port": 10086,
+  "num_req_handle_threads": 288,
+  "num_io_handle_threads": 128,
+  "num_app_logic_threads": 144,
+  "num_req_handle_threads.CPL": 416,
+  "num_io_handle_threads.CPL": 185,
+  "num_app_logic_threads.CPL": 208,
+  "num_req_local_threads.CPL": 12,
+  "num_req_handle_threads.Rome": 512,
+  "num_io_handle_threads.Rome": 228,
+  "num_app_logic_threads.Rome": 256,
+  "num_req_local_threads.Rome": 14,
+  "num_req_handle_threads.Milan": 576,
+  "num_io_handle_threads.Milan": 256,
+  "num_app_logic_threads.Milan": 288,
+  "num_req_local_threads.Milan": 16,
+  "num_thrift_accept_threads": 1,
+  "Kernels": [
+    {
+      "name": "Decompress",
+      "pool": "requestHandle",
+      "params": {
+        "compressor": "zstd",
+        "level": 4,
+        "size": 64,
+        "output": "Rdecompressed.req"
+      }
+    },
+    {
+      "name": "Deserialize",
+      "pool": "requestHandle",
+      "params": {
+        "req_vec_len": 64,
+        "req_unit_list_len": 18,
+        "unit_info_list_len": 48,
+        "unit_i32_list_len": 48,
+        "unit_list_map_size": 360,
+        "output": "Rdeserialized.req"
+      }
+    },
+    {
+      "name": "Serialize",
+      "pool": "requestHandle",
+      "params": {
+        "input": "Rdeserialized.req",
+        "output": "Rserialized.to_svc2",
+        "niters": 1
+      }
+    },
+    {
+      "name": "Decompress",
+      "pool": "requestHandle",
+      "stage": 5,
+      "fanout": 18,
+      "params": {
+        "compressor": "zstd",
+        "level": 4,
+        "size": 64,
+        "output": "Rdecompressed.svc2_resp{fidx}"
+      }
+    },
+    {
+      "name": "Deserialize",
+      "pool": "requestHandle",
+      "stage": 6,
+      "fanout": 18,
+      "params": {
+        "req_vec_len": 64,
+        "req_unit_list_len": 18,
+        "unit_info_list_len": 100,
+        "unit_i32_list_len": 60,
+        "unit_list_map_size": 20,
+        "input": "Hsvc2_resp",
+        "output": "Rdeserialized.svc2_resp{fidx}"
+      }
+    },
+    {
+      "name": "IBRun",
+      "stage": 7,
+      "fanout": 18,
+      "params": {
+        "nrounds": 6000,
+        "nmethods": 2000000
+      }
+    },
+    {
+      "name": "GEMM",
+      "pool": "applicationLogic",
+      "stage": 7,
+      "params": {
+        "M": 60,
+        "N": 100,
+        "K": 60,
+        "niters": 48,
+        "nthreads": 36,
+        "input": "H60x100x60"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 7,
+      "params": {
+        "unit_vec_len": 65536,
+        "copy_len": 24,
+        "i64_vec_len": 600,
+        "stri64_hashtab_size": 600,
+        "input": "Hdeepcopy0",
+        "output": "Rdeepcopy0"
+      }
+    },
+    {
+      "name": "HashMap",
+      "pool": "applicationLogic",
+      "stage": 7,
+      "fanout": 9,
+      "params": {
+        "input": "f14fastmap{fidx}",
+        "map_type": "f14fast",
+        "runs": 18,
+        "size": 6000
+      }
+    },
+    {
+      "name": "HashMap",
+      "pool": "applicationLogic",
+      "stage": 7,
+      "fanout": 9,
+      "params": {
+        "input": "f14vecmap{fidx}",
+        "map_type": "f14vec",
+        "runs": 18,
+        "size": 6000
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 9,
+      "params": {
+        "unit_vec_len": 4096,
+        "copy_len": 24,
+        "i64_vec_len": 12000,
+        "stri64_map_size": 60,
+        "input": "Hdeepcopy1",
+        "output": "Rdeepcopy1"
+      }
+    },
+    {
+      "name": "IBRun",
+      "pool": "applicationLogic",
+      "stage": 9,
+      "params": {
+        "nrounds": 600,
+        "nmethods": 20
+      }
+    },
+    {
+      "name": "Serialize",
+      "pool": "requestHandle",
+      "stage": 9,
+      "params": {
+        "input": "Rdeserialized.req",
+        "output": "Rserialized.req_to_svc4",
+        "niters": 1
+      }
+    },
+    {
+      "name": "Serialize",
+      "pool": "requestHandle",
+      "stage": 9,
+      "fanout": 18,
+      "params": {
+        "input": "Rdeserialized.svc2_resp{fidx}",
+        "output": "Rserialized.svc2_resp{fidx}_to_svc4",
+        "niters": 1
+      }
+    },
+    {
+      "name": "IBRun",
+      "pool": "applicationLogic",
+      "stage": 10,
+      "params": {
+        "nrounds": 600,
+        "nmethods": 20
+      }
+    },
+    {
+      "name": "Compress",
+      "pool": "requestHandle",
+      "stage": 10,
+      "params": {
+        "compressor": "zstd",
+        "level": 4,
+        "size": 64,
+        "input": "Rserialized.req_to_svc4"
+      }
+    },
+    {
+      "name": "Compress",
+      "pool": "requestHandle",
+      "stage": 10,
+      "fanout": 18,
+      "params": {
+        "compressor": "zstd",
+        "level": 4,
+        "size": 64,
+        "input": "Rserialized.svc2_resp{fidx}_to_svc4",
+        "output": "Rcompressed.svc2_resp{fidx}_to_svc4"
+      }
+    },
+    {
+      "name": "IBRun",
+      "pool": "applicationLogic",
+      "stage": 12,
+      "params": {
+        "nrounds": 6000,
+        "nmethods": 20
+      }
+    },
+    {
+      "name": "Decompress",
+      "pool": "requestHandle",
+      "stage": 12,
+      "fanout": 5,
+      "params": {
+        "compressor": "zstd",
+        "level": 4,
+        "size": 64,
+        "output": "Rdecompressed.svc4_resp{fidx}"
+      }
+    },
+    {
+      "name": "Deserialize",
+      "pool": "requestHandle",
+      "stage": 13,
+      "fanout": 5,
+      "params": {
+        "req_vec_len": 64,
+        "req_unit_list_len": 30,
+        "unit_info_list_len": 60,
+        "unit_i32_list_len": 100,
+        "unit_list_map_size": 20,
+        "input": "Hsvc4_resp",
+        "output": "Rdeserialized.svc4_resp{fidx}"
+      }
+    },
+    {
+      "name": "IBRun",
+      "pool": "applicationLogic",
+      "stage": 13,
+      "params": {
+        "nrounds": 600,
+        "nmethods": 20
+      }
+    },
+    {
+      "name": "IBRun",
+      "stage": 15,
+      "fanout": 8,
+      "params": {
+        "nrounds": 6000,
+        "nmethods": 20
+      }
+    },
+    {
+      "name": "GEMM",
+      "pool": "applicationLogic",
+      "stage": 15,
+      "params": {
+        "M": 300,
+        "N": 300,
+        "K": 30,
+        "niters": 48,
+        "nthreads": 36,
+        "input": "H300x300x30"
+      }
+    },
+    {
+      "name": "HashMap",
+      "pool": "applicationLogic",
+      "stage": 15,
+      "fanout": 9,
+      "params": {
+        "input": "f14fastmap{fidx}",
+        "map_type": "f14fast",
+        "runs": 18,
+        "size": 6000
+      }
+    },
+    {
+      "name": "HashMap",
+      "pool": "applicationLogic",
+      "stage": 15,
+      "fanout": 9,
+      "params": {
+        "input": "f14vecmap{fidx}",
+        "map_type": "f14vec",
+        "runs": 18,
+        "size": 6000
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 15,
+      "fanout": 10,
+      "params": {
+        "copy_len": 16,
+        "input": "Rdeepcopy0",
+        "output": "Rdeepcopy0.dup{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 16,
+      "fanout": 10,
+      "params": {
+        "copy_len": 16,
+        "input": "Rdeepcopy0.dup{fidx}",
+        "output": "Rdeepcopy0.dup{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 17,
+      "fanout": 10,
+      "params": {
+        "copy_len": 16,
+        "input": "Rdeepcopy0.dup{fidx}",
+        "output": "Rdeepcopy0.dup{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 18,
+      "fanout": 10,
+      "params": {
+        "copy_len": 16,
+        "input": "Rdeepcopy0.dup{fidx}",
+        "output": "Rdeepcopy0.dup{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 15,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1",
+        "output": "Rdeepcopy1.dup{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 16,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1.dup{fidx}",
+        "output": "Rdeepcopy1.dup{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 17,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1.dup{fidx}",
+        "output": "Rdeepcopy1.dup{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 18,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1.dup{fidx}",
+        "output": "Rdeepcopy1.dup{fidx}"
+      }
+    },
+    {
+      "name": "IBRun",
+      "pool": "applicationLogic",
+      "stage": 17,
+      "params": {
+        "nrounds": 2000,
+        "nmethods": 20
+      }
+    },
+    {
+      "name": "GEMM",
+      "pool": "applicationLogic",
+      "stage": 17,
+      "params": {
+        "M": 60,
+        "N": 60,
+        "K": 60,
+        "niters": 60,
+        "nthreads": 32,
+        "input": "H60x60x60"
+      }
+    },
+    {
+      "name": "IBRun",
+      "stage": 19,
+      "fanout": 8,
+      "params": {
+        "nrounds": 600,
+        "nmethods": 20
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 19,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1",
+        "output": "Rdeepcopy1.dup1{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 20,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1.dup1{fidx}",
+        "output": "Rdeepcopy1.dup1{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 21,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1.dup1{fidx}",
+        "output": "Rdeepcopy1.dup1{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 22,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1.dup1{fidx}",
+        "output": "Rdeepcopy1.dup1{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 23,
+      "fanout": 10,
+      "params": {
+        "copy_len": 14,
+        "input": "Rdeepcopy1.dup1{fidx}",
+        "output": "Rdeepcopy1.dup1{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 19,
+      "fanout": 10,
+      "params": {
+        "copy_len": 12,
+        "input": "Rdeepcopy1.dup{fidx}",
+        "output": "Rdeepcopy1.dup{fidx}.dup"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 20,
+      "fanout": 10,
+      "params": {
+        "copy_len": 12,
+        "input": "Rdeepcopy1.dup{fidx}.dup",
+        "output": "Rdeepcopy1.dup{fidx}.dup"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 21,
+      "fanout": 10,
+      "params": {
+        "copy_len": 12,
+        "input": "Rdeepcopy1.dup{fidx}.dup",
+        "output": "Rdeepcopy1.dup{fidx}.dup"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 22,
+      "fanout": 10,
+      "params": {
+        "copy_len": 12,
+        "input": "Rdeepcopy1.dup{fidx}.dup",
+        "output": "Rdeepcopy1.dup{fidx}.dup"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 23,
+      "fanout": 10,
+      "params": {
+        "copy_len": 12,
+        "input": "Rdeepcopy1.dup{fidx}.dup",
+        "output": "Rdeepcopy1.dup{fidx}.dup"
+      }
+    },
+    {
+      "name": "HashMap",
+      "pool": "applicationLogic",
+      "stage": 19,
+      "fanout": 3,
+      "params": {
+        "input": "unordmap",
+        "map_type": "unord",
+        "runs": 60,
+        "size": 512
+      }
+    },
+    {
+      "name": "GEMM",
+      "pool": "applicationLogic",
+      "stage": 19,
+      "params": {
+        "M": 60,
+        "N": 60,
+        "K": 60,
+        "niters": 60,
+        "nthreads": 36,
+        "input": "H60x60x60"
+      }
+    },
+    {
+      "name": "IBRun",
+      "pool": "requestHandle",
+      "stage": 25,
+      "params": {
+        "nrounds": 8000,
+        "nmethods": 20
+      }
+    },
+    {
+      "name": "GEMM",
+      "pool": "applicationLogic",
+      "stage": 25,
+      "params": {
+        "M": 60,
+        "N": 10,
+        "K": 100,
+        "niters": 60,
+        "nthreads": 36,
+        "input": "H60x10x100"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 25,
+      "fanout": 10,
+      "params": {
+        "copy_len": 7,
+        "input": "Rdeepcopy0.dup{fidx}",
+        "output": "Rdeepcopy0.dup1{fidx}"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 25,
+      "fanout": 10,
+      "params": {
+        "copy_len": 7,
+        "input": "Rdeepcopy0.dup{fidx}",
+        "output": "Rdeepcopy0.dup{fidx}.dup"
+      }
+    },
+    {
+      "name": "Serialize",
+      "pool": "requestHandle",
+      "params": {
+        "input": "Rdeserialized.req",
+        "output": "Rserialized.to_svc5_storage",
+        "niters": 3
+      }
+    },
+    {
+      "name": "IBRun",
+      "stage": 27,
+      "fanout": 18,
+      "params": {
+        "nrounds": 60,
+        "nmethods": 10
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 27,
+      "fanout": 18,
+      "params": {
+        "copy_len": 6,
+        "input": "Rdeepcopy1.dup{fidx}",
+        "output": "Rdeepcopy1.dup{fidx}.dup"
+      }
+    },
+    {
+      "name": "IBRun",
+      "stage": 30,
+      "fanout": 18,
+      "params": {
+        "nrounds": 60,
+        "nmethods": 10
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 30,
+      "params": {
+        "copy_len": 4,
+        "input": "Rdeepcopy0",
+        "output": "Rdeepcopy0.dup-1"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 30,
+      "params": {
+        "copy_len": 4,
+        "input": "Rdeepcopy1",
+        "output": "Rdeepcopy1.dup-1"
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "pool": "applicationLogic",
+      "stage": 30,
+      "fanout": 18,
+      "params": {
+        "copy_len": 4,
+        "input": "Rdeepcopy0.dup{fidx}",
+        "output": "Rdeepcopy0.dup{fidx}.dup"
+      }
+    },
+    {
+      "name": "HashMap",
+      "pool": "applicationLogic",
+      "stage": 30,
+      "fanout": 5,
+      "params": {
+        "input": "f14fastmap{fidx}",
+        "map_type": "f14fast",
+        "runs": 16,
+        "size": 6000
+      }
+    },
+    {
+      "name": "HashMap",
+      "pool": "applicationLogic",
+      "stage": 30,
+      "fanout": 5,
+      "params": {
+        "input": "f14vecmap{fidx}",
+        "map_type": "f14vec",
+        "runs": 16,
+        "size": 6000
+      }
+    },
+    {
+      "name": "Compress",
+      "pool": "requestHandle",
+      "stage": 31,
+      "params": {
+        "compressor": "zstd",
+        "level": 4,
+        "size": 512,
+        "input": "Rserialized.to_svc2"
+      }
+    },
+    {
+      "name": "Serialize",
+      "stage": 31,
+      "pool": "requestHandle",
+      "params": {
+        "req_vec_len": 3000,
+        "req_unit_list_len": 60,
+        "unit_info_list_len": 70,
+        "unit_i32_list_len": 80,
+        "unit_list_map_size": 20,
+        "niters": 1,
+        "input": "Hrerializable.-1",
+        "output": "Rserialized.-1"
+      }
+    },
+    {
+      "name": "Shape",
+      "pool": "IOHandle",
+      "stage": 32,
+      "params": {
+        "input": "Rshape",
+        "quantiles": [0, 1],
+        "sizes": [1, 1]
+      }
+    },
+    {
+      "name": "Shape",
+      "pool": "IOHandle",
+      "stage": 32,
+      "params": {
+        "quantiles": [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2, 0.21, 0.22, 0.23, 0.24, 0.25, 0.26, 0.27, 0.28, 0.29, 0.3, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37, 0.38, 0.39, 0.4, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49, 0.5, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59, 0.6, 0.61, 0.62, 0.63, 0.64, 0.65, 0.66, 0.67, 0.68, 0.69, 0.7, 0.71, 0.72, 0.73, 0.74, 0.75, 0.76, 0.77, 0.78, 0.79, 0.8, 0.81, 0.82, 0.83, 0.84, 0.85, 0.86, 0.87, 0.88, 0.89, 0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1],
+        "x100_sizes": [10,10,10,10,10,10,170574,237420,242209,295800,281155,252284,213658,213084,203080,242756,318347,388838,506252,637820,922937,1078802,1137146,1139016,1132150,1148688,1163384,1183056,1213740,1355750,1580044,2324544,2975864,4131982,5389530,6865380,8078038,9521250,10940109,12083560,13268472,14236244,14821182,15330276,15768100,16052966,16306591,16622664,16910864,17165750,17386534,17599492,17794940,17983262,18225945,18537948,18788858,18923780,19198762,19540460,19897672,20069838,20235828,20384620,20416920,20416502,20252982,20013324,19718634,19201810,18935601,18592180,18234703,17708962,17465275,17026928,16781044,16559056,16326558,16179160,16166174,15820910,15694075,15361776,14965570,14603678,14188032,13916092,13502148,12892180,12360513,11892160,11237878,10336442,9125740,8065140,6327135,4359730,1246405,94801900],
+        "sizes": [1,1,1,1,1,1,1,1705,2374,2422,2958,2811,2522,2136,2130,2030,2427,3183,3888,5062,6378,9229,10788,11371,11390,11321,11486,11633,11830,12137,13557,15800,23245,29758,41319,53895,68653,80780,95212,109401,120835,132684,142362,148211,153302,157681,160529,163065,166226,169108,171657,173865,175994,177949,179832,182259,185379,187888,189237,191987,195404,198976,200698,202358,203846,204169,204165,202529,200133,197186,192018,189356,185921,182347,177089,174652,170269,167810,165590,163265,161791,161661,158209,156940,153617,149655,146036,141880,139160,135021,128921,123605,118921,112378,103364,91257,80651,63271,43597,12464,948019]
+      }
+    },
+    {
+      "name": "FakeIO",
+      "pool": "IOHandle",
+      "stage": 25,
+      "params": {
+        "quantiles": [0, 0.1, 0.5, 0.95, 0.96, 0.97, 0.98, 0.99, 1],
+        "latencies": [6000, 100000, 250000, 500000, 501000, 502000, 503000, 504000, 971000],
+        "input": "svc5.storage"
+      },
+      "comment": "svc5_storage response to svc1 latency distribution"
+    }
+  ],
+  "Backup": [
+    {
+      "name": "FakeIO",
+      "pool": "IOHandle",
+      "stage": 25,
+      "params": {
+        "quantiles": [0, 0.1, 0.5, 0.95, 0.96, 0.97, 0.98, 0.99, 1],
+        "latencies": [6000, 100000, 250000, 500000, 501000, 502000, 503000, 504000, 971000],
+        "input": "svc5.storage"
+      },
+      "comment": "svc5_storage response to svc1 latency distribution"
+    },
+    {
+      "name": "FakeIO",
+      "pool": "IOHandle",
+      "stage": 25,
+      "params": {
+        "quantiles": [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2, 0.21, 0.22, 0.23, 0.24, 0.25, 0.26, 0.27, 0.28, 0.29, 0.3, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37, 0.38, 0.39, 0.4, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49, 0.5, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59, 0.6, 0.61, 0.62, 0.63, 0.64, 0.65, 0.66, 0.67, 0.68, 0.69, 0.7, 0.71, 0.72, 0.73, 0.74, 0.75, 0.76, 0.77, 0.78, 0.79, 0.8, 0.81, 0.82, 0.83, 0.84, 0.85, 0.86, 0.87, 0.88, 0.89, 0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1],
+        "latencies": [6000, 10500, 12000, 13500, 15000, 16500, 16500, 18000, 18000, 18000, 19500, 19500, 19500, 21000, 21000, 21000, 22500, 22500, 22500, 22500, 24000, 24000, 24000, 25500, 25500, 25500, 27000, 27000, 27000, 28500, 28500, 28500, 30000, 30000, 30000, 31500, 31500, 33000, 33000, 34500, 34500, 36000, 36000, 37500, 37500, 39000, 39000, 40500, 42000, 42000, 44500, 45000, 45000, 47500, 48000, 49500, 49500, 51000, 52500, 54000, 54500, 57000, 57000, 58000, 60000, 61500, 63000, 63000, 64500, 66000, 67500, 69000, 70500, 72000, 72000, 73500, 75000, 76500, 77000, 77500, 78000, 78500, 84000, 85000, 90000, 90000, 91500, 93000, 96000, 105000, 115000, 120000, 120000, 130000, 140000, 145000, 160000, 165000, 180000, 203000, 471000],
+        "input": "svc5.storage"
+      },
+      "comment": "svc5_storage response to svc1 latency distribution"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "port": 10087,
+  "num_req_handle_threads": 4,
+  "num_io_handle_threads": 4,
+  "num_app_logic_threads": 4,
+  "num_req_local_threads": 0,
+  "num_thrift_accept_threads": 1,
+  "Kernels": [
+    {
+      "name": "Delay",
+      "pool": "applicationLogic",
+      "params": {
+        "quantiles": [0.01, 0.05, 0.10, 0.15, 0.20, 0.50, 0.80, 0.85, 0.90, 0.95, 0.99, 0.999, 1.0],
+        "latencies": [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000]
+      }
+    },
+    {
+      "name": "Shape",
+      "pool": "IOHandle",
+      "params": {
+        "quantiles": [0.0, 0.5, 1.0],
+        "sizes": [0, 5, 10]
+      }
+    }
+  ]
+}

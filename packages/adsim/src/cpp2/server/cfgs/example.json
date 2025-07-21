@@ -1,0 +1,85 @@
+{
+  "port": 10086,
+  "num_req_handle_threads": 16,
+  "num_io_handle_threads": 8,
+  "num_app_logic_threads": 32,
+  "num_thrift_accept_threads": 1,
+  "Kernels": [
+    {
+      "name": "Decompress",
+      "pool": "requestHandle",
+      "stage": 1,
+      "params": {
+        "compressor": "zstd",
+        "level": 4,
+        "size": 1024
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "stage": 2,
+      "fanout": 2,
+      "params": {
+        "copy_len": 20,
+        "output": "Rdeepcopy{fidx}"
+      }
+    },
+    {
+      "name": "IBRun",
+      "pool": "applicationLogic",
+      "params": {
+        "nrounds": 100,
+        "nmethods": 100000
+      }
+    },
+    {
+      "name": "DeepCopy",
+      "stage": 4,
+      "fanout": 2,
+      "params": {
+        "copy_len": 10,
+        "input": "Rdeepcopy{fidx}",
+        "output": "Rdeepcopy{fidx}.dup"
+      }
+    },
+    {
+      "name": "GEMM",
+      "pool": "applicationLogic",
+      "fanout": 2,
+      "params": {
+        "M": 2,
+        "N": 12,
+        "K": 10
+      }
+    },
+    {
+      "name": "HashMap",
+      "pool": "applicationLogic",
+      "params": {
+        "runs": 3,
+        "size": 64
+      }
+    },
+    {
+      "name": "Serialize",
+      "pool": "IOHandle",
+      "params": {
+      }
+    },
+    {
+      "name": "ClientLite",
+      "pool": "applicationLogic",
+      "params": {
+        "services": [
+          {
+            "host": "::1",
+            "port": [10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087, 10087]
+          }
+        ],
+        "str_vec_len": 10,
+        "quantiles": [0.10, 1.0],
+        "sizes": [1, 10]
+      }
+    }
+  ]
+}
