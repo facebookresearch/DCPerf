@@ -110,6 +110,9 @@ class DjangoWorkloadParser(Parser):
             hit_percentage = round(hit_percentage, 3)
             url_key = "URL_hit_percentages_" + metric
             dw_metrics[url_key] = hit_percentage
+        elif metric == "Interpreter":
+            # Handle interpreter type as a string, not a float
+            dw_metrics[metric] = data.strip()
         else:
             """Determine if metrics are faulty or invalid; notify service that
             benchmark execution has failed"""

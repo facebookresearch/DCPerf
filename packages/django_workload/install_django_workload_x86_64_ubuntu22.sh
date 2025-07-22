@@ -16,7 +16,8 @@ DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
 
 # Install system dependencies
 apt install -y memcached libmemcached-dev zlib1g-dev screen \
-    python3 python3.10-dev python3.10-venv rpm
+    python3 python3.10-dev python3.10-venv rpm libffi-dev \
+    libssl-dev libcrypt-dev
 
 # Clone django-workload git repository
 mkdir -p "${DJANGO_WORKLOAD_ROOT}"
@@ -172,14 +173,33 @@ popd
 # 5. Install Django and its dependencies
 pushd "${DJANGO_SERVER_ROOT}"
 
-# Create virtual env to run Python 3.10
-# [ ! -d venv ] && python3 -m venv venv
-python3.10 -m venv venv
+# Download and build Cinder
+pushd "${DJANGO_SERVER_ROOT}"
+if ! [ -d "cinder" ]; then
+    git clone -b cinder/3.10 https://github.com/facebookincubator/cinder.git
+    pushd cinder
+    mkdir -p cinder-build
+    ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations
+    make -j
+    make install
+    popd
+fi
+popd
 
-# Allow unbound variables for active script
+# Create virtual environments for both CPython and Cinder
+pushd "${DJANGO_SERVER_ROOT}"
+# Create CPython virtual env
+python3.10 -m venv venv_cpython
+
+# Create Cinder virtual env
+"${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin/python3" -m venv venv_cinder
+popd
+
+# Install packages in both virtual environments
+# First, CPython environment
 set +u
 # shellcheck disable=SC1091
-source ./venv/bin/activate
+source ./venv_cpython/bin/activate
 set -u
 
 if ! [ -f setup.py.bak ]; then
@@ -253,6 +273,19 @@ git apply --check "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch" && gi
 # Enable Session, Authentication and Message middleware
 git apply --check "${TEMPLATES_DIR}/0005-django_middleware_settings.patch" && git apply "${TEMPLATES_DIR}/0005-django_middleware_settings.patch"
 popd
+
+deactivate
+
+# Now install packages in Cinder environment
+pushd "${DJANGO_SERVER_ROOT}"  # Make sure we're in the right directory
+export CPATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build/include:${DJANGO_SERVER_ROOT}/cinder/Include"
+source ./venv_cinder/bin/activate
+set -u
+
+# Install dependencies using third_party pip dependencies
+pip3 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 
 deactivate
 popd
