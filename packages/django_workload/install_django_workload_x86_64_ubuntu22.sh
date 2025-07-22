@@ -38,8 +38,6 @@ fi
 pushd "${DJANGO_WORKLOAD_DEPS}"
 # cassandra-driver-3.29.1_x86_64.whl
 wget "https://files.pythonhosted.org/packages/eb/d5/e437271aea182e33db32e0990703b4e0d7025e4fba67829c5fd65dba926a/cassandra_driver-3.29.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
-# Cython-0.29.tar.gz
-wget "https://files.pythonhosted.org/packages/6c/9f/f501ba9d178aeb1f5bf7da1ad5619b207c90ac235d9859961c11829d0160/Cython-0.29.21.tar.gz"
 # Django-4.1-py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/9b/41/e1e7d6ecc3bc76681dfdc6b373566822bc2aab96fa3eceaaed70accc28b6/Django-4.1-py3-none-any.whl"
 # Dulwich 0.21.2.tar.gz
@@ -212,7 +210,6 @@ fi
 cp setup.py.bak setup.py
 
 # Install dependencies using third_party pip dependencies
-pip3 install "Cython>=0.29.21,<=0.29.32" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
@@ -288,7 +285,7 @@ pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEP
 pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 
 deactivate
-popd
+popd  # ${DJANGO_SERVER_ROOT}
 
 # Install siege
 pushd "${DJANGO_PKG_ROOT}" || exit 1

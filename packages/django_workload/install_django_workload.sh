@@ -53,8 +53,7 @@ mkdir -p "${OUT}/django-workload/django-workload/third_party"
 pushd "${OUT}/django-workload/django-workload/third_party"
 # cassandra-driver-3.19.0.tar.gz
 wget "https://files.pythonhosted.org/packages/1c/fe/e4df42a3e864b6b7b2c7f6050b66cafc7fba8b46da0dfb9d51867e171a77/cassandra-driver-3.19.0.tar.gz"
-# Cython-0.24.1.tar.gz
-wget "https://files.pythonhosted.org/packages/c6/fe/97319581905de40f1be7015a0ea1bd336a756f6249914b148a17eefa75dc/Cython-0.24.1.tar.gz"
+# Removed Cython download as it's not needed
 # Django-1.11.29-py2.py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/49/49/178daa8725d29c475216259eb19e90b2aa0b8c0431af8c7e9b490ae6481d/Django-1.11.29-py2.py3-none-any.whl"
 # django-cassandra-engine-1.5.5.tar.gz
@@ -121,19 +120,34 @@ cp "${TEMPLATES_DIR}/cassandra.yaml" "${OUT}/apache-cassandra/conf/cassandra.yam
 # 5. Install Django and its dependencies
 cd "${OUT}/django-workload/django-workload" || exit 1
 
-# Create virtual env to run Python 3.6
-[ ! -d venv ] && python3.6 -m venv venv
+# Download and build Cinder
+if ! [ -d "cinder" ]; then
+    git clone -b cinder/3.10 https://github.com/facebookincubator/cinder.git
+    pushd cinder
+    mkdir -p cinder-build
+    ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations
+    make -j
+    make install
+    popd
+fi
 
-# Allow unbound variables for active script
+# Create virtual environments for both CPython and Cinder
+# Create CPython virtual env
+[ ! -d venv_cpython ] && python3.6 -m venv venv_cpython
+
+# Create Cinder virtual env
+[ ! -d venv_cinder ] && "${OUT}/django-workload/django-workload/cinder/cinder-build/bin/python3" -m venv venv_cinder
+
+# Install packages in both virtual environments
+# First, CPython environment
 set +u
 # shellcheck disable=SC1091
-source venv/bin/activate
+source ./venv_cpython/bin/activate
 set -u
 
 sed -i 's/django-cassandra-engine/django-cassandra-engine >= 1.5, < 1.6/' setup.py
 
 # Install dependencies using third_party pip dependencies from manifold
-pip install "Cython<0.25,>=0.20" --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
@@ -178,6 +192,23 @@ cd "${OUT}/django-workload/django-workload/django_workload" || exit 1
 git apply --check "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch" && git apply "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch"
 # Apply db caching
 git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch"
+
+deactivate
+
+# Now install packages in Cinder environment
+pushd "${OUT}/django-workload/django-workload"  # Make sure we're in the right directory
+export CPATH="${OUT}/django-workload/django-workload/cinder/cinder-build/include:${OUT}/django-workload/django-workload/cinder/Include"
+source ./venv_cinder/bin/activate
+set -u
+
+# Install dependencies using third_party pip dependencies from manifold
+pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
+pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
+pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
+
+deactivate
+popd  # ${OUT}/django-workload/django-workload
+pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 
 deactivate
 

@@ -16,7 +16,8 @@ DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
 
 # Install system dependencies
 apt install -y memcached libmemcached-dev zlib1g-dev screen \
-    python3 python3.10-dev python3.10-venv rpm
+    python3 python3.10-dev python3.10-venv rpm libffi-dev \
+    libssl-dev libcrypt-dev
 
 # Clone django-workload git repository
 mkdir -p "${DJANGO_WORKLOAD_ROOT}"
@@ -37,8 +38,7 @@ fi
 pushd "${DJANGO_WORKLOAD_DEPS}"
 # cassandra-driver-3.26_aarch64.whl
 wget "https://files.pythonhosted.org/packages/b5/5e/54c58c98a4eeea12a2fee7220e7ac9e8b021ea5c3d84c84adb9106c4ed43/cassandra_driver-3.26.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
-# Cython-0.29.tar.gz
-wget "https://files.pythonhosted.org/packages/6c/9f/f501ba9d178aeb1f5bf7da1ad5619b207c90ac235d9859961c11829d0160/Cython-0.29.21.tar.gz"
+# Removed Cython download as it's not needed
 # Django-4.1-py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/9b/41/e1e7d6ecc3bc76681dfdc6b373566822bc2aab96fa3eceaaed70accc28b6/Django-4.1-py3-none-any.whl"
 # Dulwich 0.21.2.tar.gz
@@ -172,14 +172,33 @@ popd
 # 5. Install Django and its dependencies
 pushd "${DJANGO_SERVER_ROOT}"
 
-# Create virtual env to run Python 3.10
-# [ ! -d venv ] && python3 -m venv venv
-python3.10 -m venv venv
+# Download and build Cinder
+pushd "${DJANGO_SERVER_ROOT}"
+if ! [ -d "cinder" ]; then
+    git clone -b cinder/3.10 https://github.com/facebookincubator/cinder.git
+    pushd cinder
+    mkdir -p cinder-build
+    ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations
+    make -j
+    make install
+    popd
+fi
+popd
 
-# Allow unbound variables for active script
+# Create virtual environments for both CPython and Cinder
+pushd "${DJANGO_SERVER_ROOT}"
+# Create CPython virtual env
+python3.10 -m venv venv_cpython
+
+# Create Cinder virtual env
+"${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin/python3" -m venv venv_cinder
+popd
+
+# Install packages in both virtual environments
+# First, CPython environment
 set +u
 # shellcheck disable=SC1091
-source ./venv/bin/activate
+source ./venv_cpython/bin/activate
 set -u
 
 if ! [ -f setup.py.bak ]; then
@@ -192,7 +211,6 @@ fi
 cp setup.py.bak setup.py
 
 # Install dependencies using third_party pip dependencies
-pip3 install "Cython>=0.29.21,<=0.29.32" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
@@ -255,7 +273,20 @@ git apply --check "${TEMPLATES_DIR}/0005-django_middleware_settings.patch" && gi
 popd
 
 deactivate
-popd
+
+# Now install packages in Cinder environment
+pushd "${DJANGO_SERVER_ROOT}"  # Make sure we're in the right directory
+export CPATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build/include:${DJANGO_SERVER_ROOT}/cinder/Include"
+source ./venv_cinder/bin/activate
+set -u
+
+# Install dependencies using third_party pip dependencies
+pip3 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+
+deactivate
+popd  # ${DJANGO_SERVER_ROOT}
 
 # Install siege
 pushd "${DJANGO_PKG_ROOT}" || exit 1
