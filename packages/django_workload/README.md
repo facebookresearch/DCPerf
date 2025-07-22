@@ -78,6 +78,35 @@ If running on ARM platform, please use the job `django_workload_arm`:
 ./benchpress_cli.py run django_workload_arm -r standalone
 ```
 
+### Selecting Python Interpreter
+
+DjangoBench supports two Python interpreters:
+- **CPython** (default): The standard Python interpreter
+- **Cinder**: Meta's performance-oriented Python runtime
+
+To specify which interpreter to use, add the `interpreter` parameter to your command:
+
+```
+# Run with CPython (default)
+./benchpress_cli.py run django_workload_default -r standalone
+
+# Run with Cinder
+./benchpress_cli.py run django_workload_default -r standalone -i '{"interpreter": "cinder"}'
+```
+
+When running with a separate database server:
+
+```
+# Run with CPython (default)
+./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>"}'
+
+# Run with Cinder
+./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>", "interpreter": "cinder"}'
+```
+
+The interpreter type will be reported in the benchmark results, allowing for performance comparison
+between CPython and Cinder.
+
 ## Reporting
 
 Once the benchmark finishes on the django benchmarking machine, benchpress will
@@ -114,6 +143,7 @@ is the metric that measures performance.:
     "Data transferred_MB": 474.424,
     "Elapsed time_secs": 299.22400000000005,
     "Failed transactions": 0.0,
+    "Interpreter": "cpython",
     "Longest transaction": 0.244,
     "P50_secs": 0.07,
     "P90_secs": 0.11000000000000001,
@@ -136,6 +166,10 @@ is the metric that measures performance.:
   "timestamp": 1651108577
 }
 ```
+
+Note the `Interpreter` field in the metrics section, which indicates which Python interpreter
+was used for the benchmark.
+
 ## Troubleshooting
 
 ### Cassandra could not start
@@ -150,7 +184,8 @@ the environment variable `JAVA_HOME` setting it to the path to your JVM.
 
 
 You may also encounter the error message "The stack size specified is too small, Specify at least 456k".
-To resolve this issue, add the following configuration to the end of `benchmarks/django_workload/apache-cassandra/conf/cassandra-env.sh`:
+To resolve this issue, add the following configuration to the end of
+`benchmarks/django_workload/apache-cassandra/conf/cassandra-env.sh`:
 ```shell
 JVM_OPTS="$JVM_OPTS -Xss512k"
 ```
@@ -208,3 +243,19 @@ depend on the computation power of your CPU.
 If you have already run the default time-based Django benchmark once, you can
 make REPS to be `wc -l /tmp/siege_out_1` divided by the number of your logical
 CPU cores. That way the runtime of each iteration will be close to 5 minutes.
+
+### Cinder-specific issues
+
+If you encounter issues when running with the Cinder interpreter:
+
+1. **Cinder build failures**: If Cinder fails to build during installation, make
+sure you have all the necessary build dependencies installed. You may need to
+install additional development packages.
+
+2. **Virtual environment issues**: If there are problems with the Cinder virtual
+environment, you can manually check if it was created correctly by looking for
+the `venv_cinder` directory in the django-workload installation.
+
+3. **Performance differences**: Cinder may show different performance
+characteristics compared to CPython. This is expected and can be used to
+evaluate the performance benefits of Cinder for Django workloads.
