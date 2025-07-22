@@ -46,7 +46,7 @@ trap 'cleanup' ERR EXIT SIGINT SIGTERM
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] [-d duration of workload] [-p number of repetitions] [-l siege logfile path] [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] [-t snapshot taking]
+Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] [-d duration of workload] [-p number of repetitions] [-l siege logfile path] [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] [-t snapshot taking] [-I interpreter]
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
@@ -55,6 +55,7 @@ For role "server", "clientserver":
     -c          ip address of the cassandra server (required)
     -m          minimum icachebuster calling rounds (default 100000)
     -M          maximum icachebuster calling rounds (default 200000)
+    -I          python interpreter to use (cpython or cinder, default is cpython)
     -L          when provided snapshot loading is enabled, meaning that the database is loaded from a snapshot stored in the specifed path (default disabled)
     -t          when provided snapshot taking is enabled, meaning that the a snapshot of the generetaed database will be stored in the specifed path (default disabled)
     -S          skip the database setup and use the snapshot stored in the Cassandra data directory (default disabled)
@@ -234,6 +235,7 @@ start_cassandra() {
 start_django_server() {
   local cassandra_addr=$1
   local num_server_workers=$2
+  local interpreter=${3:-cpython}
 
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -249,33 +251,37 @@ start_django_server() {
       < ${CLUSTER_SETTING}.template > ${CLUSTER_SETTING}.tmp
   mv -f "${CLUSTER_SETTING}.tmp" "${CLUSTER_SETTING}"
 
+  # Select the appropriate virtual environment based on interpreter
+  local venv_dir="venv_${interpreter}"
+  echo "Using Python interpreter: ${interpreter}"
+
   # shellcheck disable=SC1090,SC1091
-  source "${SCRIPT_ROOT}/../django-workload/django-workload/venv/bin/activate"
+  source "${SCRIPT_ROOT}/../django-workload/django-workload/${venv_dir}/bin/activate"
 
   wait_for_cassandra_to_start
 
   # Create database schema
   export LD_LIBRARY_PATH=${SCRIPT_ROOT}/../django-workload/django-workload/:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     if [ "$load_a_snapshot" = true ]; then
-      #DJANGO_SETTINGS_MODULE=cluster_settings ./venv/bin/django-admin flush
+      #DJANGO_SETTINGS_MODULE=cluster_settings ./${venv_dir}/bin/django-admin flush
       load_snapshot
       # we need to restart Cassandra after loaing an snapshot
       echo "Cassandra is loaded using the snapshot"
     fi
     if [ "$skip_data_setup" = false ]; then
       echo "Generating database "
-      DJANGO_SETTINGS_MODULE=cluster_settings ./venv/bin/django-admin flush
-      DJANGO_SETTINGS_MODULE=cluster_settings ./venv/bin/django-admin setup
+      DJANGO_SETTINGS_MODULE=cluster_settings ./${venv_dir}/bin/django-admin flush
+      DJANGO_SETTINGS_MODULE=cluster_settings ./${venv_dir}/bin/django-admin setup
 
     fi
     if [ "$take_a_snapshot" = true ]; then
       take_snapshot
     fi
-  echo "Running django server with ${num_server_workers} uWSGI workers"
+  echo "Running django server with ${num_server_workers} uWSGI workers using ${interpreter} interpreter"
 
-  venv/bin/uwsgi \
+  ${venv_dir}/bin/uwsgi \
     --ini uwsgi.ini \
-    -H "${SCRIPT_ROOT}/../django-workload/django-workload/venv" \
+    -H "${SCRIPT_ROOT}/../django-workload/django-workload/${venv_dir}" \
     --safe-pidfile "${SCRIPT_ROOT}/../uwsgi.pid" \
     --workers "${num_server_workers}"
 }
@@ -296,8 +302,10 @@ start_client() {
       < "${URLS_TEMPLATE}" > "${URLS_TEMPLATE}.tmp"
   mv -f "${URLS_TEMPLATE}.tmp" "${URLS_TEMPLATE}"
 
+  # Always use venv_cpython here because the interpreter type does not matter for the client
+  # We're just making sure numpy exists for the run-siege script
   # shellcheck disable=SC1090,SC1091
-  source "${SCRIPT_ROOT}/../django-workload/django-workload/venv/bin/activate"
+  source "${SCRIPT_ROOT}/../django-workload/django-workload/venv_cpython/bin/activate"
 
   run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "${iterations}" "${reps}"
 }
@@ -311,8 +319,9 @@ start_clientserver() {
   local urls_path=$6
   local iterations="$7"
   local reps="$8"
+  local interpreter="$9"
 
-  start_django_server "${cassandra_addr}" "${num_server_workers}" &
+  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" &
 
   # Wait for the server to start
   local retries_init=150
@@ -326,6 +335,9 @@ start_clientserver() {
       fi
   done
   start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" localhost "${iterations}" "${reps}"
+
+  # Report interpreter type
+  echo "Interpreter: ${interpreter}"
 }
 
 main() {
@@ -383,10 +395,13 @@ main() {
   local skip_data_setup
   skip_data_setup=false
 
+  local interpreter
+  interpreter="cpython"
+
   local snapshot_dir
   snapshot_dir="${BENCHPRESS_ROOT}/benchmarks/django_workload/cassandra_snapshots/synthetic_dataset_snapshot"
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:S' OPTION "${@}"; do
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:SI:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -463,6 +478,9 @@ main() {
       S)
         skip_data_setup=true
         ;;
+      I)
+        interpreter="${OPTARG}"
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -509,12 +527,14 @@ main() {
   elif [ "$role" = "server" ]; then
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
-    start_django_server "$cassandra_addr" "$num_server_workers";
+    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter";
+    # Report interpreter type
+    echo "Interpreter: ${interpreter}"
   elif [ "$role" = "standalone" ]; then
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
-    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps";
+    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter";
     pgrep -f cassandra | xargs kill
 
   else

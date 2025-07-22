@@ -187,11 +187,13 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c {db_addr}'
+        - '-I {interpreter}'
       vars:
         - 'db_addr'
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
+        - 'interpreter=cpython'
     db:
       args:
         - '-r db'
@@ -207,10 +209,12 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c 127.0.0.1'
+        - '-I {interpreter}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
+        - 'interpreter=cpython'
   hooks:
     - hook: copymove
       options:
@@ -234,11 +238,13 @@
         - '-c {db_addr}'
         - '-m 50000'
         - '-M 100000'
+        - '-I {interpreter}'
       vars:
         - 'db_addr'
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
+        - 'interpreter=cpython'
     db:
       args:
         - '-r db'
@@ -256,10 +262,12 @@
         - '-c 127.0.0.1'
         - '-m 50000'
         - '-M 100000'
+        - '-I {interpreter}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
+        - 'interpreter=cpython'
   hooks:
     - hook: copymove
       options:
@@ -284,10 +292,12 @@
         - '-m 50000'
         - '-M 100000'
         - '-S'
+        - '-I {interpreter}'
       vars:
         - 'duration=1M'
         - 'iterations=1'
         - 'reps=1000'
+        - 'interpreter=cpython'
   hooks:
     - hook: copymove
       options:
@@ -310,10 +320,12 @@
         - '-s urls.txt'
         - '-c 127.0.0.1'
         - '-S'
+        - '-I {interpreter}'
       vars:
         - 'duration=1M'
         - 'iterations=1'
         - 'reps=1000'
+        - 'interpreter=cpython'
   hooks:
     - hook: copymove
       options:
@@ -340,6 +352,7 @@
         - '-x {client_workers}'
         - '-m {ib_min}'
         - '-M {ib_max}'
+        - '-I {interpreter}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
@@ -349,6 +362,7 @@
         - 'db_addr'
         - 'server_workers'
         - 'client_workers'
+        - 'interpreter=cpython'
     client:
       args:
         - '-r client'
@@ -372,11 +386,13 @@
         - '-w {server_workers}'
         - '-m {ib_min}'
         - '-M {ib_max}'
+        - '-I {interpreter}'
       vars:
         - 'db_addr'
         - 'server_workers'
         - 'ib_min=100000'
         - 'ib_max=200000'
+        - 'interpreter=cpython'
     db:
       args:
         - '-r db'
