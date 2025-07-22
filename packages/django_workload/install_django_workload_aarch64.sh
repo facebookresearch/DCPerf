@@ -38,8 +38,7 @@ fi
 pushd "${DJANGO_WORKLOAD_DEPS}"
 # cassandra_driver-3.29.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
 wget "https://files.pythonhosted.org/packages/cc/60/f8de88175937481be98da88eb88b4fd704093e284e5907775293c496df32/cassandra_driver-3.29.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
-# Cython-0.29.tar.gz
-wget "https://files.pythonhosted.org/packages/6c/9f/f501ba9d178aeb1f5bf7da1ad5619b207c90ac235d9859961c11829d0160/Cython-0.29.21.tar.gz"
+# Removed Cython download as it's not needed
 # Django-5.2.tar.gz
 wget "https://files.pythonhosted.org/packages/1b/11/7aff961db37e1ea501a2bb663d27a8ce97f3683b9e5b83d3bfead8b86fa4/django-5.2.3-py3-none-any.whl"
 # django-cassandra-engine-1.6.2.tar.gz
@@ -183,12 +182,29 @@ if ! [ -d Python-3.10.2 ]; then
     cd ../
 fi
 
-# Create virtual env to run Python 3.10
-[ ! -d venv ] && Python-3.10.2/python -m venv venv
-# Allow unbound variables for active script
+# Download and build Cinder
+if ! [ -d "cinder" ]; then
+    git clone -b cinder/3.10 https://github.com/facebookincubator/cinder.git
+    pushd cinder
+    mkdir -p cinder-build
+    ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations
+    make -j
+    make install
+    popd
+fi
+
+# Create virtual environments for both CPython and Cinder
+# Create CPython virtual env
+[ ! -d venv_cpython ] && Python-3.10.2/python -m venv venv_cpython
+
+# Create Cinder virtual env
+[ ! -d venv_cinder ] && "${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin/python3" -m venv venv_cinder
+
+# Install packages in both virtual environments
+# First, CPython environment
 set +u
 # shellcheck disable=SC1091
-source venv/bin/activate
+source ./venv_cpython/bin/activate
 set -u
 if ! [ -f setup.py.bak ]; then
     #sed -i 's/django-cassandra-engine/django-cassandra-engine >= 1.6, < 1.9/' setup.py
@@ -200,7 +216,6 @@ fi
 cp setup.py.bak setup.py
 
 # Install dependencies using third_party pip dependencies
-pip3.10 install "Cython>=0.29.21,<=0.29.32" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3.10 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3.10 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3.10 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
@@ -263,7 +278,20 @@ git apply --check "${TEMPLATES_DIR}/0005-django_middleware_settings.patch" && gi
 popd
 
 deactivate
-popd
+
+# Now install packages in Cinder environment
+pushd "${DJANGO_SERVER_ROOT}"  # Make sure we're in the right directory
+export CPATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build/include:${DJANGO_SERVER_ROOT}/cinder/Include"
+source ./venv_cinder/bin/activate
+set -u
+
+# Install dependencies using third_party pip dependencies
+pip3.10 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3.10 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+pip3.10 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+
+deactivate
+popd  # ${DJANGO_SERVER_ROOT}
 
 # Install siege
 pushd "${DJANGO_PKG_ROOT}" || exit 1
