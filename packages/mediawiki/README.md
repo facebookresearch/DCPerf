@@ -133,6 +133,41 @@ you can run the following:
 ./benchpress_cli.py run oss_performance_mediawiki_mlp -i '{"scale_out": 3}'
 ```
 
+### Running Mediawiki mini
+
+Mediawiki mini is a shrunken version of Mediawiki
+ that aims to reduce execution time to less than two minutes.
+ Mediawiki mini includes a few new options that
+  allow user to customize the benchmarking process:
+
+- Reuse the temporary folder between runs.
+- Adjust the load generator seed.
+- Configure load generation durations for warmup.
+- Set the interval for JIT retranslation.
+- Specify a deterministic number of warmup iterations.
+
+To run the mini version of
+Mediawiki, please follow these steps:
+
+1. Make sure that you get the latest version of DCPerf and check out
+the latest commit in the `v2-beta` branch.
+If you've installed Mediawiki with an older version of DCPerf,
+we recommend that you clean and re-install Mediawiki.
+
+2. Run the `oss_performance_mediawiki_mini` job with the following command:
+
+```bash
+./benchpress run oss_performance_mediawiki_mini
+```
+
+3. To further reduce execution time by reusing the temporary directory, please run the
+`oss_performance_mediawiki_mini` job once, locate the path to the temp folder in the log output
+(named like `/tmp/hhvm-nginxXXXXX`), then specify `temp_dir` parameter in the subsequent run:
+
+```bash
+./benchpress run oss_performance_mediawiki_mini -i '{"temp_dir":"/tmp/hhvm-nginxtIdDIr"}'
+```
+
 ### Reporting
 
 After the benchmark finishes, benchpress will report the benchmark results in the

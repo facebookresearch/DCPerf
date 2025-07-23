@@ -372,6 +372,53 @@ faster with the already built database. Therefore, it's normal that the first ru
 takes much longer time than what the benchmark eventually reports. The database will
 be stored in `/flash23/warehouse`.
 
+### Running SparkBench Mini
+
+SparkBench Mini is a shrunken version of SparkBench that aims to reduce execution time to
+less than 30 seconds and can potentially be used for emulations. To run the mini version of
+SparkBench, please follow the following steps:
+
+1. Download one of the down-sampled version of the dataset:
+    - 5GB variant `bpc_t93586_s2_synthetic_5GB`
+    - 1GB variant `bpc_t93586_s2_synthetic_1GB`
+
+You can download these datasets from the following Github repository:
+
+```
+https://github.com/facebookresearch/DCPerf-datasets
+```
+
+2. Make sure that you get the latest version of DCPerf and check out the latest commit in the `v2-beta` branch.
+If you've installed SparkBench with an older version of DCPerf,
+we recommend you clean and re-install SparkBench.
+
+3. If you have run SparkBench with a different dataset,
+please remove the data from previous runs so that SparkBench can rebuild database with the new dataset:
+
+```bash
+rm -rf /flash23/warehouse
+rm -rf <benchpressPath>/benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7/metastore_db
+```
+
+4. Create the `/flash23` folder. Copy `bpc_t93586_s2_synthetic_5GB`
+or `bpc_t93586_s2_synthetic_1GB` in the `/flash23` folder.
+Note that SparkBench mini does not require the high I/O throughput
+ as the regular version, so it's OK to put `/flash23` folder on your system drive.
+
+5. Run `spark_standalone_remote_mini` job on a real machine.
+This will create data in `/flash23/warehouse`
+and `<benchpressPath>/benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7/metastore_db`.
+Create a backup of these two folders. By default, this job uses the 5GB dataset.
+If you want to use the 1GB dataset, run the job with specifying the
+`dataset_name` parameter like this:
+
+```bash
+./benchpress run spark_standalone_remote_mini -i '{"dataset_name":"bpc_t93586_s2_synthetic_1GB"}'
+```
+
+6. Run Spark mini on a real machine/emulator for the second time to reuse data,
+with the same commands and options.
+
 ## Reusing database on another machine
 
 Building database takes a considerable amount of time, so it's advisable to consider
