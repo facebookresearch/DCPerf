@@ -14,21 +14,32 @@ function benchreps_tell_state () {
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
 
+function dump_breakdown_info() {
+    # if dump_breakdown_info is true, dump the breakdown info
+    if [ "$dump_breakdown_info" = true ]; then
+        # TODO: add the breakdown info to a file
+        date +"%Y-%m-%d_%T ${1}"
+    fi
+}
 if [ "${DCPERF_PERF_RECORD:-unset}" = "unset" ]; then
     export DCPERF_PERF_RECORD=0
 fi
+
 
 # Constants
 FFMPEG_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]|[--parallelism 0-6]|[--procs {number of jobs}]
+Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]|[--parallelism 0-6]|[--procs {number of jobs}]|[--sample-rate 0.0-1.0]|[--sampling-seed {seed}] [--sleep-before-perf {seconds}] [--output {output file name}]
 
     -h Display this help and exit
     --encoder encoder name. Default: svt
     --parallelism encoder's level of parallelism. Default: 1
     --procs number of parallel jobs. Default: -1
+    --sample-rate fraction of clips to process (0.0-1.0). Default: 1.0
+    --sampling-seed seed for random sampling. Default: 1000
+    --sleep-before-perf sleep time before perf record. Default: 60
     -output Result output file name. Default: "ffmpeg_video_workload_results.txt"
 EOF
 }
@@ -43,7 +54,7 @@ delete_replicas() {
 }
 
 collect_perf_record() {
-    sleep 60
+    sleep $sleep_before_perf
     if [ -f "perf.data" ]; then
     benchreps_tell_state "collect_perf_record: already exist"
         return 0
@@ -65,6 +76,19 @@ main() {
     local runtime
     runtime="medium"
 
+    local sample_rate
+    sample_rate="1.0"
+
+    local sampling_seed
+    sampling_seed=1000
+
+    sleep_before_perf=60
+
+    dump_breakdown_info=false
+
+    # Create a backup of generate_commands_all.py before making any changes, to restore it later and avoid replicating changes for susequent runs
+    cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.backup.py
+
     while :; do
         case $1 in
             --levels)
@@ -85,17 +109,32 @@ main() {
             --procs)
                 procs="$2"
                 ;;
+            --sample-rate)
+                sample_rate="$2"
+                ;;
+            --sampling-seed)
+                sampling_seed="$2"
+                ;;
+            --sleep-before-perf)
+                sleep_before_perf="$2"
+                ;;
+            --dump-breakdown-info)
+                dump_breakdown_info=true
+                ;;
             -h)
                 show_help >&2
                 exit 1
                 ;;
             *)  # end of input
-                echo "Unsupported arg $1"
+                if [ -n "$1" ]; then
+                    echo "Unsupported arg $1"
+                    exit 1
+                fi
                 break
         esac
 
         case $1 in
-            --levels|--encoder|--output|--runtime|--parallelism|--procs)
+            --levels|--encoder|--output|--runtime|--parallelism|--procs|--sample-rate|--sampling-seed|--sleep-before-perf)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -154,6 +193,7 @@ main() {
             exit 1
     fi
 
+    dump_breakdown_info "preprocessing started"
 
     set -u  # Enable unbound variables check from here onwards
     benchreps_tell_state "working on config"
@@ -161,35 +201,22 @@ main() {
 
     delete_replicas
 
-    #Customize the script to genrate commands
-    sed -i "/^ENC/d" ./generate_commands_all.py
-    sed -i "/^num_pool/d" ./generate_commands_all.py
-    sed -i "/^lp_number/d" ./generate_commands_all.py
-    if [ "$encoder" = "svt" ]; then
-        sed -i '/^bitstream\_folders/a ENCODER\=\"ffmpeg-svt\"' ./generate_commands_all.py
-        run_sh="ffmpeg-svt-1p-run-all-paral.sh"
-    elif [ "$encoder" = "x264" ]; then
-        sed -i '/^bitstream\_folders/a ENCODER\=\"ffmpeg-x264\"' ./generate_commands_all.py
-        run_sh="ffmpeg-x264-1p-run-all-paral.sh"
-    elif [ "$encoder" = "aom" ]; then
-        sed -i '/^bitstream\_folders/a ENCODER\=\"ffmpeg-libaom\"' ./generate_commands_all.py
-        run_sh="ffmpeg-libaom-2p-run-all-paral.sh"
-    else
-        benchreps_tell_state "unsupported encoder!"
-        exit 1
-    fi
-
+    # Prepare the configuration parameters
     low=$(echo "${levels}" | cut -d':' -f1)
     high=$(echo "${levels}" | cut -d':' -f2)
     if [ -z "${low}" ] || [ -z "${high}" ]; then
         benchreps_tell_state "Invalid input. Please enter a valid range."
         exit 1
     fi
+
+    # Create the ENC_MODES range
     range="ENC_MODES = [$low"
     for i in $(seq $((low+1)) "${high}"); do
         range+=",$i"
     done
     range+="]"
+
+    # Calculate num_pool
     num_files=$(find ./datasets/cuts/ | wc -l)
     num_files=$(echo "$num_files * 8" | bc -l | awk '{print int($0)}')
     num_proc=$(nproc)
@@ -203,15 +230,30 @@ main() {
         num_pool="num_pool = $procs"
     fi
 
+    # Set lp_number
     lp_number="lp_number = 1"
     if [ ! -z "$lp" ]; then
         lp_number="lp_number = $lp"
     fi
-    sed -i "/^CLIP\_DIRS/a ${lp_number}" ./generate_commands_all.py
+    if [ "$encoder" = "svt" ]; then
+        run_sh="ffmpeg-svt-1p-run-all-paral.sh"
+    elif [ "$encoder" = "x264" ]; then
+        run_sh="ffmpeg-x264-1p-run-all-paral.sh"
+    elif [ "$encoder" = "aom" ]; then
+        run_sh="ffmpeg-libaom-2p-run-all-paral.sh"
+    else
+        benchreps_tell_state "unsupported encoder!"
+        exit 1
+    fi
 
-    sed -i "/^CLIP\_DIRS/a ${range}" ./generate_commands_all.py
-    sed -i "/^CLIP\_DIRS/a ${num_pool}" ./generate_commands_all.py
-
+    # Use the Python script to modify generate_commands_all.py
+    python3 ./modify_generate_commands_all.py --sample-rate ${sample_rate} --sampling-seed ${sampling_seed} --lp-number "${lp_number}" --num-pool "${num_pool}" --range "${range}" --encoder $encoder
+    if [ $? -ne 0 ]; then
+        benchreps_tell_state "Error configuring script!"
+        exit 1
+    fi
+    # create a copy of generate_commands_all.py to generate_commands_all.debug.py for debugging purposes
+    cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.debug.py
     #generate commands
     python3 ./generate_commands_all.py
 
@@ -221,12 +263,14 @@ main() {
     ldconfig
 
     #run
+    dump_breakdown_info "benchmark started"
     benchreps_tell_state "start"
     if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
         collect_perf_record &
     fi
     ./"${run_sh}"
     benchreps_tell_state "done"
+    dump_breakdown_info "post processing started"
 
     unset LD_LIBRARY_PATH
     ldconfig
@@ -255,10 +299,13 @@ main() {
         fi
     done
 
-    sed -i "/^ENC/d" ./generate_commands_all.py
     delete_replicas
 
+    # Restore the original generate_commands_all.py from backup
+    mv ${FFMPEG_ROOT}/generate_commands_all.backup.py ${FFMPEG_ROOT}/generate_commands_all.py
+
     popd
+    dump_breakdown_info "script ended"
 
 }
 

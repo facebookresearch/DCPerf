@@ -211,6 +211,8 @@ build_ffmpeg
 download_testing_scripts
 cp "${BPKGS_FFMPEG_ROOT}/run.sh" ./
 cp ./aom-testing/scripts/content-adaptive-streaming-pipeline-scripts/generate_commands_all.py ./
+cp "${BPKGS_FFMPEG_ROOT}/modify_generate_commands_all.py" ./
+chmod +x modify_generate_commands_all.py
 mkdir -p tools
 ln -s "${FFMPEG_BUILD}/bin/ffmpeg" ./tools/ffmpeg
 ln -s "${FFMPEG_BUILD}/bin/ffmpeg" ./ffmpeg
