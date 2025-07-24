@@ -8,6 +8,8 @@
 
 from benchpress.lib import open_source
 
+from .adsim import AdSimParser
+
 from .benchdnn import BenchdnnParser
 from .cachebench import CacheBenchParser
 from .checkmark import CheckmarkParser
@@ -54,9 +56,6 @@ from .tailbench import TailBenchParser
 from .tao_bench import TaoBenchParser
 from .tao_bench_autoscale import TaoBenchAutoscaleParser
 from .wdl import WDLParser
-
-if not open_source:
-    from .adsim import AdSimParser
 
 
 def register_parsers(factory):
@@ -108,6 +107,7 @@ def register_parsers(factory):
     factory.register("rebatch", RebatchParser)
     factory.register("chm", ChmParser)
     factory.register("deser", DeserParser)
+    factory.register("adsim", AdSimParser)
 
-    if not open_source:
-        factory.register("adsim", AdSimParser)
+    # if not open_source:
+    #     factory.register("adsim", AdSimParser)

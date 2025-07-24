@@ -210,3 +210,34 @@
     - 'num_threads=16'
     - 'duration_seconds=360'
     - 'pregenerated_copies=10'
+
+
+- benchmark: adsim
+  name: adsim
+  description: Configurable Benchmark for AdServing Services
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--cfg-file {cfg_file}'
+        - '--timeout {timeout}'
+      vars:
+        - 'cfg_file=default'
+        - 'timeout=0'
+    client:
+      args:
+        - 'client'
+        - '--server {server_ip}'
+        - '--port 10086'
+        - '--workers {num_workers}'
+        - '--runtime {runtime}'
+        - '--criteria {criteria}'
+        - '--latency {lat_target_ms}'
+        - '--timeout {timeout}'
+      vars:
+        - 'server_ip'
+        - 'num_workers=20'
+        - 'runtime=120'
+        - 'criteria=P95'
+        - 'lat_target_ms=989'
+        - 'timeout=1800'

@@ -76,7 +76,7 @@ folly::coro::Task<std::unique_ptr<AdSimResponse>> AdSimHandler::co_sim(
       std::make_shared<folly::NamedThreadFactory>("reqLocal"));
   // STATS_request_received.add(1);
   // std::string request_str = *req->request_ref();
-  std::string response_str;
+  std::string response_str = "";
   auto req_objs = std::make_shared<AdSimRequestObjs>(std::move(req));
   // Execute stage by stage
   for (const Stage& stage : *stages) {

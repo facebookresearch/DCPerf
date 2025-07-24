@@ -23,10 +23,7 @@
 
 #include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 /* The interface for a kernel to get params and config itself */
 using CONFIG_F = std::shared_ptr<Kernel> (*)(const folly::dynamic&);
@@ -55,7 +52,4 @@ struct KernelConfig {
         params_d(params_d_) {}
 };
 
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

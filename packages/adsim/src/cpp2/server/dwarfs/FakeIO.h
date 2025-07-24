@@ -25,10 +25,7 @@
 #include <folly/coro/Task.h>
 #include <folly/futures/ThreadWheelTimekeeper.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 DECLARE_timeseries(fakeio_nfired);
 
@@ -172,7 +169,4 @@ class FakeIO : public Kernel {
   std::string input_str_;
   int nfired;
 };
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

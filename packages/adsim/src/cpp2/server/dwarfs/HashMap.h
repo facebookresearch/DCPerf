@@ -32,10 +32,7 @@
 #include <folly/coro/Task.h>
 #include <folly/sorted_vector_types.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 /* A kernel does hash map operations intensively */
 class HashMap : public Kernel {
@@ -157,7 +154,4 @@ class HashMap : public Kernel {
         2);
   }
 };
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

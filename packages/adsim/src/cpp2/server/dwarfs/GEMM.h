@@ -29,10 +29,7 @@
 #include <folly/coro/Collect.h>
 #include <folly/coro/Task.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 DECLARE_timeseries(gemm_nfired);
 
@@ -113,7 +110,4 @@ class GEMM : public Kernel {
   std::string input_str_;
 };
 
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

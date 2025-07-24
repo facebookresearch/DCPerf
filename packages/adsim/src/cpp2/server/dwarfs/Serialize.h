@@ -30,10 +30,7 @@
 
 #include <cea/chips/adsim/if/gen-cpp2/Serialize_types.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 DECLARE_timeseries(serialize_nfired);
 DECLARE_timeseries(deserialize_nfired);
@@ -301,7 +298,4 @@ class Deserialize : public SerializeBase {
         SerializeBase::config(config_d, "Hdeserialize", "Rdeserialized"));
   }
 };
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

@@ -26,10 +26,7 @@
 #include <folly/json/dynamic.h>
 #include <glog/logging.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 /* Base class of kernels */
 class Kernel {
@@ -131,7 +128,4 @@ class Kernel {
   }
 };
 
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

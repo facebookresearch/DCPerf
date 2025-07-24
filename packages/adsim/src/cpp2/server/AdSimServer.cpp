@@ -57,6 +57,7 @@ using apache::thrift::DefaultThriftAcceptorFactory;
 using apache::thrift::ThriftServer;
 using apache::thrift::ThriftServerAsyncProcessorFactory;
 using apache::thrift::ThriftTlsConfig;
+
 using facebook::cea::chips::adsim::AdSimGlobalObjs;
 using facebook::cea::chips::adsim::AdSimHandler;
 using facebook::cea::chips::adsim::KERNEL_DICT;
@@ -264,13 +265,9 @@ void setup_tls(std::shared_ptr<ThriftServer> server) {
 
   auto sslConfig = std::make_shared<wangle::SSLContextConfig>();
   sslConfig->setNextProtocols({"rs"});
-  // sslConfig->setCertificate(folly::test::kTestCert, folly::test::kTestKey,
-  // "");
   sslConfig->setCertificate(FLAGS_tlscert, FLAGS_tlskey, "");
   sslConfig->clientVerification =
       folly::SSLContext::VerifyClientCertificate::DO_NOT_REQUEST;
-  // sslConfig->clientCAFiles = std::vector<std::string>{folly::kTestCA};
-  // sslConfig->sessionContext = "AdSim";
   server->setSSLConfig(std::move(sslConfig));
 
   ThriftTlsConfig thriftConfig;
@@ -299,13 +296,14 @@ std::shared_ptr<ThriftServer> newServer(
   server->setNumIOWorkerThreads(server_config->num_io_handle_threads);
   server->setNumAcceptThreads(server_config->num_thrift_accept_threads);
   server->setupThreadManager(); // manually invoke earlier to get the cpu pool
+  server->setQueueTimeout(std::chrono::milliseconds(10000));
 
   // Populate thread pools in the server configuration before build pipeline
   server_config->app_cpu_threadpool =
       std::make_shared<folly::CPUThreadPoolExecutor>(
           server_config->num_app_logic_threads,
           std::make_shared<folly::NamedThreadFactory>("applicationLogic"));
-  server_config->thrift_cpu_threadpool = server->getThreadManager_deprecated();
+  server_config->thrift_cpu_threadpool = server->getThreadManager();
   server_config->thrift_io_threadpool = server->getIOThreadPool();
 
   auto handler =
@@ -321,7 +319,7 @@ std::shared_ptr<ThriftServer> newServer(
 }
 
 int main(int argc, char** argv) {
-  folly::init(&argc, &argv);
+  folly::Init init(&argc, &argv);
 
   std::unique_ptr<AdSimServerConfig> server_config =
       read_config(FLAGS_config_file);

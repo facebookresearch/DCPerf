@@ -21,10 +21,7 @@
 #include <folly/io/async/EventBase.h>
 #include <thrift/lib/cpp2/security/extensions/ThriftParametersClientExtension.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 /* A helper class to create fizz sockets.
  * From fbcode/thrift/lib/cpp2/test/server/ThriftServerTest.cpp
@@ -55,7 +52,7 @@ class FizzStopTLSConnector
         nullptr,
         folly::none,
         folly::none,
-        folly::Optional<std::vector<fizz::ech::ParsedECHConfig>>(folly::none),
+        folly::none,
         std::chrono::milliseconds(3000));
     return promise_.getFuture().getVia(&handshake_eb_);
   }
@@ -93,7 +90,4 @@ class FizzStopTLSConnector
   folly::EventBase handshake_eb_;
 };
 
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

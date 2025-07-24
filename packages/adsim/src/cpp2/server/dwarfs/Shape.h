@@ -32,10 +32,7 @@
 #include <thrift/lib/cpp2/async/RocketClientChannel.h>
 #include <thrift/lib/cpp2/server/ThriftServer.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 using apache::thrift::RocketClientChannel;
 
@@ -535,7 +532,4 @@ class ClientLite : public Client {
   std::vector<Worker> workers_;
 };
 
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

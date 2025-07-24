@@ -27,10 +27,7 @@
 #include <cea/chips/adsim/if/gen-cpp2/AdSim.h>
 #include <fb303/BaseService.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 /* Structure to hold the stage information (e.g., kernels and the threadpools
  * assigned to excute the kernels) */
@@ -67,7 +64,4 @@ class AdSimHandler : virtual public AdSimSvIf, public fb303::BaseService {
   std::shared_ptr<std::vector<Stage>> stages;
   int num_req_local_threads;
 };
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

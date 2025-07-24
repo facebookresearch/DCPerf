@@ -29,10 +29,7 @@
 
 #include <cea/chips/adsim/if/gen-cpp2/AdSim.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 class AdSimHandler; // forward declaration
 
@@ -150,7 +147,4 @@ class AdSimRequestObjs : public AdSimBaseObjs {
   struct timespec ts_;
 };
 
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

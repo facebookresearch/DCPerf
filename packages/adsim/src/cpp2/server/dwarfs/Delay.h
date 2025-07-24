@@ -27,10 +27,7 @@
 #include <folly/stats/QuantileEstimator.h>
 #include <sys/time.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 DECLARE_timeseries(delay_nfired);
 
@@ -182,7 +179,4 @@ class Delay : public Kernel {
   int ntimekeepers_;
   std::string input_str_;
 };
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

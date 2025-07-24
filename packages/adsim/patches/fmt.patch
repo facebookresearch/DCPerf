@@ -1,0 +1,18 @@
+--- deps/folly/build/fbcode_builder/manifests/fmt	2025-07-16 15:09:12.181075000 -0700
++++ fmt	2025-07-16 15:14:14.927799121 -0700
+@@ -2,12 +2,12 @@
+ name = fmt
+
+ [download]
+-url = https://github.com/fmtlib/fmt/archive/refs/tags/11.0.2.tar.gz
+-sha256 = 6cb1e6d37bdcb756dbbe59be438790db409cdb4868c66e888d5df9f13f7c027f
++url = https://github.com/fmtlib/fmt/archive/refs/tags/11.2.0.tar.gz
++sha256 = bc23066d87ab3168f27cef3e97d545fa63314f5c79df5ea444d41d56f962c6af
+
+ [build]
+ builder = cmake
+-subdir = fmt-11.0.2
++subdir = fmt-11.2.0
+
+ [cmake.defines]
+ FMT_TEST = OFF

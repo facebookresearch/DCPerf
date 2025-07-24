@@ -32,10 +32,7 @@
 #include <folly/coro/Task.h>
 #include <folly/sorted_vector_types.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 DECLARE_timeseries(deepcopy_nfired);
 
@@ -198,7 +195,4 @@ class DeepCopy : public Kernel {
   std::string input_str_;
   std::string output_str_;
 };
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

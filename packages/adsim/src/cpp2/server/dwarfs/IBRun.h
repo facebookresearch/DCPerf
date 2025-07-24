@@ -22,10 +22,7 @@
 
 #include <folly/coro/Task.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 DECLARE_timeseries(ibrun_nfired);
 
@@ -57,7 +54,4 @@ class IBRun : public Kernel {
   int rounds_; // number of iterations
   int num_methods_; // number of functions
 };
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

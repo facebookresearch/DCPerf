@@ -25,10 +25,7 @@
 #include <thrift/lib/cpp2/async/RocketClientChannel.h>
 #include <thrift/lib/cpp2/security/extensions/ThriftParametersClientExtension.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 /* A helper class to interact with AdSimCoWorker
  */
@@ -131,7 +128,4 @@ class AdSimCoWorker
   std::unique_ptr<AdSimAsyncClient> client_;
 };
 
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

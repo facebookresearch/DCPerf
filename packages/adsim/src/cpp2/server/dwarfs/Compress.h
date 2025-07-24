@@ -26,10 +26,7 @@
 
 #include <folly/coro/Task.h>
 
-namespace facebook {
-namespace cea {
-namespace chips {
-namespace adsim {
+namespace facebook::cea::chips::adsim {
 
 /* A base kernel for compress/decompress kernel */
 class CompressBase : public Kernel {
@@ -125,7 +122,4 @@ class Decompress : public CompressBase {
   }
 };
 
-} // namespace adsim
-} // namespace chips
-} // namespace cea
-} // namespace facebook
+} // namespace facebook::cea::chips::adsim

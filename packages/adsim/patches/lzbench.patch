@@ -1,0 +1,691 @@
+Binary files lzbench/libdeflate/lib/adler32.o and adsim/third_party/lzbench/libdeflate/lib/adler32.o differ
+Binary files lzbench/libdeflate/lib/arm/cpu_features.o and adsim/third_party/lzbench/libdeflate/lib/arm/cpu_features.o differ
+Binary files lzbench/libdeflate/lib/crc32.o and adsim/third_party/lzbench/libdeflate/lib/crc32.o differ
+Binary files lzbench/libdeflate/lib/deflate_compress.o and adsim/third_party/lzbench/libdeflate/lib/deflate_compress.o differ
+Binary files lzbench/libdeflate/lib/deflate_decompress.o and adsim/third_party/lzbench/libdeflate/lib/deflate_decompress.o differ
+Binary files lzbench/libdeflate/lib/gzip_compress.o and adsim/third_party/lzbench/libdeflate/lib/gzip_compress.o differ
+Binary files lzbench/libdeflate/lib/gzip_decompress.o and adsim/third_party/lzbench/libdeflate/lib/gzip_decompress.o differ
+Binary files lzbench/libdeflate/lib/utils.o and adsim/third_party/lzbench/libdeflate/lib/utils.o differ
+Binary files lzbench/libdeflate/lib/x86/cpu_features.o and adsim/third_party/lzbench/libdeflate/lib/x86/cpu_features.o differ
+Binary files lzbench/libdeflate/lib/zlib_compress.o and adsim/third_party/lzbench/libdeflate/lib/zlib_compress.o differ
+Binary files lzbench/libdeflate/lib/zlib_decompress.o and adsim/third_party/lzbench/libdeflate/lib/zlib_decompress.o differ
+diff -wbBdu -ruN '--exclude=.git' lzbench/_lzbench/compressors.cpp adsim/third_party/lzbench/_lzbench/compressors.cpp
+--- lzbench/_lzbench/compressors.cpp	2025-07-21 23:38:47.600706052 -0700
++++ adsim/third_party/lzbench/_lzbench/compressors.cpp	2022-10-24 16:08:27.000000000 -0700
+@@ -93,7 +93,7 @@
+ 
+ 
+ #ifndef BENCH_REMOVE_BZIP2
+-#include "bzip2/bzlib.h"
++#include "bzlib.h"
+ 
+ int64_t lzbench_bzip2_compress(char *inbuf, size_t insize, char *outbuf, size_t outsize, size_t level, size_t windowLog, char*)
+ {
+@@ -308,8 +308,8 @@
+ 
+ 
+ #ifndef BENCH_REMOVE_LZ4
+-#include "lz4/lz4.h"
+-#include "lz4/lz4hc.h"
++#include "lz4.h"
++#include "lz4hc.h"
+ 
+ int64_t lzbench_lz4_compress(char *inbuf, size_t insize, char *outbuf, size_t outsize, size_t level, size_t, char*)
+ {
+@@ -1499,7 +1499,7 @@
+ 
+ 
+ #ifndef BENCH_REMOVE_ZLIB
+-#include "zlib/zlib.h"
++#include "zlib.h"
+ 
+ int64_t lzbench_zlib_compress(char *inbuf, size_t insize, char *outbuf, size_t outsize, size_t level, size_t, char*)
+ {
+@@ -1670,8 +1670,10 @@
+ 
+ 
+ #ifndef BENCH_REMOVE_ZSTD
++#ifndef ZSTD_STATIC_LINKING_ONLY
+ #define ZSTD_STATIC_LINKING_ONLY
+-#include "zstd/lib/zstd.h"
++#endif
++#include "zstd.h"
+ 
+ typedef struct {
+     ZSTD_CCtx* cctx;
+diff -wbBdu -ruN '--exclude=.git' lzbench/_lzbench/lzbench.cpp adsim/third_party/lzbench/_lzbench/lzbench.cpp
+--- lzbench/_lzbench/lzbench.cpp	2025-07-21 23:38:47.600706052 -0700
++++ adsim/third_party/lzbench/_lzbench/lzbench.cpp	2022-10-24 16:08:27.000000000 -0700
+@@ -316,6 +316,20 @@
+ }
+ 
+ 
++int64_t lzbench_compress_helper(lzbench_params_t *params, std::vector<size_t>& chunk_sizes, compress_func compress, std::vector<size_t> &compr_sizes, uint8_t *inbuf, uint8_t *outbuf, size_t outsize, size_t param1, size_t param2, char* workmem)
++{
++    return lzbench_compress(params, chunk_sizes, compress, compr_sizes,
++        inbuf, outbuf, outsize, param1, param2, workmem);
++}
++
++
++int64_t lzbench_decompress_helper(lzbench_params_t *params, std::vector<size_t>& chunk_sizes, compress_func decompress, std::vector<size_t> &compr_sizes, uint8_t *inbuf, uint8_t *outbuf, size_t param1, size_t param2, char* workmem)
++{
++    return lzbench_decompress(params, chunk_sizes, decompress, compr_sizes,
++        inbuf, outbuf, param1, param2, workmem);
++}
++
++
+ void lzbench_test(lzbench_params_t *params, std::vector<size_t> &file_sizes, const compressor_desc_t* desc, int level, uint8_t *inbuf, size_t insize, uint8_t *compbuf, size_t comprsize, uint8_t *decomp, bench_rate_t rate, size_t param1)
+ {
+     float speed;
+@@ -521,7 +535,7 @@
+ }
+ 
+ 
+-int lzbench_join(lzbench_params_t* params, const char** inFileNames, unsigned ifnIdx, char* encoder_list)
++int lzbench_join(lzbench_params_t* params, const char** inFileNames, unsigned ifnIdx, const char* encoder_list)
+ {
+     bench_rate_t rate;
+     size_t comprsize, insize, inpos, totalsize;
+@@ -607,7 +621,7 @@
+ }
+ 
+ 
+-int lzbench_main(lzbench_params_t* params, const char** inFileNames, unsigned ifnIdx, char* encoder_list)
++int lzbench_main(lzbench_params_t* params, const char** inFileNames, unsigned ifnIdx, const char* encoder_list)
+ {
+     bench_rate_t rate;
+     size_t comprsize, insize, real_insize;
+@@ -713,257 +727,3 @@
+     
+     return 0;
+ }
+-
+-
+-void usage(lzbench_params_t* params)
+-{
+-    fprintf(stderr, "usage: " PROGNAME " [options] input [input2] [input3]\n\nwhere [input] is a file or a directory and [options] are:\n");
+-    fprintf(stderr, " -b#   set block/chunk size to # KB (default = MIN(filesize,%d KB))\n", (int)(params->chunk_size>>10));
+-    fprintf(stderr, " -c#   sort results by column # (1=algname, 2=ctime, 3=dtime, 4=comprsize)\n");
+-    fprintf(stderr, " -e#   #=compressors separated by '/' with parameters specified after ',' (deflt=fast)\n");
+-    fprintf(stderr, " -iX,Y set min. number of compression and decompression iterations (default = %d, %d)\n", params->c_iters, params->d_iters);
+-    fprintf(stderr, " -j    join files in memory but compress them independently (for many small files)\n");
+-    fprintf(stderr, " -l    list of available compressors and aliases\n");
+-    fprintf(stderr, " -R    read block/chunk size from random blocks (to estimate for large files)\n");
+-    fprintf(stderr, " -m#   set memory limit to # MB (default = no limit)\n");
+-    fprintf(stderr, " -o#   output text format 1=Markdown, 2=text, 3=text+origSize, 4=CSV (default = %d)\n", params->textformat);
+-    fprintf(stderr, " -p#   print time for all iterations: 1=fastest 2=average 3=median (default = %d)\n", params->timetype);
+-#ifdef UTIL_HAS_CREATEFILELIST
+-    fprintf(stderr, " -r    operate recursively on directories\n");
+-#endif
+-    fprintf(stderr, " -s#   use only compressors with compression speed over # MB (default = %d MB)\n", params->cspeed);
+-    fprintf(stderr, " -tX,Y set min. time in seconds for compression and decompression (default = %.0f, %.0f)\n", params->cmintime/1000.0, params->dmintime/1000.0);
+-    fprintf(stderr, " -v    disable progress information\n");
+-    fprintf(stderr, " -x    disable real-time process priority\n");
+-    fprintf(stderr, " -z    show (de)compression times instead of speed\n");
+-    fprintf(stderr,"\nExample usage:\n");
+-    fprintf(stderr,"  " PROGNAME " -ezstd filename = selects all levels of zstd\n");
+-    fprintf(stderr,"  " PROGNAME " -ebrotli,2,5/zstd filename = selects levels 2 & 5 of brotli and zstd\n");
+-    fprintf(stderr,"  " PROGNAME " -t3 -u5 fname = 3 sec compression and 5 sec decompression loops\n");
+-    fprintf(stderr,"  " PROGNAME " -t0 -u0 -i3 -j5 -ezstd fname = 3 compression and 5 decompression iter.\n");
+-    fprintf(stderr,"  " PROGNAME " -t0u0i3j5 -ezstd fname = the same as above with aggregated parameters\n");
+-}
+-
+-
+-int main( int argc, char** argv)
+-{
+-    FILE *in;
+-    char* encoder_list = NULL;
+-    int result = 0, sort_col = 0, real_time = 1;
+-    lzbench_params_t lzparams;
+-    lzbench_params_t* params = &lzparams;
+-    const char** inFileNames = (const char**) calloc(argc, sizeof(char*));
+-    unsigned ifnIdx=0;
+-    bool join = false;
+-#ifdef UTIL_HAS_CREATEFILELIST
+-    const char** extendedFileList = NULL;
+-    char* fileNamesBuf = NULL;
+-    unsigned fileNamesNb, recursive=0;
+-#endif
+-
+-    if (inFileNames==NULL) {
+-        LZBENCH_PRINT(2, "Allocation error : not enough memory%c\n", ' ');
+-        return 1;
+-    }
+-
+-    memset(params, 0, sizeof(lzbench_params_t));
+-    params->timetype = FASTEST;
+-    params->textformat = TEXT;
+-    params->show_speed = 1;
+-    params->verbose = 2;
+-    params->chunk_size = (1ULL << 31) - (1ULL << 31)/6;
+-    params->cspeed = 0;
+-    params->c_iters = params->d_iters = 1;
+-    params->cmintime = 10*DEFAULT_LOOP_TIME/1000000; // 1 sec
+-    params->dmintime = 20*DEFAULT_LOOP_TIME/1000000; // 2 sec
+-    params->cloop_time = params->dloop_time = DEFAULT_LOOP_TIME;
+-
+-
+-    while ((argc>1) && (argv[1][0]=='-')) {
+-    char* argument = argv[1]+1;
+-    if (!strcmp(argument, "-compress-only")) params->compress_only = 1;
+-    else while (argument[0] != 0) {
+-        char* numPtr = argument + 1;
+-        unsigned number = 0;
+-        while ((*numPtr >='0') && (*numPtr <='9')) { number *= 10;  number += *numPtr - '0'; numPtr++; }
+-        switch (argument[0])
+-        {
+-        case 'b':
+-            params->chunk_size = number << 10;
+-            break;
+-        case 'c':
+-            sort_col = number;
+-            break;
+-        case 'e':
+-            encoder_list = strdup(argument + 1);
+-            numPtr += strlen(numPtr);
+-            break;
+-        case 'i':
+-            params->c_iters = number;
+-            if (*numPtr == ',')
+-            {
+-                numPtr++;
+-                number = 0;
+-                while ((*numPtr >='0') && (*numPtr <='9')) { number *= 10;  number += *numPtr - '0'; numPtr++; }
+-                params->d_iters = number;
+-            }
+-            break;
+-        case 'j':
+-            join = true;
+-            break;
+-        case 'm':
+-            params->mem_limit = number << 18; /*  total memory usage = mem_limit * 4  */
+-            if (params->textformat == TEXT) params->textformat = TEXT_FULL;
+-            break;
+-        case 'o':
+-            params->textformat = (textformat_e)number;
+-            if (params->textformat == CSV) params->verbose = 0;
+-            break;
+-        case 'p':
+-            params->timetype = (timetype_e)number;
+-            break;
+-#ifdef UTIL_HAS_CREATEFILELIST
+-        case 'r':
+-            recursive = 1;
+-            break;
+-#endif
+-        case 'R':
+-            params->random_read = 1;
+-            srand(time(NULL));
+-            break;
+-        case 's':
+-            params->cspeed = number;
+-            break;
+-        case 't':
+-            params->cmintime = 1000*number;
+-            params->cloop_time = (params->cmintime)?DEFAULT_LOOP_TIME:0;
+-            if (*numPtr == ',')
+-            {
+-                numPtr++;
+-                number = 0;
+-                while ((*numPtr >='0') && (*numPtr <='9')) { number *= 10;  number += *numPtr - '0'; numPtr++; }
+-                params->dmintime = 1000*number;
+-                params->dloop_time = (params->dmintime)?DEFAULT_LOOP_TIME:0;
+-            }
+-            break;
+-        case 'u':
+-            params->dmintime = 1000*number;
+-            params->dloop_time = (params->dmintime)?DEFAULT_LOOP_TIME:0;
+-            break;
+-        case 'v':
+-            params->verbose = number;
+-            break;
+-        case 'x':
+-            real_time = 0;
+-            break;
+-        case 'z':
+-            params->show_speed = 0;
+-            break;
+-        case '-': // --help
+-        case 'h':
+-            usage(params);
+-            goto _clean;
+-        case 'l':
+-            printf("\nAvailable compressors for -e option:\n");
+-            printf("all - alias for all available compressors\n");
+-            printf("fast - alias for compressors with compression speed over 100 MB/s (default)\n");
+-            printf("opt - compressors with optimal parsing (slow compression, fast decompression)\n");
+-            printf("lzo / ucl - aliases for all levels of given compressors\n");
+-            for (int i=1; i<LZBENCH_COMPRESSOR_COUNT; i++)
+-            {
+-                if (comp_desc[i].compress)
+-                {
+-                    if (comp_desc[i].first_level < comp_desc[i].last_level)
+-                        printf("%s %s [%d-%d]\n", comp_desc[i].name, comp_desc[i].version, comp_desc[i].first_level, comp_desc[i].last_level);
+-                    else
+-                        printf("%s %s\n", comp_desc[i].name, comp_desc[i].version);
+-                }
+-            }
+-            return 0;
+-        default:
+-            fprintf(stderr, "unknown option: %s\n", argv[1]);
+-            result = 1; goto _clean;
+-        }
+-        argument = numPtr;
+-    }
+-    argv++;
+-    argc--;
+-    }
+-
+-    while (argc > 1) {
+-        inFileNames[ifnIdx++] = argv[1];
+-        argv++;
+-        argc--;
+-    }
+-
+-    LZBENCH_PRINT(2, PROGNAME " " PROGVERSION " (%d-bit " PROGOS ")   Assembled by P.Skibinski\n", (uint32_t)(8 * sizeof(uint8_t*)));
+-    LZBENCH_PRINT(5, "params: chunk_size=%d c_iters=%d d_iters=%d cspeed=%d cmintime=%d dmintime=%d encoder_list=%s\n", (int)params->chunk_size, params->c_iters, params->d_iters, params->cspeed, params->cmintime, params->dmintime, encoder_list);
+-
+-    if (ifnIdx < 1)  { usage(params); goto _clean; }
+-
+-    if (real_time)
+-    {
+-        SET_HIGH_PRIORITY;
+-    } else {
+-        LZBENCH_PRINT(2, "The real-time process priority disabled%c\n", ' ');
+-    }
+-
+-
+-#ifdef UTIL_HAS_CREATEFILELIST
+-    if (recursive) {  /* at this stage, filenameTable is a list of paths, which can contain both files and directories */ 
+-        extendedFileList = UTIL_createFileList(inFileNames, ifnIdx, &fileNamesBuf, &fileNamesNb);
+-        if (extendedFileList) {
+-            unsigned u;
+-            for (u=0; u<fileNamesNb; u++) LZBENCH_PRINT(4, "%u %s\n", u, extendedFileList[u]);
+-            free((void*)inFileNames);
+-            inFileNames = extendedFileList;
+-            ifnIdx = fileNamesNb;
+-        }
+-    }
+-#endif
+-
+-    /* Main function */
+-    if (join)
+-        result = lzbench_join(params, inFileNames, ifnIdx, encoder_list);
+-    else
+-        result = lzbench_main(params, inFileNames, ifnIdx, encoder_list);
+-
+-    if (params->chunk_size > 10 * (1<<20)) {
+-        LZBENCH_PRINT(2, "done... (cIters=%d dIters=%d cTime=%.1f dTime=%.1f chunkSize=%dMB cSpeed=%dMB)\n", params->c_iters, params->d_iters, params->cmintime/1000.0, params->dmintime/1000.0, (int)(params->chunk_size >> 20), params->cspeed);
+-    } else {
+-        LZBENCH_PRINT(2, "done... (cIters=%d dIters=%d cTime=%.1f dTime=%.1f chunkSize=%dKB cSpeed=%dMB)\n", params->c_iters, params->d_iters, params->cmintime/1000.0, params->dmintime/1000.0, (int)(params->chunk_size >> 10), params->cspeed);
+-    }
+-
+-    if (sort_col <= 0) goto _clean;
+-
+-    printf("\nThe results sorted by column number %d:\n", sort_col);
+-    print_header(params);
+-
+-    switch (sort_col)
+-    {
+-        default:
+-        case 1: std::sort(params->results.begin(), params->results.end(), less_using_1st_column()); break;
+-        case 2: std::sort(params->results.begin(), params->results.end(), less_using_2nd_column()); break;
+-        case 3: std::sort(params->results.begin(), params->results.end(), less_using_3rd_column()); break;
+-        case 4: std::sort(params->results.begin(), params->results.end(), less_using_4th_column()); break;
+-        case 5: std::sort(params->results.begin(), params->results.end(), less_using_5th_column()); break;
+-    }
+-
+-    for (std::vector<string_table_t>::iterator it = params->results.begin(); it!=params->results.end(); it++)
+-    {
+-        if (params->show_speed)
+-            print_speed(params, *it);
+-        else
+-            print_time(params, *it);
+-    }
+-
+-_clean:
+-    if (encoder_list) free(encoder_list);
+-#ifdef UTIL_HAS_CREATEFILELIST
+-    if (extendedFileList)
+-        UTIL_freeFileList(extendedFileList, fileNamesBuf);
+-    else
+-#endif
+-        free((void*)inFileNames);
+-    return result;
+-}
+diff -wbBdu -ruN '--exclude=.git' lzbench/_lzbench/lzbench.h adsim/third_party/lzbench/_lzbench/lzbench.h
+--- lzbench/_lzbench/lzbench.h	2025-07-21 23:38:47.600706052 -0700
++++ adsim/third_party/lzbench/_lzbench/lzbench.h	2022-10-24 16:08:27.000000000 -0700
+@@ -7,7 +7,6 @@
+ #include <vector>
+ #include <string>
+ #include "compressors.h"
+-#include "lizard/lizard_compress.h"    // LIZARD_MAX_CLEVEL
+ 
+ #define PROGNAME "lzbench"
+ #define PROGVERSION "1.8"
+@@ -44,7 +43,7 @@
+ 	#define InitTimer(rate) if (!QueryPerformanceFrequency(&rate)) { printf("QueryPerformance not present"); };
+ 	#define GetTime(now) QueryPerformanceCounter(&now); 
+ 	#define GetDiffTime(rate, start_ticks, end_ticks) (1000000000ULL*(end_ticks.QuadPart - start_ticks.QuadPart)/rate.QuadPart)
+-	void uni_sleep(UINT milisec) { Sleep(milisec); };
++	#define uni_sleep(milisec) (Sleep(milisec))
+     #ifndef fseeko
+ 		#ifdef _fseeki64
+             #define fseeko _fseeki64 
+@@ -60,7 +59,7 @@
+ 	#include <time.h>   
+ 	#include <unistd.h>
+ 	#include <sys/resource.h>
+-	void uni_sleep(uint32_t milisec) { usleep(milisec * 1000); };
++	#define uni_sleep(milisec) (usleep(milisec * 1000))
+ #if defined(__APPLE__) || defined(__MACH__)
+     #include <mach/mach_time.h>
+ 	typedef mach_timebase_info_data_t bench_rate_t;
+@@ -137,7 +136,7 @@
+ 
+ 
+ 
+-#define LZBENCH_COMPRESSOR_COUNT 71
++#define LZBENCH_COMPRESSOR_COUNT 70
+ 
+ static const compressor_desc_t comp_desc[LZBENCH_COMPRESSOR_COUNT] =
+ {
+@@ -159,7 +158,6 @@
+     { "lz4",        "1.9.2",       0,   0,    0,       0, lzbench_lz4_compress,        lzbench_lz4_decompress,        NULL,                    NULL },
+     { "lz4fast",    "1.9.2",       1,  99,    0,       0, lzbench_lz4fast_compress,    lzbench_lz4_decompress,        NULL,                    NULL },
+     { "lz4hc",      "1.9.2",       1,  12,    0,       0, lzbench_lz4hc_compress,      lzbench_lz4_decompress,        NULL,                    NULL },
+-    { "lizard",     "1.0",  LIZARD_MIN_CLEVEL, LIZARD_MAX_CLEVEL, 0, 0, lzbench_lizard_compress,      lzbench_lizard_decompress,        NULL,                    NULL },
+     { "lzf",        "3.6",         0,   1,    0,       0, lzbench_lzf_compress,        lzbench_lzf_decompress,        NULL,                    NULL },
+     { "lzfse",      "2017-03-08",  0,   0,    0,       0, lzbench_lzfse_compress,      lzbench_lzfse_decompress,      lzbench_lzfse_init,      lzbench_lzfse_deinit },
+     { "lzg",        "1.0.10",      1,   9,    0,       0, lzbench_lzg_compress,        lzbench_lzg_decompress,        NULL,                    NULL },
+diff -wbBdu -ruN '--exclude=.git' lzbench/_lzbench/main.cpp adsim/third_party/lzbench/_lzbench/main.cpp
+--- lzbench/_lzbench/main.cpp	1969-12-31 16:00:00.000000000 -0800
++++ adsim/third_party/lzbench/_lzbench/main.cpp	2022-10-24 16:08:27.000000000 -0700
+@@ -0,0 +1,286 @@
++/*
++(C) 2011-2017 by Przemyslaw Skibinski (inikep@gmail.com)
++
++    LICENSE
++
++    This program is free software; you can redistribute it and/or
++    modify it under the terms of the GNU General Public License as
++    published by the Free Software Foundation; either version 3 of
++    the License, or (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful, but
++    WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++    General Public License for more details at
++    Visit <http://www.gnu.org/copyleft/gpl.html>.
++
++*/
++
++#include "lzbench.h"
++#include "util.h"
++
++#include <algorithm>
++#include <stdlib.h>
++#include <string.h>
++
++extern int lzbench_main(lzbench_params_t* params, const char** inFileNames, unsigned ifnIdx, const char* encoder_list);
++extern int lzbench_join(lzbench_params_t* params, const char** inFileNames, unsigned ifnIdx, const char* encoder_list);
++
++extern void print_header(lzbench_params_t *params);
++extern void print_speed(lzbench_params_t *params, string_table_t& row);
++extern void print_time(lzbench_params_t *params, string_table_t& row);
++extern void print_stats(lzbench_params_t *params, const compressor_desc_t* desc, int level, std::vector<uint64_t> &ctime, std::vector<uint64_t> &dtime, size_t insize, size_t outsize, bool decomp_error);
++
++
++void usage(lzbench_params_t* params)
++{
++    fprintf(stderr, "usage: " PROGNAME " [options] input [input2] [input3]\n\nwhere [input] is a file or a directory and [options] are:\n");
++    fprintf(stderr, " -b#   set block/chunk size to # KB (default = MIN(filesize,%d KB))\n", (int)(params->chunk_size>>10));
++    fprintf(stderr, " -c#   sort results by column # (1=algname, 2=ctime, 3=dtime, 4=comprsize)\n");
++    fprintf(stderr, " -e#   #=compressors separated by '/' with parameters specified after ',' (deflt=fast)\n");
++    fprintf(stderr, " -iX,Y set min. number of compression and decompression iterations (default = %d, %d)\n", params->c_iters, params->d_iters);
++    fprintf(stderr, " -j    join files in memory but compress them independently (for many small files)\n");
++    fprintf(stderr, " -l    list of available compressors and aliases\n");
++    fprintf(stderr, " -R    read block/chunk size from random blocks (to estimate for large files)\n");
++    fprintf(stderr, " -m#   set memory limit to # MB (default = no limit)\n");
++    fprintf(stderr, " -o#   output text format 1=Markdown, 2=text, 3=text+origSize, 4=CSV (default = %d)\n", params->textformat);
++    fprintf(stderr, " -p#   print time for all iterations: 1=fastest 2=average 3=median (default = %d)\n", params->timetype);
++#ifdef UTIL_HAS_CREATEFILELIST
++    fprintf(stderr, " -r    operate recursively on directories\n");
++#endif
++    fprintf(stderr, " -s#   use only compressors with compression speed over # MB (default = %d MB)\n", params->cspeed);
++    fprintf(stderr, " -tX,Y set min. time in seconds for compression and decompression (default = %.0f, %.0f)\n", params->cmintime/1000.0, params->dmintime/1000.0);
++    fprintf(stderr, " -v    disable progress information\n");
++    fprintf(stderr, " -x    disable real-time process priority\n");
++    fprintf(stderr, " -z    show (de)compression times instead of speed\n");
++    fprintf(stderr,"\nExample usage:\n");
++    fprintf(stderr,"  " PROGNAME " -ezstd filename = selects all levels of zstd\n");
++    fprintf(stderr,"  " PROGNAME " -ebrotli,2,5/zstd filename = selects levels 2 & 5 of brotli and zstd\n");
++    fprintf(stderr,"  " PROGNAME " -t3 -u5 fname = 3 sec compression and 5 sec decompression loops\n");
++    fprintf(stderr,"  " PROGNAME " -t0 -u0 -i3 -j5 -ezstd fname = 3 compression and 5 decompression iter.\n");
++    fprintf(stderr,"  " PROGNAME " -t0u0i3j5 -ezstd fname = the same as above with aggregated parameters\n");
++}
++
++
++int main( int argc, char** argv)
++{
++    FILE *in;
++    char* encoder_list = NULL;
++    int result = 0, sort_col = 0, real_time = 1;
++    lzbench_params_t lzparams;
++    lzbench_params_t* params = &lzparams;
++    const char** inFileNames = (const char**) calloc(argc, sizeof(char*));
++    unsigned ifnIdx=0;
++    bool join = false;
++#ifdef UTIL_HAS_CREATEFILELIST
++    const char** extendedFileList = NULL;
++    char* fileNamesBuf = NULL;
++    unsigned fileNamesNb, recursive=0;
++#endif
++
++    if (inFileNames==NULL) {
++        LZBENCH_PRINT(2, "Allocation error : not enough memory%c\n", ' ');
++        return 1;
++    }
++
++    memset(params, 0, sizeof(lzbench_params_t));
++    params->timetype = FASTEST;
++    params->textformat = TEXT;
++    params->show_speed = 1;
++    params->verbose = 2;
++    params->chunk_size = (1ULL << 31) - (1ULL << 31)/6;
++    params->cspeed = 0;
++    params->c_iters = params->d_iters = 1;
++    params->cmintime = 10*DEFAULT_LOOP_TIME/1000000; // 1 sec
++    params->dmintime = 20*DEFAULT_LOOP_TIME/1000000; // 2 sec
++    params->cloop_time = params->dloop_time = DEFAULT_LOOP_TIME;
++
++
++    while ((argc>1) && (argv[1][0]=='-')) {
++    char* argument = argv[1]+1;
++    if (!strcmp(argument, "-compress-only")) params->compress_only = 1;
++    else while (argument[0] != 0) {
++        char* numPtr = argument + 1;
++        unsigned number = 0;
++        while ((*numPtr >='0') && (*numPtr <='9')) { number *= 10;  number += *numPtr - '0'; numPtr++; }
++        switch (argument[0])
++        {
++        case 'b':
++            params->chunk_size = number << 10;
++            break;
++        case 'c':
++            sort_col = number;
++            break;
++        case 'e':
++            encoder_list = strdup(argument + 1);
++            numPtr += strlen(numPtr);
++            break;
++        case 'i':
++            params->c_iters = number;
++            if (*numPtr == ',')
++            {
++                numPtr++;
++                number = 0;
++                while ((*numPtr >='0') && (*numPtr <='9')) { number *= 10;  number += *numPtr - '0'; numPtr++; }
++                params->d_iters = number;
++            }
++            break;
++        case 'j':
++            join = true;
++            break;
++        case 'm':
++            params->mem_limit = number << 18; /*  total memory usage = mem_limit * 4  */
++            if (params->textformat == TEXT) params->textformat = TEXT_FULL;
++            break;
++        case 'o':
++            params->textformat = (textformat_e)number;
++            if (params->textformat == CSV) params->verbose = 0;
++            break;
++        case 'p':
++            params->timetype = (timetype_e)number;
++            break;
++#ifdef UTIL_HAS_CREATEFILELIST
++        case 'r':
++            recursive = 1;
++            break;
++#endif
++        case 'R':
++            params->random_read = 1;
++            srand(time(NULL));
++            break;
++        case 's':
++            params->cspeed = number;
++            break;
++        case 't':
++            params->cmintime = 1000*number;
++            params->cloop_time = (params->cmintime)?DEFAULT_LOOP_TIME:0;
++            if (*numPtr == ',')
++            {
++                numPtr++;
++                number = 0;
++                while ((*numPtr >='0') && (*numPtr <='9')) { number *= 10;  number += *numPtr - '0'; numPtr++; }
++                params->dmintime = 1000*number;
++                params->dloop_time = (params->dmintime)?DEFAULT_LOOP_TIME:0;
++            }
++            break;
++        case 'u':
++            params->dmintime = 1000*number;
++            params->dloop_time = (params->dmintime)?DEFAULT_LOOP_TIME:0;
++            break;
++        case 'v':
++            params->verbose = number;
++            break;
++        case 'x':
++            real_time = 0;
++            break;
++        case 'z':
++            params->show_speed = 0;
++            break;
++        case '-': // --help
++        case 'h':
++            usage(params);
++            goto _clean;
++        case 'l':
++            printf("\nAvailable compressors for -e option:\n");
++            printf("all - alias for all available compressors\n");
++            printf("fast - alias for compressors with compression speed over 100 MB/s (default)\n");
++            printf("opt - compressors with optimal parsing (slow compression, fast decompression)\n");
++            printf("lzo / ucl - aliases for all levels of given compressors\n");
++            for (int i=1; i<LZBENCH_COMPRESSOR_COUNT; i++)
++            {
++                if (comp_desc[i].compress)
++                {
++                    if (comp_desc[i].first_level < comp_desc[i].last_level)
++                        printf("%s %s [%d-%d]\n", comp_desc[i].name, comp_desc[i].version, comp_desc[i].first_level, comp_desc[i].last_level);
++                    else
++                        printf("%s %s\n", comp_desc[i].name, comp_desc[i].version);
++                }
++            }
++            return 0;
++        default:
++            fprintf(stderr, "unknown option: %s\n", argv[1]);
++            result = 1; goto _clean;
++        }
++        argument = numPtr;
++    }
++    argv++;
++    argc--;
++    }
++
++    while (argc > 1) {
++        inFileNames[ifnIdx++] = argv[1];
++        argv++;
++        argc--;
++    }
++
++    LZBENCH_PRINT(2, PROGNAME " " PROGVERSION " (%d-bit " PROGOS ")   Assembled by P.Skibinski\n", (uint32_t)(8 * sizeof(uint8_t*)));
++    LZBENCH_PRINT(5, "params: chunk_size=%d c_iters=%d d_iters=%d cspeed=%d cmintime=%d dmintime=%d encoder_list=%s\n", (int)params->chunk_size, params->c_iters, params->d_iters, params->cspeed, params->cmintime, params->dmintime, encoder_list);
++
++    if (ifnIdx < 1)  { usage(params); goto _clean; }
++
++    if (real_time)
++    {
++        SET_HIGH_PRIORITY;
++    } else {
++        LZBENCH_PRINT(2, "The real-time process priority disabled%c\n", ' ');
++    }
++
++
++#ifdef UTIL_HAS_CREATEFILELIST
++    if (recursive) {  /* at this stage, filenameTable is a list of paths, which can contain both files and directories */ 
++        extendedFileList = UTIL_createFileList(inFileNames, ifnIdx, &fileNamesBuf, &fileNamesNb);
++        if (extendedFileList) {
++            unsigned u;
++            for (u=0; u<fileNamesNb; u++) LZBENCH_PRINT(4, "%u %s\n", u, extendedFileList[u]);
++            free((void*)inFileNames);
++            inFileNames = extendedFileList;
++            ifnIdx = fileNamesNb;
++        }
++    }
++#endif
++
++    /* Main function */
++    if (join)
++        result = lzbench_join(params, inFileNames, ifnIdx, encoder_list);
++    else
++        result = lzbench_main(params, inFileNames, ifnIdx, encoder_list);
++
++    if (params->chunk_size > 10 * (1<<20)) {
++        LZBENCH_PRINT(2, "done... (cIters=%d dIters=%d cTime=%.1f dTime=%.1f chunkSize=%dMB cSpeed=%dMB)\n", params->c_iters, params->d_iters, params->cmintime/1000.0, params->dmintime/1000.0, (int)(params->chunk_size >> 20), params->cspeed);
++    } else {
++        LZBENCH_PRINT(2, "done... (cIters=%d dIters=%d cTime=%.1f dTime=%.1f chunkSize=%dKB cSpeed=%dMB)\n", params->c_iters, params->d_iters, params->cmintime/1000.0, params->dmintime/1000.0, (int)(params->chunk_size >> 10), params->cspeed);
++    }
++
++    if (sort_col <= 0) goto _clean;
++
++    printf("\nThe results sorted by column number %d:\n", sort_col);
++    print_header(params);
++
++    switch (sort_col)
++    {
++        default:
++        case 1: std::sort(params->results.begin(), params->results.end(), less_using_1st_column()); break;
++        case 2: std::sort(params->results.begin(), params->results.end(), less_using_2nd_column()); break;
++        case 3: std::sort(params->results.begin(), params->results.end(), less_using_3rd_column()); break;
++        case 4: std::sort(params->results.begin(), params->results.end(), less_using_4th_column()); break;
++        case 5: std::sort(params->results.begin(), params->results.end(), less_using_5th_column()); break;
++    }
++
++    for (std::vector<string_table_t>::iterator it = params->results.begin(); it!=params->results.end(); it++)
++    {
++        if (params->show_speed)
++            print_speed(params, *it);
++        else
++            print_time(params, *it);
++    }
++
++_clean:
++    if (encoder_list) free(encoder_list);
++#ifdef UTIL_HAS_CREATEFILELIST
++    if (extendedFileList)
++        UTIL_freeFileList(extendedFileList, fileNamesBuf);
++    else
++#endif
++        free((void*)inFileNames);
++    return result;
++}

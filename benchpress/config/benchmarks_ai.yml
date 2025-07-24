@@ -30,3 +30,25 @@ deser:
   path: ./benchmarks/deser/deser_bench
   metrics:
     - Mops/sec
+
+adsim:
+  parser: adsim
+  install_script: ./packages/adsim/install_adsim.sh
+  cleanup_script: ./packages/adsim/cleanup_adsim.sh
+  path: ./benchmarks/adsim/run_adsim.py
+  roles:
+    - client
+    - server
+  tags:
+    scope:
+      - app
+      - ads
+    component:
+      - cpu
+      - memory
+  metrics:
+    - final_achieved_qps
+    - final_latency_msec
+    - final_requested_qps
+    - target_latency_msec
+    - target_latency_percentile
