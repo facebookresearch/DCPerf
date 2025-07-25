@@ -120,9 +120,17 @@ def run_server(args):
     if args.interface_name != "lo":
         affinitize_nic(args)
     # number of threads for various paths
-    n_threads = max(int(n_cores * args.fast_threads_ratio), 1)
+    if hasattr(args, "num_fast_threads") and args.num_fast_threads > 0:
+        n_threads = args.num_fast_threads
+    else:
+        n_threads = max(int(n_cores * args.fast_threads_ratio), 1)
+
     n_dispatchers = max(int(n_threads * args.dispatcher_to_fast_ratio), 1)
-    n_slow_threads = max(int(n_threads * args.slow_to_fast_ratio), 1)
+
+    if hasattr(args, "num_slow_threads") and args.num_slow_threads > 0:
+        n_slow_threads = args.num_slow_threads
+    else:
+        n_slow_threads = max(int(n_threads * args.slow_to_fast_ratio), 1)
     # memory size
     n_mem = int(args.memsize * 1024 * args_utils.MEM_USAGE_FACTOR)
     # port number
@@ -306,6 +314,18 @@ def init_parser():
         type=int,
         default=11211,
         help="port number of server",
+    )
+    server_parser.add_argument(
+        "--num-fast-threads",
+        type=int,
+        default=0,
+        help="number of fast threads for the server. If not specified, will use default calculation (cores * fast_threads_ratio).",
+    )
+    server_parser.add_argument(
+        "--num-slow-threads",
+        type=int,
+        default=0,
+        help="number of slow threads for the server. If not specified, will use default calculation (fast_threads * slow_to_fast_ratio).",
     )
 
     # client-side arguments

@@ -131,6 +131,24 @@ def init_parser():
         help="time in seconds for the client to wait after warmup before starting the test. "
         + " If set to 0 or positive, this will be used in the client instructions.",
     )
+    parser.add_argument(
+        "--num-client-threads",
+        type=int,
+        default=0,
+        help="number of client threads to use. If not specified, will use default calculation (cores - 6).",
+    )
+    parser.add_argument(
+        "--num-fast-threads",
+        type=int,
+        default=0,
+        help="number of fast threads for the server. If not specified, will use default calculation (cores * fast_threads_ratio).",
+    )
+    parser.add_argument(
+        "--num-slow-threads",
+        type=int,
+        default=0,
+        help="number of slow threads for the server. If not specified, will use default calculation (fast_threads * slow_to_fast_ratio).",
+    )
     return parser
 
 
@@ -158,6 +176,13 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
         script_args["--port-number-start"] = port_number_start
     script_args["--bind-cpu"] = bind_cpu
     script_args["--bind-mem"] = bind_mem
+
+    # Add custom thread parameters if specified
+    if hasattr(args, "num_fast_threads") and args.num_fast_threads > 0:
+        script_args["--num-fast-threads"] = args.num_fast_threads
+    if hasattr(args, "num_slow_threads") and args.num_slow_threads > 0:
+        script_args["--num-slow-threads"] = args.num_slow_threads
+
     cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
 
     for argname, argval in script_args.items():

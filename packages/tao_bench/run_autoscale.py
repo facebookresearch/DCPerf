@@ -73,6 +73,13 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number):
     }
     server_args["--memsize"] = memsize
     server_args["--port-number"] = port_number
+
+    # Add custom thread parameters if specified
+    if hasattr(args, "num_fast_threads") and args.num_fast_threads > 0:
+        server_args["--num-fast-threads"] = args.num_fast_threads
+    if hasattr(args, "num_slow_threads") and args.num_slow_threads > 0:
+        server_args["--num-slow-threads"] = args.num_slow_threads
+
     cmd = [
         "taskset",
         "--cpu-list",
@@ -84,7 +91,7 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number):
         if isinstance(argval, bool):
             if argval:
                 cmd.append(argname)
-        elif argval is not None:
+        elif argval is not None and argval != 0:
             cmd += [argname, str(argval)]
 
     if len(NUMA_NODES) > 1 and (args.bind_cpu > 0 or args.bind_mem > 0):
@@ -160,6 +167,8 @@ def gen_client_instructions(args, to_file=True):
                 client_args["wait_after_warmup"] = args.client_wait_after_warmup
             if args.disable_tls != 0:
                 client_args["disable_tls"] = 1
+            if hasattr(args, "num_client_threads") and args.num_client_threads > 0:
+                client_args["num_threads"] = args.num_client_threads
             clients[c] += (
                 " ".join(
                     [
@@ -192,6 +201,8 @@ def gen_client_instructions(args, to_file=True):
                 client_args["wait_after_warmup"] = args.client_wait_after_warmup
             if args.disable_tls != 0:
                 client_args["disable_tls"] = 1
+            if hasattr(args, "num_client_threads") and args.num_client_threads > 0:
+                client_args["num_threads"] = args.num_client_threads
             clients[i] += (
                 " ".join(
                     [
@@ -438,6 +449,23 @@ def init_parser():
         default=0,
         help="sanity check for the network bandwidth and latency between the server and the client.",
     )
+    parser.add_argument(
+        "--num-fast-threads",
+        type=int,
+        default=0,
+        help="number of fast threads for the server. If not specified, will use default calculation (cores * fast_threads_ratio).",
+    )
+    parser.add_argument(
+        "--num-slow-threads",
+        type=int,
+        default=0,
+        help="number of slow threads for the server. If not specified, will use default calculation (fast_threads * slow_to_fast_ratio).",
+    )
+
+    # Add custom thread parameters to SERVER_CMD_OPTIONS
+    SERVER_CMD_OPTIONS.append(("--num-fast-threads", "num_fast_threads"))
+    SERVER_CMD_OPTIONS.append(("--num-slow-threads", "num_slow_threads"))
+
     # functions
     parser.set_defaults(func=run_server)
     return parser
