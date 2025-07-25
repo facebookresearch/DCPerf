@@ -254,6 +254,8 @@ pushd "${BENCHPRESS_ROOT}"
 # Patch for Java
 git apply --check "${TEMPLATES_DIR}/cassandra-env.patch" && git apply "${TEMPLATES_DIR}/cassandra-env.patch"
 git apply --check "${TEMPLATES_DIR}/jvm_options.patch" && git apply "${TEMPLATES_DIR}/jvm_options.patch"
+# shellcheck disable=SC2016
+echo 'JVM_OPTS="$JVM_OPTS -Xss512k"' >> "${DJANGO_WORKLOAD_ROOT}/apache-cassandra/conf/cassandra-env.sh"
 # Patch for gen-urls-file
 git apply --check "${TEMPLATES_DIR}/gen-urls-file.patch" && git apply "${TEMPLATES_DIR}/gen-urls-file.patch"
 popd
