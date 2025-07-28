@@ -268,7 +268,7 @@ start_django_server() {
       # we need to restart Cassandra after loaing an snapshot
       echo "Cassandra is loaded using the snapshot"
     fi
-    if [ "$skip_data_setup" = false ]; then
+    if [ "$skip_data_setup" = false ] && ! [ "${SKIP_DATAGEN}" = 1 ]; then
       echo "Generating database "
       DJANGO_SETTINGS_MODULE=cluster_settings ./${venv_dir}/bin/django-admin flush
       DJANGO_SETTINGS_MODULE=cluster_settings ./${venv_dir}/bin/django-admin setup
@@ -381,10 +381,18 @@ main() {
   cassandra_bind_addr=''
 
   local django_ib_min
-  django_ib_min="100000"
+  if [ -n "${IB_MIN}" ]; then
+    django_ib_min="${IB_MIN}"
+  else
+    django_ib_min="100000"
+  fi
 
   local django_ib_max
-  django_ib_max="200000"
+  if [ -n "${IB_MAX}" ]; then
+    django_ib_max="${IB_MAX}"
+  else
+    django_ib_max="200000"
+  fi
 
   local take_a_snapshot
   take_a_snapshot=false
@@ -521,7 +529,7 @@ main() {
   elif [ "$role" = "clientserver" ]; then
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
-    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps";
+    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}";
   elif [ "$role" = "client" ]; then
     start_client "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
