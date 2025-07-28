@@ -59,7 +59,7 @@ jobs:
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}
-      run: dnf update -y; dnf install -y git pciutils which python3-devel ; dnf group install -y "Development Tools"
+      run: dnf update -y; dnf install -y git pciutils which python3-devel ; dnf group install -y "Development Tools" --exclude="texlive*"
 
     - name: Checkout the Repository
       uses: actions/checkout@v4

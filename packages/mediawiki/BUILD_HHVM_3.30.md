@@ -75,7 +75,7 @@ sudo dnf install \
 Development Tools:
 
 ```
-sudo dnf -y group install "Development Tools"
+sudo dnf -y group install "Development Tools" --exclude="texlive*"
 ```
 
 ### CentOS 9 Deps
@@ -93,7 +93,7 @@ sudo dnf install \
     numactl-devel openldap-devel glib2-devel \
     perl krb5-devel inotify-tools-devel
 
-sudo dnf -y group install "Development Tools"
+sudo dnf -y group install "Development Tools" --exclude="texlive*"
 ```
 
 ### Ubuntu 22.04 Deps

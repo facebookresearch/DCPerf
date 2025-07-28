@@ -15,7 +15,7 @@ DJANGO_SERVER_ROOT="${DJANGO_REPO_ROOT}/django-workload"
 DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
 
 # Install system dependencies
-dnf groupinstall "Development Tools" -y
+dnf groupinstall "Development Tools" -y --exclude="texlive*"
 dnf install -y memcached libmemcached-awesome-devel zlib-devel screen \
     openssl-devel bzip2-devel libffi-devel wget make
 

@@ -20,7 +20,7 @@ centos9() {
         $SUDO dnf install -y 'dnf-command(config-manager)'
         $SUDO dnf config-manager --set-enabled crb
     fi
-    $SUDO dnf group install -y "Development Tools"
+    $SUDO dnf group install -y "Development Tools" --exclude="texlive*"
 }
 
 centos8() {
