@@ -34,3 +34,25 @@ if not PROFILING:
     MIDDLEWARE.remove("django_workload.middleware.memory_cpu_stats_middleware")
     MIDDLEWARE.remove("django_workload.middleware.GraphiteRequestTimingMiddleware")
     MIDDLEWARE.remove("django_workload.middleware.GraphiteMiddleware")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname}: {name}.{message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "level": "INFO",
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}
