@@ -46,7 +46,10 @@ trap 'cleanup' ERR EXIT SIGINT SIGTERM
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] [-d duration of workload] [-p number of repetitions] [-l siege logfile path] [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] [-t snapshot taking] [-I interpreter]
+Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] \
+[-d duration of workload] [-p number of repetitions] [-l siege logfile path] \
+[-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] \
+[-t snapshot taking] [-I interpreter]
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
@@ -138,18 +141,20 @@ load_snapshot(){
         for dst_dir in ${dest_directory}/${table}*/; do
           if [ -d "$dst_dir" ]; then
             echo "Copying content from ${src_dir} to ${dst_dir}"
-            cp -rf "${src_dir}"* "${dst_dir}" || echo "Failed to copy from ${src_dir} to ${dst_dir}"
+            cp -rf "${src_dir}"* "${dst_dir}" || \
+              echo "Failed to copy from ${src_dir} to ${dst_dir}"
           fi
         done
       fi
     done
   done
 
-   # Loop through each table in TABLE_NAMES and refresh it
+  # Loop through each table in TABLE_NAMES and refresh it
   #echo "Refreshing tables in ${KEY_SPACE_NAME}..."
   for table in ${TABLE_NAMES}; do
     #echo "Refreshing table: ${table}"
-    ${BENCHPRESS_ROOT}/benchmarks/django_workload/apache-cassandra/bin/nodetool ${extra_options} refresh -- ${KEY_SPACE_NAME} ${table} || exit 1
+    ${BENCHPRESS_ROOT}/benchmarks/django_workload/apache-cassandra/bin/nodetool \
+      ${extra_options} refresh -- ${KEY_SPACE_NAME} ${table} || exit 1
   done
   # The documentation says that the node should be restarted but it is not necessary and the node frrezes sometimes if we restart it, So for now the restart code is commented until we are sure that the restart is unecessary
   #pgrep -f cassandra | xargs kill
@@ -193,8 +198,10 @@ take_snapshot(){
   command_options="-t ${snapshot_name}"
   # Our nodetool is v3, so unfortunately the new nodetool commands for taking a snapshot and importing a snapshot does not work, so we need to use the following commands based on the following documentation
   #https://docs.datastax.com/en/cassandra-oss/3.0/cassandra/operations/opsBackupTakesSnapshot.html
-  ${BENCHPRESS_ROOT}/benchmarks/django_workload/apache-cassandra/bin/nodetool ${extra_options}  cleanup ${KEY_SPACE_NAME} || exit 1
-  ${BENCHPRESS_ROOT}/benchmarks/django_workload/apache-cassandra/bin/nodetool ${extra_options}  snapshot ${KEY_SPACE_NAME} ${command_options} || exit 1
+  ${BENCHPRESS_ROOT}/benchmarks/django_workload/apache-cassandra/bin/nodetool \
+    ${extra_options} cleanup ${KEY_SPACE_NAME} || exit 1
+  ${BENCHPRESS_ROOT}/benchmarks/django_workload/apache-cassandra/bin/nodetool \
+    ${extra_options} snapshot ${KEY_SPACE_NAME} ${command_options} || exit 1
 
 
   # The snapshot taken by the nodetool is scattered among several directories and has no option for storing in a user specified folder
@@ -225,7 +232,8 @@ start_cassandra() {
     HOST_IP="$cassandra_bind_addr"
   fi
   sed "s/__HOST_IP__/${HOST_IP}/g" < ${CASSANDRA_YAML}.template > ${CASSANDRA_YAML}.tmp
-  sed "s/__CONCUR_WRITES__/${cassandra_concur_writes}/g" < ${CASSANDRA_YAML}.tmp > ${CASSANDRA_YAML}.tmp2
+  sed "s/__CONCUR_WRITES__/${cassandra_concur_writes}/g" < \
+    ${CASSANDRA_YAML}.tmp > ${CASSANDRA_YAML}.tmp2
   mv -f "${CASSANDRA_YAML}.tmp2" "${CASSANDRA_YAML}"
 
   ./apache-cassandra/bin/cassandra -R -f -p cassandra.pid > cassandra.log 2>&1
@@ -261,7 +269,8 @@ start_django_server() {
   wait_for_cassandra_to_start
 
   # Create database schema
-  export LD_LIBRARY_PATH=${SCRIPT_ROOT}/../django-workload/django-workload/:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+  export LD_LIBRARY_PATH=${SCRIPT_ROOT}/../django-workload/django-workload/:\
+${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     if [ "$load_a_snapshot" = true ]; then
       #DJANGO_SETTINGS_MODULE=cluster_settings ./${venv_dir}/bin/django-admin flush
       load_snapshot
@@ -529,9 +538,11 @@ main() {
   elif [ "$role" = "clientserver" ]; then
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
-    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}";
+    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}";
   elif [ "$role" = "client" ]; then
-    start_client "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$server_addr" "$iterations" "$reps";
+    start_client "$num_client_workers" "$duration" "$siege_logs_path" \
+      "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
@@ -542,7 +553,8 @@ main() {
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
-    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter";
+    start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter";
     pgrep -f cassandra | xargs kill
 
   else
