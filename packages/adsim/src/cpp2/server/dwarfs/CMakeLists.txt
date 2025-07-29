@@ -112,6 +112,11 @@ target_link_libraries(hashmap data_objects kernel)
 target_compile_options(hashmap PRIVATE ${COROUTINES_FLAG})
 
 
+add_library(concurrenthashmap ConcurrentHashMap.cc ConcurrentHashMap.h)
+target_link_libraries(concurrenthashmap data_objects kernel)
+target_compile_options(concurrenthashmap PRIVATE ${COROUTINES_FLAG})
+
+
 add_library(deepcopy DeepCopy.h)
 target_link_libraries(deepcopy data_objects kernel)
 target_compile_options(deepcopy PRIVATE ${COROUTINES_FLAG})
@@ -125,6 +130,7 @@ target_compile_options(shape PRIVATE ${COROUTINES_FLAG})
 add_library(dwarfs Dwarfs.cc Dwarfs.h)
 target_link_libraries(dwarfs
     compress
+    concurrenthashmap
     deepcopy
     delay
     fakeio

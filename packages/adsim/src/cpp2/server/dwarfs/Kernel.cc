@@ -32,6 +32,10 @@ DEFINE_timeseries(decompress_nfired, "decompress_nfired", fb303::SUM);
 DEFINE_timeseries(serialize_nfired, "serialize_nfired", fb303::SUM);
 DEFINE_timeseries(deserialize_nfired, "serialize_nfired", fb303::SUM);
 DEFINE_timeseries(hashmap_nfired, "hashmap_nfired", fb303::SUM);
+DEFINE_timeseries(
+    concurrent_hashmap_nfired,
+    "concurrent_hashmap_nfired",
+    fb303::SUM);
 DEFINE_timeseries(deepcopy_nfired, "deepcopy_nfired", fb303::SUM);
 DEFINE_timeseries(delay_nfired, "delay_nfired", fb303::SUM);
 DEFINE_timeseries(shape_nfired, "shape_nfired", fb303::SUM);
