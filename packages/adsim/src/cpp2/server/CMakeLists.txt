@@ -24,8 +24,8 @@ target_link_libraries(server_handlers
         FBThrift::thriftcpp2
         Folly::folly)
 
-set(ATOMIC_LIB /usr/lib64/libatomic.so.1)
-add_executable(adsim_server AdSimServer.cpp)
+add_executable(adsim_server AdSimServer.cpp dwarfs/memwrap.cc)
+target_link_options(adsim_server PRIVATE "-Wl,--wrap=memcpy")
 target_link_libraries(adsim_server
     PUBLIC
         server_handlers
@@ -37,5 +37,6 @@ target_link_libraries(adsim_server
         fb303::fb303_thrift_cpp
         FBThrift::thriftcpp2
         Folly::folly
-        ${ATOMIC_LIB}
-        ${FMT_LIBRARIES})
+        Atomic::Atomic
+        ${FMT_LIBRARIES}
+        ${JEMALLOC_LIB})

@@ -117,6 +117,12 @@ target_link_libraries(concurrenthashmap data_objects kernel)
 target_compile_options(concurrenthashmap PRIVATE ${COROUTINES_FLAG})
 
 
+
+add_library(tensordeser TensorDeser.cc TensorDeser.h)
+target_link_libraries(tensordeser data_objects kernel ${JEMALLOC_LIB})
+target_compile_options(tensordeser PRIVATE ${COROUTINES_FLAG})
+
+
 add_library(deepcopy DeepCopy.h)
 target_link_libraries(deepcopy data_objects kernel)
 target_compile_options(deepcopy PRIVATE ${COROUTINES_FLAG})
@@ -138,5 +144,6 @@ target_link_libraries(dwarfs
     hashmap
     ibrun
     serialize
-    shape)
+    shape
+    tensordeser)
 target_compile_options(dwarfs PRIVATE ${COROUTINES_FLAG})

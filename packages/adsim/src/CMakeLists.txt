@@ -25,6 +25,7 @@ find_package(Threads REQUIRED)
 find_package(LibEvent REQUIRED)
 find_package(LibIberty REQUIRED)
 find_library(JEMALLOC_LIB NAMES jemalloc REQUIRED)
+find_package(Atomic REQUIRED)
 find_package(Boost 1.83.0
     COMPONENTS
         context

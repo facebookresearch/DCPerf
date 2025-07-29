@@ -31,6 +31,7 @@
 #include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Serialize.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Shape.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/TensorDeser.h>
 
 namespace facebook::cea::chips::adsim {
 
@@ -43,7 +44,7 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"Compress", Compress::config},
     {"Decompress", Decompress::config},
     {"Serialize", Serialize::config},
-    {"Deserialize", Deserialize::config},
+    {"TensorDeser", TensorDeser::config},
     {"HashMap", HashMap::config},
     {"ConcurrentHashMap", ConcurrentHashMap::config},
     {"DeepCopy", DeepCopy::config},

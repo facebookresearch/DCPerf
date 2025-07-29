@@ -1,5 +1,5 @@
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/client/AdSimClient.cpp build/adsim/cpp2/client/AdSimClient.cpp
---- adsim/cpp2/client/AdSimClient.cpp	2025-07-28 12:08:37.404634728 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/client/AdSimClient.cpp build/adsim/cpp2/client/AdSimClient.cpp
+--- adsim_group/cpp2/client/AdSimClient.cpp	2025-07-29 14:17:29.771582057 -0700
 +++ build/adsim/cpp2/client/AdSimClient.cpp	2025-07-25 15:55:10.007667247 -0700
 @@ -14,17 +14,15 @@
   * limitations under the License.
@@ -22,8 +22,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  DEFINE_string(host, "::1", "AdSimServer host");
  DEFINE_int32(port, 10086, "AdSimServer port");
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/client/CoWorker.h build/adsim/cpp2/client/CoWorker.h
---- adsim/cpp2/client/CoWorker.h	2025-07-28 12:08:37.405599047 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/client/CoWorker.h build/adsim/cpp2/client/CoWorker.h
+--- adsim_group/cpp2/client/CoWorker.h	2025-07-29 14:17:29.772459085 -0700
 +++ build/adsim/cpp2/client/CoWorker.h	2025-07-25 15:55:10.009191271 -0700
 @@ -16,14 +16,16 @@
  
@@ -43,8 +43,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  namespace facebook::cea::chips::adsim {
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/AdSimServer.cpp build/adsim/cpp2/server/AdSimServer.cpp
---- adsim/cpp2/server/AdSimServer.cpp	2025-07-28 12:08:37.420421287 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/AdSimServer.cpp build/adsim/cpp2/server/AdSimServer.cpp
+--- adsim_group/cpp2/server/AdSimServer.cpp	2025-07-29 14:17:29.787921133 -0700
 +++ build/adsim/cpp2/server/AdSimServer.cpp	2025-07-25 15:55:10.010304364 -0700
 @@ -19,16 +19,17 @@
  #include <streambuf>
@@ -67,8 +67,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  DEFINE_string(config_file, "", "A json file of configurations");
  DEFINE_int32(port, -1, "Overwrite port in the config file");
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/AdSimService.cpp build/adsim/cpp2/server/AdSimService.cpp
---- adsim/cpp2/server/AdSimService.cpp	2025-07-28 12:08:37.420848854 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/AdSimService.cpp build/adsim/cpp2/server/AdSimService.cpp
+--- adsim_group/cpp2/server/AdSimService.cpp	2025-07-29 14:17:29.788333958 -0700
 +++ build/adsim/cpp2/server/AdSimService.cpp	2025-07-25 15:55:10.011314962 -0700
 @@ -14,8 +14,8 @@
   * limitations under the License.
@@ -81,8 +81,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Collect.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/AdSimService.h build/adsim/cpp2/server/AdSimService.h
---- adsim/cpp2/server/AdSimService.h	2025-07-28 12:08:37.421285043 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/AdSimService.h build/adsim/cpp2/server/AdSimService.h
+--- adsim_group/cpp2/server/AdSimService.h	2025-07-29 14:17:29.788761875 -0700
 +++ build/adsim/cpp2/server/AdSimService.h	2025-07-25 15:55:10.012430769 -0700
 @@ -22,10 +22,10 @@
  #include <folly/Executor.h>
@@ -98,8 +98,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  namespace facebook::cea::chips::adsim {
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/DataObjects.cpp build/adsim/cpp2/server/DataObjects.cpp
---- adsim/cpp2/server/DataObjects.cpp	2025-07-28 12:08:37.422131554 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/DataObjects.cpp build/adsim/cpp2/server/DataObjects.cpp
+--- adsim_group/cpp2/server/DataObjects.cpp	2025-07-29 14:17:29.789743832 -0700
 +++ build/adsim/cpp2/server/DataObjects.cpp	2025-07-25 15:55:10.013145970 -0700
 @@ -14,7 +14,7 @@
   * limitations under the License.
@@ -110,8 +110,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  #include <folly/Singleton.h>
  
  namespace facebook::cea::chips::adsim {
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/DataObjects.h build/adsim/cpp2/server/DataObjects.h
---- adsim/cpp2/server/DataObjects.h	2025-07-28 12:08:37.422600023 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/DataObjects.h build/adsim/cpp2/server/DataObjects.h
+--- adsim_group/cpp2/server/DataObjects.h	2025-07-29 14:17:29.790185910 -0700
 +++ build/adsim/cpp2/server/DataObjects.h	2025-07-25 15:55:10.013816493 -0700
 @@ -27,7 +27,7 @@
  #include <thrift/lib/cpp2/protocol/CompactProtocol.h>
@@ -122,8 +122,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  namespace facebook::cea::chips::adsim {
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Compress.cc build/adsim/cpp2/server/dwarfs/Compress.cc
---- adsim/cpp2/server/dwarfs/Compress.cc	2025-07-28 12:08:37.411753456 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Compress.cc build/adsim/cpp2/server/dwarfs/Compress.cc
+--- adsim_group/cpp2/server/dwarfs/Compress.cc	2025-07-29 14:17:29.777879647 -0700
 +++ build/adsim/cpp2/server/dwarfs/Compress.cc	2025-07-25 15:55:10.014647761 -0700
 @@ -18,10 +18,10 @@
  #include <util.h>
@@ -139,8 +139,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Task.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Compress.h build/adsim/cpp2/server/dwarfs/Compress.h
---- adsim/cpp2/server/dwarfs/Compress.h	2025-07-28 12:08:37.412260183 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Compress.h build/adsim/cpp2/server/dwarfs/Compress.h
+--- adsim_group/cpp2/server/dwarfs/Compress.h	2025-07-29 14:17:29.778403731 -0700
 +++ build/adsim/cpp2/server/dwarfs/Compress.h	2025-07-25 15:55:10.015383212 -0700
 @@ -21,8 +21,8 @@
  
@@ -153,9 +153,9 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <folly/coro/Task.h>
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/ConcurrentHashMap.cc build/adsim/cpp2/server/dwarfs/ConcurrentHashMap.cc
---- adsim/cpp2/server/dwarfs/ConcurrentHashMap.cc	2025-07-28 12:08:37.412914793 -0700
-+++ build/adsim/cpp2/server/dwarfs/ConcurrentHashMap.cc	2025-07-28 11:49:52.560117703 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/ConcurrentHashMap.cc build/adsim/cpp2/server/dwarfs/ConcurrentHashMap.cc
+--- adsim_group/cpp2/server/dwarfs/ConcurrentHashMap.cc	2025-07-29 14:17:29.778881854 -0700
++++ build/adsim/cpp2/server/dwarfs/ConcurrentHashMap.cc	2025-07-29 14:21:45.143901510 -0700
 @@ -14,7 +14,7 @@
   * limitations under the License.
   */
@@ -165,9 +165,9 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/executors/CPUThreadPoolExecutor.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/ConcurrentHashMap.h build/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h
---- adsim/cpp2/server/dwarfs/ConcurrentHashMap.h	2025-07-28 12:08:37.413367828 -0700
-+++ build/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h	2025-07-28 11:40:51.243521796 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/ConcurrentHashMap.h build/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h
+--- adsim_group/cpp2/server/dwarfs/ConcurrentHashMap.h	2025-07-29 14:17:29.779299386 -0700
++++ build/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h	2025-07-29 14:20:53.562536690 -0700
 @@ -30,8 +30,8 @@
  #include <utility>
  #include <vector>
@@ -179,8 +179,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <folly/Likely.h>
  #include <folly/SharedMutex.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/DeepCopy.h build/adsim/cpp2/server/dwarfs/DeepCopy.h
---- adsim/cpp2/server/dwarfs/DeepCopy.h	2025-07-28 12:08:37.413807904 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/DeepCopy.h build/adsim/cpp2/server/dwarfs/DeepCopy.h
+--- adsim_group/cpp2/server/dwarfs/DeepCopy.h	2025-07-29 14:17:29.779765491 -0700
 +++ build/adsim/cpp2/server/dwarfs/DeepCopy.h	2025-07-25 15:55:10.016208450 -0700
 @@ -24,8 +24,8 @@
  #include <unordered_map>
@@ -193,8 +193,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/container/F14Map.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Delay.h build/adsim/cpp2/server/dwarfs/Delay.h
---- adsim/cpp2/server/dwarfs/Delay.h	2025-07-28 12:08:37.414329413 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Delay.h build/adsim/cpp2/server/dwarfs/Delay.h
+--- adsim_group/cpp2/server/dwarfs/Delay.h	2025-07-29 14:17:29.780277646 -0700
 +++ build/adsim/cpp2/server/dwarfs/Delay.h	2025-07-25 15:55:10.016889980 -0700
 @@ -18,8 +18,8 @@
  
@@ -207,10 +207,10 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Task.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Dwarfs.cc build/adsim/cpp2/server/dwarfs/Dwarfs.cc
---- adsim/cpp2/server/dwarfs/Dwarfs.cc	2025-07-28 12:08:37.414788797 -0700
-+++ build/adsim/cpp2/server/dwarfs/Dwarfs.cc	2025-07-25 15:57:48.883604643 -0700
-@@ -19,18 +19,18 @@
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Dwarfs.cc build/adsim/cpp2/server/dwarfs/Dwarfs.cc
+--- adsim_group/cpp2/server/dwarfs/Dwarfs.cc	2025-07-29 14:17:29.780712845 -0700
++++ build/adsim/cpp2/server/dwarfs/Dwarfs.cc	2025-07-29 03:22:28.989646826 -0700
+@@ -19,19 +19,19 @@
  #include <folly/MapUtil.h>
  #include <folly/dynamic.h>
  
@@ -226,6 +226,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Serialize.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Shape.h>
+-#include <cea/chips/adsim/cpp2/server/dwarfs/TensorDeser.h>
 +#include "Compress.h"
 +#include "ConcurrentHashMap.h"
 +#include "DeepCopy.h"
@@ -238,11 +239,12 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +#include "Kernel.h"
 +#include "Serialize.h"
 +#include "Shape.h"
++#include "TensorDeser.h"
  
  namespace facebook::cea::chips::adsim {
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Dwarfs.h build/adsim/cpp2/server/dwarfs/Dwarfs.h
---- adsim/cpp2/server/dwarfs/Dwarfs.h	2025-07-28 12:08:37.415197876 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Dwarfs.h build/adsim/cpp2/server/dwarfs/Dwarfs.h
+--- adsim_group/cpp2/server/dwarfs/Dwarfs.h	2025-07-29 14:17:29.781173923 -0700
 +++ build/adsim/cpp2/server/dwarfs/Dwarfs.h	2025-07-25 15:55:10.019374336 -0700
 @@ -19,9 +19,9 @@
  #include <string>
@@ -256,8 +258,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  namespace facebook::cea::chips::adsim {
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/FakeIO.h build/adsim/cpp2/server/dwarfs/FakeIO.h
---- adsim/cpp2/server/dwarfs/FakeIO.h	2025-07-28 12:08:37.415633616 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/FakeIO.h build/adsim/cpp2/server/dwarfs/FakeIO.h
+--- adsim_group/cpp2/server/dwarfs/FakeIO.h	2025-07-29 14:17:29.781695752 -0700
 +++ build/adsim/cpp2/server/dwarfs/FakeIO.h	2025-07-25 15:55:10.020115056 -0700
 @@ -18,8 +18,8 @@
  
@@ -270,8 +272,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Task.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/GEMM.cc build/adsim/cpp2/server/dwarfs/GEMM.cc
---- adsim/cpp2/server/dwarfs/GEMM.cc	2025-07-28 12:08:37.416049855 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/GEMM.cc build/adsim/cpp2/server/dwarfs/GEMM.cc
+--- adsim_group/cpp2/server/dwarfs/GEMM.cc	2025-07-29 14:17:29.782197962 -0700
 +++ build/adsim/cpp2/server/dwarfs/GEMM.cc	2025-07-25 15:55:10.020712910 -0700
 @@ -22,17 +22,21 @@
  #include <glog/logging.h>
@@ -297,8 +299,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  using namespace std;
  using namespace fbgemm;
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/GEMM.h build/adsim/cpp2/server/dwarfs/GEMM.h
---- adsim/cpp2/server/dwarfs/GEMM.h	2025-07-28 12:08:37.416462089 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/GEMM.h build/adsim/cpp2/server/dwarfs/GEMM.h
+--- adsim_group/cpp2/server/dwarfs/GEMM.h	2025-07-29 14:17:29.782715055 -0700
 +++ build/adsim/cpp2/server/dwarfs/GEMM.h	2025-07-25 15:55:10.021362522 -0700
 @@ -22,8 +22,8 @@
  
@@ -311,8 +313,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Collect.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/HashMap.cc build/adsim/cpp2/server/dwarfs/HashMap.cc
---- adsim/cpp2/server/dwarfs/HashMap.cc	2025-07-28 12:08:37.416948243 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/HashMap.cc build/adsim/cpp2/server/dwarfs/HashMap.cc
+--- adsim_group/cpp2/server/dwarfs/HashMap.cc	2025-07-29 14:17:29.783274811 -0700
 +++ build/adsim/cpp2/server/dwarfs/HashMap.cc	2025-07-25 15:55:10.022044754 -0700
 @@ -14,7 +14,7 @@
   * limitations under the License.
@@ -323,8 +325,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/HashMap.h build/adsim/cpp2/server/dwarfs/HashMap.h
---- adsim/cpp2/server/dwarfs/HashMap.h	2025-07-28 12:08:37.417373798 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/HashMap.h build/adsim/cpp2/server/dwarfs/HashMap.h
+--- adsim_group/cpp2/server/dwarfs/HashMap.h	2025-07-29 14:17:29.783789461 -0700
 +++ build/adsim/cpp2/server/dwarfs/HashMap.h	2025-07-25 15:55:10.022653935 -0700
 @@ -24,8 +24,8 @@
  #include <unordered_map>
@@ -337,8 +339,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <folly/Synchronized.h>
  #include <folly/container/F14Map.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/IBRun.h build/adsim/cpp2/server/dwarfs/IBRun.h
---- adsim/cpp2/server/dwarfs/IBRun.h	2025-07-28 12:08:37.417779992 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/IBRun.h build/adsim/cpp2/server/dwarfs/IBRun.h
+--- adsim_group/cpp2/server/dwarfs/IBRun.h	2025-07-29 14:17:29.784390450 -0700
 +++ build/adsim/cpp2/server/dwarfs/IBRun.h	2025-07-25 15:55:10.023200492 -0700
 @@ -16,9 +16,9 @@
  
@@ -353,8 +355,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <folly/coro/Task.h>
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py build/adsim/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py
---- adsim/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py	2025-07-28 12:08:37.410741445 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py build/adsim/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py
+--- adsim_group/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py	2025-07-29 14:17:29.776967347 -0700
 +++ build/adsim/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py	2025-07-25 15:55:10.023937655 -0700
 @@ -14,8 +14,6 @@
  # See the License for the specific language governing permissions and
@@ -365,8 +367,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  """Module to split file into multiple segments."""
  
  import argparse
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Kernel.cc build/adsim/cpp2/server/dwarfs/Kernel.cc
---- adsim/cpp2/server/dwarfs/Kernel.cc	2025-07-28 12:08:37.418280539 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Kernel.cc build/adsim/cpp2/server/dwarfs/Kernel.cc
+--- adsim_group/cpp2/server/dwarfs/Kernel.cc	2025-07-29 14:17:29.784831819 -0700
 +++ build/adsim/cpp2/server/dwarfs/Kernel.cc	2025-07-25 16:37:11.073788021 -0700
 @@ -20,7 +20,7 @@
  #include <fb303/ExportType.h>
@@ -377,8 +379,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  namespace facebook::cea::chips::adsim {
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Kernel.h build/adsim/cpp2/server/dwarfs/Kernel.h
---- adsim/cpp2/server/dwarfs/Kernel.h	2025-07-28 12:08:37.418808267 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Kernel.h build/adsim/cpp2/server/dwarfs/Kernel.h
+--- adsim_group/cpp2/server/dwarfs/Kernel.h	2025-07-29 14:17:29.785257753 -0700
 +++ build/adsim/cpp2/server/dwarfs/Kernel.h	2025-07-25 15:55:10.025158201 -0700
 @@ -21,10 +21,10 @@
  #include <unordered_map>
@@ -393,8 +395,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  namespace facebook::cea::chips::adsim {
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Serialize.h build/adsim/cpp2/server/dwarfs/Serialize.h
---- adsim/cpp2/server/dwarfs/Serialize.h	2025-07-28 12:08:37.419346141 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Serialize.h build/adsim/cpp2/server/dwarfs/Serialize.h
+--- adsim_group/cpp2/server/dwarfs/Serialize.h	2025-07-29 14:17:29.785666401 -0700
 +++ build/adsim/cpp2/server/dwarfs/Serialize.h	2025-07-25 15:55:10.025830557 -0700
 @@ -20,15 +20,15 @@
  
@@ -415,8 +417,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  namespace facebook::cea::chips::adsim {
  
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/cpp2/server/dwarfs/Shape.h build/adsim/cpp2/server/dwarfs/Shape.h
---- adsim/cpp2/server/dwarfs/Shape.h	2025-07-28 12:08:37.419914901 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/Shape.h build/adsim/cpp2/server/dwarfs/Shape.h
+--- adsim_group/cpp2/server/dwarfs/Shape.h	2025-07-29 14:17:29.786140568 -0700
 +++ build/adsim/cpp2/server/dwarfs/Shape.h	2025-07-25 15:55:10.026656306 -0700
 @@ -16,10 +16,10 @@
  
@@ -433,8 +435,34 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/MoveWrapper.h>
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/if/AdSim.thrift build/adsim/if/AdSim.thrift
---- adsim/if/AdSim.thrift	2025-07-28 12:08:37.424502511 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/TensorDeser.cc build/adsim/cpp2/server/dwarfs/TensorDeser.cc
+--- adsim_group/cpp2/server/dwarfs/TensorDeser.cc	2025-07-29 14:17:29.786570039 -0700
++++ build/adsim/cpp2/server/dwarfs/TensorDeser.cc	2025-07-29 03:10:24.727445630 -0700
+@@ -14,7 +14,7 @@
+  * limitations under the License.
+  */
+ 
+-#include <cea/chips/adsim/cpp2/server/dwarfs/TensorDeser.h>
++#include "TensorDeser.h"
+ #include <cstring>
+ #include <iomanip>
+ #include <iostream>
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/cpp2/server/dwarfs/TensorDeser.h build/adsim/cpp2/server/dwarfs/TensorDeser.h
+--- adsim_group/cpp2/server/dwarfs/TensorDeser.h	2025-07-29 14:17:29.787024406 -0700
++++ build/adsim/cpp2/server/dwarfs/TensorDeser.h	2025-07-29 03:10:09.858016018 -0700
+@@ -30,8 +30,8 @@
+ #include <tuple>
+ #include <vector>
+ 
+-#include <cea/chips/adsim/cpp2/server/DataObjects.h>
+-#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
++#include "cpp2/server/DataObjects.h"
++#include "cpp2/server/dwarfs/Kernel.h"
+ 
+ #include <folly/FileUtil.h>
+ #include <folly/Format.h>
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/if/AdSim.thrift build/adsim/if/AdSim.thrift
+--- adsim_group/if/AdSim.thrift	2025-07-29 14:17:29.792097453 -0700
 +++ build/adsim/if/AdSim.thrift	2025-07-25 15:55:10.027410947 -0700
 @@ -1,4 +1,4 @@
 -include "common/fb303/if/fb303.thrift"
@@ -442,8 +470,8 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  
  namespace cpp2 facebook.cea.chips.adsim
  namespace py3 facebook.cea.chips.adsim
-diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim/if/Serialize.thrift build/adsim/if/Serialize.thrift
---- adsim/if/Serialize.thrift	2025-07-28 12:08:37.425347058 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' adsim_group/if/Serialize.thrift build/adsim/if/Serialize.thrift
+--- adsim_group/if/Serialize.thrift	2025-07-29 14:17:29.792879556 -0700
 +++ build/adsim/if/Serialize.thrift	2025-07-25 15:55:10.028022061 -0700
 @@ -3,20 +3,15 @@
  cpp_include "list"
