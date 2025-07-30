@@ -36,6 +36,7 @@ DEFINE_timeseries(
     concurrent_hashmap_nfired,
     "concurrent_hashmap_nfired",
     fb303::SUM);
+DEFINE_timeseries(rebatch_nfired, "rebatch_nfired", fb303::SUM);
 DEFINE_timeseries(deepcopy_nfired, "deepcopy_nfired", fb303::SUM);
 DEFINE_timeseries(delay_nfired, "delay_nfired", fb303::SUM);
 DEFINE_timeseries(shape_nfired, "shape_nfired", fb303::SUM);

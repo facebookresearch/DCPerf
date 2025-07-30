@@ -122,6 +122,9 @@ add_library(tensordeser TensorDeser.cc TensorDeser.h)
 target_link_libraries(tensordeser data_objects kernel ${JEMALLOC_LIB})
 target_compile_options(tensordeser PRIVATE ${COROUTINES_FLAG})
 
+add_library(rebatch Rebatch.cc Rebatch.h)
+target_link_libraries(rebatch data_objects kernel)
+target_compile_options(rebatch PRIVATE ${COROUTINES_FLAG})
 
 add_library(deepcopy DeepCopy.h)
 target_link_libraries(deepcopy data_objects kernel)
@@ -137,6 +140,7 @@ add_library(dwarfs Dwarfs.cc Dwarfs.h)
 target_link_libraries(dwarfs
     compress
     concurrenthashmap
+    rebatch
     deepcopy
     delay
     fakeio

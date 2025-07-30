@@ -29,6 +29,7 @@
 #include <cea/chips/adsim/cpp2/server/dwarfs/HashMap.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/IBRun.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/Rebatch.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Serialize.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Shape.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/TensorDeser.h>
@@ -47,6 +48,7 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"TensorDeser", TensorDeser::config},
     {"HashMap", HashMap::config},
     {"ConcurrentHashMap", ConcurrentHashMap::config},
+    {"Rebatch", Rebatch::config},
     {"DeepCopy", DeepCopy::config},
     {"Delay", Delay::config},
     {"Shape", Shape::config},
