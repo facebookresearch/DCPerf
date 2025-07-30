@@ -7,11 +7,11 @@ install_packages() {
     # Detect OS distribution and install packages with appropriate names
     if command -v dnf >/dev/null 2>&1; then
         # Red Hat/Fedora/CentOS systems
-        sudo dnf install -y clang-20.1.1 jemalloc-devel xxhash-devel bzip2-devel libomp-devel gengetopt
+        sudo dnf install -y clang-20.1.1 jemalloc-devel xxhash-devel bzip2-devel libomp-devel gengetopt gcc-toolset-14-libatomic-devel
     elif command -v apt-get >/dev/null 2>&1; then
         # Ubuntu/Debian systems - map package names to Ubuntu equivalents
         sudo apt-get update
-        sudo apt-get install -y clang libjemalloc-dev libxxhash-dev libbz2-dev libomp-dev gengetopt
+        sudo apt-get install -y clang libjemalloc-dev libxxhash-dev libbz2-dev libomp-dev gengetopt libatomic1-dev
     else
         echo "Error: No supported package manager found (dnf and apt-get)"
         exit 1
