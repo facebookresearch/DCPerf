@@ -24,6 +24,7 @@
 #include <cea/chips/adsim/cpp2/server/dwarfs/DeepCopy.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Delay.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Dwarfs.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/Embedding.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/FakeIO.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/GEMM.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/HashMap.h>
@@ -42,6 +43,7 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"FakeIO", FakeIO::config},
     {"IBRun", IBRun::config},
     {"GEMM", GEMM::config},
+    {"Embedding", Embedding::config},
     {"Compress", Compress::config},
     {"Decompress", Decompress::config},
     {"Serialize", Serialize::config},

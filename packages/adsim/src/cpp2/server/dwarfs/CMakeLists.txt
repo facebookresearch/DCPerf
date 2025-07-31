@@ -30,16 +30,33 @@ target_link_directories(gemm
     PUBLIC
         ${ADSIM_STAGING_DIR}/include
 )
-target_link_libraries(gemm data_objects kernel fbgemm ${MKL_LIBRARIES} omp)
-target_link_options(gemm PUBLIC "-Wl,--rpath=${MKL_ROOT}/lib/intel64")
+target_link_libraries(gemm data_objects kernel fbgemm)
 target_include_directories(gemm
     PRIVATE
         ${FBGEMM_SRC_DIR}
-        #${CPUINFO_SOURCE_DIR}/include
         ${ADSIM_STAGING_DIR}/include
 )
 add_dependencies(gemm fbgemm)
-#add_dependencies(gemm gtest fbgemm_avx2 fbgemm)
+
+add_library(embedding Embedding.cc Embedding.h)
+
+target_compile_options(embedding PRIVATE
+    ${COROUTINES_FLAG}
+    -m64
+    -mavx2
+    -mfma
+    -masm=intel)
+target_link_directories(embedding
+    PUBLIC
+        ${ADSIM_STAGING_DIR}/include
+)
+target_link_libraries(embedding data_objects kernel fbgemm)
+target_include_directories(embedding
+    PRIVATE
+        ${FBGEMM_SRC_DIR}
+        ${ADSIM_STAGING_DIR}/include
+)
+add_dependencies(embedding fbgemm)
 
 add_library(compress
     Compress.cc
@@ -143,6 +160,7 @@ target_link_libraries(dwarfs
     rebatch
     deepcopy
     delay
+    embedding
     fakeio
     gemm
     hashmap
