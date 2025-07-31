@@ -27,24 +27,20 @@ ExternalProject_Add(fbthrift
     BUILD_BYPRODUCTS
         <INSTALL_DIR>/lib/libthriftcpp2.a
         <INSTALL_DIR>/bin/thrift1
-        <INSTALL_DIR>/lib/libprotocol.a
+        <INSTALL_DIR>/lib/libthriftprotocol.a
         <INSTALL_DIR>/lib/libcompiler_ast.a
         <INSTALL_DIR>/lib/libtransport.a
         <INSTALL_DIR>/lib/libthriftfrozen2.a
-        <INSTALL_DIR>/lib/libcompiler_generators.a
-        <INSTALL_DIR>/lib/libcompiler_generate_templates.a
         <INSTALL_DIR>/lib/libcompiler_lib.a
-        <INSTALL_DIR>/lib/libmustache_lib.a
         <INSTALL_DIR>/lib/libasync.a
         <INSTALL_DIR>/lib/libthrift-core.a
         <INSTALL_DIR>/lib/libcompiler_base.a
-        <INSTALL_DIR>/lib/libthriftprotocol.a
         <INSTALL_DIR>/lib/libconcurrency.a
     BUILD_COMMAND
         cmake --build .
     )
 
-ExternalProject_Add_StepDependencies(fbthrift configure folly wangle rsocket fmt)
+ExternalProject_Add_StepDependencies(fbthrift configure folly wangle fmt)
 
 ExternalProject_Get_Property(fbthrift SOURCE_DIR)
 ExternalProject_Get_Property(fbthrift INSTALL_DIR)
@@ -55,19 +51,15 @@ set(THRIFT1 ${INSTALL_DIR}/bin/thrift1)
 set(THRIFTCPP2 ${INSTALL_DIR}/lib/libthriftcpp2.a)
 
 set(FBTHRIFT_LIBRARIES
-    ${INSTALL_DIR}/lib/libprotocol.a
+    ${INSTALL_DIR}/lib/libthriftprotocol.a
     ${INSTALL_DIR}/lib/libthriftcpp2.a
     ${INSTALL_DIR}/lib/libcompiler_ast.a
     ${INSTALL_DIR}/lib/libtransport.a
     ${INSTALL_DIR}/lib/libthriftfrozen2.a
-    ${INSTALL_DIR}/lib/libcompiler_generators.a
-    ${INSTALL_DIR}/lib/libcompiler_generate_templates.a
     ${INSTALL_DIR}/lib/libcompiler_lib.a
-    ${INSTALL_DIR}/lib/libmustache_lib.a
     ${INSTALL_DIR}/lib/libasync.a
     ${INSTALL_DIR}/lib/libthrift-core.a
     ${INSTALL_DIR}/lib/libcompiler_base.a
-    ${INSTALL_DIR}/lib/libthriftprotocol.a
     ${INSTALL_DIR}/lib/libconcurrency.a
 )
 

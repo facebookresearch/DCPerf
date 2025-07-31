@@ -23,7 +23,6 @@
 
 #include <folly/Range.h>
 #include <folly/compression/Compression.h>
-#include <folly/compression/Counters.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <folly/executors/IOThreadPoolExecutor.h>
 #include <folly/futures/Future.h>
@@ -114,20 +113,23 @@ std::string compressPayload(const std::string& data, int result) {
   folly::StringPiece output(
       data.data(),
       std::min(args.compression_data_size_arg, args.random_data_size_arg));
-  auto codec = folly::io::getCodec(folly::io::CodecType::ZSTD);
+  auto codec =
+      folly::compression::getCodec(folly::compression::CodecType::ZSTD);
   std::string compressed = codec->compress(output);
   return std::move(compressed);
 }
 
 std::string decompressPayload(const std::string& data) {
-  auto codec = folly::io::getCodec(folly::io::CodecType::ZSTD);
+  auto codec =
+      folly::compression::getCodec(folly::compression::CodecType::ZSTD);
   std::string decompressed = codec->uncompress(data);
   return decompressed;
 }
 
 std::unique_ptr<folly::IOBuf> compressThrift(
     std::unique_ptr<folly::IOBuf> buf) {
-  auto codec = folly::io::getCodec(folly::io::CodecType::ZSTD);
+  auto codec =
+      folly::compression::getCodec(folly::compression::CodecType::ZSTD);
   auto compressed_buf = codec->compress(buf.get());
   return compressed_buf;
 }

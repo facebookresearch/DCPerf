@@ -42,7 +42,7 @@ inline uint64_t xor128() {
 
 inline ranking::Payload generateRandomPayload(size_t length) {
   ranking::Payload payload;
-  payload.message = RandomString(length);
+  payload.message() = RandomString(length);
   return payload;
 }
 
@@ -50,10 +50,10 @@ inline ranking::Action generateRandomAction() {
   ranking::Action action;
   uint64_t rand_int = static_cast<uint64_t>(xor128());
 
-  action.type = static_cast<int16_t>(rand_int >> 48);
-  action.timeUsec = static_cast<int64_t>(rand_int);
-  action.timeMsec = static_cast<int32_t>(rand_int >> 32);
-  action.actorID = static_cast<int64_t>(rand_int);
+  action.type() = static_cast<int16_t>(rand_int >> 48);
+  action.timeUsec() = static_cast<int64_t>(rand_int);
+  action.timeMsec() = static_cast<int32_t>(rand_int >> 32);
+  action.actorID() = static_cast<int64_t>(rand_int);
   return action;
 }
 
@@ -66,8 +66,8 @@ inline ranking::RankingPayloadIntMap generateRandomIntMap(size_t length) {
 
   ranking::RankingPayloadIntMap map;
   map.reserve(length);
-  std::generate_n(std::inserter(map, map.begin()), length,
-                  generate_int_map_pair);
+  std::generate_n(
+      std::inserter(map, map.begin()), length, generate_int_map_pair);
   return map;
 }
 
@@ -79,8 +79,8 @@ inline ranking::RankingPayloadStringMap generateRandomStringMap(size_t length) {
   };
   ranking::RankingPayloadStringMap map;
   map.reserve(length);
-  std::generate_n(std::inserter(map, map.begin()), length,
-                  generate_str_map_pair);
+  std::generate_n(
+      std::inserter(map, map.begin()), length, generate_str_map_pair);
   return map;
 }
 
@@ -94,62 +94,73 @@ inline ranking::RankingPayloadVecMap generateRandomVecMap(size_t length) {
   };
   ranking::RankingPayloadVecMap map;
   map.reserve(length);
-  std::generate_n(std::inserter(map, map.begin()), length,
-                  generate_vec_map_pair);
+  std::generate_n(
+      std::inserter(map, map.begin()), length, generate_vec_map_pair);
   return map;
 }
 
-inline ranking::RankingObject
-generateRandomRankingObject(size_t actions_length) {
+inline ranking::RankingObject generateRandomRankingObject(
+    size_t actions_length) {
   ranking::RankingObject obj;
   uint64_t rand_int = static_cast<uint64_t>(xor128());
-  obj.objectID = static_cast<int64_t>(rand_int);
-  obj.objectType = static_cast<ranking::RankingObjectType>(
+  obj.objectID() = static_cast<int64_t>(rand_int);
+  obj.objectType() = static_cast<ranking::RankingObjectType>(
       rand_int % static_cast<uint64_t>(ranking::RankingObjectType::OBJ_TYPE_Z));
-  obj.actorID = static_cast<int64_t>(rand_int);
-  obj.createTime = static_cast<int64_t>(rand_int);
+  obj.actorID() = static_cast<int64_t>(rand_int);
+  obj.createTime() = static_cast<int64_t>(rand_int);
 
   // FIXME(cltorres): Populate with realistic sizes
-  obj.payloadIntMap = generateRandomIntMap(5);
-  obj.payloadStrMap = generateRandomStringMap(5);
-  obj.payloadVecMap = generateRandomVecMap(5);
+  obj.payloadIntMap() = generateRandomIntMap(5);
+  obj.payloadStrMap() = generateRandomStringMap(5);
+  obj.payloadVecMap() = generateRandomVecMap(5);
 
-  obj.actions.reserve(actions_length);
-  std::generate_n(std::back_inserter(obj.actions), actions_length,
-                  generateRandomAction);
-  obj.weight = static_cast<double>(rand_int);
+  auto actions_ref = obj.actions();
+  auto& actions = *actions_ref;
+  actions.reserve(actions_length);
+  std::generate_n(
+      std::back_inserter(actions), actions_length, generateRandomAction);
+  obj.weight() = static_cast<double>(rand_int);
 
   return obj;
 }
 
-inline ranking::RankingStory
-generateRandomRankingStory(size_t ranking_objects_length) {
+inline ranking::RankingStory generateRandomRankingStory(
+    size_t ranking_objects_length) {
   ranking::RankingStory story;
   uint64_t rand_int = static_cast<uint64_t>(xor128());
-  story.storyID = static_cast<int64_t>(rand_int);
-  story.objects.reserve(ranking_objects_length);
+  story.storyID() = static_cast<int64_t>(rand_int);
+  auto objects_ref = story.objects();
+  auto& objects = *objects_ref;
+  objects.reserve(ranking_objects_length);
   // TODO(cltorres): Determine distribution of Actions per ranking object
-  std::generate_n(std::back_inserter(story.objects), ranking_objects_length,
-                  std::bind(generateRandomRankingObject, 5));
-  story.weight = static_cast<double>(rand_int);
-  story.storyType = static_cast<ranking::RankingStoryType>(
+  std::generate_n(
+      std::back_inserter(objects),
+      ranking_objects_length,
+      std::bind(generateRandomRankingObject, 5));
+  story.weight() = static_cast<double>(rand_int);
+  story.storyType() = static_cast<ranking::RankingStoryType>(
       rand_int %
       static_cast<uint64_t>(ranking::RankingStoryType::STORY_TYPE_Z));
   return story;
 }
 
-inline ranking::RankingResponse
-generateRandomRankingResponse(size_t ranking_stories_length) {
+inline ranking::RankingResponse generateRandomRankingResponse(
+    size_t ranking_stories_length) {
   ranking::RankingResponse resp;
   uint64_t rand_int = static_cast<uint64_t>(xor128());
-  resp.queryID = static_cast<int64_t>(rand_int);
-  resp.rankingStories.reserve(ranking_stories_length);
+  resp.queryID() = static_cast<int64_t>(rand_int);
+  auto rankingStories_ref = resp.rankingStories();
+  auto& rankingStories = *rankingStories_ref;
+  rankingStories.reserve(ranking_stories_length);
   // TODO(cltorres): Determine distribution of ranking objects per story
-  std::generate_n(std::back_inserter(resp.rankingStories),
-                  ranking_stories_length,
-                  std::bind(generateRandomRankingStory, 20));
-  resp.objectCounts.reserve(ranking_stories_length);
-  resp.metadata = RandomString(200);
+  std::generate_n(
+      std::back_inserter(rankingStories),
+      ranking_stories_length,
+      std::bind(generateRandomRankingStory, 20));
+  auto objectCounts_ref = resp.objectCounts();
+  auto& objectCounts = *objectCounts_ref;
+  objectCounts.reserve(ranking_stories_length);
+  resp.metadata() = RandomString(200);
   return resp;
 }
 

@@ -213,4 +213,4 @@ cmake -G Ninja \
 
 sed -i 's/lib64/lib/' build.ninja
 
-ninja -v
+ninja -v -j1

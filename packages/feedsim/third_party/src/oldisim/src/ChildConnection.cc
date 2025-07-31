@@ -192,7 +192,7 @@ void ChildConnection::ChildConnectionImpl::bev_read_cb(struct bufferevent* bev,
 
   // Protocol processing loop.
   if (conn->impl_->num_outstanding_requests == 0) {
-    V("Spurious read callback.");
+    OLDISIM_V("Spurious read callback.");
     return;
   }
 
@@ -258,4 +258,3 @@ void ChildConnection::ChildConnectionImpl::bev_write_cb(struct bufferevent* bev,
   // Currently write cb does nothing
 }
 }  // namespace oldisim
-

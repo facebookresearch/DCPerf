@@ -75,7 +75,7 @@ target_link_libraries(rankingThriftDataGen
 )
 
 # Build Ranking Dwarfs library
-add_library(rankingDwarfs
+add_library(rankingDwarfs STATIC
     dwarfs/pagerank.cpp
     dwarfs/pagerank.h
 )
@@ -85,6 +85,8 @@ add_dependencies(rankingDwarfs
 target_include_directories(rankingDwarfs
     PUBLIC
         dwarfs/
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../
     PRIVATE
         ${FOLLY_INCLUDE_DIR}
 )
@@ -94,6 +96,7 @@ target_link_libraries(rankingDwarfs
     PRIVATE
         ${FOLLY_LIBRARIES}
 )
+target_compile_options(rankingDwarfs PRIVATE -fvisibility=hidden)
 
 
 # Generate getopts for LeafNodeRank
@@ -162,7 +165,8 @@ target_link_libraries(LeafNodeRank
         ${JEMALLOC_LIB}
         ${LIBLZMA_LIBRARIES}
 )
-target_compile_options(LeafNodeRank PUBLIC -fno-omit-frame-pointer)
+target_compile_options(LeafNodeRank PUBLIC -fno-omit-frame-pointer -ffunction-sections -fdata-sections)
+target_link_options(LeafNodeRank PRIVATE -Wl,--gc-sections -Wl,--allow-multiple-definition)
 
 
 # Generate getopts for ParentNodeRank

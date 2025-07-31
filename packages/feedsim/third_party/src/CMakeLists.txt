@@ -6,7 +6,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(oldisim C CXX)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -99,10 +99,17 @@ include(build-fmt)
 include(build-folly)
 include(build-fizz)
 include(build-wangle)
-include(build-rsocket)
+include(build-mvfst)
 include(build-fbthrift)
 include(${oldisim_SOURCE_DIR}/third_party/fbthrift/ThriftLibrary.cmake)
 
+
+# Add global include directories to fix include path issues
+include_directories(
+  ${CMAKE_CURRENT_SOURCE_DIR}/oldisim/include
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
 
 add_subdirectory(third_party)
 add_subdirectory(oldisim)

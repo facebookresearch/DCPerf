@@ -34,7 +34,7 @@ die() {
 ARCH="$(uname -p)"
 if [ "$ARCH" = "aarch64" ]; then
   if distro_is_like ubuntu; then
-    "${FEEDSIM_ROOT}"/install_feedsim_aarch64_ubuntu.sh
+    "${FEEDSIM_ROOT}"/install_feedsim_ubuntu.sh
      exit $?
   else
     "${FEEDSIM_ROOT}"/install_feedsim_aarch64.sh
@@ -42,13 +42,13 @@ if [ "$ARCH" = "aarch64" ]; then
   fi
 fi
 if distro_is_like ubuntu && [ "$(uname -p)" = "x86_64" ]; then
-  "${FEEDSIM_ROOT}"/install_feedsim_x86_64_ubuntu.sh
+  "${FEEDSIM_ROOT}"/install_feedsim_ubuntu.sh
   exit $?
 fi
 dnf install -y bc ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \
-    zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq
+    zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq xxhash xxhash-devel
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -66,22 +66,30 @@ cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party" "${FEEDSIM_ROOT_SRC}"
 mv "${FEEDSIM_THIRD_PARTY_SRC}/src" "${FEEDSIM_ROOT_SRC}/src"
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
-# Installing cmake-3.14.5
+# Installing cmake-4.0.3
 
-if ! [ -d "cmake-3.14.5" ]; then
-    wget "https://github.com/Kitware/CMake/releases/download/v3.14.5/cmake-3.14.5.tar.gz"
-    tar -zxf "cmake-3.14.5.tar.gz"
-    cd "cmake-3.14.5"
+if ! [ -d "cmake-4.0.3" ]; then
+    wget "https://github.com/Kitware/CMake/releases/download/v4.0.3/cmake-4.0.3.tar.gz"
+    tar -zxf "cmake-4.0.3.tar.gz"
+    cd "cmake-4.0.3"
     mkdir staging
     ./bootstrap --parallel=8 --prefix="$(pwd)/staging"
     make -j8
     make install
     cd ../
 else
-    msg "[SKIPPED] cmake-3.14.5"
+    msg "[SKIPPED] cmake-4.0.3"
 fi
 
-export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-3.14.5/staging/bin:${PATH}"
+export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-4.0.3/staging/bin:${PATH}"
+
+git clone https://github.com/fastfloat/fast_float.git
+cd fast_float
+mkdir build && cd build
+cmake ..
+make
+make install
+cd ../
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
@@ -97,18 +105,15 @@ else
 fi
 
 # Installing Boost
-if ! [ -d "boost_1_71_0" ] && ! grep -i 'centos stream release 9' /etc/*-release; then
-    wget "https://archives.boost.io/release/1.71.0/source/boost_1_71_0.tar.gz"
-    tar -xzf "boost_1_71_0.tar.gz"
-    cd "boost_1_71_0"
+if ! [ -d "boost_1_88_0" ]; then
+    wget "https://archives.boost.io/release/1.88.0/source/boost_1_88_0.tar.gz"
+    tar -xzf "boost_1_88_0.tar.gz"
+    cd "boost_1_88_0"
     ./bootstrap.sh --without-libraries=python
     ./b2 install
     cd ../
-elif grep -i 'centos stream release 9' /etc/*-release; then
-    # On CentOS 9 let's just use boost 1.75 that comes with the system
-    dnf install -y boost-devel
 else
-    msg "[SKIPPED] boost_1_71_0"
+    msg "[SKIPPED] boost_1_88_0"
 fi
 
 
@@ -118,7 +123,7 @@ if ! [ -d "gflags-2.2.2" ]; then
     tar -xzf "gflags-2.2.2.tar.gz"
     cd "gflags-2.2.2"
     mkdir -p build && cd build
-    cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release ../
+    cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
     make -j8
     make install
     cd ../../
@@ -132,7 +137,7 @@ if ! [ -d "glog-0.4.0" ]; then
     tar -xzf "glog-0.4.0.tar.gz"
     cd "glog-0.4.0"
     mkdir -p build && cd build
-    cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release ../
+    cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
     make -j8
     make install
     cd ../../
@@ -141,30 +146,30 @@ else
 fi
 
 # Installing JEMalloc
-if ! [ -d "jemalloc-5.2.1" ]; then
-    wget "https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2"
-    bunzip2 "jemalloc-5.2.1.tar.bz2"
-    tar -xvf "jemalloc-5.2.1.tar"
-    cd "jemalloc-5.2.1"
+if ! [ -d "jemalloc-5.3.0" ]; then
+    wget "https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2"
+    bunzip2 "jemalloc-5.3.0.tar.bz2"
+    tar -xvf "jemalloc-5.3.0.tar"
+    cd "jemalloc-5.3.0"
     ./configure --enable-prof --enable-prof-libunwind
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] jemalloc-5.2.1"
+    msg "[SKIPPED] jemalloc-5.3.0"
 fi
 
 # Installing libevent
 if ! [ -d "libevent-2.1.11-stable" ]; then
-    wget "https://github.com/libevent/libevent/releases/download/release-2.1.11-stable/libevent-2.1.11-stable.tar.gz"
-    tar -xzf "libevent-2.1.11-stable.tar.gz"
-    cd "libevent-2.1.11-stable"
+    wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
+    tar -xzf "libevent-2.1.12-stable.tar.gz"
+    cd "libevent-2.1.12-stable"
     ./configure
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] libevent-2.1.11-stable"
+    msg "[SKIPPED] libevent-2.1.12-stable"
 fi
 
 msg "Installing third-party dependencies ... DONE"
@@ -188,17 +193,10 @@ do
     popd
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
-# If running on CentOS Stream 9, apply compatilibity patches to folly, rsocket and wangle
-# TODO: This is a temporary fix. In the long term we should seek to have feedsim
-# support the up-to-date version of these dependencies
-REPOS_TO_PATCH=(folly wangle rsocket-cpp)
-if grep -i 'centos stream release 9' /etc/*-release >/dev/null 2>&1; then
-    for repo in "${REPOS_TO_PATCH[@]}"; do
-        pushd "third_party/$repo" || exit 1
-        git apply --check "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff" && \
-            git apply "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff"
-        popd || exit 1
-    done
+# Patch fizz for OpenSSL 3.0 compatibility
+if [ -f "third_party/fizz/fizz/tool/FizzServerCommand.cpp" ]; then
+    # Replace EVP_PKEY_cmp with EVP_PKEY_eq
+    sed -i 's/EVP_PKEY_cmp(pubKey.get(), key.get()) == 1/EVP_PKEY_eq(pubKey.get(), key.get())/g' "third_party/fizz/fizz/tool/FizzServerCommand.cpp"
 fi
 
 mkdir -p build && cd build/
@@ -213,7 +211,8 @@ cmake -G Ninja \
     -DCMAKE_C_COMPILER="$BP_CC" \
     -DCMAKE_CXX_COMPILER="$BP_CXX" \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \
-    -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS -DFMT_HEADER_ONLY=1" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     ../
-ninja -v
+
+ninja -v -j1

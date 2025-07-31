@@ -23,7 +23,7 @@ void log_file_line(log_level_t level, const char* file, int line,
 #define L(level, args...) log_file_line(level, __FILE__, __LINE__, args)
 
 #define D(args...) L(DEBUG, args)
-#define V(args...) L(VERBOSE, args)
+#define OLDISIM_V(args...) L(VERBOSE, args)
 #define I(args...) L(INFO, args)
 #define W(args...) L(WARN, args)
 
