@@ -770,6 +770,9 @@
     - '--stats-interval={stats_interval}'
     - '--port-number-start={port_number_start}'
     - '--disable-tls={disable_tls}'
+    - '--num-slow-threads={num_slow_threads}'
+    - '--num-fast-threads={num_fast_threads}'
+    - '--num-client-threads={num_client_threads}'
   vars:
     - 'num_servers=0'
     - 'memsize=0'
@@ -784,6 +787,9 @@
     - 'stats_interval=5000'
     - 'port_number_start=11211'
     - 'disable_tls=0'
+    - 'num_slow_threads=0'
+    - 'num_fast_threads=0'
+    - 'num_client_threads=0'
   hooks:
     - hook: copymove
       options:
