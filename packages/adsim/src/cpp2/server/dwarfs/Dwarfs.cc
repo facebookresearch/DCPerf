@@ -45,6 +45,7 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"Compress", Compress::config},
     {"Decompress", Decompress::config},
     {"Serialize", Serialize::config},
+    {"Deserialize", Deserialize::config},
     {"TensorDeser", TensorDeser::config},
     {"HashMap", HashMap::config},
     {"ConcurrentHashMap", ConcurrentHashMap::config},
