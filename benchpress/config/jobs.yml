@@ -911,11 +911,6 @@
     - 'sampling_seed=1000'
     - 'sleep_before_perf=0'
   hooks:
-    - hook: cpu-mpstat
-      options:
-        args:
-          - '-u'   # utilization
-          - '1'    # second interval
     - hook: copymove
       options:
         is_move: true
