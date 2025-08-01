@@ -40,7 +40,7 @@ pushd "${DJANGO_WORKLOAD_DEPS}"
 # cassandra-driver-3.29.1_x86_64.whl
 wget "https://files.pythonhosted.org/packages/eb/d5/e437271aea182e33db32e0990703b4e0d7025e4fba67829c5fd65dba926a/cassandra_driver-3.29.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
 # Removed Cython download as it's not needed
-# Django-5.2.tar.gz
+# Django-5.2.3-py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/1b/11/7aff961db37e1ea501a2bb663d27a8ce97f3683b9e5b83d3bfead8b86fa4/django-5.2.3-py3-none-any.whl"
 # django-cassandra-engine-1.6.2.tar.gz
 wget "https://files.pythonhosted.org/packages/1f/5e/438eb7f2d8b8e240701b721a43cb5a20cf970c8e9da8b3770df1de6d7c5b/django-cassandra-engine-1.6.2.tar.gz"

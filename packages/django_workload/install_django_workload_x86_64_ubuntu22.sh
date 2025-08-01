@@ -38,8 +38,8 @@ fi
 pushd "${DJANGO_WORKLOAD_DEPS}"
 # cassandra-driver-3.29.1_x86_64.whl
 wget "https://files.pythonhosted.org/packages/eb/d5/e437271aea182e33db32e0990703b4e0d7025e4fba67829c5fd65dba926a/cassandra_driver-3.29.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
-# Django-4.1-py3-none-any.whl
-wget "https://files.pythonhosted.org/packages/9b/41/e1e7d6ecc3bc76681dfdc6b373566822bc2aab96fa3eceaaed70accc28b6/Django-4.1-py3-none-any.whl"
+# Django-5.2.3-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/1b/11/7aff961db37e1ea501a2bb663d27a8ce97f3683b9e5b83d3bfead8b86fa4/django-5.2.3-py3-none-any.whl"
 # Dulwich 0.21.2.tar.gz
 wget "https://files.pythonhosted.org/packages/14/a5/cf61f9209d48abf47d48086e0a0388f1030bb5f7cf2661972eee56ccee3d/dulwich-0.21.2.tar.gz"
 # django-cassandra-engine-1.6.2.tar.gz
@@ -64,10 +64,12 @@ wget "https://files.pythonhosted.org/packages/a7/4e/c4d5559b3504bb65175a759392b0
 wget "https://files.pythonhosted.org/packages/c9/81/156ca48f950f833ddc392f8e3677ca50a18cb9d5db38ccb4ecea55a9303f/geomet-0.2.1.post1-py3-none-any.whl"
 # click-7.1.2.tar.gz
 wget "https://files.pythonhosted.org/packages/27/6f/be940c8b1f1d69daceeb0032fee6c34d7bd70e3e649ccac0951500b4720e/click-7.1.2.tar.gz"
-# asgiref-3.5.2-py3-none-any.whl
-wget "https://files.pythonhosted.org/packages/af/6d/ea3a5c3027c3f14b0321cd4f7e594c776ebe64e4b927432ca6917512a4f7/asgiref-3.5.2-py3-none-any.whl"
-# sqlparse-0.2.4-py2.py3-none-any.whl
-wget "https://files.pythonhosted.org/packages/65/85/20bdd72f4537cf2c4d5d005368d502b2f464ede22982e724a82c86268eda/sqlparse-0.2.4-py2.py3-none-any.whl"
+# typing_extensions-4.14.0-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/69/e0/552843e0d356fbb5256d21449fa957fa4eff3bbc135a74a691ee70c7c5da/typing_extensions-4.14.0-py3-none-any.whl"
+# asgiref-3.8.1-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/39/e3/893e8757be2612e6c266d9bb58ad2e3651524b5b40cf56761e985a28b13e/asgiref-3.8.1-py3-none-any.whl"
+# sqlparse-0.5.3-py3-none-any.whl
+wget "https://files.pythonhosted.org/packages/a9/5c/bfd6bd0bf979426d405cc6e71eceb8701b148b16c21d2dc3c261efc61c7b/sqlparse-0.5.3-py3-none-any.whl"
 # rapidfuzz-2.10.2.tar.gz
 wget "https://files.pythonhosted.org/packages/ee/92/0c0366b108f658dd29fdf7e9ae73874e9b0c36a9d7c72e7690d075132a3d/rapidfuzz-2.10.2.tar.gz"
 # scikit-learn-0.15.0.tar.gz
