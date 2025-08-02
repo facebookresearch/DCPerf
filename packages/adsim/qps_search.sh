@@ -42,6 +42,7 @@ MIN_QPS_LAT=0
 MAX_QPS_LAT=0
 VERBOSE_LOGGING=false
 CSV_LOGGING=false
+SEQ=1
 
 function parse_opts()
 {
@@ -173,7 +174,8 @@ function coarse_search()
 
   while true; do
     log "Testing QPS = $qps"
-    measure_latency $qps
+    measure_latency $qps $SEQ $RUNTIME
+    SEQ=$((SEQ + 1))
     lat=${LATENCY%.*}
 
     log "QPS $qps achieved latency $lat (target: $tgt_lat)"
@@ -207,19 +209,18 @@ function binary_search()
 {
   qps_l=$MIN_QPS
   qps_r=$MAX_QPS
-  seq=1
   tgt_lat=${TGT_LATENCY%.*}
 
   if [ "$MIN_QPS_LAT" -eq 0 ]; then
-    lat_l=$(measure_latency "$qps_l" "$seq" "$RUNTIME")
-    seq=$((seq + 1))
+    lat_l=$(measure_latency "$qps_l" "$SEQ" "$RUNTIME")
+    SEQ=$((SEQ + 1))
   else
     lat_l=$MIN_QPS_LAT
   fi
 
   if [ "$MAX_QPS_LAT" -eq 0 ]; then
-    lat_r=$(measure_latency "$qps_r" "$seq" "$RUNTIME")
-    seq=$((seq + 1))
+    lat_r=$(measure_latency "$qps_r" "$SEQ" "$RUNTIME")
+    SEQ=$((SEQ + 1))
   else
     lat_r=$MAX_QPS_LAT
   fi
@@ -230,8 +231,8 @@ function binary_search()
   fi
   while [ "$qps_l" -lt $(( qps_r - 1 )) ]; do
     qps_m=$(( (qps_l + qps_r) / 2 ))
-    measure_latency $"$qps_m" "$seq" "$RUNTIME"
-    seq=$((seq + 1))
+    measure_latency $"$qps_m" "$SEQ" "$RUNTIME"
+    SEQ=$((SEQ + 1))
     lat=${LATENCY%.*}
 
     log "QPS $qps_m: latency = $lat, target = $tgt_lat"
@@ -253,7 +254,7 @@ function binary_search()
   fi
   if [ true == "$CSV_LOGGING" ]; then
     final_qps=$(cat "$THROUGHPUT_LOG")
-    echo "${seq},${qps_opt},${final_qps},${TGT_QUANTILE},${TGT_LATENCY},${lat_opt}"
+    echo "${SEQ},${qps_opt},${final_qps},${TGT_QUANTILE},${TGT_LATENCY},${lat_opt}"
   fi
 
 

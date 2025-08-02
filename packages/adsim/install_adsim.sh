@@ -111,6 +111,13 @@ post_build() {
   cp "${BENCHPRESS_ROOT}/packages/adsim/adsim_config.py" "${BENCHMARKS_DIR}"
   cp "${BENCHPRESS_ROOT}/packages/adsim/qps_search.sh" "${BENCHMARKS_DIR}"
 
+
+  cat "${BENCHPRESS_ROOT}/packages/deser/model_a_part_"*.dist > "${BENCHMARKS_DIR}/deser_model_a.dist"
+  cat "${BENCHPRESS_ROOT}/packages/deser/model_b_part_"*.dist > "${BENCHMARKS_DIR}/deser_model_b.dist"
+
+  cp "${BENCHPRESS_ROOT}/packages/rebatch/model_a.dist" "${BENCHMARKS_DIR}/rebatch_model_a.dist"
+  cp "${BENCHPRESS_ROOT}/packages/rebatch/model_b.dist" "${BENCHMARKS_DIR}/rebatch_model_b.dist"
+
   # Install patchelf and set runtime library paths for executables
   install_packages patchelf
   patchelf --set-rpath "${BENCHMARKS_DIR}/lib" ${BENCHMARKS_DIR}/adsim_server

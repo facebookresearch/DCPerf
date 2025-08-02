@@ -241,3 +241,38 @@
         - 'criteria=P95'
         - 'lat_target_ms=989'
         - 'timeout=1800'
+
+
+- benchmark: adsim
+  name: adsim_inference_a
+  description: Benchmark for Model Inference Workload
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--auto-config-type {config_type}'
+        - '--auto-config-model {config_model}'
+        - '--timeout {timeout}'
+      vars:
+        - 'config_type=inference'
+        - 'config_model=model_a'
+        - 'timeout=0'
+    client:
+      args:
+        - 'client'
+        - '--server {server_ip}'
+        - '--port 10086'
+        - '--workers {num_workers}'
+        - '--runtime {runtime}'
+        - '--criteria {criteria}'
+        - '--latency {lat_target_ms}'
+        - '--timeout {timeout}'
+        - '--mode'
+      vars:
+        - 'server_ip'
+        - 'num_workers=20'
+        - 'runtime=120'
+        - 'criteria=P99'
+        - 'lat_target_ms=100'
+        - 'timeout=1800'
+        - 'ai'

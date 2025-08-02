@@ -117,6 +117,113 @@ req_size_dist = [
     2205630,
 ]
 
+# AI mode request size distribution - base sizes for AI workloads
+ai_req_size_dist = [
+    4,
+    8,
+    928,
+    1040,
+    1200,
+    1340,
+    2040,
+    2272,
+    2400,
+    2520,
+    2812,
+    2868,
+    2892,
+    2964,
+    3216,
+    3460,
+    3520,
+    5120,
+    6780,
+    8160,
+    8288,
+    12264,
+    14892,
+    21024,
+    21120,
+    26496,
+    28032,
+    28032,
+    28032,
+    28032,
+    28032,
+    28032,
+    28032,
+    28160,
+    28160,
+    28160,
+    28160,
+    28160,
+    30720,
+    31580,
+    35836,
+    37544,
+    38400,
+    38400,
+    46120,
+    46348,
+    48484,
+    50270,
+    53212,
+    62900,
+    76800,
+    76800,
+    76800,
+    76800,
+    87752,
+    109680,
+    144132,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    146240,
+    188460,
+    194108,
+    197552,
+    199160,
+    199980,
+    202692,
+    206676,
+    209172,
+    209756,
+    212456,
+    214116,
+    214960,
+    215384,
+    275052,
+    278592,
+    280852,
+    283968,
+    287156,
+    287808,
+    291532,
+    293000,
+    294112,
+    297472,
+    305160,
+    305336,
+    311672,
+    315932,
+    317208,
+]
+
+# Request size multiplier for AI mode
+AI_REQUEST_SIZE_MULTIPLIER = 20
+
 
 def run_cmd(cmd: List[str], timeout=None, dryrun=False, verbose=False) -> str:
     if verbose or dryrun:
@@ -136,15 +243,31 @@ def run_cmd(cmd: List[str], timeout=None, dryrun=False, verbose=False) -> str:
 
 
 def run_server(args):
-    config_file = args.cfg_file
     timeout = args.timeout
 
-    if config_file == "" or config_file.strip().lower() == "default":
+    # Handle config file generation
+    if args.cfg_file:
+        config_file = args.cfg_file
+        if config_file == "" or config_file.strip().lower() == "default":
+            with tempfile.NamedTemporaryFile(
+                mode="w+", prefix="adsim-config-", suffix=".json", delete=False
+            ) as cfgfile:
+                json.dump(adsim_config.ads_config, cfgfile, indent=2)
+                config_file = cfgfile.name
+    elif args.auto_config_type:
+        # Auto-generate config using get_config function
+        config_type = args.auto_config_type
+        model = args.auto_config_model if config_type == "inference" else None
+
+        config = adsim_config.get_config(config_type, model)
+
         with tempfile.NamedTemporaryFile(
-            mode="w+", prefix="adsim-config-", suffix=".json", delete=False
+            mode="w+", prefix=f"adsim-{config_type}-", suffix=".json", delete=False
         ) as cfgfile:
-            json.dump(adsim_config.config, cfgfile, indent=2)
+            json.dump(config, cfgfile, indent=2)
             config_file = cfgfile.name
+    else:
+        raise ValueError("Either --cfg-file or --auto-config-type must be specified")
 
     return run_cmd(
         [
@@ -165,6 +288,18 @@ def run_server(args):
 
 
 def run_client(args):
+    # Select request size distribution based on mode
+    if args.mode == "ai":
+        # Apply multiplier to AI request sizes
+        size_dist = [sz * AI_REQUEST_SIZE_MULTIPLIER for sz in ai_req_size_dist]
+        # Override defaults for AI mode
+        criteria = "P99" if args.criteria == "P95" else args.criteria
+        latency = 100 if args.latency == 989 else args.latency
+    else:
+        size_dist = req_size_dist
+        criteria = args.criteria
+        latency = args.latency
+
     cmd = [
         ADSIM_DIR + "/qps_search.sh",
         "-e",
@@ -178,11 +313,11 @@ def run_client(args):
         "-W",
         str(args.workers),
         "-q",
-        args.criteria,
+        criteria,
         "-l",
-        str(args.latency * 1000),
+        str(latency * 1000),
         "-S",
-        ",".join([str(sz) for sz in req_size_dist]),
+        ",".join([str(sz) for sz in size_dist]),
         "-c",
     ]
     return run_cmd(cmd, timeout=args.timeout)
@@ -203,13 +338,27 @@ def init_parser():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         help="run AdSim benchmark driver",
     )
-    # server side arguments
-    server_parser.add_argument(
+    # server side arguments - mutually exclusive config options
+    config_group = server_parser.add_mutually_exclusive_group(required=True)
+    config_group.add_argument(
         "--cfg-file",
         type=str,
-        required=True,
         help="Path to AdSim server config file, "
         + "or 'default' to automatically generate a config file based on adsim-config.py",
+    )
+    config_group.add_argument(
+        "--auto-config-type",
+        type=str,
+        choices=["ads", "inference"],
+        help="Auto-generate config file of specified type (ads, inference). "
+        + "Cannot be used with --cfg-file.",
+    )
+    server_parser.add_argument(
+        "--auto-config-model",
+        type=str,
+        default="model_a",
+        help="Model name for inference configs (default: model_a). "
+        + "Only used with --auto-config-type=inference.",
     )
     server_parser.add_argument(
         "--timeout", type=int, default=0, help="How long to run the server?"
@@ -247,6 +396,12 @@ def init_parser():
         type=int,
         default=1800,
         help="Stop if binary search won't converge within timeout seconds",
+    )
+    client_parser.add_argument(
+        "--mode",
+        type=str,
+        default="default",
+        help="Mode to run the benchmark in (default, ai)",
     )
     # functions
     server_parser.set_defaults(func=run_server)
