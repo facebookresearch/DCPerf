@@ -35,6 +35,12 @@ Proxy shell script to executes oss-performance benchmark
     -m          number of memcache threads. Default: 8 * number of HHVM (=${MEMCACHE_THREADS})
     -p          disable perf-record.sh execution after warmup
     -T          specify temporary directory path
+    -j          enable JIT size monitoring with dump_jit_size.py
+    -J          JIT monitoring port (default: localhost:9092)
+    -I          JIT monitoring interval in seconds (default: 1)
+    -D          enable TC dump with vm-dump-tc
+    -C          TC dump interval in seconds (default:600)
+    -O          output directory for JIT monitoring files (default: /tmp/jit_study_output)
 
 Any other options that oss-performance perf.php script could accept can be
 passed in as extra arguments appending two hyphens '--' followed by the
@@ -69,6 +75,49 @@ function _check_local_db_running() {
   then
     >&2 echo "Make sure either 'mariadb' or 'mysql' is running."
     return 1
+  fi
+}
+
+# Start JIT monitoring in the background
+function start_jit_monitoring() {
+  local ip_and_port="$1"
+  local dump_jit_interval="$2"
+  local dump_tc_enabled="$3"
+  local dump_tc_interval="$4"
+  local output_dir="$5"
+
+  # Build command with optional TC dump parameters
+  local jit_monitor_cmd="python3 ${SCRIPT_DIR}/dump_jit_size.py \
+    --output-dir \"${output_dir}\" \
+    --dump-jit-interval \"${dump_jit_interval}\" \
+    --ip-and-port \"${ip_and_port}\""
+
+  # Add TC dump options if enabled
+  if [[ "$dump_tc_enabled" == "true" ]]; then
+    jit_monitor_cmd="${jit_monitor_cmd} \
+    --dump-tc \
+    --dump-tc-interval \"${dump_tc_interval}\""
+    echo "TC dump enabled with interval: ${dump_tc_interval} seconds"
+  fi
+
+  echo "Starting JIT size monitoring..."
+  echo "JIT monitoring output directory: ${output_dir}"
+
+  # Execute the command
+  eval "${jit_monitor_cmd}" &
+
+  # Save the PID for later cleanup
+  JIT_MONITOR_PID=$!
+  echo "JIT monitoring started with PID: ${JIT_MONITOR_PID}"
+}
+
+# Stop JIT size monitoring
+function stop_jit_monitoring() {
+  if [[ -n "${JIT_MONITOR_PID}" ]]; then
+    echo "Stopping JIT size monitoring (PID: ${JIT_MONITOR_PID})..."
+    kill "${JIT_MONITOR_PID}" 2>/dev/null || true
+    wait "${JIT_MONITOR_PID}" 2>/dev/null || true
+    echo "JIT size monitoring stopped."
   fi
 }
 
@@ -110,6 +159,11 @@ function run_benchmark() {
     client_threads="${CLIENT_THREADS}"
   fi
 
+  # Start JIT monitoring if enabled
+  if [[ "${enable_jit_monitoring}" == "true" ]]; then
+    start_jit_monitoring "${jit_monitor_port}" "${jit_monitor_interval}" "${enable_tc_dump}" "${tc_dump_interval}" "${jit_output_dir}"
+  fi
+
   cd "${OLD_CWD}/oss-performance" || exit
   # shellcheck disable=2086
   HHVM_DISABLE_NUMA=1 "$_hhvm_path" \
@@ -131,7 +185,16 @@ function run_benchmark() {
     ${_perf_record_arg} \
     ${_temp_dir_arg} \
     ${extra_args}
+
+  local benchmark_exit_code=$?
+
+  # Stop JIT monitoring if it was started
+  if [[ "${enable_jit_monitoring}" == "true" ]]; then
+    stop_jit_monitoring
+  fi
+
   cd "${OLD_CWD}" || exit
+  return $benchmark_exit_code
 }
 
 function main() {
@@ -156,7 +219,15 @@ function main() {
   local temp_dir
   temp_dir=""
 
-  while getopts 'H:n:r:L:s:R:t:c:m:pT:' OPTION "${@}"; do
+  # JIT monitoring options
+  enable_jit_monitoring=false
+  jit_monitor_port="localhost:9092"
+  jit_monitor_interval=1
+  enable_tc_dump=false
+  tc_dump_interval=600
+  jit_output_dir="/tmp/jit_study_output"
+
+  while getopts 'H:n:r:L:s:R:t:c:m:pT:jJ:DI:C:O:' OPTION "${@}"; do
     case "$OPTION" in
       H)
         db_host="${OPTARG}"
@@ -215,6 +286,26 @@ function main() {
         temp_dir="${OPTARG}"
         use_temp_dir=true
         ;;
+      j)
+        enable_jit_monitoring=true
+        ;;
+      J)
+        jit_monitor_port="${OPTARG}"
+        ;;
+      I)
+        jit_monitor_interval="${OPTARG}"
+        ;;
+      D)
+        enable_tc_dump=true
+        ;;
+      C)
+        tc_dump_interval="${OPTARG}"
+        ;;
+      O)
+        jit_output_dir="${OPTARG}"
+        # Make sure the directory exists
+        mkdir -p "${jit_output_dir}"
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -236,6 +327,32 @@ function main() {
   readonly disable_perf_record
   readonly use_temp_dir
   readonly temp_dir
+  readonly enable_jit_monitoring
+  readonly jit_monitor_port
+  readonly jit_monitor_interval
+  readonly enable_tc_dump
+  readonly tc_dump_interval
+  readonly jit_output_dir
+
+  # Check if dump_jit_size.py exists when JIT monitoring is enabled
+  if [[ "${enable_jit_monitoring}" == "true" ]]; then
+    if [[ ! -f "${SCRIPT_DIR}/dump_jit_size.py" ]]; then
+      echo "Error: dump_jit_size.py not found in ${SCRIPT_DIR}"
+      exit 1
+    fi
+
+    # Make sure the script is executable
+    chmod +x "${SCRIPT_DIR}/dump_jit_size.py"
+
+    echo "JIT monitoring enabled:"
+    echo "  - Server: ${jit_monitor_port}"
+    echo "  - JIT monitoring interval: ${jit_monitor_interval} seconds"
+    echo "  - Output directory: ${jit_output_dir}"
+
+    if [[ "${enable_tc_dump}" == "true" ]]; then
+      echo "  - TC dumping enabled with interval: ${tc_dump_interval} seconds"
+    fi
+  fi
 
   echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
 
@@ -250,7 +367,14 @@ function main() {
   exit 0
 }
 
+# Make sure to clean up JIT monitoring on script exit
+function cleanup() {
+  stop_jit_monitoring
+  cd "${OLD_CWD}" || exit 1
+  exit 1
+}
+
 # shellcheck disable=2064,2172
-trap "cd ${OLD_CWD}; exit 1" 1 2 3 13 15
+trap cleanup 1 2 3 13 15
 
 main "$@"
