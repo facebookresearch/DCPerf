@@ -41,8 +41,10 @@ def run_cmd(
     env: Dict[str, str],
     for_real: bool,
     print_cmd: bool = True,
+    check: bool = True,
 ) -> Optional[str]:
     env_setting = [f"{k}={v}" for k, v in env.items()]
+    cmd_str = " ".join(cmd)
     if print_cmd:
         print(" ".join(env_setting + cmd))
     exec_env = os.environ.copy()
@@ -53,10 +55,18 @@ def run_cmd(
             with open(outfile, "wt") as fp:
                 proc = launch_proc(cmd, cwd, fp, fp, exec_env)
                 proc.wait()
+                if check and proc.returncode != 0:
+                    raise RuntimeError(
+                        f"Command failed with return code {proc.returncode}: {cmd_str}"
+                    )
             return None
         else:
             proc = launch_proc(cmd, cwd, subprocess.PIPE, subprocess.STDOUT, exec_env)
             (stdout, _) = proc.communicate()
+            if check and proc.returncode != 0:
+                raise RuntimeError(
+                    f"Command failed with return code {proc.returncode}: {cmd_str}"
+                )
             return stdout.decode("utf-8")
     return None
 

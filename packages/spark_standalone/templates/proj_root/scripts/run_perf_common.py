@@ -312,23 +312,30 @@ def stop(args) -> None:
     cmd = ["sbin/stop-slave.sh"]
     log_file = joinpath(WORK_PATH, "stop_slave.log")
     env = {"SPARK_WORKER_INSTANCES": str(args.num_workers)}
-    run_cmd(cmd, SPARK_HOME, log_file, env, args.real)
+    run_cmd(cmd, SPARK_HOME, log_file, env, args.real, check=False)
     # shuffle server
     cmd = ["sbin/stop-shuffle-service.sh"]
     log_file = joinpath(WORK_PATH, "stop_shuffle_service.log")
     env = {}
-    run_cmd(cmd, SPARK_HOME, log_file, env, args.real)
+    run_cmd(cmd, SPARK_HOME, log_file, env, args.real, check=False)
     # drvier
     cmd = ["sbin/stop-master.sh"]
     log_file = joinpath(WORK_PATH, "stop_master.log")
     env = {}
-    run_cmd(cmd, SPARK_HOME, log_file, env, args.real)
+    run_cmd(cmd, SPARK_HOME, log_file, env, args.real, check=False)
 
 
 def experiment(args) -> None:
-    start(args)
-    run(args)
-    stop(args)
+    return_code = 0
+    try:
+        start(args)
+        run(args)
+    except Exception as e:
+        print(f"Error during experiment: {e}")
+        return_code = 1
+    finally:
+        stop(args)
+        exit(return_code)
 
 
 def install(args) -> None:
