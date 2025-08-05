@@ -1,6 +1,6 @@
-diff -wbBdu -ruN '--exclude=.git' treadmill/build.sh ../treadmill/build.sh
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/build.sh build/treadmill/build.sh
 --- treadmill/build.sh	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/build.sh	2025-07-23 03:45:59.938362286 -0700
++++ build/treadmill/build.sh	2025-08-04 15:42:33.386110376 -0700
 @@ -0,0 +1,42 @@
 +#!/bin/bash
 +
@@ -44,9 +44,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/build.sh ../treadmill/build.sh
 +
 +echo "Build completed successfully!"
 +echo "Executables are located in: $(pwd)"
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FBCMakeParseArgs.cmake ../treadmill/CMake/FBCMakeParseArgs.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FBCMakeParseArgs.cmake build/treadmill/CMake/FBCMakeParseArgs.cmake
 --- treadmill/CMake/FBCMakeParseArgs.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FBCMakeParseArgs.cmake	2025-07-17 12:25:25.962057541 -0700
++++ build/treadmill/CMake/FBCMakeParseArgs.cmake	2025-08-04 15:39:02.694385614 -0700
 @@ -0,0 +1,141 @@
 +#
 +# Copyright (c) Facebook, Inc. and its affiliates.
@@ -189,9 +189,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FBCMakeParseArgs.cmake ../trea
 +    endif()
 +  endif()
 +endfunction()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FBThriftCppLibrary.cmake ../treadmill/CMake/FBThriftCppLibrary.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FBThriftCppLibrary.cmake build/treadmill/CMake/FBThriftCppLibrary.cmake
 --- treadmill/CMake/FBThriftCppLibrary.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FBThriftCppLibrary.cmake	2025-07-17 12:25:25.962057541 -0700
++++ build/treadmill/CMake/FBThriftCppLibrary.cmake	2025-08-04 15:39:02.695475893 -0700
 @@ -0,0 +1,194 @@
 +# Copyright (c) Facebook, Inc. and its affiliates.
 +
@@ -387,9 +387,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FBThriftCppLibrary.cmake ../tr
 +      HEADER_INSTALL_DIR "${ARG_INCLUDE_DIR}/${include_prefix}/gen-cpp2"
 +  )
 +endfunction()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindCereal.cmake ../treadmill/CMake/FindCereal.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindCereal.cmake build/treadmill/CMake/FindCereal.cmake
 --- treadmill/CMake/FindCereal.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindCereal.cmake	2025-07-17 12:25:25.963057551 -0700
++++ build/treadmill/CMake/FindCereal.cmake	2025-08-04 15:39:02.696180198 -0700
 @@ -0,0 +1,21 @@
 +find_path(Cereal_INCLUDE_DIR
 +    NAMES cereal/cereal.hpp
@@ -412,9 +412,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindCereal.cmake ../treadmill/
 +        INTERFACE_INCLUDE_DIRECTORIES "${Cereal_INCLUDE_DIR}"
 +    )
 +endif()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindDoubleConversion.cmake ../treadmill/CMake/FindDoubleConversion.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindDoubleConversion.cmake build/treadmill/CMake/FindDoubleConversion.cmake
 --- treadmill/CMake/FindDoubleConversion.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindDoubleConversion.cmake	2025-07-17 12:25:25.963057551 -0700
++++ build/treadmill/CMake/FindDoubleConversion.cmake	2025-08-04 15:39:02.696809109 -0700
 @@ -0,0 +1,26 @@
 +# Copyright (c) 2017-present, Facebook, Inc. and its affiliates.
 +# All rights reserved.
@@ -442,9 +442,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindDoubleConversion.cmake ../
 +endif ()
 +
 +mark_as_advanced(DOUBLE_CONVERSION_INCLUDE_DIR DOUBLE_CONVERSION_LIBRARY)
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindGflags.cmake ../treadmill/CMake/FindGflags.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindGflags.cmake build/treadmill/CMake/FindGflags.cmake
 --- treadmill/CMake/FindGflags.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindGflags.cmake	2025-07-17 12:25:25.963057551 -0700
++++ build/treadmill/CMake/FindGflags.cmake	2025-08-04 15:39:02.697593736 -0700
 @@ -0,0 +1,105 @@
 +# Copyright (c) Facebook, Inc. and its affiliates.
 +# Find libgflags.
@@ -551,9 +551,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindGflags.cmake ../treadmill/
 +    )
 +  endif()
 +endif()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindGlog.cmake ../treadmill/CMake/FindGlog.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindGlog.cmake build/treadmill/CMake/FindGlog.cmake
 --- treadmill/CMake/FindGlog.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindGlog.cmake	2025-07-17 12:25:25.964057560 -0700
++++ build/treadmill/CMake/FindGlog.cmake	2025-08-04 15:39:02.698168525 -0700
 @@ -0,0 +1,37 @@
 +# Copyright (c) Facebook, Inc. and its affiliates.
 +# - Try to find Glog
@@ -592,9 +592,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindGlog.cmake ../treadmill/CM
 +  set_target_properties(glog::glog PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${GLOG_INCLUDE_DIRS}")
 +  set_target_properties(glog::glog PROPERTIES IMPORTED_LINK_INTERFACE_LANGUAGES "C" IMPORTED_LOCATION "${GLOG_LIBRARIES}")
 +endif()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindGMock.cmake ../treadmill/CMake/FindGMock.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindGMock.cmake build/treadmill/CMake/FindGMock.cmake
 --- treadmill/CMake/FindGMock.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindGMock.cmake	2025-07-17 12:25:25.963057551 -0700
++++ build/treadmill/CMake/FindGMock.cmake	2025-08-04 15:39:02.698727791 -0700
 @@ -0,0 +1,80 @@
 +# Copyright (c) Facebook, Inc. and its affiliates.
 +# Find libgmock
@@ -676,9 +676,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindGMock.cmake ../treadmill/C
 +    LIBGMOCK_INCLUDE_DIR
 +  )
 +endif()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindLibEvent.cmake ../treadmill/CMake/FindLibEvent.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindLibEvent.cmake build/treadmill/CMake/FindLibEvent.cmake
 --- treadmill/CMake/FindLibEvent.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindLibEvent.cmake	2025-07-17 12:25:25.964057560 -0700
++++ build/treadmill/CMake/FindLibEvent.cmake	2025-08-04 15:39:02.699284823 -0700
 @@ -0,0 +1,38 @@
 +# - Find LibEvent (a cross event library)
 +# This module defines
@@ -718,9 +718,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindLibEvent.cmake ../treadmil
 +    LIBEVENT_LIB
 +    LIBEVENT_INCLUDE_DIR
 +  )
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindLibIberty.cmake ../treadmill/CMake/FindLibIberty.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindLibIberty.cmake build/treadmill/CMake/FindLibIberty.cmake
 --- treadmill/CMake/FindLibIberty.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindLibIberty.cmake	2025-07-17 12:25:25.964057560 -0700
++++ build/treadmill/CMake/FindLibIberty.cmake	2025-08-04 15:39:02.699839121 -0700
 @@ -0,0 +1,25 @@
 +# Copyright (c) 2017-present, Facebook, Inc. and its affiliates.
 +# All rights reserved.
@@ -747,9 +747,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindLibIberty.cmake ../treadmi
 +   ENDIF (IBERTY_FIND_REQUIRED)
 +
 +ENDIF (IBERTY_LIBRARIES)
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindLZ4.cmake ../treadmill/CMake/FindLZ4.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindLZ4.cmake build/treadmill/CMake/FindLZ4.cmake
 --- treadmill/CMake/FindLZ4.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindLZ4.cmake	2025-07-17 12:25:25.964057560 -0700
++++ build/treadmill/CMake/FindLZ4.cmake	2025-08-04 15:39:02.700412319 -0700
 @@ -0,0 +1,21 @@
 +# Copyright (c) 2017-present, Facebook, Inc. and its affiliates.
 +# All rights reserved.
@@ -772,9 +772,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindLZ4.cmake ../treadmill/CMa
 +endif (NOT LZ4_FOUND)
 +
 +mark_as_advanced(LZ4_INCLUDE_DIR LZ4_LIBRARY)
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindSnappy.cmake ../treadmill/CMake/FindSnappy.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindSnappy.cmake build/treadmill/CMake/FindSnappy.cmake
 --- treadmill/CMake/FindSnappy.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindSnappy.cmake	2025-07-17 12:25:25.964057560 -0700
++++ build/treadmill/CMake/FindSnappy.cmake	2025-08-04 15:39:02.701011806 -0700
 @@ -0,0 +1,21 @@
 +# Copyright (c) 2017-present, Facebook, Inc. and its affiliates.
 +# All rights reserved.
@@ -797,306 +797,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindSnappy.cmake ../treadmill/
 +endif (NOT SNAPPY_FOUND)
 +
 +mark_as_advanced(SNAPPY_INCLUDE_DIR SNAPPY_LIBRARY)
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/Findsodium.cmake ../treadmill/CMake/Findsodium.cmake
---- treadmill/CMake/Findsodium.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/Findsodium.cmake	2025-07-17 12:25:25.965057569 -0700
-@@ -0,0 +1,293 @@
-+# Written in 2016 by Henrik Steffen Gaßmann <henrik@gassmann.onl>
-+#
-+# To the extent possible under law, the author(s) have dedicated all copyright
-+# and related and neighboring rights to this software to the public domain
-+# worldwide. This software is distributed without any warranty.
-+#
-+# You should have received a copy of the CC0 Public Domain Dedication along with
-+# this software. If not, see
-+#
-+# http://creativecommons.org/publicdomain/zero/1.0/
-+#
-+# ##############################################################################
-+# Tries to find the local libsodium installation.
-+#
-+# On Windows the sodium_DIR environment variable is used as a default hint which
-+# can be overridden by setting the corresponding cmake variable.
-+#
-+# Once done the following variables will be defined:
-+#
-+# sodium_FOUND sodium_INCLUDE_DIR sodium_LIBRARY_DEBUG sodium_LIBRARY_RELEASE
-+# sodium_VERSION_STRING
-+#
-+# Furthermore an imported "sodium" target is created.
-+#
-+
-+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
-+  set(_GCC_COMPATIBLE 1)
-+endif()
-+
-+# static library option
-+if(NOT DEFINED sodium_USE_STATIC_LIBS)
-+  option(sodium_USE_STATIC_LIBS "enable to statically link against sodium" OFF)
-+endif()
-+if(NOT (sodium_USE_STATIC_LIBS EQUAL sodium_USE_STATIC_LIBS_LAST))
-+  unset(sodium_LIBRARY CACHE)
-+  unset(sodium_LIBRARY_DEBUG CACHE)
-+  unset(sodium_LIBRARY_RELEASE CACHE)
-+  unset(sodium_DLL_DEBUG CACHE)
-+  unset(sodium_DLL_RELEASE CACHE)
-+  set(sodium_USE_STATIC_LIBS_LAST
-+      ${sodium_USE_STATIC_LIBS}
-+      CACHE INTERNAL "internal change tracking variable")
-+endif()
-+
-+# ##############################################################################
-+# UNIX
-+if(UNIX)
-+  # import pkg-config
-+  find_package(PkgConfig QUIET)
-+  if(PKG_CONFIG_FOUND)
-+    pkg_check_modules(sodium_PKG QUIET libsodium)
-+  endif()
-+
-+  if(sodium_USE_STATIC_LIBS)
-+    if(sodium_PKG_STATIC_LIBRARIES)
-+      foreach(_libname ${sodium_PKG_STATIC_LIBRARIES})
-+        if(NOT _libname MATCHES "^lib.*\\.a$") # ignore strings already ending
-+                                               # with .a
-+          list(INSERT sodium_PKG_STATIC_LIBRARIES 0 "lib${_libname}.a")
-+        endif()
-+      endforeach()
-+      list(REMOVE_DUPLICATES sodium_PKG_STATIC_LIBRARIES)
-+    else()
-+      # if pkgconfig for libsodium doesn't provide static lib info, then
-+      # override PKG_STATIC here..
-+      set(sodium_PKG_STATIC_LIBRARIES libsodium.a)
-+    endif()
-+
-+    set(XPREFIX sodium_PKG_STATIC)
-+  else()
-+    if(sodium_PKG_LIBRARIES STREQUAL "")
-+      set(sodium_PKG_LIBRARIES sodium)
-+    endif()
-+
-+    set(XPREFIX sodium_PKG)
-+  endif()
-+
-+  find_path(sodium_INCLUDE_DIR sodium.h HINTS ${${XPREFIX}_INCLUDE_DIRS})
-+  find_library(sodium_LIBRARY_DEBUG
-+               NAMES ${${XPREFIX}_LIBRARIES}
-+               HINTS ${${XPREFIX}_LIBRARY_DIRS})
-+  find_library(sodium_LIBRARY_RELEASE
-+               NAMES ${${XPREFIX}_LIBRARIES}
-+               HINTS ${${XPREFIX}_LIBRARY_DIRS})
-+
-+  # ############################################################################
-+  # Windows
-+elseif(WIN32)
-+  set(sodium_DIR "$ENV{sodium_DIR}" CACHE FILEPATH "sodium install directory")
-+  mark_as_advanced(sodium_DIR)
-+
-+  find_path(sodium_INCLUDE_DIR sodium.h
-+            HINTS ${sodium_DIR}
-+            PATH_SUFFIXES include)
-+
-+  if(MSVC)
-+    # detect target architecture
-+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/arch.c" [=[
-+            #if defined _M_IX86
-+            #error ARCH_VALUE x86_32
-+            #elif defined _M_X64
-+            #error ARCH_VALUE x86_64
-+            #endif
-+            #error ARCH_VALUE unknown
-+        ]=])
-+    try_compile(_UNUSED_VAR "${CMAKE_CURRENT_BINARY_DIR}"
-+                "${CMAKE_CURRENT_BINARY_DIR}/arch.c"
-+                OUTPUT_VARIABLE _COMPILATION_LOG)
-+    string(REGEX
-+           REPLACE ".*ARCH_VALUE ([a-zA-Z0-9_]+).*"
-+                   "\\1"
-+                   _TARGET_ARCH
-+                   "${_COMPILATION_LOG}")
-+
-+    # construct library path
-+    if(_TARGET_ARCH STREQUAL "x86_32")
-+      string(APPEND _PLATFORM_PATH "Win32")
-+    elseif(_TARGET_ARCH STREQUAL "x86_64")
-+      string(APPEND _PLATFORM_PATH "x64")
-+    else()
-+      message(
-+        FATAL_ERROR
-+          "the ${_TARGET_ARCH} architecture is not supported by Findsodium.cmake."
-+        )
-+    endif()
-+    string(APPEND _PLATFORM_PATH "/$$CONFIG$$")
-+
-+    if(MSVC_VERSION LESS 1900)
-+      math(EXPR _VS_VERSION "${MSVC_VERSION} / 10 - 60")
-+    else()
-+      math(EXPR _VS_VERSION "${MSVC_VERSION} / 10 - 50")
-+    endif()
-+    string(APPEND _PLATFORM_PATH "/v${_VS_VERSION}")
-+
-+    if(sodium_USE_STATIC_LIBS)
-+      string(APPEND _PLATFORM_PATH "/static")
-+    else()
-+      string(APPEND _PLATFORM_PATH "/dynamic")
-+    endif()
-+
-+    string(REPLACE "$$CONFIG$$"
-+                   "Debug"
-+                   _DEBUG_PATH_SUFFIX
-+                   "${_PLATFORM_PATH}")
-+    string(REPLACE "$$CONFIG$$"
-+                   "Release"
-+                   _RELEASE_PATH_SUFFIX
-+                   "${_PLATFORM_PATH}")
-+
-+    find_library(sodium_LIBRARY_DEBUG libsodium.lib
-+                 HINTS ${sodium_DIR}
-+                 PATH_SUFFIXES ${_DEBUG_PATH_SUFFIX})
-+    find_library(sodium_LIBRARY_RELEASE libsodium.lib
-+                 HINTS ${sodium_DIR}
-+                 PATH_SUFFIXES ${_RELEASE_PATH_SUFFIX})
-+    if(NOT sodium_USE_STATIC_LIBS)
-+      set(CMAKE_FIND_LIBRARY_SUFFIXES_BCK ${CMAKE_FIND_LIBRARY_SUFFIXES})
-+      set(CMAKE_FIND_LIBRARY_SUFFIXES ".dll")
-+      find_library(sodium_DLL_DEBUG libsodium
-+                   HINTS ${sodium_DIR}
-+                   PATH_SUFFIXES ${_DEBUG_PATH_SUFFIX})
-+      find_library(sodium_DLL_RELEASE libsodium
-+                   HINTS ${sodium_DIR}
-+                   PATH_SUFFIXES ${_RELEASE_PATH_SUFFIX})
-+      set(CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES_BCK})
-+    endif()
-+
-+  elseif(_GCC_COMPATIBLE)
-+    if(sodium_USE_STATIC_LIBS)
-+      find_library(sodium_LIBRARY_DEBUG libsodium.a
-+                   HINTS ${sodium_DIR}
-+                   PATH_SUFFIXES lib)
-+      find_library(sodium_LIBRARY_RELEASE libsodium.a
-+                   HINTS ${sodium_DIR}
-+                   PATH_SUFFIXES lib)
-+    else()
-+      find_library(sodium_LIBRARY_DEBUG libsodium.dll.a
-+                   HINTS ${sodium_DIR}
-+                   PATH_SUFFIXES lib)
-+      find_library(sodium_LIBRARY_RELEASE libsodium.dll.a
-+                   HINTS ${sodium_DIR}
-+                   PATH_SUFFIXES lib)
-+
-+      file(GLOB _DLL
-+           LIST_DIRECTORIES false
-+           RELATIVE "${sodium_DIR}/bin"
-+           "${sodium_DIR}/bin/libsodium*.dll")
-+      find_library(sodium_DLL_DEBUG ${_DLL} libsodium
-+                   HINTS ${sodium_DIR}
-+                   PATH_SUFFIXES bin)
-+      find_library(sodium_DLL_RELEASE ${_DLL} libsodium
-+                   HINTS ${sodium_DIR}
-+                   PATH_SUFFIXES bin)
-+    endif()
-+  else()
-+    message(FATAL_ERROR "this platform is not supported by FindSodium.cmake")
-+  endif()
-+
-+  # ############################################################################
-+  # unsupported
-+else()
-+  message(FATAL_ERROR "this platform is not supported by FindSodium.cmake")
-+endif()
-+
-+# ##############################################################################
-+# common stuff
-+
-+# extract sodium version
-+if(sodium_INCLUDE_DIR)
-+  set(_VERSION_HEADER "${sodium_INCLUDE_DIR}/sodium/version.h")
-+  if(EXISTS "${_VERSION_HEADER}")
-+    file(READ "${_VERSION_HEADER}" _VERSION_HEADER_CONTENT)
-+    string(
-+      REGEX
-+      REPLACE
-+        ".*define[ \t]+SODIUM_VERSION_STRING[^\"]+\"([^\"]+)\".*"
-+        "\\1"
-+        sodium_VERSION_STRING
-+        "${_VERSION_HEADER_CONTENT}")
-+    set(sodium_VERSION_STRING "${sodium_VERSION_STRING}")
-+  endif()
-+endif()
-+
-+# communicate results
-+include(FindPackageHandleStandardArgs)
-+find_package_handle_standard_args(sodium
-+                                  REQUIRED_VARS
-+                                  sodium_LIBRARY_RELEASE
-+                                  sodium_LIBRARY_DEBUG
-+                                  sodium_INCLUDE_DIR
-+                                  VERSION_VAR
-+                                  sodium_VERSION_STRING)
-+
-+# mark file paths as advanced
-+mark_as_advanced(sodium_INCLUDE_DIR)
-+mark_as_advanced(sodium_LIBRARY_DEBUG)
-+mark_as_advanced(sodium_LIBRARY_RELEASE)
-+if(WIN32)
-+  mark_as_advanced(sodium_DLL_DEBUG)
-+  mark_as_advanced(sodium_DLL_RELEASE)
-+endif()
-+
-+# create imported target
-+if(sodium_USE_STATIC_LIBS)
-+  set(_LIB_TYPE STATIC)
-+else()
-+  set(_LIB_TYPE SHARED)
-+endif()
-+add_library(sodium ${_LIB_TYPE} IMPORTED)
-+
-+set_target_properties(sodium
-+                      PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
-+                                 "${sodium_INCLUDE_DIR}"
-+                                 IMPORTED_LINK_INTERFACE_LANGUAGES
-+                                 "C")
-+
-+if(sodium_USE_STATIC_LIBS)
-+  set_target_properties(sodium
-+                        PROPERTIES INTERFACE_COMPILE_DEFINITIONS
-+                                   "SODIUM_STATIC"
-+                                   IMPORTED_LOCATION
-+                                   "${sodium_LIBRARY_RELEASE}"
-+                                   IMPORTED_LOCATION_DEBUG
-+                                   "${sodium_LIBRARY_DEBUG}")
-+else()
-+  if(UNIX)
-+    set_target_properties(sodium
-+                          PROPERTIES IMPORTED_LOCATION
-+                                     "${sodium_LIBRARY_RELEASE}"
-+                                     IMPORTED_LOCATION_DEBUG
-+                                     "${sodium_LIBRARY_DEBUG}")
-+  elseif(WIN32)
-+    set_target_properties(sodium
-+                          PROPERTIES IMPORTED_IMPLIB
-+                                     "${sodium_LIBRARY_RELEASE}"
-+                                     IMPORTED_IMPLIB_DEBUG
-+                                     "${sodium_LIBRARY_DEBUG}")
-+    if(NOT (sodium_DLL_DEBUG MATCHES ".*-NOTFOUND"))
-+      set_target_properties(sodium
-+                            PROPERTIES IMPORTED_LOCATION_DEBUG
-+                                       "${sodium_DLL_DEBUG}")
-+    endif()
-+    if(NOT (sodium_DLL_RELEASE MATCHES ".*-NOTFOUND"))
-+      set_target_properties(sodium
-+                            PROPERTIES IMPORTED_LOCATION_RELWITHDEBINFO
-+                                       "${sodium_DLL_RELEASE}"
-+                                       IMPORTED_LOCATION_MINSIZEREL
-+                                       "${sodium_DLL_RELEASE}"
-+                                       IMPORTED_LOCATION_RELEASE
-+                                       "${sodium_DLL_RELEASE}")
-+    endif()
-+  endif()
-+endif()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindSodium.cmake ../treadmill/CMake/FindSodium.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindSodium.cmake build/treadmill/CMake/FindSodium.cmake
 --- treadmill/CMake/FindSodium.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindSodium.cmake	2025-07-17 12:25:25.965057569 -0700
++++ build/treadmill/CMake/FindSodium.cmake	2025-08-04 15:39:02.701805756 -0700
 @@ -0,0 +1,297 @@
 +# Written in 2016 by Henrik Steffen Gaßmann <henrik@gassmann.onl>
 +#
@@ -1395,9 +1098,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindSodium.cmake ../treadmill/
 +        endif()
 +    endif()
 +endif()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindThrift.cmake ../treadmill/CMake/FindThrift.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindThrift.cmake build/treadmill/CMake/FindThrift.cmake
 --- treadmill/CMake/FindThrift.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindThrift.cmake	2025-07-17 12:25:25.965057569 -0700
++++ build/treadmill/CMake/FindThrift.cmake	2025-08-04 15:39:02.702405143 -0700
 @@ -0,0 +1,162 @@
 +# Licensed to the Apache Software Foundation (ASF) under one
 +# or more contributor license agreements.  See the NOTICE file
@@ -1561,9 +1264,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindThrift.cmake ../treadmill/
 +find_package_handle_standard_args(THRIFT REQUIRED_VARS
 +  THRIFT_SHARED_LIBRARY THRIFT_STATIC_LIBRARY
 +  THRIFT_INCLUDE_DIR THRIFT_EXECUTABLE)
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindXxhash.cmake ../treadmill/CMake/FindXxhash.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindXxhash.cmake build/treadmill/CMake/FindXxhash.cmake
 --- treadmill/CMake/FindXxhash.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindXxhash.cmake	2025-07-17 12:25:25.965057569 -0700
++++ build/treadmill/CMake/FindXxhash.cmake	2025-08-04 15:39:02.702986361 -0700
 @@ -0,0 +1,40 @@
 +# Copyright (c) Facebook, Inc. and its affiliates.
 +#
@@ -1605,9 +1308,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindXxhash.cmake ../treadmill/
 +endif()
 +
 +mark_as_advanced(Xxhash_INCLUDE_DIR Xxhash_LIBRARY)
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindZstd.cmake ../treadmill/CMake/FindZstd.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/FindZstd.cmake build/treadmill/CMake/FindZstd.cmake
 --- treadmill/CMake/FindZstd.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/FindZstd.cmake	2025-07-17 12:25:25.965057569 -0700
++++ build/treadmill/CMake/FindZstd.cmake	2025-08-04 15:39:02.703574070 -0700
 @@ -0,0 +1,14 @@
 +# Copyright (c) 2017-present, Facebook, Inc. and its affiliates.
 +# All rights reserved.
@@ -1623,9 +1326,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/FindZstd.cmake ../treadmill/CM
 +    set(ZSTD_FOUND TRUE)
 +    message(STATUS "Found ZSTD library: ${ZSTD_LIBRARY}")
 +endif ()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/ThriftLibrary.cmake ../treadmill/CMake/ThriftLibrary.cmake
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMake/ThriftLibrary.cmake build/treadmill/CMake/ThriftLibrary.cmake
 --- treadmill/CMake/ThriftLibrary.cmake	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMake/ThriftLibrary.cmake	2025-07-17 12:25:25.965057569 -0700
++++ build/treadmill/CMake/ThriftLibrary.cmake	2025-08-04 15:39:02.704340469 -0700
 @@ -0,0 +1,302 @@
 +# Copyright (c) Meta Platforms, Inc. and affiliates.
 +#
@@ -1929,9 +1632,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMake/ThriftLibrary.cmake ../treadmi
 +    DESTINATION include/${include_prefix}
 +    FILES_MATCHING PATTERN "*.tcc")
 +endmacro()
-diff -wbBdu -ruN '--exclude=.git' treadmill/CMakeLists.txt ../treadmill/CMakeLists.txt
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CMakeLists.txt build/treadmill/CMakeLists.txt
 --- treadmill/CMakeLists.txt	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/CMakeLists.txt	2025-07-18 15:53:16.538734367 -0700
++++ build/treadmill/CMakeLists.txt	2025-08-04 15:39:02.704933897 -0700
 @@ -0,0 +1,81 @@
 +cmake_minimum_required(VERSION 3.20)
 +project(treadmill
@@ -2014,9 +1717,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CMakeLists.txt ../treadmill/CMakeLis
 +add_subdirectory(src)
 +add_subdirectory(services/adsim)
 +add_subdirectory(services/sleep)
-diff -wbBdu -ruN '--exclude=.git' treadmill/CODE_OF_CONDUCT.md ../treadmill/CODE_OF_CONDUCT.md
---- treadmill/CODE_OF_CONDUCT.md	2025-07-22 13:22:26.568891845 -0700
-+++ ../treadmill/CODE_OF_CONDUCT.md	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CODE_OF_CONDUCT.md build/treadmill/CODE_OF_CONDUCT.md
+--- treadmill/CODE_OF_CONDUCT.md	2025-08-04 15:31:45.083168865 -0700
++++ build/treadmill/CODE_OF_CONDUCT.md	1969-12-31 16:00:00.000000000 -0800
 @@ -1,77 +0,0 @@
 -# Code of Conduct
 -
@@ -2095,9 +1798,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CODE_OF_CONDUCT.md ../treadmill/CODE
 -For answers to common questions about this code of conduct, see
 -https://www.contributor-covenant.org/faq
 -
-diff -wbBdu -ruN '--exclude=.git' treadmill/common/fb303/if/fb303.thrift ../treadmill/common/fb303/if/fb303.thrift
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/common/fb303/if/fb303.thrift build/treadmill/common/fb303/if/fb303.thrift
 --- treadmill/common/fb303/if/fb303.thrift	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/common/fb303/if/fb303.thrift	2023-01-27 13:32:40.000000000 -0800
++++ build/treadmill/common/fb303/if/fb303.thrift	2025-08-04 15:39:02.706968163 -0700
 @@ -0,0 +1,123 @@
 +/*
 + * fb303.thrift
@@ -2222,9 +1925,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/common/fb303/if/fb303.thrift ../trea
 +   */
 +  list<string> translateFrames(1: list<i64> pointers);
 +}
-diff -wbBdu -ruN '--exclude=.git' treadmill/configure.ac ../treadmill/configure.ac
---- treadmill/configure.ac	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/configure.ac	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/configure.ac build/treadmill/configure.ac
+--- treadmill/configure.ac	2025-08-04 15:31:45.101479511 -0700
++++ build/treadmill/configure.ac	1969-12-31 16:00:00.000000000 -0800
 @@ -1,138 +0,0 @@
 -# Copyright (c) 2013, Facebook, Inc.
 -# All rights reserved.
@@ -2364,9 +2067,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/configure.ac ../treadmill/configure.
 -AC_CONFIG_FILES([Makefile])
 -
 -AC_OUTPUT
-diff -wbBdu -ruN '--exclude=.git' treadmill/Connection.h ../treadmill/Connection.h
---- treadmill/Connection.h	2025-07-22 13:22:26.568891845 -0700
-+++ ../treadmill/Connection.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Connection.h build/treadmill/Connection.h
+--- treadmill/Connection.h	2025-08-04 15:31:45.083924938 -0700
++++ build/treadmill/Connection.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,61 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -2429,9 +2132,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Connection.h ../treadmill/Connection
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/CounterStatistic.cpp ../treadmill/CounterStatistic.cpp
---- treadmill/CounterStatistic.cpp	2025-07-22 13:22:26.568891845 -0700
-+++ ../treadmill/CounterStatistic.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CounterStatistic.cpp build/treadmill/CounterStatistic.cpp
+--- treadmill/CounterStatistic.cpp	2025-08-04 15:31:45.091611480 -0700
++++ build/treadmill/CounterStatistic.cpp	1969-12-31 16:00:00.000000000 -0800
 @@ -1,37 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -2470,9 +2173,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CounterStatistic.cpp ../treadmill/Co
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/CounterStatistic.h ../treadmill/CounterStatistic.h
---- treadmill/CounterStatistic.h	2025-07-22 13:22:26.568891845 -0700
-+++ ../treadmill/CounterStatistic.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/CounterStatistic.h build/treadmill/CounterStatistic.h
+--- treadmill/CounterStatistic.h	2025-08-04 15:31:45.092090034 -0700
++++ build/treadmill/CounterStatistic.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,63 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -2537,9 +2240,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/CounterStatistic.h ../treadmill/Coun
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Event.h ../treadmill/Event.h
---- treadmill/Event.h	2025-07-22 13:22:26.568891845 -0700
-+++ ../treadmill/Event.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Event.h build/treadmill/Event.h
+--- treadmill/Event.h	2025-08-04 15:31:45.092513724 -0700
++++ build/treadmill/Event.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,47 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -2588,18 +2291,18 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Event.h ../treadmill/Event.h
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/.gitignore ../treadmill/.gitignore
---- treadmill/.gitignore	2025-07-22 13:22:26.568891845 -0700
-+++ ../treadmill/.gitignore	2025-07-17 14:52:32.009382576 -0700
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/.gitignore build/treadmill/.gitignore
+--- treadmill/.gitignore	2025-08-04 15:31:45.082364829 -0700
++++ build/treadmill/.gitignore	2025-08-04 15:39:02.710160451 -0700
 @@ -19,4 +19,5 @@
  /install-sh
  /libtool
  /missing
 +build/
  services/sleep/gen-cpp2
-diff -wbBdu -ruN '--exclude=.git' treadmill/if/treadmill.thrift ../treadmill/if/treadmill.thrift
---- treadmill/if/treadmill.thrift	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/if/treadmill.thrift	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/if/treadmill.thrift build/treadmill/if/treadmill.thrift
+--- treadmill/if/treadmill.thrift	2025-08-04 15:31:45.102041001 -0700
++++ build/treadmill/if/treadmill.thrift	1969-12-31 16:00:00.000000000 -0800
 @@ -1,54 +0,0 @@
 -// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 -include "common/fb303/if/fb303.thrift"
@@ -2655,9 +2358,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/if/treadmill.thrift ../treadmill/if/
 -  void setConfiguration(1: string key, 2: string value);
 -  void clearConfiguration();
 -}
-diff -wbBdu -ruN '--exclude=.git' treadmill/m4/ax_cxx_compile_stdcxx_14.m4 ../treadmill/m4/ax_cxx_compile_stdcxx_14.m4
---- treadmill/m4/ax_cxx_compile_stdcxx_14.m4	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/m4/ax_cxx_compile_stdcxx_14.m4	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/m4/ax_cxx_compile_stdcxx_14.m4 build/treadmill/m4/ax_cxx_compile_stdcxx_14.m4
+--- treadmill/m4/ax_cxx_compile_stdcxx_14.m4	2025-08-04 15:31:45.103138300 -0700
++++ build/treadmill/m4/ax_cxx_compile_stdcxx_14.m4	1969-12-31 16:00:00.000000000 -0800
 @@ -1,34 +0,0 @@
 -# ============================================================================
 -#  http://www.gnu.org/software/autoconf-archive/ax_cxx_compile_stdcxx_14.html
@@ -2693,9 +2396,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/m4/ax_cxx_compile_stdcxx_14.m4 ../tr
 -
 -AX_REQUIRE_DEFINED([AX_CXX_COMPILE_STDCXX])
 -AC_DEFUN([AX_CXX_COMPILE_STDCXX_14], [AX_CXX_COMPILE_STDCXX([14], [$1], [$2])])
-diff -wbBdu -ruN '--exclude=.git' treadmill/m4/ax_cxx_compile_stdcxx.m4 ../treadmill/m4/ax_cxx_compile_stdcxx.m4
---- treadmill/m4/ax_cxx_compile_stdcxx.m4	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/m4/ax_cxx_compile_stdcxx.m4	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/m4/ax_cxx_compile_stdcxx.m4 build/treadmill/m4/ax_cxx_compile_stdcxx.m4
+--- treadmill/m4/ax_cxx_compile_stdcxx.m4	2025-08-04 15:31:45.102725766 -0700
++++ build/treadmill/m4/ax_cxx_compile_stdcxx.m4	1969-12-31 16:00:00.000000000 -0800
 @@ -1,982 +0,0 @@
 -# ===========================================================================
 -#   http://www.gnu.org/software/autoconf-archive/ax_cxx_compile_stdcxx.html
@@ -3679,9 +3382,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/m4/ax_cxx_compile_stdcxx.m4 ../tread
 -#endif  // __cplusplus <= 201402L
 -
 -]])
-diff -wbBdu -ruN '--exclude=.git' treadmill/Makefile.am ../treadmill/Makefile.am
---- treadmill/Makefile.am	2025-07-22 13:22:26.568891845 -0700
-+++ ../treadmill/Makefile.am	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Makefile.am build/treadmill/Makefile.am
+--- treadmill/Makefile.am	2025-08-04 15:31:45.093437621 -0700
++++ build/treadmill/Makefile.am	1969-12-31 16:00:00.000000000 -0800
 @@ -1,74 +0,0 @@
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 -ACLOCAL_AMFLAGS = -I m4
@@ -3757,9 +3460,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Makefile.am ../treadmill/Makefile.am
 -
 -treadmill_libmcrouter_LDADD = \
 -	libtreadmill.a
-diff -wbBdu -ruN '--exclude=.git' treadmill/RandomEngine.cpp ../treadmill/RandomEngine.cpp
---- treadmill/RandomEngine.cpp	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/RandomEngine.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/RandomEngine.cpp build/treadmill/RandomEngine.cpp
+--- treadmill/RandomEngine.cpp	2025-08-04 15:31:45.094662954 -0700
++++ build/treadmill/RandomEngine.cpp	1969-12-31 16:00:00.000000000 -0800
 @@ -1,86 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -3847,9 +3550,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/RandomEngine.cpp ../treadmill/Random
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/RandomEngine.h ../treadmill/RandomEngine.h
---- treadmill/RandomEngine.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/RandomEngine.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/RandomEngine.h build/treadmill/RandomEngine.h
+--- treadmill/RandomEngine.h	2025-08-04 15:31:45.095119394 -0700
++++ build/treadmill/RandomEngine.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,110 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -3961,9 +3664,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/RandomEngine.h ../treadmill/RandomEn
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/README.md ../treadmill/README.md
---- treadmill/README.md	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/README.md	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/README.md build/treadmill/README.md
+--- treadmill/README.md	2025-08-04 15:31:45.094297181 -0700
++++ build/treadmill/README.md	2025-08-04 15:39:02.713923803 -0700
 @@ -1,6 +1,6 @@
  ## Treadmill [![Build Status](https://travis-ci.org/facebook/treadmill.svg?branch=master)](https://travis-ci.org/facebook/treadmill)
  
@@ -3972,9 +3675,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/README.md ../treadmill/README.md
  server-side applications (_e.g._, [Memcached](http://memcached.org/),
  [Mcrouter](https://github.com/facebook/mcrouter), and
  [FBThrift](https://github.com/facebook/fbthrift).
-diff -wbBdu -ruN '--exclude=.git' treadmill/Request.h ../treadmill/Request.h
---- treadmill/Request.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Request.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Request.h build/treadmill/Request.h
+--- treadmill/Request.h	2025-08-04 15:31:45.095518768 -0700
++++ build/treadmill/Request.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,21 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -3997,9 +3700,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Request.h ../treadmill/Request.h
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Scheduler.cpp ../treadmill/Scheduler.cpp
---- treadmill/Scheduler.cpp	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Scheduler.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Scheduler.cpp build/treadmill/Scheduler.cpp
+--- treadmill/Scheduler.cpp	2025-08-04 15:31:45.095962629 -0700
++++ build/treadmill/Scheduler.cpp	1969-12-31 16:00:00.000000000 -0800
 @@ -1,198 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -4199,9 +3902,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Scheduler.cpp ../treadmill/Scheduler
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Scheduler.h ../treadmill/Scheduler.h
---- treadmill/Scheduler.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Scheduler.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Scheduler.h build/treadmill/Scheduler.h
+--- treadmill/Scheduler.h	2025-08-04 15:31:45.096359840 -0700
++++ build/treadmill/Scheduler.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,108 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -4311,162 +4014,411 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Scheduler.h ../treadmill/Scheduler.h
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/common.sh ../treadmill/scripts/common.sh
---- treadmill/scripts/common.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/common.sh	2023-01-27 13:55:32.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/common.sh build/treadmill/scripts/common.sh
+--- treadmill/scripts/common.sh	2025-08-04 15:31:45.103676914 -0700
++++ build/treadmill/scripts/common.sh	2025-08-04 15:39:02.715822725 -0700
 @@ -1,5 +1,3 @@
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 -# shellcheck disable=SC2148
  set -ex
  
  function die { printf "%s: %s\n" "$0" "$@"; exit 1; }
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/get_and_build_everything.sh ../treadmill/scripts/get_and_build_everything.sh
---- treadmill/scripts/get_and_build_everything.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/get_and_build_everything.sh	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/get_and_build_everything.sh build/treadmill/scripts/get_and_build_everything.sh
+--- treadmill/scripts/get_and_build_everything.sh	2025-08-04 15:31:45.104056317 -0700
++++ build/treadmill/scripts/get_and_build_everything.sh	2025-08-04 15:39:02.716393188 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  set -ex
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/install_ubuntu_14.04.sh ../treadmill/scripts/install_ubuntu_14.04.sh
---- treadmill/scripts/install_ubuntu_14.04.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/install_ubuntu_14.04.sh	2023-01-27 13:56:30.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/install_ubuntu_14.04.sh build/treadmill/scripts/install_ubuntu_14.04.sh
+--- treadmill/scripts/install_ubuntu_14.04.sh	2025-08-04 15:31:45.104478296 -0700
++++ build/treadmill/scripts/install_ubuntu_14.04.sh	2025-08-04 15:39:02.716869979 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  set -ex
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/order_ubuntu-14.04/10_folly ../treadmill/scripts/order_ubuntu-14.04/10_folly
---- treadmill/scripts/order_ubuntu-14.04/10_folly	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/order_ubuntu-14.04/10_folly	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/10_folly build/treadmill/scripts/order_ubuntu-14.04/10_folly
+--- treadmill/scripts/order_ubuntu-14.04/10_folly	2025-08-04 15:31:45.107560366 -0700
++++ build/treadmill/scripts/order_ubuntu-14.04/10_folly	2025-08-04 15:39:02.717402254 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/order_ubuntu-14.04/20_wangle ../treadmill/scripts/order_ubuntu-14.04/20_wangle
---- treadmill/scripts/order_ubuntu-14.04/20_wangle	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/order_ubuntu-14.04/20_wangle	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/20_wangle build/treadmill/scripts/order_ubuntu-14.04/20_wangle
+--- treadmill/scripts/order_ubuntu-14.04/20_wangle	2025-08-04 15:31:45.108967784 -0700
++++ build/treadmill/scripts/order_ubuntu-14.04/20_wangle	2025-08-04 15:39:02.718012357 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/order_ubuntu-14.04/30_mstch ../treadmill/scripts/order_ubuntu-14.04/30_mstch
---- treadmill/scripts/order_ubuntu-14.04/30_mstch	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/order_ubuntu-14.04/30_mstch	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/30_mstch build/treadmill/scripts/order_ubuntu-14.04/30_mstch
+--- treadmill/scripts/order_ubuntu-14.04/30_mstch	2025-08-04 15:31:45.108263939 -0700
++++ build/treadmill/scripts/order_ubuntu-14.04/30_mstch	2025-08-04 15:39:02.718467855 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/order_ubuntu-14.04/40_zstd ../treadmill/scripts/order_ubuntu-14.04/40_zstd
---- treadmill/scripts/order_ubuntu-14.04/40_zstd	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/order_ubuntu-14.04/40_zstd	2023-01-27 13:56:30.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/40_zstd build/treadmill/scripts/order_ubuntu-14.04/40_zstd
+--- treadmill/scripts/order_ubuntu-14.04/40_zstd	2025-08-04 15:31:45.109335540 -0700
++++ build/treadmill/scripts/order_ubuntu-14.04/40_zstd	2025-08-04 15:39:02.719050086 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/order_ubuntu-14.04/50_fbthrift ../treadmill/scripts/order_ubuntu-14.04/50_fbthrift
---- treadmill/scripts/order_ubuntu-14.04/50_fbthrift	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/order_ubuntu-14.04/50_fbthrift	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/50_fbthrift build/treadmill/scripts/order_ubuntu-14.04/50_fbthrift
+--- treadmill/scripts/order_ubuntu-14.04/50_fbthrift	2025-08-04 15:31:45.107208354 -0700
++++ build/treadmill/scripts/order_ubuntu-14.04/50_fbthrift	2025-08-04 15:39:02.719553137 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/order_ubuntu-14.04/60_mcrouter ../treadmill/scripts/order_ubuntu-14.04/60_mcrouter
---- treadmill/scripts/order_ubuntu-14.04/60_mcrouter	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/order_ubuntu-14.04/60_mcrouter	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/60_mcrouter build/treadmill/scripts/order_ubuntu-14.04/60_mcrouter
+--- treadmill/scripts/order_ubuntu-14.04/60_mcrouter	2025-08-04 15:31:45.107889653 -0700
++++ build/treadmill/scripts/order_ubuntu-14.04/60_mcrouter	2025-08-04 15:39:02.720107996 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/order_ubuntu-14.04/70_treadmill ../treadmill/scripts/order_ubuntu-14.04/70_treadmill
---- treadmill/scripts/order_ubuntu-14.04/70_treadmill	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/order_ubuntu-14.04/70_treadmill	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/70_treadmill build/treadmill/scripts/order_ubuntu-14.04/70_treadmill
+--- treadmill/scripts/order_ubuntu-14.04/70_treadmill	2025-08-04 15:31:45.108517293 -0700
++++ build/treadmill/scripts/order_ubuntu-14.04/70_treadmill	2025-08-04 15:39:02.720582323 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/recipes/fbthrift.sh ../treadmill/scripts/recipes/fbthrift.sh
---- treadmill/scripts/recipes/fbthrift.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/recipes/fbthrift.sh	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/fbthrift.sh build/treadmill/scripts/recipes/fbthrift.sh
+--- treadmill/scripts/recipes/fbthrift.sh	2025-08-04 15:31:45.107208354 -0700
++++ build/treadmill/scripts/recipes/fbthrift.sh	2025-08-04 15:39:02.721126146 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/recipes/folly.sh ../treadmill/scripts/recipes/folly.sh
---- treadmill/scripts/recipes/folly.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/recipes/folly.sh	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/folly.sh build/treadmill/scripts/recipes/folly.sh
+--- treadmill/scripts/recipes/folly.sh	2025-08-04 15:31:45.107560366 -0700
++++ build/treadmill/scripts/recipes/folly.sh	2025-08-04 15:39:02.721582616 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/recipes/mcrouter.sh ../treadmill/scripts/recipes/mcrouter.sh
---- treadmill/scripts/recipes/mcrouter.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/recipes/mcrouter.sh	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/mcrouter.sh build/treadmill/scripts/recipes/mcrouter.sh
+--- treadmill/scripts/recipes/mcrouter.sh	2025-08-04 15:31:45.107889653 -0700
++++ build/treadmill/scripts/recipes/mcrouter.sh	2025-08-04 15:39:02.722218779 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/recipes/mstch.sh ../treadmill/scripts/recipes/mstch.sh
---- treadmill/scripts/recipes/mstch.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/recipes/mstch.sh	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/mstch.sh build/treadmill/scripts/recipes/mstch.sh
+--- treadmill/scripts/recipes/mstch.sh	2025-08-04 15:31:45.108263939 -0700
++++ build/treadmill/scripts/recipes/mstch.sh	2025-08-04 15:39:02.722760948 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/recipes/treadmill.sh ../treadmill/scripts/recipes/treadmill.sh
---- treadmill/scripts/recipes/treadmill.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/recipes/treadmill.sh	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/treadmill.sh build/treadmill/scripts/recipes/treadmill.sh
+--- treadmill/scripts/recipes/treadmill.sh	2025-08-04 15:31:45.108517293 -0700
++++ build/treadmill/scripts/recipes/treadmill.sh	2025-08-04 15:39:02.723244931 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/recipes/wangle.sh ../treadmill/scripts/recipes/wangle.sh
---- treadmill/scripts/recipes/wangle.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/recipes/wangle.sh	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/wangle.sh build/treadmill/scripts/recipes/wangle.sh
+--- treadmill/scripts/recipes/wangle.sh	2025-08-04 15:31:45.108967784 -0700
++++ build/treadmill/scripts/recipes/wangle.sh	2025-08-04 15:39:02.723774982 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/scripts/recipes/zstd.sh ../treadmill/scripts/recipes/zstd.sh
---- treadmill/scripts/recipes/zstd.sh	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/scripts/recipes/zstd.sh	2023-01-27 13:56:30.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/zstd.sh build/treadmill/scripts/recipes/zstd.sh
+--- treadmill/scripts/recipes/zstd.sh	2025-08-04 15:31:45.109335540 -0700
++++ build/treadmill/scripts/recipes/zstd.sh	2025-08-04 15:39:02.724305014 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
  
  source common.sh
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/AdSimService.h ../treadmill/services/adsim/AdSimService.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/AdSimClientFactory.cpp build/treadmill/services/adsim/AdSimClientFactory.cpp
+--- treadmill/services/adsim/AdSimClientFactory.cpp	1969-12-31 16:00:00.000000000 -0800
++++ build/treadmill/services/adsim/AdSimClientFactory.cpp	2025-08-04 15:39:02.724918682 -0700
+@@ -0,0 +1,170 @@
++#include "AdSimClientFactory.h"
++
++#include <fizz/client/AsyncFizzClient.h>
++#include <fizz/client/MultiClientExtensions.h>
++#include <folly/futures/Future.h>
++#include <folly/io/async/AsyncSocket.h>
++#include <glog/logging.h>
++#include <thrift/lib/cpp2/security/extensions/ThriftParametersClientExtension.h>
++
++DEFINE_bool(
++    use_stop_tls,
++    false,
++    "Use stop TLS mode (transition to plaintext) instead of full TLS encryption");
++
++namespace facebook {
++namespace windtunnel {
++namespace treadmill {
++
++namespace {
++
++class ConnectCallback : public folly::AsyncSocket::ConnectCallback {
++ public:
++  void connectSuccess() noexcept override {
++    // Connection successful
++  }
++  void connectErr(const folly::AsyncSocketException& ex) noexcept override {
++    LOG(ERROR) << "Connection failed: " << ex.what();
++  }
++};
++
++class StopTLSConnector
++    : public fizz::client::AsyncFizzClient::HandshakeCallback,
++      public fizz::AsyncFizzBase::EndOfTLSCallback {
++ public:
++  explicit StopTLSConnector(const ClientConnectionConfig& config)
++      : config_(config) {}
++
++  folly::AsyncSocket::UniquePtr connect(folly::EventBase* evb) {
++    eb_ = evb;
++
++    auto sock = folly::AsyncSocket::newSocket(eb_, config_.serverAddress);
++    auto ctx = AdSimClientFactory::createFizzContext();
++
++    auto thriftParametersContext =
++        std::make_shared<apache::thrift::ThriftParametersContext>();
++    thriftParametersContext->setUseStopTLS(true);
++    auto extension =
++        std::make_shared<apache::thrift::ThriftParametersClientExtension>(
++            thriftParametersContext);
++
++    client_.reset(new fizz::client::AsyncFizzClient(
++        std::move(sock), std::move(ctx), std::move(extension)));
++    client_->connect(
++        this,
++        nullptr,
++        folly::none,
++        folly::none,
++        folly::none,
++        config_.connectTimeout);
++    return promise_.getFuture().getVia(eb_);
++  }
++
++  void fizzHandshakeSuccess(
++      fizz::client::AsyncFizzClient* client) noexcept override {
++    client->setEndOfTLSCallback(this);
++  }
++
++  void fizzHandshakeError(
++      fizz::client::AsyncFizzClient* /* unused */,
++      folly::exception_wrapper ex) noexcept override {
++    promise_.setException(ex);
++    LOG(ERROR) << "Fizz handshake failed: " << ex.what();
++  }
++
++  void endOfTLS(fizz::AsyncFizzBase* transport, std::unique_ptr<folly::IOBuf>)
++      override {
++    auto sock = transport->getUnderlyingTransport<folly::AsyncSocket>();
++    DCHECK(sock);
++
++    auto fd = sock->detachNetworkSocket();
++    auto zcId = sock->getZeroCopyBufId();
++
++    // Create new plaintext socket
++    auto plaintextTransport =
++        folly::AsyncSocket::UniquePtr(new folly::AsyncSocket(eb_, fd, zcId));
++    promise_.setValue(std::move(plaintextTransport));
++  }
++
++ private:
++  ClientConnectionConfig config_;
++  fizz::client::AsyncFizzClient::UniquePtr client_;
++  folly::Promise<folly::AsyncSocket::UniquePtr> promise_;
++  folly::EventBase* eb_;
++};
++
++} // anonymous namespace
++
++/* static */ folly::AsyncTransport::UniquePtr
++AdSimClientFactory::createTransport(
++    folly::EventBase* evb,
++    const ClientConnectionConfig& config) {
++  switch (config.tlsMode) {
++    case TLSMode::FULL_TLS:
++      return createFullTLSTransport(evb, config);
++    case TLSMode::STOP_TLS:
++      return createStopTLSTransport(evb, config);
++  }
++  LOG(FATAL) << "Unknown TLS mode";
++}
++
++/* static */ folly::AsyncTransport::UniquePtr
++AdSimClientFactory::createTransport(
++    folly::EventBase* evb,
++    const folly::SocketAddress& serverAddress) {
++  ClientConnectionConfig config;
++  config.serverAddress = serverAddress;
++  config.tlsMode = FLAGS_use_stop_tls ? TLSMode::STOP_TLS : TLSMode::FULL_TLS;
++  return createTransport(evb, config);
++}
++
++/* static */ folly::AsyncTransport::UniquePtr
++AdSimClientFactory::createFullTLSTransport(
++    folly::EventBase* evb,
++    const ClientConnectionConfig& config) {
++  auto ctx = createFizzContext();
++
++  // Configure ThriftParameters to disable stop TLS
++  auto thriftParametersContext =
++      std::make_shared<apache::thrift::ThriftParametersContext>();
++  thriftParametersContext->setUseStopTLS(false);
++  auto extension =
++      std::make_shared<apache::thrift::ThriftParametersClientExtension>(
++          thriftParametersContext);
++
++  std::vector<std::shared_ptr<fizz::ClientExtensions>> extensions;
++  extensions.push_back(extension);
++
++  auto fizzClient = fizz::client::AsyncFizzClient::UniquePtr(
++      new fizz::client::AsyncFizzClient(
++          evb,
++          ctx,
++          std::make_shared<fizz::client::MultiClientExtensions>(
++              std::move(extensions))));
++
++  // Connect synchronously and return the transport
++  fizzClient->connect(
++      config.serverAddress, new ConnectCallback(), nullptr, {}, {});
++  return std::move(fizzClient);
++}
++
++/* static */ folly::AsyncTransport::UniquePtr
++AdSimClientFactory::createStopTLSTransport(
++    folly::EventBase* evb,
++    const ClientConnectionConfig& config) {
++  StopTLSConnector connector(config);
++  auto transport = connector.connect(evb);
++  // Convert AsyncSocket::UniquePtr to AsyncTransport::UniquePtr
++  return folly::AsyncTransport::UniquePtr(transport.release());
++}
++
++/* static */ std::shared_ptr<fizz::client::FizzClientContext>
++AdSimClientFactory::createFizzContext() {
++  auto ctx = std::make_shared<fizz::client::FizzClientContext>();
++  ctx->setSupportedAlpns({"rs"});
++  return ctx;
++}
++
++} // namespace treadmill
++} // namespace windtunnel
++} // namespace facebook
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/AdSimClientFactory.h build/treadmill/services/adsim/AdSimClientFactory.h
+--- treadmill/services/adsim/AdSimClientFactory.h	1969-12-31 16:00:00.000000000 -0800
++++ build/treadmill/services/adsim/AdSimClientFactory.h	2025-08-04 15:39:02.725408242 -0700
+@@ -0,0 +1,71 @@
++#pragma once
++
++#include <fizz/client/AsyncFizzClient.h>
++#include <fizz/client/MultiClientExtensions.h>
++#include <folly/io/async/AsyncTransport.h>
++#include <folly/io/async/EventBase.h>
++#include <gflags/gflags.h>
++#include <thrift/lib/cpp2/security/extensions/ThriftParametersClientExtension.h>
++
++DECLARE_bool(use_stop_tls);
++
++namespace facebook {
++namespace windtunnel {
++namespace treadmill {
++
++enum class TLSMode {
++  FULL_TLS, // Continuous TLS encryption (no stop TLS)
++  STOP_TLS // Traditional stop TLS (transition to plaintext)
++};
++
++struct ClientConnectionConfig {
++  folly::SocketAddress serverAddress;
++  TLSMode tlsMode = TLSMode::FULL_TLS;
++  std::chrono::milliseconds connectTimeout{100};
++};
++
++/**
++ * Factory class for creating different types of TLS connectors.
++ * Provides a clean interface to create either full TLS or stop TLS connectors
++ * based on configuration parameters.
++ */
++class AdSimClientFactory {
++ public:
++  /**
++   * Create a transport connection based on the specified configuration.
++   *
++   * @param evb EventBase for the connection
++   * @param config Connection configuration including TLS mode
++   * @return AsyncTransport::UniquePtr that can be used with RocketClientChannel
++   */
++  static folly::AsyncTransport::UniquePtr createTransport(
++      folly::EventBase* evb,
++      const ClientConnectionConfig& config);
++
++  /**
++   * Create a transport connection using global flags for configuration.
++   * This is a convenience method that reads from FLAGS_use_stop_tls.
++   *
++   * @param evb EventBase for the connection
++   * @param serverAddress Server address to connect to
++   * @return AsyncTransport::UniquePtr that can be used with RocketClientChannel
++   */
++  static folly::AsyncTransport::UniquePtr createTransport(
++      folly::EventBase* evb,
++      const folly::SocketAddress& serverAddress);
++
++  static std::shared_ptr<fizz::client::FizzClientContext> createFizzContext();
++
++ private:
++  static folly::AsyncTransport::UniquePtr createFullTLSTransport(
++      folly::EventBase* evb,
++      const ClientConnectionConfig& config);
++
++  static folly::AsyncTransport::UniquePtr createStopTLSTransport(
++      folly::EventBase* evb,
++      const ClientConnectionConfig& config);
++};
++
++} // namespace treadmill
++} // namespace windtunnel
++} // namespace facebook
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/AdSimService.h build/treadmill/services/adsim/AdSimService.h
 --- treadmill/services/adsim/AdSimService.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/adsim/AdSimService.h	2023-01-30 13:56:19.000000000 -0800
++++ build/treadmill/services/adsim/AdSimService.h	2025-08-04 15:39:02.725842188 -0700
 @@ -0,0 +1,18 @@
 +#pragma once
 +
@@ -4486,9 +4438,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/AdSimService.h ../tre
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/AdSimServiceRequestFactory.cpp ../treadmill/services/adsim/AdSimServiceRequestFactory.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/AdSimServiceRequestFactory.cpp build/treadmill/services/adsim/AdSimServiceRequestFactory.cpp
 --- treadmill/services/adsim/AdSimServiceRequestFactory.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/adsim/AdSimServiceRequestFactory.cpp	2023-01-30 13:56:18.000000000 -0800
++++ build/treadmill/services/adsim/AdSimServiceRequestFactory.cpp	2025-08-04 15:39:02.726272379 -0700
 @@ -0,0 +1,92 @@
 +// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 +
@@ -4582,9 +4534,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/AdSimServiceRequestFa
 +}
 +
 +} // namespace facebook::windtunnel::treadmill
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/AdSimServiceRequestFactory.h ../treadmill/services/adsim/AdSimServiceRequestFactory.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/AdSimServiceRequestFactory.h build/treadmill/services/adsim/AdSimServiceRequestFactory.h
 --- treadmill/services/adsim/AdSimServiceRequestFactory.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/adsim/AdSimServiceRequestFactory.h	2023-01-30 13:56:16.000000000 -0800
++++ build/treadmill/services/adsim/AdSimServiceRequestFactory.h	2025-08-04 15:39:02.726747568 -0700
 @@ -0,0 +1,36 @@
 +// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 +
@@ -4622,14 +4574,15 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/AdSimServiceRequestFa
 +};
 +
 +} // namespace facebook::windtunnel::treadmill
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/CMakeLists.txt ../treadmill/services/adsim/CMakeLists.txt
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/CMakeLists.txt build/treadmill/services/adsim/CMakeLists.txt
 --- treadmill/services/adsim/CMakeLists.txt	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/adsim/CMakeLists.txt	2025-07-17 14:48:11.715010988 -0700
-@@ -0,0 +1,51 @@
++++ build/treadmill/services/adsim/CMakeLists.txt	2025-08-04 15:39:02.727281355 -0700
+@@ -0,0 +1,52 @@
 +# Define the treadmill_adsim executable
 +add_executable(treadmill_adsim
 +    Treadmill.cpp
 +    AdSimServiceRequestFactory.cpp
++    AdSimClientFactory.cpp
 +)
 +
 +# Set include directories for treadmill_adsim
@@ -4677,13 +4630,12 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/CMakeLists.txt ../tre
 +install(TARGETS treadmill_adsim
 +    RUNTIME DESTINATION bin
 +)
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Connection.h ../treadmill/services/adsim/Connection.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/Connection.h build/treadmill/services/adsim/Connection.h
 --- treadmill/services/adsim/Connection.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/adsim/Connection.h	2025-07-17 15:10:45.216548603 -0700
-@@ -0,0 +1,135 @@
++++ build/treadmill/services/adsim/Connection.h	2025-08-04 15:39:02.727752197 -0700
+@@ -0,0 +1,79 @@
 +#pragma once
 +
-+#include <fizz/client/AsyncFizzClient.h>
 +#include <folly/futures/Future.h>
 +#include <folly/io/async/EventBase.h>
 +#include <gen-cpp2/AdSim.h>
@@ -4697,6 +4649,7 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Connection.h ../tread
 +#include "src/Connection.h"
 +#include "src/Treadmill.h"
 +
++#include "AdSimClientFactory.h"
 +#include "AdSimService.h"
 +#include "AdSimServiceRequestFactory.h"
 +
@@ -4711,75 +4664,17 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Connection.h ../tread
 +using facebook::cea::chips::adsim::AdSimAsyncClient;
 +using facebook::cea::chips::adsim::AdSimResponse;
 +
-+/* A helper class to create fizz sockets.
-+ * From fbcode/thrift/lib/cpp2/test/server/ThriftServerTest.cpp
-+ */
-+class FizzStopTLSConnector
-+    : public fizz::client::AsyncFizzClient::HandshakeCallback,
-+      public fizz::AsyncFizzBase::EndOfTLSCallback {
-+public:
-+  folly::AsyncSocket::UniquePtr connect(const folly::SocketAddress &addr,
-+                                        folly::EventBase *evb) {
-+    eb_ = evb;
-+
-+    auto sock = folly::AsyncSocket::newSocket(eb_, addr);
-+    auto ctx = std::make_shared<fizz::client::FizzClientContext>();
-+    ctx->setSupportedAlpns({"rs"});
-+    auto thriftParametersContext =
-+        std::make_shared<apache::thrift::ThriftParametersContext>();
-+    thriftParametersContext->setUseStopTLS(true);
-+    auto extension =
-+        std::make_shared<apache::thrift::ThriftParametersClientExtension>(
-+            thriftParametersContext);
-+
-+    client_.reset(new fizz::client::AsyncFizzClient(
-+        std::move(sock), std::move(ctx), std::move(extension)));
-+    client_->connect(this, nullptr, folly::none, folly::none, folly::none,
-+                     std::chrono::milliseconds(100));
-+    return promise_.getFuture().getVia(eb_);
-+  }
-+
-+  void fizzHandshakeSuccess(
-+      fizz::client::AsyncFizzClient *client) noexcept override {
-+    client->setEndOfTLSCallback(this);
-+  }
-+
-+  void fizzHandshakeError(fizz::client::AsyncFizzClient * /* unused */,
-+                          folly::exception_wrapper ex) noexcept override {
-+    promise_.setException(ex);
-+    LOG(ERROR) << "Fizz handshake failed " << ex.what();
-+  }
-+
-+  void endOfTLS(fizz::AsyncFizzBase *transport,
-+                std::unique_ptr<folly::IOBuf>) override {
-+    auto sock = transport->getUnderlyingTransport<folly::AsyncSocket>();
-+    DCHECK(sock);
-+
-+    auto fd = sock->detachNetworkSocket();
-+    auto zcId = sock->getZeroCopyBufId();
-+
-+    // create new socket
-+    auto plaintextTransport =
-+        folly::AsyncSocket::UniquePtr(new folly::AsyncSocket(eb_, fd, zcId));
-+    promise_.setValue(std::move(plaintextTransport));
-+  }
-+
-+  fizz::client::AsyncFizzClient::UniquePtr client_;
-+  folly::Promise<folly::AsyncSocket::UniquePtr> promise_;
-+  folly::EventBase *eb_;
-+};
-+
-+template <> class Connection<AdSimService> {
++template <>
++class Connection<AdSimService> {
 +  // This class is responsible for actually executing the requests against the
 +  // service, and acquiring the responses.
 +
-+public:
-+  explicit Connection<AdSimService>(folly::EventBase &eventBase)
++ public:
++  explicit Connection<AdSimService>(folly::EventBase& eventBase)
 +      : eventBase_(eventBase) {
-+    // Create a thrift client
-+    FizzStopTLSConnector connector;
++    // Create a thrift client using the new AdSimClientFactory
 +    auto addr = folly::SocketAddress(FLAGS_hostname, FLAGS_port);
-+    auto transport = connector.connect(addr, &eventBase_);
++    auto transport = AdSimClientFactory::createTransport(&eventBase_, addr);
 +    client_ = std::make_shared<AdSimAsyncClient>(
 +        RocketClientChannel::newChannel(std::move(transport)));
 +    requestFactory_ = AdSimServiceRequestFactory::get();
@@ -4789,36 +4684,38 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Connection.h ../tread
 +    }
 +  }
 +
-+  bool isReady() { return true; }
++  bool isReady() {
++    return true;
++  }
 +
 +  // reset connections, called by treadmill worker. see treadmill/Connection.h
 +  // for more details.
 +  void reset() {}
 +
-+  folly::Future<AdSimService::Reply>
-+  sendRequest(std::unique_ptr<AdSimService::Request> request) {
++  folly::Future<AdSimService::Reply> sendRequest(
++      std::unique_ptr<AdSimService::Request> request) {
 +    return co_sendRequestImpl(std::move(request)).semi().via(&eventBase_);
 +  }
 +
-+private:
-+  folly::coro::Task<AdSimService::Reply>
-+  co_sendRequestImpl(std::unique_ptr<AdSimService::Request> request) {
++ private:
++  folly::coro::Task<AdSimService::Reply> co_sendRequestImpl(
++      std::unique_ptr<AdSimService::Request> request) {
 +    while (!requestFactory_->isReady()) {
 +      co_await folly::futures::sleep(std::chrono::seconds{1});
 +    }
 +    co_await client_->co_sim(requestFactory_->getRequest());
 +    co_return AdSimService::Reply{};
 +  }
-+  folly::EventBase &eventBase_;
++  folly::EventBase& eventBase_;
 +  std::shared_ptr<AdSimAsyncClient> client_;
 +  std::shared_ptr<AdSimServiceRequestFactory> requestFactory_;
 +};
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Request.h ../treadmill/services/adsim/Request.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/Request.h build/treadmill/services/adsim/Request.h
 --- treadmill/services/adsim/Request.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/adsim/Request.h	2025-07-17 14:45:56.131776571 -0700
++++ build/treadmill/services/adsim/Request.h	2025-08-04 15:39:02.728357963 -0700
 @@ -0,0 +1,20 @@
 +#pragma once
 +
@@ -4840,9 +4737,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Request.h ../treadmil
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Treadmill.cpp ../treadmill/services/adsim/Treadmill.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/Treadmill.cpp build/treadmill/services/adsim/Treadmill.cpp
 --- treadmill/services/adsim/Treadmill.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/adsim/Treadmill.cpp	2025-07-17 14:45:41.332641834 -0700
++++ build/treadmill/services/adsim/Treadmill.cpp	2025-08-04 15:39:02.728863608 -0700
 @@ -0,0 +1,12 @@
 +#include "Connection.h"
 +#include "Workload.h"
@@ -4856,9 +4753,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Treadmill.cpp ../trea
 +  return facebook::windtunnel::treadmill::run<
 +      facebook::windtunnel::treadmill::AdSimService>(argc, argv);
 +}
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Workload.h ../treadmill/services/adsim/Workload.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/Workload.h build/treadmill/services/adsim/Workload.h
 --- treadmill/services/adsim/Workload.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/adsim/Workload.h	2025-07-17 14:45:34.817582518 -0700
++++ build/treadmill/services/adsim/Workload.h	2025-08-04 15:39:02.729344696 -0700
 @@ -0,0 +1,49 @@
 +#pragma once
 +
@@ -4909,9 +4806,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/adsim/Workload.h ../treadmi
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/libmcrouter/Connection.h ../treadmill/services/libmcrouter/Connection.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/libmcrouter/Connection.h build/treadmill/services/libmcrouter/Connection.h
 --- treadmill/services/libmcrouter/Connection.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/libmcrouter/Connection.h	2023-01-27 13:56:11.000000000 -0800
++++ build/treadmill/services/libmcrouter/Connection.h	2025-08-04 15:39:02.730114340 -0700
 @@ -0,0 +1,92 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -5005,9 +4902,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/libmcrouter/Connection.h ..
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/libmcrouter/LibmcrouterService.h ../treadmill/services/libmcrouter/LibmcrouterService.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/libmcrouter/LibmcrouterService.h build/treadmill/services/libmcrouter/LibmcrouterService.h
 --- treadmill/services/libmcrouter/LibmcrouterService.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/libmcrouter/LibmcrouterService.h	2023-01-27 13:56:11.000000000 -0800
++++ build/treadmill/services/libmcrouter/LibmcrouterService.h	2025-08-04 15:39:02.730632003 -0700
 @@ -0,0 +1,41 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -5050,9 +4947,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/libmcrouter/LibmcrouterServ
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/libmcrouter/Treadmill.cpp ../treadmill/services/libmcrouter/Treadmill.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/libmcrouter/Treadmill.cpp build/treadmill/services/libmcrouter/Treadmill.cpp
 --- treadmill/services/libmcrouter/Treadmill.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/libmcrouter/Treadmill.cpp	2023-01-27 13:56:11.000000000 -0800
++++ build/treadmill/services/libmcrouter/Treadmill.cpp	2025-08-04 15:39:02.731124919 -0700
 @@ -0,0 +1,24 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -5078,9 +4975,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/libmcrouter/Treadmill.cpp .
 +  return facebook::windtunnel::treadmill::run<
 +    facebook::windtunnel::treadmill::LibmcrouterService>(argc, argv);
 +}
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/libmcrouter/Workload.h ../treadmill/services/libmcrouter/Workload.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/libmcrouter/Workload.h build/treadmill/services/libmcrouter/Workload.h
 --- treadmill/services/libmcrouter/Workload.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/libmcrouter/Workload.h	2023-01-27 13:56:25.000000000 -0800
++++ build/treadmill/services/libmcrouter/Workload.h	2025-08-04 15:39:02.731559356 -0700
 @@ -0,0 +1,98 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -5180,9 +5077,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/libmcrouter/Workload.h ../t
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/memcached/Connection.h ../treadmill/services/memcached/Connection.h
---- treadmill/services/memcached/Connection.h	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/services/memcached/Connection.h	2023-01-27 13:55:50.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/memcached/Connection.h build/treadmill/services/memcached/Connection.h
+--- treadmill/services/memcached/Connection.h	2025-08-04 15:31:45.110169761 -0700
++++ build/treadmill/services/memcached/Connection.h	2025-08-04 15:39:02.731999311 -0700
 @@ -14,8 +14,8 @@
  #include <folly/fibers/EventBaseLoopController.h>
  #include <folly/fibers/FiberManager.h>
@@ -5227,9 +5124,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/memcached/Connection.h ../t
        fm_->addTask([this, req, p]() mutable {
          client_->sendSync(*req, std::chrono::milliseconds::zero());
          p->setValue(MemcachedService::Reply());
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/memcached/Makefile.am ../treadmill/services/memcached/Makefile.am
---- treadmill/services/memcached/Makefile.am	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/services/memcached/Makefile.am	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/memcached/Makefile.am build/treadmill/services/memcached/Makefile.am
+--- treadmill/services/memcached/Makefile.am	2025-08-04 15:31:45.110743028 -0700
++++ build/treadmill/services/memcached/Makefile.am	1969-12-31 16:00:00.000000000 -0800
 @@ -1,14 +0,0 @@
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 -bin_PROGRAMS = treadmill_memcached
@@ -5245,9 +5142,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/memcached/Makefile.am ../tr
 -
 -treadmill_memcached_LDADD = \
 -  $(top_builddir)/libtreadmill.a
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/memcached/Request.h ../treadmill/services/memcached/Request.h
---- treadmill/services/memcached/Request.h	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/services/memcached/Request.h	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/memcached/Request.h build/treadmill/services/memcached/Request.h
+--- treadmill/services/memcached/Request.h	2025-08-04 15:31:45.111574576 -0700
++++ build/treadmill/services/memcached/Request.h	2025-08-04 15:39:02.732858039 -0700
 @@ -20,14 +20,20 @@
  
  class Request;
@@ -5272,9 +5169,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/memcached/Request.h ../trea
  
    virtual ~MemcachedRequest() {}
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/memcached/Workload.h ../treadmill/services/memcached/Workload.h
---- treadmill/services/memcached/Workload.h	2025-07-22 13:22:26.570891863 -0700
-+++ ../treadmill/services/memcached/Workload.h	2023-01-27 13:56:25.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/memcached/Workload.h build/treadmill/services/memcached/Workload.h
+--- treadmill/services/memcached/Workload.h	2025-08-04 15:31:45.112496339 -0700
++++ build/treadmill/services/memcached/Workload.h	2025-08-04 15:39:02.733547162 -0700
 @@ -26,20 +26,18 @@
  namespace treadmill {
  
@@ -5335,9 +5232,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/memcached/Workload.h ../tre
      return folly::dynamic::object;
    }
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/CMakeLists.txt ../treadmill/services/sleep/CMakeLists.txt
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/CMakeLists.txt build/treadmill/services/sleep/CMakeLists.txt
 --- treadmill/services/sleep/CMakeLists.txt	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/services/sleep/CMakeLists.txt	2025-07-17 14:48:12.223015613 -0700
++++ build/treadmill/services/sleep/CMakeLists.txt	2025-08-04 15:39:02.734066497 -0700
 @@ -0,0 +1,90 @@
 +# Only build if the option is enabled
 +if(BUILD_TREADMILL_SLEEP)
@@ -5429,9 +5326,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/CMakeLists.txt ../tre
 +add_custom_target(thrift_gen DEPENDS
 +    ${CMAKE_CURRENT_SOURCE_DIR}/gen-cpp2/Sleep.h
 +)
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Connection.h ../treadmill/services/sleep/Connection.h
---- treadmill/services/sleep/Connection.h	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/Connection.h	2023-01-27 15:51:55.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/Connection.h build/treadmill/services/sleep/Connection.h
+--- treadmill/services/sleep/Connection.h	2025-08-04 15:31:45.113158109 -0700
++++ build/treadmill/services/sleep/Connection.h	2025-08-04 15:39:02.734576999 -0700
 @@ -14,12 +14,12 @@
  #include "treadmill/services/sleep/SleepService.h"
  
@@ -5494,9 +5391,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Connection.h ../tread
    std::unique_ptr<services::sleep::SleepAsyncClient> client_;
  };
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Makefile.am ../treadmill/services/sleep/Makefile.am
---- treadmill/services/sleep/Makefile.am	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/Makefile.am	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/Makefile.am build/treadmill/services/sleep/Makefile.am
+--- treadmill/services/sleep/Makefile.am	2025-08-04 15:31:45.113695552 -0700
++++ build/treadmill/services/sleep/Makefile.am	1969-12-31 16:00:00.000000000 -0800
 @@ -1,14 +0,0 @@
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 -bin_PROGRAMS = treadmill_sleep
@@ -5512,9 +5409,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Makefile.am ../treadm
 -
 -treadmill_sleep_LDADD = \
 -  $(top_builddir)/libtreadmill.a
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Request.h ../treadmill/services/sleep/Request.h
---- treadmill/services/sleep/Request.h	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/Request.h	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/Request.h build/treadmill/services/sleep/Request.h
+--- treadmill/services/sleep/Request.h	2025-08-04 15:31:45.114105532 -0700
++++ build/treadmill/services/sleep/Request.h	2025-08-04 15:39:02.735840640 -0700
 @@ -22,7 +22,8 @@
  
  class SleepReply {
@@ -5541,9 +5438,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Request.h ../treadmil
  
    virtual ~SleepRequest() {}
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleepserver/SleepClient.cpp ../treadmill/services/sleep/sleepserver/SleepClient.cpp
---- treadmill/services/sleep/sleepserver/SleepClient.cpp	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/sleepserver/SleepClient.cpp	2023-01-27 13:56:58.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleepserver/SleepClient.cpp build/treadmill/services/sleep/sleepserver/SleepClient.cpp
+--- treadmill/services/sleep/sleepserver/SleepClient.cpp	2025-08-04 15:31:45.116475936 -0700
++++ build/treadmill/services/sleep/sleepserver/SleepClient.cpp	2025-08-04 15:39:02.736739580 -0700
 @@ -10,32 +10,36 @@
  
  #include <gflags/gflags.h>
@@ -5590,9 +5487,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleepserver/SleepClie
  
    auto sleep_time = client.future_goSleep(FLAGS_sleep_time).getVia(&event_base);
    LOG(INFO) << "Slept for " << sleep_time << " microseconds.";
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleepserver/SleepHandler.cpp ../treadmill/services/sleep/sleepserver/SleepHandler.cpp
---- treadmill/services/sleep/sleepserver/SleepHandler.cpp	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/sleepserver/SleepHandler.cpp	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleepserver/SleepHandler.cpp build/treadmill/services/sleep/sleepserver/SleepHandler.cpp
+--- treadmill/services/sleep/sleepserver/SleepHandler.cpp	2025-08-04 15:31:45.116891564 -0700
++++ build/treadmill/services/sleep/sleepserver/SleepHandler.cpp	2025-08-04 15:39:02.737575905 -0700
 @@ -35,8 +35,7 @@
  
    folly::RequestEventBase::get()->runInEventBaseThread(
@@ -5603,9 +5500,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleepserver/SleepHand
          gettimeofday(&start_time, nullptr);
          usleep(time);
          gettimeofday(&end_time, nullptr);
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleepserver/SleepHandler.h ../treadmill/services/sleep/sleepserver/SleepHandler.h
---- treadmill/services/sleep/sleepserver/SleepHandler.h	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/sleepserver/SleepHandler.h	2023-01-27 13:56:11.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleepserver/SleepHandler.h build/treadmill/services/sleep/sleepserver/SleepHandler.h
+--- treadmill/services/sleep/sleepserver/SleepHandler.h	2025-08-04 15:31:45.117269116 -0700
++++ build/treadmill/services/sleep/sleepserver/SleepHandler.h	2025-08-04 15:39:02.738258567 -0700
 @@ -10,7 +10,6 @@
  
  #pragma once
@@ -5639,9 +5536,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleepserver/SleepHand
  };
  
  } // namespace sleep
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleepserver/SleepServer.cpp ../treadmill/services/sleep/sleepserver/SleepServer.cpp
---- treadmill/services/sleep/sleepserver/SleepServer.cpp	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/sleepserver/SleepServer.cpp	2023-01-27 13:56:58.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleepserver/SleepServer.cpp build/treadmill/services/sleep/sleepserver/SleepServer.cpp
+--- treadmill/services/sleep/sleepserver/SleepServer.cpp	2025-08-04 15:31:45.117685235 -0700
++++ build/treadmill/services/sleep/sleepserver/SleepServer.cpp	2025-08-04 15:39:02.738940248 -0700
 @@ -8,24 +8,29 @@
   *
   */
@@ -5676,9 +5573,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleepserver/SleepServ
  
    auto handler = std::make_shared<SleepHandler>();
    auto server = std::make_unique<ThriftServer>();
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/SleepService.h ../treadmill/services/sleep/SleepService.h
---- treadmill/services/sleep/SleepService.h	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/SleepService.h	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/SleepService.h build/treadmill/services/sleep/SleepService.h
+--- treadmill/services/sleep/SleepService.h	2025-08-04 15:31:45.114421380 -0700
++++ build/treadmill/services/sleep/SleepService.h	2025-08-04 15:39:02.739658565 -0700
 @@ -12,8 +12,7 @@
  
  #include "treadmill/services/sleep/Request.h"
@@ -5689,9 +5586,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/SleepService.h ../tre
      1000,
      "Requested microseconds to sleep for (default:1000)");
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleep.thrift ../treadmill/services/sleep/sleep.thrift
---- treadmill/services/sleep/sleep.thrift	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/sleep.thrift	2023-01-27 13:55:32.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleep.thrift build/treadmill/services/sleep/sleep.thrift
+--- treadmill/services/sleep/sleep.thrift	2025-08-04 15:31:45.115581373 -0700
++++ build/treadmill/services/sleep/sleep.thrift	2025-08-04 15:39:02.740347717 -0700
 @@ -1,8 +1,5 @@
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 -include "common/fb303/if/fb303.thrift"
@@ -5703,9 +5600,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/sleep.thrift ../tread
 +service Sleep {
 +  i64 goSleep(1: i64 time)
  }
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Treadmill.cpp ../treadmill/services/sleep/Treadmill.cpp
---- treadmill/services/sleep/Treadmill.cpp	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/Treadmill.cpp	2023-01-27 13:55:12.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/Treadmill.cpp build/treadmill/services/sleep/Treadmill.cpp
+--- treadmill/services/sleep/Treadmill.cpp	2025-08-04 15:31:45.114833953 -0700
++++ build/treadmill/services/sleep/Treadmill.cpp	2025-08-04 15:39:02.740955817 -0700
 @@ -8,6 +8,8 @@
   *
   */
@@ -5715,9 +5612,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Treadmill.cpp ../trea
  #include "treadmill/services/sleep/Connection.h"
  #include "treadmill/services/sleep/Workload.h"
  
-diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Workload.h ../treadmill/services/sleep/Workload.h
---- treadmill/services/sleep/Workload.h	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/services/sleep/Workload.h	2023-01-27 13:56:25.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/Workload.h build/treadmill/services/sleep/Workload.h
+--- treadmill/services/sleep/Workload.h	2025-08-04 15:31:45.115191094 -0700
++++ build/treadmill/services/sleep/Workload.h	2025-08-04 15:39:02.741665430 -0700
 @@ -23,26 +23,24 @@
  namespace treadmill {
  
@@ -5752,9 +5649,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/services/sleep/Workload.h ../treadmi
      return folly::dynamic::object;
    }
  };
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/CMakeLists.txt ../treadmill/src/CMakeLists.txt
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/CMakeLists.txt build/treadmill/src/CMakeLists.txt
 --- treadmill/src/CMakeLists.txt	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/CMakeLists.txt	2025-07-17 14:37:27.807148104 -0700
++++ build/treadmill/src/CMakeLists.txt	2025-08-04 15:39:02.742353901 -0700
 @@ -0,0 +1,46 @@
 +# Define the treadmill library
 +add_library(treadmill STATIC
@@ -5802,9 +5699,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/CMakeLists.txt ../treadmill/src/
 +    ${GLOG_LIBRARIES}
 +    ${GFLAGS_LIBRARIES}
 +)
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Connection.h ../treadmill/src/Connection.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Connection.h build/treadmill/src/Connection.h
 --- treadmill/src/Connection.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Connection.h	2023-01-27 13:55:12.000000000 -0800
++++ build/treadmill/src/Connection.h	2025-08-04 15:39:02.742952236 -0700
 @@ -0,0 +1,59 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -5865,9 +5762,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Connection.h ../treadmill/src/Co
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/ContinuousStatistic.cpp ../treadmill/src/ContinuousStatistic.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/ContinuousStatistic.cpp build/treadmill/src/ContinuousStatistic.cpp
 --- treadmill/src/ContinuousStatistic.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/ContinuousStatistic.cpp	2025-07-21 14:59:48.037086661 -0700
++++ build/treadmill/src/ContinuousStatistic.cpp	2025-08-04 15:39:02.743853959 -0700
 @@ -0,0 +1,314 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6183,9 +6080,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/ContinuousStatistic.cpp ../tread
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/ContinuousStatistic.h ../treadmill/src/ContinuousStatistic.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/ContinuousStatistic.h build/treadmill/src/ContinuousStatistic.h
 --- treadmill/src/ContinuousStatistic.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/ContinuousStatistic.h	2025-07-17 14:39:03.449018492 -0700
++++ build/treadmill/src/ContinuousStatistic.h	2025-08-04 15:39:02.744416040 -0700
 @@ -0,0 +1,128 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6315,9 +6212,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/ContinuousStatistic.h ../treadmi
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/CounterStatistic.cpp ../treadmill/src/CounterStatistic.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/CounterStatistic.cpp build/treadmill/src/CounterStatistic.cpp
 --- treadmill/src/CounterStatistic.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/CounterStatistic.cpp	2025-07-17 14:39:21.671184322 -0700
++++ build/treadmill/src/CounterStatistic.cpp	2025-08-04 15:39:02.744947954 -0700
 @@ -0,0 +1,63 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6382,9 +6279,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/CounterStatistic.cpp ../treadmil
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/CounterStatistic.h ../treadmill/src/CounterStatistic.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/CounterStatistic.h build/treadmill/src/CounterStatistic.h
 --- treadmill/src/CounterStatistic.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/CounterStatistic.h	2025-07-17 14:40:01.361545523 -0700
++++ build/treadmill/src/CounterStatistic.h	2025-08-04 15:39:02.745500560 -0700
 @@ -0,0 +1,67 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6453,9 +6350,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/CounterStatistic.h ../treadmill/
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Histogram.cpp ../treadmill/src/Histogram.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Histogram.cpp build/treadmill/src/Histogram.cpp
 --- treadmill/src/Histogram.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Histogram.cpp	2025-07-17 14:39:29.051251485 -0700
++++ build/treadmill/src/Histogram.cpp	2025-08-04 15:39:02.746079185 -0700
 @@ -0,0 +1,161 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6618,9 +6515,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Histogram.cpp ../treadmill/src/H
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Histogram.h ../treadmill/src/Histogram.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Histogram.h build/treadmill/src/Histogram.h
 --- treadmill/src/Histogram.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Histogram.h	2023-01-27 13:55:12.000000000 -0800
++++ build/treadmill/src/Histogram.h	2025-08-04 15:39:02.746613323 -0700
 @@ -0,0 +1,126 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6748,9 +6645,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Histogram.h ../treadmill/src/His
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/RandomEngine.cpp ../treadmill/src/RandomEngine.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/RandomEngine.cpp build/treadmill/src/RandomEngine.cpp
 --- treadmill/src/RandomEngine.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/RandomEngine.cpp	2025-07-17 14:38:09.814530389 -0700
++++ build/treadmill/src/RandomEngine.cpp	2025-08-04 15:39:02.747230596 -0700
 @@ -0,0 +1,83 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6835,9 +6732,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/RandomEngine.cpp ../treadmill/sr
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/RandomEngine.h ../treadmill/src/RandomEngine.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/RandomEngine.h build/treadmill/src/RandomEngine.h
 --- treadmill/src/RandomEngine.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/RandomEngine.h	2023-01-27 13:55:32.000000000 -0800
++++ build/treadmill/src/RandomEngine.h	2025-08-04 15:39:02.747737743 -0700
 @@ -0,0 +1,110 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6949,9 +6846,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/RandomEngine.h ../treadmill/src/
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Request.h ../treadmill/src/Request.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Request.h build/treadmill/src/Request.h
 --- treadmill/src/Request.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Request.h	2023-01-27 13:55:12.000000000 -0800
++++ build/treadmill/src/Request.h	2025-08-04 15:39:02.748270128 -0700
 @@ -0,0 +1,22 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -6975,9 +6872,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Request.h ../treadmill/src/Reque
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Scheduler.cpp ../treadmill/src/Scheduler.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Scheduler.cpp build/treadmill/src/Scheduler.cpp
 --- treadmill/src/Scheduler.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Scheduler.cpp	2025-07-17 14:39:42.607374852 -0700
++++ build/treadmill/src/Scheduler.cpp	2025-08-04 15:39:02.748880612 -0700
 @@ -0,0 +1,107 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7086,9 +6983,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Scheduler.cpp ../treadmill/src/S
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Scheduler.h ../treadmill/src/Scheduler.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Scheduler.h build/treadmill/src/Scheduler.h
 --- treadmill/src/Scheduler.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Scheduler.h	2023-01-27 13:56:25.000000000 -0800
++++ build/treadmill/src/Scheduler.h	2025-08-04 15:39:02.749435931 -0700
 @@ -0,0 +1,66 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7156,9 +7053,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Scheduler.h ../treadmill/src/Sch
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Statistic.h ../treadmill/src/Statistic.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Statistic.h build/treadmill/src/Statistic.h
 --- treadmill/src/Statistic.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Statistic.h	2023-01-27 13:55:12.000000000 -0800
++++ build/treadmill/src/Statistic.h	2025-08-04 15:39:02.749925953 -0700
 @@ -0,0 +1,49 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7209,9 +7106,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Statistic.h ../treadmill/src/Sta
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/StatisticsManager.cpp ../treadmill/src/StatisticsManager.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/StatisticsManager.cpp build/treadmill/src/StatisticsManager.cpp
 --- treadmill/src/StatisticsManager.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/StatisticsManager.cpp	2025-07-17 14:39:52.677466494 -0700
++++ build/treadmill/src/StatisticsManager.cpp	2025-08-04 15:39:02.750402694 -0700
 @@ -0,0 +1,119 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7332,9 +7229,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/StatisticsManager.cpp ../treadmi
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/StatisticsManager.h ../treadmill/src/StatisticsManager.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/StatisticsManager.h build/treadmill/src/StatisticsManager.h
 --- treadmill/src/StatisticsManager.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/StatisticsManager.h	2025-07-17 14:38:49.582892302 -0700
++++ build/treadmill/src/StatisticsManager.h	2025-08-04 15:39:02.750952776 -0700
 @@ -0,0 +1,67 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7403,9 +7300,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/StatisticsManager.h ../treadmill
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Treadmill.cpp ../treadmill/src/Treadmill.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Treadmill.cpp build/treadmill/src/Treadmill.cpp
 --- treadmill/src/Treadmill.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Treadmill.cpp	2023-01-30 14:53:19.000000000 -0800
++++ build/treadmill/src/Treadmill.cpp	2025-08-04 15:39:02.751428755 -0700
 @@ -0,0 +1,129 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7536,9 +7433,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Treadmill.cpp ../treadmill/src/T
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/TreadmillFB303.cpp ../treadmill/src/TreadmillFB303.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/TreadmillFB303.cpp build/treadmill/src/TreadmillFB303.cpp
 --- treadmill/src/TreadmillFB303.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/TreadmillFB303.cpp	2023-01-27 13:57:09.000000000 -0800
++++ build/treadmill/src/TreadmillFB303.cpp	2025-08-04 15:39:02.752000020 -0700
 @@ -0,0 +1,52 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7592,9 +7489,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/TreadmillFB303.cpp ../treadmill/
 +}
 +}
 +}
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/TreadmillFB303.h ../treadmill/src/TreadmillFB303.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/TreadmillFB303.h build/treadmill/src/TreadmillFB303.h
 --- treadmill/src/TreadmillFB303.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/TreadmillFB303.h	2023-01-27 13:57:09.000000000 -0800
++++ build/treadmill/src/TreadmillFB303.h	2025-08-04 15:39:02.752451082 -0700
 @@ -0,0 +1,73 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7669,9 +7566,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/TreadmillFB303.h ../treadmill/sr
 +}
 +}
 +}
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Treadmill.h ../treadmill/src/Treadmill.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Treadmill.h build/treadmill/src/Treadmill.h
 --- treadmill/src/Treadmill.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Treadmill.h	2025-07-17 14:44:22.707925785 -0700
++++ build/treadmill/src/Treadmill.h	2025-08-04 15:39:02.753176489 -0700
 @@ -0,0 +1,208 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -7881,9 +7778,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Treadmill.h ../treadmill/src/Tre
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Util.cpp ../treadmill/src/Util.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Util.cpp build/treadmill/src/Util.cpp
 --- treadmill/src/Util.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Util.cpp	2025-07-17 14:38:20.772630113 -0700
++++ build/treadmill/src/Util.cpp	2025-08-04 15:39:02.753867413 -0700
 @@ -0,0 +1,206 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -8091,9 +7988,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Util.cpp ../treadmill/src/Util.c
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Util.h ../treadmill/src/Util.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Util.h build/treadmill/src/Util.h
 --- treadmill/src/Util.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Util.h	2023-01-27 13:55:12.000000000 -0800
++++ build/treadmill/src/Util.h	2025-08-04 15:39:02.754422323 -0700
 @@ -0,0 +1,71 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -8166,9 +8063,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Util.h ../treadmill/src/Util.h
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Worker.h ../treadmill/src/Worker.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Worker.h build/treadmill/src/Worker.h
 --- treadmill/src/Worker.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Worker.h	2025-07-18 16:13:47.872324024 -0700
++++ build/treadmill/src/Worker.h	2025-08-04 15:39:02.755311087 -0700
 @@ -0,0 +1,250 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -8420,9 +8317,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Worker.h ../treadmill/src/Worker
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/src/Workload.h ../treadmill/src/Workload.h
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/src/Workload.h build/treadmill/src/Workload.h
 --- treadmill/src/Workload.h	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/src/Workload.h	2023-01-30 14:02:27.000000000 -0800
++++ build/treadmill/src/Workload.h	2025-08-04 15:39:02.755898786 -0700
 @@ -0,0 +1,54 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -8478,9 +8375,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/src/Workload.h ../treadmill/src/Work
 +} // namespace treadmill
 +} // namespace windtunnel
 +} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Statistic.h ../treadmill/Statistic.h
---- treadmill/Statistic.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Statistic.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Statistic.h build/treadmill/Statistic.h
+--- treadmill/Statistic.h	2025-08-04 15:31:45.096708858 -0700
++++ build/treadmill/Statistic.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,48 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -8530,9 +8427,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Statistic.h ../treadmill/Statistic.h
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/StatisticsManager.cpp ../treadmill/StatisticsManager.cpp
---- treadmill/StatisticsManager.cpp	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/StatisticsManager.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/StatisticsManager.cpp build/treadmill/StatisticsManager.cpp
+--- treadmill/StatisticsManager.cpp	2025-08-04 15:31:45.097064936 -0700
++++ build/treadmill/StatisticsManager.cpp	1969-12-31 16:00:00.000000000 -0800
 @@ -1,113 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -8647,9 +8544,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/StatisticsManager.cpp ../treadmill/S
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/StatisticsManager.h ../treadmill/StatisticsManager.h
---- treadmill/StatisticsManager.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/StatisticsManager.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/StatisticsManager.h build/treadmill/StatisticsManager.h
+--- treadmill/StatisticsManager.h	2025-08-04 15:31:45.097430999 -0700
++++ build/treadmill/StatisticsManager.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,60 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -8711,9 +8608,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/StatisticsManager.h ../treadmill/Sta
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/test/RandomEngineTest.cpp ../treadmill/test/RandomEngineTest.cpp
---- treadmill/test/RandomEngineTest.cpp	2025-07-22 13:22:26.571891873 -0700
-+++ ../treadmill/test/RandomEngineTest.cpp	2023-01-27 13:55:50.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/test/RandomEngineTest.cpp build/treadmill/test/RandomEngineTest.cpp
+--- treadmill/test/RandomEngineTest.cpp	2025-08-04 15:31:45.118315488 -0700
++++ build/treadmill/test/RandomEngineTest.cpp	2025-08-04 15:39:02.757582973 -0700
 @@ -12,11 +12,13 @@
  
  #include "treadmill/RandomEngine.h"
@@ -8747,9 +8644,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/test/RandomEngineTest.cpp ../treadmi
 +  FLAGS_random_seed = 0;
    return RUN_ALL_TESTS();
  }
-diff -wbBdu -ruN '--exclude=.git' treadmill/test/StatisticTest.cpp ../treadmill/test/StatisticTest.cpp
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/test/StatisticTest.cpp build/treadmill/test/StatisticTest.cpp
 --- treadmill/test/StatisticTest.cpp	1969-12-31 16:00:00.000000000 -0800
-+++ ../treadmill/test/StatisticTest.cpp	2023-01-27 13:55:12.000000000 -0800
++++ build/treadmill/test/StatisticTest.cpp	2025-08-04 15:39:02.758216101 -0700
 @@ -0,0 +1,47 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
@@ -8798,9 +8695,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/test/StatisticTest.cpp ../treadmill/
 +}  // namespace treadmill
 +}  // namespace windtunnel
 +}  // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/TreadmillConst.h ../treadmill/TreadmillConst.h
---- treadmill/TreadmillConst.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/TreadmillConst.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/TreadmillConst.h build/treadmill/TreadmillConst.h
+--- treadmill/TreadmillConst.h	2025-08-04 15:31:45.098786029 -0700
++++ build/treadmill/TreadmillConst.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,20 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -8822,9 +8719,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/TreadmillConst.h ../treadmill/Treadm
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Treadmill.cpp ../treadmill/Treadmill.cpp
---- treadmill/Treadmill.cpp	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Treadmill.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Treadmill.cpp build/treadmill/Treadmill.cpp
+--- treadmill/Treadmill.cpp	2025-08-04 15:31:45.097900700 -0700
++++ build/treadmill/Treadmill.cpp	1969-12-31 16:00:00.000000000 -0800
 @@ -1,117 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -8943,9 +8840,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Treadmill.cpp ../treadmill/Treadmill
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/TreadmillFB303.cpp ../treadmill/TreadmillFB303.cpp
---- treadmill/TreadmillFB303.cpp	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/TreadmillFB303.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/TreadmillFB303.cpp build/treadmill/TreadmillFB303.cpp
+--- treadmill/TreadmillFB303.cpp	2025-08-04 15:31:45.099164961 -0700
++++ build/treadmill/TreadmillFB303.cpp	1969-12-31 16:00:00.000000000 -0800
 @@ -1,267 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -9214,9 +9111,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/TreadmillFB303.cpp ../treadmill/Trea
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/TreadmillFB303.h ../treadmill/TreadmillFB303.h
---- treadmill/TreadmillFB303.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/TreadmillFB303.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/TreadmillFB303.h build/treadmill/TreadmillFB303.h
+--- treadmill/TreadmillFB303.h	2025-08-04 15:31:45.099436142 -0700
++++ build/treadmill/TreadmillFB303.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,83 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -9301,9 +9198,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/TreadmillFB303.h ../treadmill/Treadm
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Treadmill.h ../treadmill/Treadmill.h
---- treadmill/Treadmill.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Treadmill.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Treadmill.h build/treadmill/Treadmill.h
+--- treadmill/Treadmill.h	2025-08-04 15:31:45.098384221 -0700
++++ build/treadmill/Treadmill.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,270 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -9575,9 +9472,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Treadmill.h ../treadmill/Treadmill.h
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Util.cpp ../treadmill/Util.cpp
---- treadmill/Util.cpp	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Util.cpp	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Util.cpp build/treadmill/Util.cpp
+--- treadmill/Util.cpp	2025-08-04 15:31:45.099886472 -0700
++++ build/treadmill/Util.cpp	1969-12-31 16:00:00.000000000 -0800
 @@ -1,208 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -9787,9 +9684,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Util.cpp ../treadmill/Util.cpp
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Util.h ../treadmill/Util.h
---- treadmill/Util.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Util.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Util.h build/treadmill/Util.h
+--- treadmill/Util.h	2025-08-04 15:31:45.100354540 -0700
++++ build/treadmill/Util.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,69 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -9860,9 +9757,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Util.h ../treadmill/Util.h
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Worker.h ../treadmill/Worker.h
---- treadmill/Worker.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Worker.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Worker.h build/treadmill/Worker.h
+--- treadmill/Worker.h	2025-08-04 15:31:45.100789097 -0700
++++ build/treadmill/Worker.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,324 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.
@@ -10188,9 +10085,9 @@ diff -wbBdu -ruN '--exclude=.git' treadmill/Worker.h ../treadmill/Worker.h
 -} // namespace treadmill
 -} // namespace windtunnel
 -} // namespace facebook
-diff -wbBdu -ruN '--exclude=.git' treadmill/Workload.h ../treadmill/Workload.h
---- treadmill/Workload.h	2025-07-22 13:22:26.569891854 -0700
-+++ ../treadmill/Workload.h	1969-12-31 16:00:00.000000000 -0800
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/Workload.h build/treadmill/Workload.h
+--- treadmill/Workload.h	2025-08-04 15:31:45.101139046 -0700
++++ build/treadmill/Workload.h	1969-12-31 16:00:00.000000000 -0800
 @@ -1,54 +0,0 @@
 -/*
 - *  Copyright (c) 2014, Facebook, Inc.

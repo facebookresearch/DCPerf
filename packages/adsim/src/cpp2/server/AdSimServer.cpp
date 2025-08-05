@@ -52,6 +52,10 @@ DEFINE_string(
     "the kernel)");
 DEFINE_string(tlskey, "tests-key.pem", "Path to TLS key.pem");
 DEFINE_string(tlscert, "tests-cert.pem", "Path to TLS cert.pem");
+DEFINE_bool(
+    use_stop_tls,
+    false,
+    "Use stop TLS mode (transition to plaintext) instead of full TLS encryption");
 
 using apache::thrift::DefaultThriftAcceptorFactory;
 using apache::thrift::ThriftServer;
@@ -272,7 +276,7 @@ void setup_tls(std::shared_ptr<ThriftServer> server) {
 
   ThriftTlsConfig thriftConfig;
   thriftConfig.enableThriftParamsNegotiation = true;
-  thriftConfig.enableStopTLS = true;
+  thriftConfig.enableStopTLS = FLAGS_use_stop_tls;
   server->setThriftConfig(thriftConfig);
   server->setAcceptorFactory(
       std::make_shared<DefaultThriftAcceptorFactory>(server.get()));
