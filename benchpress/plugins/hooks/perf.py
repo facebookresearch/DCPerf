@@ -39,7 +39,7 @@ DEFAULT_OPTIONS = {
     "perfstat": {"interval": 5, "additional_events": []},
     "netstat": {"interval": 5, "additional_counters": []},
     "memstat": {"interval": 5, "additional_counters": []},
-    "topdown": {},
+    "topdown": {"interval": 5},
     "power": {"interval": 1},
 }
 

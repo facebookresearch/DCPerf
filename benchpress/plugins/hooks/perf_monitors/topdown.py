@@ -141,9 +141,12 @@ def get_os_release():
 
 
 class IntelPerfSpect(Monitor):
-    def __init__(self, job_uuid, mux_interval_msecs=125, perfspect_path=None):
-        # PerfSpect 1.x does not support specifying interval
-        super(IntelPerfSpect, self).__init__(1, "perfspect", job_uuid)
+    def __init__(self, interval, job_uuid, mux_interval_msecs=125, perfspect_path=None):
+        # NOTE: PerfSpect 1.x does not support configurable sampling intervals.
+        # The 'interval' parameter is accepted here only for API compatibility
+        # with the DEFAULT_OPTIONS in perf.py, but it is not actually used
+        # by this implementation.
+        super(IntelPerfSpect, self).__init__(interval, "perfspect", job_uuid)
         self.mux_interval_msecs = mux_interval_msecs
         if perfspect_path is None:
             self.perfspect_path = os.path.join(BP_BASEPATH, "perfspect")
@@ -216,14 +219,12 @@ class IntelPerfSpect(Monitor):
 class IntelPerfSpect3(Monitor):
     def __init__(
         self,
+        interval,
         job_uuid,
-        report_interval_secs=5,
         mux_interval_msecs=125,
         perfspect_path=None,
     ):
-        super(IntelPerfSpect3, self).__init__(
-            report_interval_secs, "perfspect3", job_uuid
-        )
+        super(IntelPerfSpect3, self).__init__(interval, "perfspect3", job_uuid)
         self.mux_interval_msecs = mux_interval_msecs
         if perfspect_path is None:
             self.perfspect_path = os.path.join(BP_BASEPATH, "perfspect")
@@ -282,6 +283,7 @@ class IntelPerfSpect3(Monitor):
 class BasePerfUtil(Monitor):
     def __init__(
         self,
+        interval,
         job_uuid,
         name,
         perf_collect_script_name,
@@ -289,7 +291,7 @@ class BasePerfUtil(Monitor):
         perfutils_path=None,
         perf_postproc_args=None,
     ):
-        super(BasePerfUtil, self).__init__(0, name, job_uuid)
+        super(BasePerfUtil, self).__init__(interval, name, job_uuid)
         if perfutils_path is None:
             self.perfutils_path = os.path.join(BP_BASEPATH, "perfutils")
         else:
@@ -314,6 +316,8 @@ class BasePerfUtil(Monitor):
             logger.warning(f"{perf_collect_script} does not exist")
             return
         cmd = [perf_collect_script]
+        if self.interval is not None:
+            cmd.append(str(self.interval))
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, encoding="utf-8")
         super(BasePerfUtil, self).run()
 
@@ -355,13 +359,14 @@ class BasePerfUtil(Monitor):
 
 
 class AMDPerfUtil:
-    def __init__(self, job_uuid, **kwargs):
+    def __init__(self, interval, job_uuid, **kwargs):
         self.cpuinfo = get_cpuinfo()
         self.cpu_vendor = get_cpu_vendor(self.cpuinfo)
         if self.cpu_vendor != "amd":
             raise Exception("Not an AMD processor!")
         self.amd_gen = get_amd_zen_generation(self.cpuinfo)
         self.perfutil = BasePerfUtil(
+            interval,
             job_uuid,
             "amd-perf-collector",
             perf_collect_script_name="collect_amd_perf_counters.sh",
@@ -369,6 +374,7 @@ class AMDPerfUtil:
         )
         if self.amd_gen == "zen4":
             self.perfutil_zen4 = BasePerfUtil(
+                interval,
                 job_uuid,
                 "amd-zen4-perf-collector",
                 perf_collect_script_name="collect_amd_zen4_perf_counters.sh",
@@ -377,6 +383,7 @@ class AMDPerfUtil:
             )
         elif self.amd_gen == "zen5":
             self.perfutil = BasePerfUtil(
+                interval,
                 job_uuid,
                 "amd-zen5-perf-collector",
                 perf_collect_script_name="collect_amd_zen5_perf_counters.sh",
@@ -385,6 +392,7 @@ class AMDPerfUtil:
             )
         elif self.amd_gen == "zen5es":
             self.perfutil = BasePerfUtil(
+                interval,
                 job_uuid,
                 "amd-zen5-perf-collector",
                 perf_collect_script_name="collect_amd_zen5_perf_counters.sh",
@@ -416,7 +424,7 @@ class ARMPerfUtil(Monitor):
         "https://git.gitlab.arm.com/telemetry-solution/telemetry-solution.git"
     )
 
-    def __init__(self, job_uuid, interval=5):
+    def __init__(self, interval, job_uuid, **kwargs):
         super(ARMPerfUtil, self).__init__(interval, "arm-perf-collector", job_uuid)
         self.avail = self.install_if_not_available()
         if not self.avail:
@@ -502,17 +510,21 @@ class ARMPerfUtil(Monitor):
 
 
 class NVPerfUtil(BasePerfUtil):
-    def __init__(self, job_uuid, **kwargs):
+    def __init__(self, interval, job_uuid, **kwargs):
         super(NVPerfUtil, self).__init__(
+            interval,
             job_uuid,
             "nv-perf-collector",
             perf_collect_script_name="collect_nvda_neoversev2_perf_counters.sh",
             perf_postproc_script_name="generate_arm_perf_report.py",
         )
 
+    def run(self):
+        super(NVPerfUtil, self).run()
+
 
 class DummyPerfUtil:
-    def __init__(self, job_uuid, **kwargs):
+    def __init__(self, interval, job_uuid, **kwargs):
         pass
 
     def run(self):
@@ -538,6 +550,12 @@ def choose_perfspect():
     elif os.path.exists(perfspect1_bin1) and os.path.exists(perfspect1_bin2):
         return IntelPerfSpect
     else:
+        logger.warning(f"Neither perfspect 1.x nor perfspect 3.x is available.\n \
+        None of the followings exist:\n \
+        {perfspect3_bin}\n \
+        {perfspect1_bin1} \n \
+        {perfspect1_bin2} \n \
+        .")
         return DummyPerfUtil
 
 

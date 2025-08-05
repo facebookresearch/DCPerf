@@ -649,6 +649,7 @@ def zen4_frontend_bound(grouped_df):
     return {"name": "Zen4 frontend Bound %", "series": frontend_bound_pct_series}
 
 
+@skip_if_missing
 def zen4_backend_bound(grouped_df):
     de_no_dispatch_per_slot_backend_stalls_series = grouped_df.get_group(
         "de_no_dispatch_per_slot.backend_stalls"
@@ -2580,6 +2581,13 @@ def main(
         metrics.append(zen4_backend_bound(grouped_df))
 
     filtered_metrics = list(itertools.filterfalse(lambda x: x is None, metrics))
+
+    if not filtered_metrics:
+        click.echo(
+            "No metrics could be calculated. All required counters are missing from the input data."
+        )
+        return
+
     shortest_series = max(filtered_metrics, key=lambda m: m["series"].size)
     df_metrics = concat_series(filtered_metrics, shortest_series)
     if series:
