@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(adsim
     VERSION 1.0.0
-    LANGUAGES C CXX)
+    LANGUAGES C CXX ASM)
 set(CMAKE_CXX_COMPILER "clang++")
 set(CMAKE_C_COMPILER "clang")
 
