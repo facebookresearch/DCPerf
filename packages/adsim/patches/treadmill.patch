@@ -3669,7 +3669,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +++ build/treadmill/README.md	2025-08-04 15:39:02.713923803 -0700
 @@ -1,6 +1,6 @@
  ## Treadmill [![Build Status](https://travis-ci.org/facebook/treadmill.svg?branch=master)](https://travis-ci.org/facebook/treadmill)
- 
+
 -Treadmill is an open-source modular load testing platform for characterizing
 +Treadmill is an open-source modular load testing platform for characeterizing
  server-side applications (_e.g._, [Memcached](http://memcached.org/),
@@ -4021,7 +4021,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 -# shellcheck disable=SC2148
  set -ex
- 
+
  function die { printf "%s: %s\n" "$0" "$@"; exit 1; }
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/get_and_build_everything.sh build/treadmill/scripts/get_and_build_everything.sh
 --- treadmill/scripts/get_and_build_everything.sh	2025-08-04 15:31:45.104056317 -0700
@@ -4029,144 +4029,144 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  set -ex
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/install_ubuntu_14.04.sh build/treadmill/scripts/install_ubuntu_14.04.sh
 --- treadmill/scripts/install_ubuntu_14.04.sh	2025-08-04 15:31:45.104478296 -0700
 +++ build/treadmill/scripts/install_ubuntu_14.04.sh	2025-08-04 15:39:02.716869979 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  set -ex
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/10_folly build/treadmill/scripts/order_ubuntu-14.04/10_folly
 --- treadmill/scripts/order_ubuntu-14.04/10_folly	2025-08-04 15:31:45.107560366 -0700
 +++ build/treadmill/scripts/order_ubuntu-14.04/10_folly	2025-08-04 15:39:02.717402254 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/20_wangle build/treadmill/scripts/order_ubuntu-14.04/20_wangle
 --- treadmill/scripts/order_ubuntu-14.04/20_wangle	2025-08-04 15:31:45.108967784 -0700
 +++ build/treadmill/scripts/order_ubuntu-14.04/20_wangle	2025-08-04 15:39:02.718012357 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/30_mstch build/treadmill/scripts/order_ubuntu-14.04/30_mstch
 --- treadmill/scripts/order_ubuntu-14.04/30_mstch	2025-08-04 15:31:45.108263939 -0700
 +++ build/treadmill/scripts/order_ubuntu-14.04/30_mstch	2025-08-04 15:39:02.718467855 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/40_zstd build/treadmill/scripts/order_ubuntu-14.04/40_zstd
 --- treadmill/scripts/order_ubuntu-14.04/40_zstd	2025-08-04 15:31:45.109335540 -0700
 +++ build/treadmill/scripts/order_ubuntu-14.04/40_zstd	2025-08-04 15:39:02.719050086 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/50_fbthrift build/treadmill/scripts/order_ubuntu-14.04/50_fbthrift
 --- treadmill/scripts/order_ubuntu-14.04/50_fbthrift	2025-08-04 15:31:45.107208354 -0700
 +++ build/treadmill/scripts/order_ubuntu-14.04/50_fbthrift	2025-08-04 15:39:02.719553137 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/60_mcrouter build/treadmill/scripts/order_ubuntu-14.04/60_mcrouter
 --- treadmill/scripts/order_ubuntu-14.04/60_mcrouter	2025-08-04 15:31:45.107889653 -0700
 +++ build/treadmill/scripts/order_ubuntu-14.04/60_mcrouter	2025-08-04 15:39:02.720107996 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/order_ubuntu-14.04/70_treadmill build/treadmill/scripts/order_ubuntu-14.04/70_treadmill
 --- treadmill/scripts/order_ubuntu-14.04/70_treadmill	2025-08-04 15:31:45.108517293 -0700
 +++ build/treadmill/scripts/order_ubuntu-14.04/70_treadmill	2025-08-04 15:39:02.720582323 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/fbthrift.sh build/treadmill/scripts/recipes/fbthrift.sh
 --- treadmill/scripts/recipes/fbthrift.sh	2025-08-04 15:31:45.107208354 -0700
 +++ build/treadmill/scripts/recipes/fbthrift.sh	2025-08-04 15:39:02.721126146 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/folly.sh build/treadmill/scripts/recipes/folly.sh
 --- treadmill/scripts/recipes/folly.sh	2025-08-04 15:31:45.107560366 -0700
 +++ build/treadmill/scripts/recipes/folly.sh	2025-08-04 15:39:02.721582616 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/mcrouter.sh build/treadmill/scripts/recipes/mcrouter.sh
 --- treadmill/scripts/recipes/mcrouter.sh	2025-08-04 15:31:45.107889653 -0700
 +++ build/treadmill/scripts/recipes/mcrouter.sh	2025-08-04 15:39:02.722218779 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/mstch.sh build/treadmill/scripts/recipes/mstch.sh
 --- treadmill/scripts/recipes/mstch.sh	2025-08-04 15:31:45.108263939 -0700
 +++ build/treadmill/scripts/recipes/mstch.sh	2025-08-04 15:39:02.722760948 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/treadmill.sh build/treadmill/scripts/recipes/treadmill.sh
 --- treadmill/scripts/recipes/treadmill.sh	2025-08-04 15:31:45.108517293 -0700
 +++ build/treadmill/scripts/recipes/treadmill.sh	2025-08-04 15:39:02.723244931 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/wangle.sh build/treadmill/scripts/recipes/wangle.sh
 --- treadmill/scripts/recipes/wangle.sh	2025-08-04 15:31:45.108967784 -0700
 +++ build/treadmill/scripts/recipes/wangle.sh	2025-08-04 15:39:02.723774982 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/scripts/recipes/zstd.sh build/treadmill/scripts/recipes/zstd.sh
 --- treadmill/scripts/recipes/zstd.sh	2025-08-04 15:31:45.109335540 -0700
 +++ build/treadmill/scripts/recipes/zstd.sh	2025-08-04 15:39:02.724305014 -0700
 @@ -1,5 +1,4 @@
  #!/usr/bin/env bash
 -# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
- 
+
  source common.sh
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/adsim/AdSimClientFactory.cpp build/treadmill/services/adsim/AdSimClientFactory.cpp
 --- treadmill/services/adsim/AdSimClientFactory.cpp	1969-12-31 16:00:00.000000000 -0800
 +++ build/treadmill/services/adsim/AdSimClientFactory.cpp	2025-08-04 15:39:02.724918682 -0700
@@ -5089,7 +5089,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +#include <folly/io/IOBuf.h>
  #include <mcrouter/lib/network/AsyncMcClient.h>
  #include <mcrouter/lib/network/gen/Memcache.h>
- 
+
 @@ -32,6 +32,7 @@
  using facebook::memcache::McDeleteRequest;
  using facebook::memcache::McGetRequest;
@@ -5097,23 +5097,23 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +using facebook::memcache::McOperation;
  using folly::fibers::EventBaseLoopController;
  using folly::fibers::FiberManager;
- 
+
 @@ -51,12 +52,10 @@
      fm_ = std::make_unique<FiberManager>(std::move(loopController));
    }
- 
+
 -  bool isReady() const {
 -    return true;
 -  }
 +  bool isReady() const { return true; }
- 
+
 -  folly::Future<MemcachedService::Reply> sendRequest(
 -      std::unique_ptr<typename MemcachedService::Request> request) {
 +  folly::Future<MemcachedService::Reply>
 +  sendRequest(std::unique_ptr<typename MemcachedService::Request> request) {
      folly::MoveWrapper<folly::Promise<MemcachedService::Reply>> p;
      auto f = p->getFuture();
- 
+
 @@ -68,8 +67,7 @@
        });
      } else if (request->which() == MemcachedRequest::SET) {
@@ -5146,13 +5146,13 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 --- treadmill/services/memcached/Request.h	2025-08-04 15:31:45.111574576 -0700
 +++ build/treadmill/services/memcached/Request.h	2025-08-04 15:39:02.732858039 -0700
 @@ -20,14 +20,20 @@
- 
+
  class Request;
- 
+
 -class MemcachedReply {};
 +class MemcachedReply {
 +};
- 
+
  class MemcachedRequest : public Request {
   public:
 -  enum Operation { GET, SET, DELETE };
@@ -5161,20 +5161,20 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +    SET,
 +    DELETE
 +  };
- 
+
    MemcachedRequest(Operation type, std::string key)
 -      : type_(type), key_(std::move(key)) {}
 +    : type_(type),
 +      key_(std::move(key)) { }
- 
+
    virtual ~MemcachedRequest() {}
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/memcached/Workload.h build/treadmill/services/memcached/Workload.h
 --- treadmill/services/memcached/Workload.h	2025-08-04 15:31:45.112496339 -0700
 +++ build/treadmill/services/memcached/Workload.h	2025-08-04 15:39:02.733547162 -0700
 @@ -26,20 +26,18 @@
  namespace treadmill {
- 
+
  template <>
 -class Workload<MemcachedService>
 -    : public WorkloadBase<Workload<MemcachedService>> {
@@ -5188,14 +5188,14 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +    WARMUP,
 +    GET
 +  };
- 
+
 -  void reset() {
 -    index_ = 0;
 -  }
 +  Workload<MemcachedService>(folly::dynamic config)
 +    : state_(State::WARMUP),
 +      index_(0) { }
- 
+
 -  std::tuple<
 -      std::unique_ptr<MemcachedService::Request>,
 +  std::tuple<std::unique_ptr<MemcachedService::Request>,
@@ -5203,7 +5203,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
        Future<MemcachedService::Reply>>
    getNextRequest() {
 @@ -51,16 +49,16 @@
- 
+
      std::unique_ptr<MemcachedService::Request> request;
      if (state_ == State::WARMUP) {
 -      request = std::make_unique<MemcachedRequest>(
@@ -5225,13 +5225,13 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
      auto f = p.getFuture();
 @@ -69,7 +67,7 @@
    }
- 
+
    folly::dynamic makeConfigOutputs(
 -      std::vector<Workload<MemcachedService>*> /*workloads*/) {
 +                  std::vector<Workload<MemcachedService>*> workloads) {
      return folly::dynamic::object;
    }
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/CMakeLists.txt build/treadmill/services/sleep/CMakeLists.txt
 --- treadmill/services/sleep/CMakeLists.txt	1969-12-31 16:00:00.000000000 -0800
 +++ build/treadmill/services/sleep/CMakeLists.txt	2025-08-04 15:39:02.734066497 -0700
@@ -5331,17 +5331,17 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +++ build/treadmill/services/sleep/Connection.h	2025-08-04 15:39:02.734576999 -0700
 @@ -14,12 +14,12 @@
  #include "treadmill/services/sleep/SleepService.h"
- 
+
  #include "treadmill/Connection.h"
 -#include "treadmill/StatisticsManager.h"
  #include "treadmill/Util.h"
 +#include "treadmill/StatisticsManager.h"
- 
+
 +#include "treadmill/services/sleep/gen-cpp2/Sleep.h"
  #include <folly/io/async/AsyncSocket.h>
  #include <thrift/lib/cpp2/async/HeaderClientChannel.h>
 -#include "treadmill/services/sleep/gen-cpp2/Sleep.h"
- 
+
  DECLARE_string(hostname);
  DECLARE_int32(port);
 @@ -31,33 +31,30 @@
@@ -5356,18 +5356,18 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 -    auto channel =
 -        apache::thrift::HeaderClientChannel::newChannel(std::move(socket));
 +    auto channel = apache::thrift::HeaderClientChannel::newChannel(std::move(socket));
- 
+
 -    client_ =
 -        std::make_unique<services::sleep::SleepAsyncClient>(std::move(channel));
 +    client_ = std::make_unique<services::sleep::SleepAsyncClient>(
 +                std::move(channel));
    }
- 
+
 -  bool isReady() const {
 -    return true;
 -  }
 +  bool isReady() const { return true; }
- 
+
 -  folly::Future<SleepService::Reply> sendRequest(
 -      std::unique_ptr<typename SleepService::Request> request) {
 -    auto f = client_->future_goSleep(request->sleep_time())
@@ -5385,12 +5385,12 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +    );
      return f;
    }
- 
+
   private:
 -  std::shared_ptr<StatisticsManager::Histogram> histo_;
    std::unique_ptr<services::sleep::SleepAsyncClient> client_;
  };
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/Makefile.am build/treadmill/services/sleep/Makefile.am
 --- treadmill/services/sleep/Makefile.am	2025-08-04 15:31:45.113695552 -0700
 +++ build/treadmill/services/sleep/Makefile.am	1969-12-31 16:00:00.000000000 -0800
@@ -5413,85 +5413,85 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 --- treadmill/services/sleep/Request.h	2025-08-04 15:31:45.114105532 -0700
 +++ build/treadmill/services/sleep/Request.h	2025-08-04 15:39:02.735840640 -0700
 @@ -22,7 +22,8 @@
- 
+
  class SleepReply {
   public:
 -  explicit SleepReply(int64_t sleep_time) : sleep_time_(sleep_time) {}
 +  explicit SleepReply(int64_t sleep_time)
 +    : sleep_time_(sleep_time) { }
- 
+
    int64_t sleep_time() {
      return sleep_time_;
 @@ -34,10 +35,13 @@
- 
+
  class SleepRequest : public Request {
   public:
 -  enum Operation { SLEEP };
 +  enum Operation {
 +    SLEEP
 +  };
- 
+
    SleepRequest(Operation type, int64_t sleep_time)
 -      : type_(type), sleep_time_(sleep_time) {}
 +    : type_(type),
 +      sleep_time_(sleep_time) { }
- 
+
    virtual ~SleepRequest() {}
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleepserver/SleepClient.cpp build/treadmill/services/sleep/sleepserver/SleepClient.cpp
 --- treadmill/services/sleep/sleepserver/SleepClient.cpp	2025-08-04 15:31:45.116475936 -0700
 +++ build/treadmill/services/sleep/sleepserver/SleepClient.cpp	2025-08-04 15:39:02.736739580 -0700
 @@ -10,32 +10,36 @@
- 
+
  #include <gflags/gflags.h>
- 
+
 -#include <folly/io/async/AsyncSocket.h>
 -#include <thrift/lib/cpp2/async/HeaderClientChannel.h>
  #include "treadmill/services/sleep/gen-cpp2/Sleep.h"
 +#include <thrift/lib/cpp2/async/HeaderClientChannel.h>
- 
+
  using namespace folly;
  using namespace apache::thrift;
 +using namespace apache::thrift::async;
  using namespace facebook::windtunnel::treadmill::services::sleep;
- 
+
 -DEFINE_int32(port, 12345, "Port for sleep service (default: 12345).");
 +DEFINE_int32(port,
 +             12345,
 +             "Port for sleep service (default: 12345).");
- 
+
 -DEFINE_string(
 -    hostname,
 +DEFINE_string(hostname,
      "127.0.0.1",
      "Hostname of the server (default: localhost).");
- 
+
 -DEFINE_int32(sleep_time, 1000, "The sleep time to send (default: 1000).");
 +DEFINE_int32(sleep_time,
 +             1000,
 +             "The sleep time to send (default: 1000).");
- 
+
  int main(int argc, char* argv[]) {
    google::InitGoogleLogging(argv[0]);
 -  gflags::ParseCommandLineFlags(&argc, &argv, true);
 +  google::ParseCommandLineFlags(&argc, &argv, true);
- 
+
    EventBase event_base;
- 
+
 -  auto socket = AsyncSocket::newSocket(&event_base, FLAGS_hostname, FLAGS_port);
 +  std::shared_ptr<TAsyncSocket> socket(
 +      TAsyncSocket::newSocket(&event_base, FLAGS_hostname, FLAGS_port));
- 
+
 -  SleepAsyncClient client(HeaderClientChannel::newChannel(std::move(socket)));
 +  SleepAsyncClient client(HeaderClientChannel::newChannel(socket));
- 
+
    auto sleep_time = client.future_goSleep(FLAGS_sleep_time).getVia(&event_base);
    LOG(INFO) << "Slept for " << sleep_time << " microseconds.";
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleepserver/SleepHandler.cpp build/treadmill/services/sleep/sleepserver/SleepHandler.cpp
 --- treadmill/services/sleep/sleepserver/SleepHandler.cpp	2025-08-04 15:31:45.116891564 -0700
 +++ build/treadmill/services/sleep/sleepserver/SleepHandler.cpp	2025-08-04 15:39:02.737575905 -0700
 @@ -35,8 +35,7 @@
- 
+
    folly::RequestEventBase::get()->runInEventBaseThread(
        [promise, time]() mutable {
 -        struct timeval start_time, end_time, diff_time;
@@ -5504,12 +5504,12 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 --- treadmill/services/sleep/sleepserver/SleepHandler.h	2025-08-04 15:31:45.117269116 -0700
 +++ build/treadmill/services/sleep/sleepserver/SleepHandler.h	2025-08-04 15:39:02.738258567 -0700
 @@ -10,7 +10,6 @@
- 
+
  #pragma once
- 
+
 -#include "common/fb303/cpp/FacebookBase2.h"
  #include "treadmill/services/sleep/gen-cpp2/Sleep.h"
- 
+
  namespace facebook {
 @@ -23,21 +22,16 @@
   * A simple thrift server which has only one method that tells the server to
@@ -5534,7 +5534,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 -  folly::Future<int64_t> future_goSleep(int64_t time) override;
 +  folly::Future<int64_t> future_goSleep(int64_t time);
  };
- 
+
  } // namespace sleep
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleepserver/SleepServer.cpp build/treadmill/services/sleep/sleepserver/SleepServer.cpp
 --- treadmill/services/sleep/sleepserver/SleepServer.cpp	2025-08-04 15:31:45.117685235 -0700
@@ -5542,50 +5542,50 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -8,24 +8,29 @@
   *
   */
- 
+
 -#include <gflags/gflags.h>
  #include <memory>
 +#include <gflags/gflags.h>
- 
+
  #include <thrift/lib/cpp2/server/ThriftServer.h>
- 
+
  #include "treadmill/services/sleep/sleepserver/SleepHandler.h"
- 
+
  using namespace apache::thrift;
 +using namespace apache::thrift::async;
- 
+
  using namespace facebook::windtunnel::treadmill::services::sleep;
- 
+
 -DEFINE_int32(port, 12345, "Port for sleep service (default: 12345).");
 +DEFINE_int32(port,
 +             12345,
 +             "Port for sleep service (default: 12345).");
- 
+
 -DEFINE_int32(num_workers, 4, "Number of workers (default: 4).");
 +DEFINE_int32(num_workers,
 +             4,
 +             "Number of workers (default: 4).");
- 
+
  int main(int argc, char* argv[]) {
    google::InitGoogleLogging(argv[0]);
 -  gflags::ParseCommandLineFlags(&argc, &argv, true);
 +  google::ParseCommandLineFlags(&argc, &argv, true);
- 
+
    auto handler = std::make_shared<SleepHandler>();
    auto server = std::make_unique<ThriftServer>();
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/SleepService.h build/treadmill/services/sleep/SleepService.h
 --- treadmill/services/sleep/SleepService.h	2025-08-04 15:31:45.114421380 -0700
 +++ build/treadmill/services/sleep/SleepService.h	2025-08-04 15:39:02.739658565 -0700
 @@ -12,8 +12,7 @@
- 
+
  #include "treadmill/services/sleep/Request.h"
- 
+
 -DEFINE_int64(
 -    sleep_time,
 +DEFINE_int64(sleep_time,
      1000,
      "Requested microseconds to sleep for (default:1000)");
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/sleep.thrift build/treadmill/services/sleep/sleep.thrift
 --- treadmill/services/sleep/sleep.thrift	2025-08-04 15:31:45.115581373 -0700
 +++ build/treadmill/services/sleep/sleep.thrift	2025-08-04 15:39:02.740347717 -0700
@@ -5594,7 +5594,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 -include "common/fb303/if/fb303.thrift"
 -
  namespace cpp2 facebook.windtunnel.treadmill.services.sleep
- 
+
 -service Sleep extends fb303.FacebookService {
 -  i64 goSleep(1: i64 time);
 +service Sleep {
@@ -5606,18 +5606,18 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -8,6 +8,8 @@
   *
   */
- 
+
 +#include <gflags/gflags.h>
 +
  #include "treadmill/services/sleep/Connection.h"
  #include "treadmill/services/sleep/Workload.h"
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill/services/sleep/Workload.h build/treadmill/services/sleep/Workload.h
 --- treadmill/services/sleep/Workload.h	2025-08-04 15:31:45.115191094 -0700
 +++ build/treadmill/services/sleep/Workload.h	2025-08-04 15:39:02.741665430 -0700
 @@ -23,26 +23,24 @@
  namespace treadmill {
- 
+
  template <>
 -class Workload<SleepService> : public WorkloadBase<Workload<SleepService>> {
 +class Workload<SleepService> {
@@ -5626,7 +5626,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 -
 -  void reset() {}
 +  Workload<SleepService>(folly::dynamic config) {}
- 
+
 -  std::tuple<
 -      std::unique_ptr<SleepService::Request>,
 +  std::tuple<std::unique_ptr<SleepService::Request>,
@@ -5642,7 +5642,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
      auto f = p.getFuture();
      return std::make_tuple(std::move(request), std::move(p), std::move(f));
    }
- 
+
    folly::dynamic makeConfigOutputs(
 -      std::vector<Workload<SleepService>*> /*workloads*/) {
 +                        std::vector<Workload<SleepService>*> workloads) {
@@ -8612,9 +8612,9 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 --- treadmill/test/RandomEngineTest.cpp	2025-08-04 15:31:45.118315488 -0700
 +++ build/treadmill/test/RandomEngineTest.cpp	2025-08-04 15:39:02.757582973 -0700
 @@ -12,11 +12,13 @@
- 
+
  #include "treadmill/RandomEngine.h"
- 
+
 -#include <cmath>
 -#include <functional>
 -#include <numeric>
@@ -8626,18 +8626,18 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +#include <cmath>
 +
 +#include <folly/Memory.h>
- 
+
  namespace facebook {
  namespace windtunnel {
 @@ -88,12 +90,13 @@
- 
+
  } // namespace
- 
+
 +
  } // namespace treadmill
  } // namespace windtunnel
  } // namespace facebook
- 
+
  int main(int argc, char* argv[]) {
    testing::InitGoogleTest(&argc, argv);
 -  FLAGS_treadmill_random_seed = 0;
