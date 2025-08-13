@@ -291,7 +291,7 @@ def run_client(args):
     # Select request size distribution based on mode
     if args.mode == "ai":
         # Apply multiplier to AI request sizes
-        size_dist = [sz * AI_REQUEST_SIZE_MULTIPLIER for sz in ai_req_size_dist]
+        size_dist = [sz * args.ai_request_size_multiplier for sz in ai_req_size_dist]
         # Override defaults for AI mode
         criteria = "P99" if args.criteria == "P95" else args.criteria
         latency = 100 if args.latency == 989 else args.latency
@@ -402,6 +402,12 @@ def init_parser():
         type=str,
         default="default",
         help="Mode to run the benchmark in (default, ai)",
+    )
+    client_parser.add_argument(
+        "--ai-request-size-multiplier",
+        type=int,
+        default=AI_REQUEST_SIZE_MULTIPLIER,
+        help="Multiplier for AI request sizes when using AI mode",
     )
     # functions
     server_parser.set_defaults(func=run_server)

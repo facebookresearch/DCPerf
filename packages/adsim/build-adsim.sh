@@ -36,7 +36,7 @@ rm -rf build third_party
 mkdir -p build third_party
 
 # Copy CMake configuration and clone compression benchmark library
-cp ${ADSIM_PROJ_ROOT}/buildfiles/adsim/build/cmake.txt build
+cp ${ADSIM_PROJ_ROOT}/buildfiles/adsim/cmake.txt build
 git clone https://github.com/inikep/lzbench.git -b $LZBENCH_VERSION third_party/lzbench
 
 # Apply patches to lzbench for AdSim integration

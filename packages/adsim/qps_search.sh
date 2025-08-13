@@ -106,7 +106,7 @@ function log() {
 
 STDOUT_LOG=/tmp/qps_search.stdout
 STDERR_LOG=/tmp/qps_search.stderr
-LAT_SECTION_LINES=17
+LAT_SECTION_LINES=20
 SECTION_LOG=/tmp/qps_search.sec
 THROUGHPUT_LOG=/tmp/qps_search.tp
 LATENCY_LOG=/tmp/qps_search.lat
@@ -114,13 +114,26 @@ LATENCY_LOG=/tmp/qps_search.lat
 
 function measure_latency()
 {
+   # Handle QPS 0 case to avoid blocking
+  if [ "$1" -eq 0 ]; then
+    log "QPS is 0, returning large latency value to avoid blocking"
+    LATENCY=999999999
+    ACHIEVED_QPS=0
+    if [ true == $CSV_LOGGING ]; then
+      requested_qps="$1"
+      sequence="$2"
+      runtime="$3"
+      echo "${sequence},${runtime},${requested_qps},${ACHIEVED_QPS},${TGT_QUANTILE},${TGT_LATENCY},${LATENCY}"
+    fi
+    return
+  fi
 
   log "$TREADMILL_EXE --hostname $ADSIM_HOST --port $ADSIM_PORT " \
       "--number_of_workers $NWORKERS --number_of_connections $NCONNECTS " \
       "--runtime $RUNTIME --req_size $REQ_SIZE --request-per-second $1 -stderrthreshold=0"
   $TREADMILL_EXE --hostname "$ADSIM_HOST" --port "$ADSIM_PORT" \
     --number_of_workers "$NWORKERS" --number_of_connections "$NCONNECTS" \
-    --runtime "$RUNTIME" --req_size "$REQ_SIZE" --request-per-second "$1" --latency_calibration_samples 10 --latency_warmup_samples 10 -stderrthreshold=0 --logtostderr=1 \
+    --runtime "$RUNTIME" --req_size "$REQ_SIZE" --request-per-second "$1" --latency_calibration_samples 10 --latency_warmup_samples 10 -stderrthreshold=0 --logtostderr=1  --use_aegis_encryption \
     > "$STDOUT_LOG" 2>"$STDERR_LOG"
   HEADER_LINE=$(awk '/request_latency/{ print NR }' "$STDERR_LOG")
   tail -n "+$HEADER_LINE" "$STDERR_LOG" \

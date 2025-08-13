@@ -28,14 +28,14 @@ set -x
 # Global Configuration Variables
 ################################################################################
 
-# Output directory for final benchmark executables and libraries
-BENCHMARKS_DIR="$(pwd)/benchmarks/adsim"
-
 # Path to directory containing this script (benchpress packages)
-BPKGS_CHM_ROOT="$(dirname "$(readlink -f "$0")")"
+BPKGS_ADSIM_ROOT="$(dirname "$(readlink -f "$0")")"
 
 # Root directory of the Benchpress benchmarking framework
-BENCHPRESS_ROOT="$(readlink -f "$BPKGS_CHM_ROOT/../..")"
+BENCHPRESS_ROOT="$(readlink -f "$BPKGS_ADSIM_ROOT/../..")"
+
+# Output directory for final benchmark executables and libraries
+BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks/adsim"
 
 # Temporary directory for intermediate build artifacts
 BUILD_DIR="${BENCHPRESS_ROOT}/build"

@@ -1,0 +1,15 @@
+--- /dev/null
++++ b/manifests/libaegis
+@@ -0,0 +1,11 @@
++[manifest]
++name = libaegis
++
++[download]
++url = https://github.com/aegis-aead/libaegis/archive/refs/tags/0.4.0.tar.gz
++sha256 = bf8d363edc28b9969e9d0decc41b41f818461136619652b1a977c8afa9b81363
++
++[build]
++builder = cmake
++subdir = libaegis-0.4.0
++
++[dependencies]

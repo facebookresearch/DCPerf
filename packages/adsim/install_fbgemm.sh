@@ -965,7 +965,7 @@ install_fbgemm() {
   popd || exist
   pushd fbgemm || exist
   mkdir build
-  cp ${ADSIM_PROJ_ROOT}/buildfiles/fbgemm/build/cmake.txt build
+  cp ${ADSIM_PROJ_ROOT}/buildfiles/fbgemm/cmake.txt build
   pushd build || exist
   source cmake.txt
   popd || exist

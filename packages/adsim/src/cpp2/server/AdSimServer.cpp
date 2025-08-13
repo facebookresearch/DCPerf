@@ -21,6 +21,8 @@
 
 #include <cea/chips/adsim/cpp2/server/AdSimService.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Dwarfs.h>
+#include <fizz/fizz-config.h>
+#include <fizz/server/FizzServerContext.h>
 #include <folly/init/Init.h>
 #include <folly/io/async/test/TestSSLServer.h>
 #include <folly/json/json.h>
@@ -29,6 +31,8 @@
 #include <thrift/lib/cpp2/server/Cpp2Worker.h>
 #include <thrift/lib/cpp2/server/ThriftProcessor.h>
 #include <thrift/lib/cpp2/server/ThriftServer.h>
+#include <wangle/acceptor/FizzConfig.h>
+#include <wangle/acceptor/FizzConfigUtil.h>
 
 DEFINE_string(config_file, "", "A json file of configurations");
 DEFINE_int32(port, -1, "Overwrite port in the config file");
@@ -57,7 +61,9 @@ DEFINE_bool(
     false,
     "Use stop TLS mode (transition to plaintext) instead of full TLS encryption");
 
+using apache::thrift::Cpp2Worker;
 using apache::thrift::DefaultThriftAcceptorFactory;
+using apache::thrift::DefaultThriftAcceptorFactorySharedSSLContext;
 using apache::thrift::ThriftServer;
 using apache::thrift::ThriftServerAsyncProcessorFactory;
 using apache::thrift::ThriftTlsConfig;
@@ -68,8 +74,68 @@ using facebook::cea::chips::adsim::KERNEL_DICT;
 using facebook::cea::chips::adsim::KernelConfig;
 using facebook::cea::chips::adsim::Stage;
 
-namespace {
+/**
+ * Implementations of methods to handle Fizz connections.
+ */
+template <typename TicketCipherT>
+class FbThriftFizzConfigUtil : public wangle::FizzConfigUtil {
+ public:
+  static std::shared_ptr<fizz::server::FizzServerContext> createFizzContext(
+      const std::vector<wangle::SSLContextConfig>& sslContextConfigs,
+      const wangle::FizzConfig& fizzConfig,
+      bool strictSSL) {
+    auto fizzCtx = wangle::FizzConfigUtil::createFizzContext(
+        sslContextConfigs, fizzConfig, strictSSL);
+#if FIZZ_HAVE_LIBAEGIS
+    if (fizzCtx) {
+      auto serverCiphers = fizzCtx->getSupportedCiphers();
 
+      serverCiphers.insert(
+          serverCiphers.begin(),
+          {
+              {fizz::CipherSuite::TLS_AEGIS_128L_SHA256},
+          });
+
+      fizzCtx->setSupportedCiphers(std::move(serverCiphers));
+    }
+#endif
+    return fizzCtx;
+  }
+
+  static std::shared_ptr<fizz::server::TicketCipher> createFizzTicketCipher(
+      const wangle::TLSTicketKeySeeds& seeds,
+      std::chrono::seconds validity,
+      std::chrono::seconds handshakeValidity,
+      std::shared_ptr<fizz::Factory> factory,
+      std::shared_ptr<fizz::server::CertManager> certManager,
+      folly::Optional<std::string> pskContext) {
+    return wangle::FizzConfigUtil::createTicketCipher<TicketCipherT>(
+        seeds,
+        validity,
+        handshakeValidity,
+        factory,
+        certManager,
+        std::move(pskContext));
+  }
+
+  static std::unique_ptr<fizz::server::CertManager> createCertManager(
+      const std::vector<wangle::SSLContextConfig>& sslContextConfigs,
+      const std::shared_ptr<wangle::PasswordInFileFactory>& pwFactory,
+      bool strictSSL) {
+    return FizzConfigUtil::createCertManager(
+        sslContextConfigs,
+        /* pwFactory = */ nullptr,
+        strictSSL);
+  }
+};
+
+using FBThriftAcceptorFactorySharedSSLContext =
+    apache::thrift::ThriftAcceptorFactory<
+        Cpp2Worker,
+        wangle::SharedSSLContextManagerImpl<
+            FbThriftFizzConfigUtil<fizz::server::AES128TicketCipher>>>;
+
+namespace {
 /* The structure carries all the information needed to config the server. */
 struct AdSimServerConfig {
   int port;
@@ -278,8 +344,9 @@ void setup_tls(std::shared_ptr<ThriftServer> server) {
   thriftConfig.enableThriftParamsNegotiation = true;
   thriftConfig.enableStopTLS = FLAGS_use_stop_tls;
   server->setThriftConfig(thriftConfig);
+
   server->setAcceptorFactory(
-      std::make_shared<DefaultThriftAcceptorFactory>(server.get()));
+      std::make_shared<FBThriftAcceptorFactorySharedSSLContext>(server.get()));
 }
 
 /* Create a new thrift server and config it

@@ -1,0 +1,10 @@
+--- a/manifests/fizz
++++ b/manifests/fizz
+@@ -22,6 +22,7 @@ BUILD_TESTS = OFF
+
+ [dependencies]
+ folly
++libaegis
+ liboqs
+ libsodium
+ zlib

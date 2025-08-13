@@ -1,0 +1,26 @@
+#!/bin/bash
+# !! Run inside the Conda environment !!
+
+cmake \
+  -DFBGEMM_CPU_ONLY=ON \
+  -DFBGEMM_BUILD_BENCHMARKS=0 \
+  -DCMAKE_INSTALL_PREFIX="${ADSIM_STAGING_DIR}/fbgemm" \
+  -DFBGEMM_LIBRARY_TYPE=shared \
+  -DCMAKE_CXX_COMPILER="clang++" \
+  -DCMAKE_C_COMPILER="clang" \
+  -DCMAKE_CXX_FLAGS="-fopenmp=libomp -I ${FBGEMM_STAGING_DIR}/minicoda/include" \
+  -DCMAKE_C_FLAGS="-fopenmp=libomp -I ${FBGEMM_STAGING_DIR}/minicoda/include" \
+  ..
+
+# Set up the build
+
+# cmake ${build_args[@]} ..
+
+# Build the library
+make -j VERBOSE=1
+
+# # Run all tests
+# make test
+
+# Install the library
+make install
