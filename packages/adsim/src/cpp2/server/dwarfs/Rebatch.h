@@ -140,7 +140,8 @@ class Rebatch : public Kernel {
       size_t memory_pool_size_gb,
       int prefetch_dist,
       std::string input_str,
-      std::string distribution_file);
+      std::string distribution_file,
+      size_t num_pregenerated_batches = 100);
 
   std::string init(
       std::shared_ptr<AdSimHandleObjs> h_objs,
@@ -173,6 +174,10 @@ class Rebatch : public Kernel {
     }
     std::string distribution_file = config_d["distribution_file"].asString();
 
+    size_t num_pregenerated_batches = config_d.count("num_pregenerated_batches")
+        ? static_cast<size_t>(config_d["num_pregenerated_batches"].asInt())
+        : 100;
+
     return std::make_shared<Rebatch>(
         tensors_per_batch,
         num_threads,
@@ -180,7 +185,8 @@ class Rebatch : public Kernel {
         memory_pool_size_gb,
         prefetch_dist,
         input_str,
-        distribution_file);
+        distribution_file,
+        num_pregenerated_batches);
   }
 
  private:
@@ -191,9 +197,20 @@ class Rebatch : public Kernel {
   int64_t prefetch_dist_;
   std::string input_str_;
   std::string distribution_file_;
+  size_t num_pregenerated_batches_;
 
   std::shared_ptr<SizeDistribution> size_distribution_;
   std::shared_ptr<InputMemoryPool> input_memory_pool_;
+
+  // Pregenerated batches for performance optimization
+  std::vector<std::shared_ptr<TensorBatch>> pregenerated_batches_;
+  std::atomic<size_t> batch_index_{0};
+
+  // Pregenerate N batches to avoid on-the-fly generation
+  void pregenerateBatches();
+
+  // Get next pregenerated batch in round-robin fashion
+  std::shared_ptr<TensorBatch> getNextBatch();
 
   // Single-threaded rebatch operation
   int rebatch_single_thread();

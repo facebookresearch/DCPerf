@@ -244,14 +244,16 @@ Rebatch::Rebatch(
     size_t memory_pool_size_gb,
     int prefetch_dist,
     std::string input_str,
-    std::string distribution_file)
+    std::string distribution_file,
+    size_t num_pregenerated_batches)
     : tensors_per_batch_(tensors_per_batch),
       num_threads_(num_threads),
       output_tensor_size_(output_tensor_size),
       memory_pool_size_gb_(memory_pool_size_gb),
       prefetch_dist_(prefetch_dist),
       input_str_(std::move(input_str)),
-      distribution_file_(std::move(distribution_file)) {
+      distribution_file_(std::move(distribution_file)),
+      num_pregenerated_batches_(num_pregenerated_batches) {
   LOG(INFO) << "Rebatch initialized with params: " << "tensors_per_batch="
             << tensors_per_batch_ << ", num_threads=" << num_threads_
             << ", output_tensor_size=" << output_tensor_size_
@@ -282,25 +284,69 @@ std::string Rebatch::init(
   h_objs->set_shared_ptr(input_str_ + "_size_dist", size_distribution_);
   h_objs->set_shared_ptr(input_str_ + "_memory_pool", input_memory_pool_);
 
+  // Pregenerate batches for performance optimization
+  pregenerateBatches();
+
   std::string info = folly::to<std::string>(
       "Rebatch: ", input_str_, " ", std::to_string(output_tensor_size_), "B");
   info += " (distribution: " + distribution_file_ + ")";
   info += " (memory_pool: " + std::to_string(memory_pool_size_gb_) + "GB)";
+  info +=
+      " (pregenerated_batches: " + std::to_string(num_pregenerated_batches_) +
+      ")";
   return info;
+}
+
+/**
+ * Pregenerate N batches to avoid on-the-fly generation during benchmark
+ * execution
+ *
+ * Creates pregenerated_batches_ vector with N TensorBatch instances that can be
+ * reused in a round-robin fashion during rebatch operations.
+ */
+void Rebatch::pregenerateBatches() {
+  LOG(INFO) << "Pregenerating " << num_pregenerated_batches_
+            << " batches for performance optimization";
+
+  pregenerated_batches_.reserve(num_pregenerated_batches_);
+
+  for (size_t i = 0; i < num_pregenerated_batches_; ++i) {
+    auto batch = std::make_shared<TensorBatch>(
+        tensors_per_batch_,
+        *size_distribution_,
+        output_tensor_size_,
+        *input_memory_pool_);
+    pregenerated_batches_.push_back(std::move(batch));
+  }
+
+  LOG(INFO) << "Successfully pregenerated " << pregenerated_batches_.size()
+            << " batches";
+}
+
+/**
+ * Get next pregenerated batch in round-robin fashion
+ *
+ * Returns a pregenerated batch from the pool, cycling through them in a
+ * thread-safe manner using atomic operations.
+ */
+std::shared_ptr<TensorBatch> Rebatch::getNextBatch() {
+  if (pregenerated_batches_.empty()) {
+    throw std::runtime_error("No pregenerated batches available");
+  }
+
+  size_t index = batch_index_.fetch_add(1) % pregenerated_batches_.size();
+  return pregenerated_batches_[index];
 }
 
 /**
  * Single-threaded rebatch operation
  *
- * Creates a batch of tensors and performs sequential memory copy operations.
+ * Uses a pregenerated batch of tensors and performs sequential memory copy
+ * operations.
  */
 int Rebatch::rebatch_single_thread() {
-  // Create a fresh batch of tensors for this operation
-  auto batch = std::make_unique<TensorBatch>(
-      tensors_per_batch_,
-      *size_distribution_,
-      output_tensor_size_,
-      *input_memory_pool_);
+  // Get a pregenerated batch for this operation (avoids on-the-fly generation)
+  auto batch = getNextBatch();
 
   const auto& tensors = batch->getTensors();
   const size_t numTensors = tensors.size();
@@ -341,10 +387,17 @@ int Rebatch::rebatch_single_thread() {
 
       // Perform the memcpy operation
       memcpy(output.get() + totalProcessedBytes, srcPtr, inputNbytes);
-      totalProcessedBytes += inputNbytes;
 
-      // Update checksum to prevent optimization
+      // Use the copied data to prevent compiler optimization
+      // Calculate checksum from both source and destination data
       checksum ^= reinterpret_cast<uintptr_t>(srcPtr);
+      if (inputNbytes >= sizeof(uint64_t)) {
+        // XOR with first 8 bytes of copied data to ensure it's actually used
+        checksum ^= *reinterpret_cast<const uint64_t*>(
+            output.get() + totalProcessedBytes);
+      }
+
+      totalProcessedBytes += inputNbytes;
     }
   } else {
     // Without prefetching - baseline implementation
@@ -358,10 +411,17 @@ int Rebatch::rebatch_single_thread() {
 
       // Perform the memcpy operation
       memcpy(output.get() + totalProcessedBytes, srcPtr, inputNbytes);
-      totalProcessedBytes += inputNbytes;
 
-      // Update checksum to prevent optimization
+      // Use the copied data to prevent compiler optimization
+      // Calculate checksum from both source and destination data
       checksum ^= reinterpret_cast<uintptr_t>(srcPtr);
+      if (inputNbytes >= sizeof(uint64_t)) {
+        // XOR with first 8 bytes of copied data to ensure it's actually used
+        checksum ^= *reinterpret_cast<const uint64_t*>(
+            output.get() + totalProcessedBytes);
+      }
+
+      totalProcessedBytes += inputNbytes;
     }
   }
 
@@ -376,12 +436,8 @@ int Rebatch::rebatch_single_thread() {
  */
 folly::coro::Task<int> Rebatch::rebatch_multi_thread(
     std::shared_ptr<folly::Executor> pool) {
-  // Create a fresh batch of tensors for this operation
-  auto batch = std::make_shared<TensorBatch>(
-      tensors_per_batch_,
-      *size_distribution_,
-      output_tensor_size_,
-      *input_memory_pool_);
+  // Get a pregenerated batch for this operation (avoids on-the-fly generation)
+  auto batch = getNextBatch();
 
   const auto& tensors = batch->getTensors();
   const size_t numTensors = tensors.size();
@@ -429,10 +485,18 @@ folly::coro::Task<int> Rebatch::rebatch_multi_thread(
                 output->data() + output_offset + totalProcessedBytes,
                 srcPtr,
                 inputNbytes);
-            totalProcessedBytes += inputNbytes;
 
-            // Update checksum to prevent optimization
+            // Use the copied data to prevent compiler optimization
+            // Calculate checksum from both source and destination data
             checksum ^= reinterpret_cast<uintptr_t>(srcPtr);
+            if (inputNbytes >= sizeof(uint64_t)) {
+              // XOR with first 8 bytes of copied data to ensure it's actually
+              // used
+              checksum ^= *reinterpret_cast<const uint64_t*>(
+                  output->data() + output_offset + totalProcessedBytes);
+            }
+
+            totalProcessedBytes += inputNbytes;
           }
 
           return static_cast<int>(totalProcessedBytes ^ checksum);
