@@ -17,6 +17,33 @@ MEMCACHE_THREADS=8
 
 export LD_LIBRARY_PATH=/opt/local/hhvm-3.30/lib
 
+# Function to detect if running in Docker container
+is_docker_container() {
+  # Check for .dockerenv file (most reliable method)
+  if [ -f /.dockerenv ]; then
+    return 0
+  fi
+  return 1
+}
+
+# Function to restart MariaDB in Docker container
+restart_mariadb_docker() {
+  echo "Restarting MariaDB in Docker container mode..."
+  pkill mariadb
+  # Wait until MariaDB is fully killed before starting it again
+  while pgrep -f mariadb > /dev/null; do
+    sleep 1
+  done
+  # Start MariaDB in the background with nohup to ensure it's fully detached
+  nohup mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock > /dev/null 2>&1 &
+}
+
+# Function to restart MariaDB on bare-metal machine
+restart_mariadb_systemctl() {
+  echo "Restarting MariaDB using systemctl..."
+  systemctl restart mariadb
+}
+
 function show_help() {
 cat <<EOF
 Usage: ${0##*/} [-h] [-H db host] [-r hhvm path] [-n nginx path] [-L siege or wrk ] [-s load generator path] [-t server threads] [-c client threads] [-m memcache thrads] [-p] [-T temp-dir] [-- extra_args]
@@ -60,7 +87,12 @@ function _systemd_service_status() {
 
   local status
   # shellcheck disable=2086
-  status="$(systemctl show ${service} | awk -F= '/ActiveState/{print $2}')"
+    if is_docker_container; then
+      status="$(ps aux | grep ${service} > /dev/null && echo "active" || echo "no active")"
+    else
+      status="$(systemctl show ${service} | awk -F= '/ActiveState/{print $2}')"
+    fi
+
   echo "$status"
 }
 
@@ -357,7 +389,12 @@ function main() {
   echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
 
   if [[ "$db_host" = "" ]]; then
-    systemctl restart mariadb
+    # Restart MariaDB using appropriate method based on environment
+    if is_docker_container; then
+      restart_mariadb_docker
+    else
+      restart_mariadb_systemctl
+    fi
     _check_local_db_running || return
     run_benchmark "${hhvm_path}" "${nginx_path}" "${load_generator}" "${lg_path}" "" "${disable_perf_record}" "${use_temp_dir}" "${temp_dir}"
   else

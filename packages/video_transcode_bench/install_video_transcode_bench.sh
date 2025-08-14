@@ -25,7 +25,6 @@ declare -A TAGS=(
     ['x264']='570f6c70808287fc78e3f8f5372a095ec6ef7878'
 )
 
-
 ##################### SYS CONFIG AND DEPS #########################
 
 BPKGS_FFMPEG_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
@@ -40,18 +39,23 @@ FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets/cuts"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y cmake autoconf automake flex bison \
+   apt install -y cmake autoconf automake flex bison \
     meson nasm clang patch git \
     python3-dev pkg-config time parallel p7zip
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y cmake autoconf automake flex bison \
+   dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch \
     git python3-devel time parallel p7zip
 fi
 
 platform_cc_flags=""
 if [[ $(uname -m) = "aarch64" ]]; then
-    platform_cc_flags="-march=armv9-a -mtune=neoverse-v2 -msve-vector-bits=128"
+    cpu_model=$(lscpu | grep "^Model name" | awk -F ':' '{print $2}' | sed 's/^[ \t]*//') || true
+    if [ "$cpu_model" = "Neoverse-V2" ]; then
+        platform_cc_flags="-march=armv9-a -mtune=neoverse-v2 -msve-vector-bits=128"
+    else
+        platform_cc_flags="-march=armv9-a -msve-vector-bits=128"
+    fi
 fi
 
 mkdir -p "${FFMPEG_SOURCE}"
@@ -59,7 +63,7 @@ mkdir -p "${FFMPEG_BUILD}"
 mkdir -p "${FFMPEG_DATASETS}"
 
 if ! [ -f "/usr/local/bin/cmake" ]; then
-    sudo ln -s /usr/bin/cmake /usr/local/bin/cmake
+     ln -s /usr/bin/cmake /usr/local/bin/cmake
 fi
 
 ##################### BUILD AND INSTALL FUNCTIONS #########################

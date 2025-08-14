@@ -86,4 +86,3 @@ jobs:
 
     - name: Install FeedSim
       run: . $PRELUDE; install_feedsim $BUILD_ENV
-      continue-on-error: false

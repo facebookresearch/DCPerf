@@ -104,3 +104,21 @@ install_python_tools () {
 
   echo "[INSTALL] Successfully installed all the build tools"
 }
+
+################################################################################
+# HHVM Setup
+################################################################################
+
+install_hhvm (){
+  echo "[INSTALL] Installing hhvm ..."
+  if which dnf; then
+  wget https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary.tar.xz
+  tar -Jxf hhvm-3.30-multplatform-binary.tar.xz
+  else
+  wget https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary-ubuntu.tar.xz
+  tar -Jxf hhvm-3.30-multplatform-binary-ubuntu.tar.xz
+  fi
+  cd hhvm || return 1
+  bash -x ./pour-hhvm.sh
+  cd .. || return 1
+}

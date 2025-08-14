@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 # This workflow is used for DCPerf CI.
-name: DCPerf Tao_bench CI
+name: DCPerf VideoTranscodeBench CI
 
 on:
   # PR Trigger
@@ -55,11 +55,11 @@ jobs:
     steps:
     - name: Setup Build Container (ubuntu-based)
       if: ${{ matrix.host-machine.type == 'ubuntu' }}
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode curl
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode gcc clang; clang --version; gcc --version
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}
-      run: dnf update -y; dnf install -y git pciutils which dmidecode
+      run: dnf update -y; dnf install -y git pciutils which dmidecode gcc clang
 
     - name: Checkout the Repository
       uses: actions/checkout@v4
@@ -84,5 +84,5 @@ jobs:
     - name: Install Python Tools
       run: . $PRELUDE; install_python_tools $BUILD_ENV
 
-    - name: Install Tao_bench
-      run: . $PRELUDE; install_tao_bench $BUILD_ENV
+    - name: Install VideoTranscodeBench
+      run: . $PRELUDE; install_video_transcode_bench $BUILD_ENV

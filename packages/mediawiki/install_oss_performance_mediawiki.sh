@@ -16,6 +16,82 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 OLD_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH="/opt/local/hhvm-3.30/lib:$LD_LIBRARY_PATH"
 
+# Function to detect if running in Docker container
+is_docker_container() {
+  # Check for .dockerenv file
+  if [ -f /.dockerenv ]; then
+    return 0
+  fi
+  return 1
+}
+
+# Function to start MariaDB in Docker container
+start_mariadb_docker() {
+  echo "Starting MariaDB in Docker container mode..."
+  mkdir -p /run/mysqld
+  chown mysql:mysql /run/mysqld
+  chmod 755 /run/mysqld
+
+  mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock &
+
+  while ! pgrep -f mysql > /dev/null; do
+    echo "Waiting for MariaDB to start..."
+    sleep 1
+  done
+
+  # Wait for the socket file to be created and MariaDB to be ready
+  echo "Waiting for MariaDB socket file to be created..."
+  for i in {1..30}; do
+    if [ -S /var/lib/mysql/mysql.sock ]; then
+      echo "MariaDB socket file found, waiting for server to be ready..."
+      sleep 5  # Give MariaDB additional time to initialize
+      break
+    fi
+    echo "Waiting for MariaDB socket file (attempt $i/30)..."
+    sleep 2
+  done
+
+  if ! [ -S /var/lib/mysql/mysql.sock ]; then
+    echo "ERROR: MariaDB socket file not found after waiting. Check MariaDB logs for errors."
+    exit 1
+  fi
+}
+
+# Function to start MariaDB on bare-metal machine
+start_mariadb_systemctl() {
+  echo "Starting MariaDB using systemctl..."
+  systemctl start mariadb
+}
+
+# Function to restart MariaDB in Docker container
+restart_mariadb_docker() {
+  echo "Restarting MariaDB in Docker container mode..."
+  pkill mariadb
+  # Wait until MariaDB is fully killed before starting it again
+  while pgrep -f mariadb > /dev/null; do
+    sleep 1
+  done
+  # Start MariaDB in the background with nohup to ensure it's fully detached
+  nohup mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock > /dev/null 2>&1 &
+}
+
+# Function to restart MariaDB on bare-metal machine
+restart_mariadb_systemctl() {
+  echo "Restarting MariaDB using systemctl..."
+  systemctl restart mariadb
+}
+
+# Function to stop nginx based on environment
+stop_nginx() {
+  if is_docker_container; then
+    echo "Stopping nginx in Docker container mode..."
+    pkill nginx &
+  else
+    echo "Stopping nginx using systemctl..."
+    systemctl stop nginx
+  fi
+}
+
 # 1. Install prerequisite packages
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y libevent-dev zlib1g zlib1g-dev
@@ -45,27 +121,53 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y nginx
 fi
-systemctl stop nginx
-
+stop_nginx
 # 4. Install mariadb
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y mariadb-server
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y mariadb-server
 fi
-systemctl start mariadb
+
+# Start MariaDB using appropriate method based on environment
+if is_docker_container; then
+  start_mariadb_docker
+else
+  start_mariadb_systemctl
+fi
+
 if ! [ -x "$(command -v mysql)" ]; then
   echo >&2 "Could not install mariadb!"
   exit 1
 fi
 
-mysql -u root --password="$MARIADB_PWD" -e ";"
-mysql_success=$?
-if [ $mysql_success -ne 0 ]; then
-  mysql -uroot --password="" < "${TEMPLATES_DIR}/update_mariadb_pwd.sql"
+# Set MySQL connection parameters based on environment
+if is_docker_container; then
+  MYSQL_SOCKET_PARAM="--socket=/var/lib/mysql/mysql.sock"
+else
+  MYSQL_SOCKET_PARAM=""
 fi
 
-mysql -u root --password=$MARIADB_PWD < "${TEMPLATES_DIR}/grant_privileges.sql"
+# Try to connect multiple times with a delay between attempts
+for i in {1..5}; do
+  echo "Attempting to connect to MariaDB (attempt $i/5)..."
+  if mysql -u root --password="$MARIADB_PWD" $MYSQL_SOCKET_PARAM -e ";" 2>/dev/null; then
+    echo "Successfully connected to MariaDB!"
+    break
+  fi
+  if [ "$i" -eq 5 ]; then
+    echo "Failed to connect to MariaDB after multiple attempts."
+  else
+    echo "Connection failed, waiting before retry..."
+    sleep 5
+  fi
+done
+mysql_success=$?
+if [ "$mysql_success" -ne 0 ]; then
+  mysql -uroot --password="" $MYSQL_SOCKET_PARAM < "${TEMPLATES_DIR}/update_mariadb_pwd.sql"
+fi
+
+mysql -u root --password="$MARIADB_PWD" $MYSQL_SOCKET_PARAM < "${TEMPLATES_DIR}/grant_privileges.sql"
 
 # 5. Install Siege
 if ! [ -x "$(command -v siege)" ]; then
@@ -158,4 +260,14 @@ sudo cp "${TEMPLATES_DIR}/my.cnf" "/etc/my.cnf"
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   sudo mkdir -p /etc/my.cnf.d
 fi
-sudo systemctl restart mariadb
+
+# Restart MariaDB using appropriate method based on environment
+if is_docker_container; then
+  restart_mariadb_docker
+else
+  restart_mariadb_systemctl
+fi
+
+# Ensure the script exits cleanly
+echo "Installation completed successfully. MariaDB restarted with new configuration."
+exit 0

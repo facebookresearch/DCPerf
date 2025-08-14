@@ -86,4 +86,3 @@ jobs:
 
     - name: Install Spark
       run: . $PRELUDE; install_spark $BUILD_ENV
-      continue-on-error: false
