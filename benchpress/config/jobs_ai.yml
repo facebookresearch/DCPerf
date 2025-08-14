@@ -267,7 +267,7 @@
         - '--criteria {criteria}'
         - '--latency {lat_target_ms}'
         - '--timeout {timeout}'
-        - '--mode'
+        - '--mode ai'
       vars:
         - 'server_ip'
         - 'num_workers=20'
@@ -275,4 +275,3 @@
         - 'criteria=P99'
         - 'lat_target_ms=100'
         - 'timeout=1800'
-        - 'ai'
