@@ -48,7 +48,7 @@ to improve and add in the future
 
 ## Workload Coverage
 
-As of 2024 Q3, DCPerf consists of six benchmarks and provides coverage for the
+As of 2024 Q4, DCPerf consists of multiple benchmarks and provides coverage for the
 major production workloads listed as follows:
 
 <table>
@@ -98,6 +98,49 @@ major production workloads listed as follows:
    <td>C++ </td>
    <td>ffmpeg, svt-av1, libaom, x264</td>
    <td>Video Processing </td>
+  </tr>
+</table>
+
+### AI/ML Benchmarks
+
+DCPerf includes specialized benchmarks focusing on AI/ML workloads commonly found in datacenter deployments.
+
+<table>
+  <tr>
+   <td>Benchmarks </td>
+   <td>Programming Languages</td>
+   <td>Libraries / SW Stack</td>
+   <td>Application domain they represent</td>
+  </tr>
+  <tr>
+   <td><a href="packages/fbgemm_gpu/README.md">FBGEMM Embedding</a></td>
+   <td>C++, Python</td>
+   <td>FBGEMM</td>
+   <td>Table-based Embedding Inference, Recommendation Systems</td>
+  </tr>
+  <tr>
+   <td><a href="packages/rebatch/README.md">Rebatch</a></td>
+   <td>C++</td>
+   <td>Memcpy</td>
+   <td>Tensor Rebatching, Model Inference Optimization</td>
+  </tr>
+  <tr>
+   <td><a href="packages/deser/README.md">Tensor Deserialization</a></td>
+   <td>C++</td>
+   <td>folly, memcpy</td>
+   <td>Tensor Deserialization, Prediction Request Tensor Deserialization</td>
+  </tr>
+  <tr>
+   <td><a href="packages/chm/README.md">Concurrent HashMap</a></td>
+   <td>C++</td>
+   <td>Concurrent Data Structures, folly</td>
+   <td>Concurrent HashMap Operations, Model Feature Lookup</td>
+  </tr>
+  <tr>
+   <td><a href="packages/adsim/README.md">AdSim</a></td>
+   <td>C++</td>
+   <td>AdSim Framework, Folly, FBThrift, FBGEMM, Treadmill</td>
+   <td>Server-client AI Inference workload Simulation, Model Inference</td>
   </tr>
 </table>
 
