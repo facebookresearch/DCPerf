@@ -519,10 +519,10 @@ ads_config = {
 
 inference_config = {
     "port": 10086,
-    "num_req_handle_threads": math.ceil(NPROC / 6),
-    "num_io_handle_threads": 8,
-    "num_app_logic_threads": math.ceil(NPROC * 1.5),
-    "num_thrift_accept_threads": 8,
+    "num_req_handle_threads": 16,
+    "num_io_handle_threads": 16,
+    "num_app_logic_threads": 128,
+    "num_thrift_accept_threads": 32,
     "Kernels": [],
 }
 
@@ -556,12 +556,12 @@ def get_config(name, model=None):
             {
                 "name": "TensorDeser",
                 "pool": "applicationLogic",
-                "stage": 1,
+                "stage": 0,
                 "fanout": 1,
                 "params": {
-                    "requests_per_run": 50,
-                    "request_book_multiplier": 5,
-                    "num_threads": 64,
+                    "requests_per_run": 48,
+                    "request_book_multiplier": 1,
+                    "num_threads": 1,
                     "input": "tensor_data",
                     "distribution_file": str(
                         os.path.join(os.path.dirname(__file__), f"deser_{model}.dist")
@@ -569,29 +569,12 @@ def get_config(name, model=None):
                 },
             },
             {
-                "name": "Rebatch",
-                "pool": "applicationLogic",
-                "stage": 2,
-                "fanout": 1,
-                "params": {
-                    "tensors_per_batch": 32,
-                    "num_threads": 16,
-                    "output_tensor_size": 1048576,
-                    "memory_pool_size_gb": 4,
-                    "prefetch_dist": 0,
-                    "input": "rebatch_stage",
-                    "distribution_file": str(
-                        os.path.join(os.path.dirname(__file__), f"rebatch_{model}.dist")
-                    ),
-                },
-            },
-            {
                 "name": "Embedding",
                 "pool": "applicationLogic",
-                "stage": 3,
+                "stage": 1,
                 "fanout": 1,
                 "params": {
-                    "batch_size": 162,
+                    "batch_size": 100,
                     "pregenerated_req_num": 300000,
                     "num_embeddings_list": "40000000",
                     "embedding_dim_list": "96",
@@ -600,22 +583,39 @@ def get_config(name, model=None):
                     "weights_precision": "int4",
                     "output_dtype": "fp32",
                     "pooling": "sum",
-                    "requests_per_fire": 1,
-                    "nthreads": 32,
+                    "requests_per_fire": 48,
+                    "nthreads": 1,
                     "weighted": False,
                     "warmup_runs": 0,
                 },
             },
             {
+                "name": "Rebatch",
+                "pool": "requestHandle",
+                "stage": 2,
+                "fanout": 1,
+                "params": {
+                    "tensors_per_batch": 12,
+                    "num_threads": 1,
+                    "output_tensor_size": 5023008,
+                    "memory_pool_size_gb": 1,
+                    "prefetch_dist": 0,
+                    "input": "rebatch_stage",
+                    "distribution_file": str(
+                        os.path.join(os.path.dirname(__file__), f"rebatch_{model}.dist")
+                    ),
+                },
+            },
+            {
                 "name": "FakeIO",
-                "pool": "IOHandle",
-                "stage": 4,
+                "pool": "requestHandle",
+                "stage": 3,
                 "fanout": 1,
                 "params": {
                     "quantiles": [0.5, 0.9, 0.99, 1.0],
-                    "latencies": [80000, 100000, 120000, 150000],
+                    "latencies": [20000, 30000, 40000, 60000],
                     "ntimekeepers": 8,
-                    "input": "GPU_IO",
+                    "input": "GPU_io",
                 },
             },
         ]

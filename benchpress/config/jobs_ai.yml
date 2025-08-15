@@ -268,6 +268,7 @@
         - '--latency {lat_target_ms}'
         - '--timeout {timeout}'
         - '--mode ai'
+        - '--ai-request-size-multiplier {request_size_multiplier}'
       vars:
         - 'server_ip'
         - 'num_workers=20'
@@ -275,3 +276,4 @@
         - 'criteria=P99'
         - 'lat_target_ms=100'
         - 'timeout=1800'
+        - 'request_size_multiplier=6'

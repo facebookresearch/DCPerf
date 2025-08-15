@@ -165,7 +165,7 @@ function measure_latency()
     requested_qps="$1"
     sequence="$2"
     runtime="$3"
-    echo "${sequence},${runtime},${requested_qps},${ACHIEVED_QPS},${TGT_QUANTILE},${TGT_LATENCY},${LATENCY}"
+    echo "${sequence},${requested_qps},${ACHIEVED_QPS},${TGT_QUANTILE},${TGT_LATENCY},${LATENCY}"
   fi
 }
 
@@ -176,7 +176,6 @@ function coarse_search()
   log "Starting coarse search to find maximum QPS..."
 
   # Find largest power of 2 <= NWORKERS
-  start_qps=1
   while [ $((start_qps * 2)) -le $NWORKERS ]; do
     start_qps=$((start_qps * 2))
   done
@@ -239,9 +238,7 @@ function binary_search()
   fi
 
   log "Starting binary search between QPS $qps_l and $qps_r..."
-  if [ true == "$CSV_LOGGING" ]; then
-    echo "seq,runtime,requested_qps,achieved_qps,target_latency_quantile,target_latency_usec,achieved_latency_usec"
-  fi
+
   while [ "$qps_l" -lt $(( qps_r - 1 )) ]; do
     qps_m=$(( (qps_l + qps_r) / 2 ))
     measure_latency $"$qps_m" "$SEQ" "$RUNTIME"
@@ -270,6 +267,7 @@ function binary_search()
     echo "${SEQ},${qps_opt},${final_qps},${TGT_QUANTILE},${TGT_LATENCY},${lat_opt}"
   fi
 
+  measure_latency $"$qps_opt" "$SEQ" "$RUNTIME"
 
   log "Optimal QPS = $qps_opt, achieving latency = $lat_opt"
   log "$TREADMILL_EXE --hostname $ADSIM_HOST --port $ADSIM_PORT " \
@@ -278,7 +276,9 @@ function binary_search()
 }
 
 parse_opts "$@"
-
+if [ true == "$CSV_LOGGING" ]; then
+    echo "seq,requested_qps,achieved_qps,target_latency_quantile,target_latency_usec,achieved_latency_usec"
+fi
 # If min and max QPS are not manually specified, run coarse search to find them
 if [ "$MIN_QPS" -eq 0 ] && [ "$MAX_QPS" -eq 200 ]; then
   coarse_search
