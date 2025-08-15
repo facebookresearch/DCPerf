@@ -160,6 +160,9 @@ setup_miniconda() {
   echo "Updating conda to the latest version..."
   conda update -n base -c conda-forge -y conda
 
+  conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+  conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
   echo "Miniconda setup complete and ready for use!"
 }
 
