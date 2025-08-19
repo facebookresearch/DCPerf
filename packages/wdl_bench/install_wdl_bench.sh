@@ -16,7 +16,7 @@ declare -A REPOS=(
 
 declare -A TAGS=(
     ['folly']='v2025.05.12.00'
-    ['fbthrift']='v2025.05.12.00'
+    ['fbthrift']='v2025.08.18.00'
     ['lzbench']='d138844ea56b36ff1c1c43b259c866069deb64ad'
     ['openssl']='openssl-3.3.1'
 )
@@ -112,7 +112,7 @@ build_fbthrift()
 
     sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
 
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --scratch-path "${WDL_BUILD}"
+    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --scratch-path "${WDL_BUILD}" --extra-cmake-defines='{"enable_tests": "1"}'
 
     popd || exit
 }
