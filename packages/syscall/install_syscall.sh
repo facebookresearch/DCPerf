@@ -13,9 +13,9 @@ PKG_SYSCALL_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y libgflags-dev
+  apt install -y libgflags-dev
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y gflags-devel
+  dnf install -y gflags-devel
 fi
 
 # Syscall system microbenchmarks
