@@ -5,7 +5,7 @@ index 44ba37edd..6ba5a69f1 100644
 @@ -566,8 +566,8 @@ install(
    COMPONENT dev
  )
- 
+
 -option(BUILD_TESTS "If enabled, compile the tests." OFF)
 -option(BUILD_BENCHMARKS "If enabled, compile the benchmarks." OFF)
 +option(BUILD_TESTS "If enabled, compile the tests." ON)
@@ -45,7 +45,7 @@ index 44ba37edd..6ba5a69f1 100644
 +
 +    DIRECTORY test/function_benchmark/
 +      BENCHMARK function_benchmark SOURCES main.cpp benchmark_impl.cpp test_functions.cpp
- 
+
      DIRECTORY synchronization/detail/test/
        TEST synchronization_detail_hardware_test SOURCES HardwareTest.cpp
 @@ -1139,6 +1146,8 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
@@ -72,7 +72,7 @@ index 44ba37edd..6ba5a69f1 100644
 +        BENCHMARK lt_hash_benchmark SOURCES LtHashBenchmark.cpp
      )
    endif()
- 
+
 diff --git a/folly/concurrency/test/ConcurrentHashMapBench.cpp b/folly/concurrency/test/ConcurrentHashMapBench.cpp
 index 770c47ed0..e1e5bf097 100644
 --- a/folly/concurrency/test/ConcurrentHashMapBench.cpp
@@ -91,11 +91,11 @@ index 2c207a551..bd577ed98 100644
 --- a/folly/lang/Hint-inl.h
 +++ b/folly/lang/Hint-inl.h
 @@ -115,7 +115,7 @@ FOLLY_ALWAYS_INLINE void compiler_must_not_elide(T const& t, std::true_type) {
- 
+
  template <typename T>
  FOLLY_ALWAYS_INLINE void compiler_must_not_predict(T& t, std::false_type) {
 -  asm volatile("" : "+r"(t));
 +  //asm volatile("" : "+r"(t));
  }
- 
+
  template <typename T>
