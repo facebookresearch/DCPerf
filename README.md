@@ -289,7 +289,7 @@ The commands are:
 ```bash
 dnf install -y python38 python38-pip git
 alternatives --set python3 /usr/bin/python3.8
-pip-3.8 install click pyyaml tabulate pandas
+pip-3.8 install click pyyaml tabulate pandas packaging
 ```
 
 Enable EPEL and PowerTools repos:
@@ -321,7 +321,7 @@ Install git, click, pyyaml and tabulate using DNF, then install Pandas with pip:
 
 ```bash
 dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel
-pip-3.9 install pandas
+pip-3.9 install pandas packaging
 ```
 
 Enable EPEL and PowerTools/CRB repos:
@@ -338,7 +338,7 @@ Install git, pip, then install click, pyyaml, tabulate and pandas:
 ```bash
 sudo apt update
 sudo apt install -y python3-pip git
-sudo pip3 install click pyyaml tabulate pandas
+sudo pip3 install click pyyaml tabulate pandas packaging
 ```
 
 ### Using Benchpress

@@ -330,6 +330,7 @@ to access the data in it. Below lists the steps to download the dataset:
   git lfs track
   git lfs fetch
   ```
+  if `git lfs fetch` doesn't work, please try `git lfs checkout`
 - Copy the dataset folder `bpc_t93586_s2_synthetic`:
   ```
   cp -r DCPerf-datasets/bpc_t93586_s2_synthetic /flash23/
