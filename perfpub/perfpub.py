@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 
 # pyre-unsafe
-from . import utils
 
+import utils  # pyre-ignore[21]: This file is only used in open-source environments
 
 if __name__ == "__main__":
     parser = utils.init_parser()
