@@ -28,6 +28,9 @@ option "graph_max_iters" - "Perform at most 'graph_max_iters' iterations during 
 option "graph_subset" - "Perform partial PageRank over these numbers of nodes. 0 indicates all nodes." int default="3145728"
 option "num_objects" - "Number of objects to serialize." int default="40"
 option "random_data_size" - "Number of bytes of string random data." int default="3145728"
+option "store_graph" - "Enable storing the generated graph to a file." string typestr="filename" optional
+option "load_graph" - "Enable loading a graph from a file instead of generating one." string typestr="filename" optional
+option "instrument_graph" - "Enable timing instrumentation for graph operations (build, store, load)."
 option "max_response_size" - "Maximum response size in bytes returned by the leaf server." int default="131072"
 option "compression_data_size" - "Number of bytes to compress per request." int default="131072"
 option "rank_trials_per_thread" - "Number of iterations each CPU thread executes of rank work." int default="1"

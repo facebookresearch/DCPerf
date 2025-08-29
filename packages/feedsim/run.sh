@@ -65,6 +65,9 @@ Usage: ${0##*/} [OPTION]...
     -d Duration of each load testing experiment, in seconds. Default: 300
     -p Port to use by the LeafNodeRank server and the load drivers. Default: 11222
     -o Result output file name. Default: "feedsim_results.txt"
+    -S Store the generated graph to a file (requires a file path)
+    -L Load a graph from a file instead of generating one (requires a file path)
+    -I Enable timing instrumentation for graph operations (build, store, load)
 EOF
 }
 
@@ -122,6 +125,17 @@ main() {
     local icache_iterations
     icache_iterations="1600000"
 
+    # Graph storage and loading options
+    local store_graph
+    store_graph=""
+
+    local load_graph
+    load_graph=""
+
+    local instrument_graph
+    instrument_graph=""
+
+
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
     fi
@@ -162,6 +176,19 @@ main() {
             -i)
                 icache_iterations="$2"
                 ;;
+            -S)
+                if [ "$2" != "default_do_not_store" ]; then
+                    store_graph="--store_graph=$2"
+                fi
+                ;;
+            -L)
+                if [ "$2" != "default_do_not_load" ]; then
+                    load_graph="--load_graph=$2"
+                fi
+                ;;
+            -I)
+                instrument_graph="--instrument_graph"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -172,7 +199,7 @@ main() {
         esac
 
         case $1 in
-            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l)
+            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l|-S|-L)
                 if [ -z "$2" ]; then
                     echo "Invalid option: '$1' requires an argument" 1>&2
                     exit 1
@@ -208,13 +235,29 @@ main() {
         --num_objects=2000 \
         --graph_max_iters=1 \
         --noaffinity \
-        --min_icache_iterations="$icache_iterations" &
+        --min_icache_iterations="$icache_iterations" \
+        "$store_graph" \
+        "$load_graph" \
+        "$instrument_graph" >> $BREPS_LFILE 2>&1 &
 
     LEAF_PID=$!
 
-    # FIXME(cltorres)
-    # Remove sleep, expose an endpoint or print a message to notify service is ready
-    sleep 30
+    # Wait for server to be fully ready using monitoring endpoint
+    echo "Waiting for LeafNodeRank server to be ready on monitor port $monitor_port..."
+    max_attempts=30
+    attempt=0
+    while [ $attempt -lt $max_attempts ]; do
+        if curl -f -s "http://localhost:$monitor_port/topology" > /dev/null 2>&1; then
+            echo "LeafNodeRank server is ready (monitor port responding)"
+            break
+        fi
+        attempt=$((attempt + 1))
+        if [ $attempt -eq $max_attempts ]; then
+            echo "ERROR: Server failed to become ready within $max_attempts seconds"
+            exit 1
+        fi
+        sleep 1
+    done
 
     # FIXME(cltorres)
     # Skip ParentNode for now, and talk directly to LeafNode

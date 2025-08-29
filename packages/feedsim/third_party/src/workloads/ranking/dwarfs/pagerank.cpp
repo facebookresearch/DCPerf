@@ -25,9 +25,12 @@
 
 #include "pagerank.h"
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <gapbs/src/benchmark.h>
 #include <gapbs/src/command_line.h>
@@ -71,6 +74,185 @@ PageRankParams::~PageRankParams() = default;
 
 CSRGraph<int32_t> PageRankParams::buildGraph() {
   return pimpl->makeGraph();
+}
+CSRGraph<int32_t> PageRankParams::makeGraphCopy(
+    const CSRGraph<int32_t>& original) {
+  // Create a deep copy of the graph
+  const int64_t num_nodes = original.num_nodes();
+  const int64_t num_edges = original.num_edges();
+
+  // Allocate memory for the new graph's index and neighbors arrays
+  int32_t** out_index = new int32_t*[num_nodes + 1];
+  int32_t* out_neighbors = new int32_t[num_edges];
+  auto is_directed = original.directed();
+
+  // Copy all outgoing neighbors data efficiently
+  std::copy(
+      original.out_neigh(0).begin(),
+      original.out_neigh(num_nodes - 1).end(),
+      out_neighbors);
+ // Set up index pointers for each node
+ #pragma omp parallel for
+  for (int64_t n = 0; n < num_nodes; n++) {
+    //TODO: check this is correct
+    out_index[n] = out_neighbors  +
+        (original.out_neigh(n).begin() - original.out_neigh(0).begin());
+  }
+  // Set the last index pointer
+  out_index[num_nodes] = out_neighbors + num_edges;
+
+  // If the graph is directed and has incoming edges, copy those too
+  if (is_directed) {
+    int32_t** in_index = new int32_t*[num_nodes + 1];
+    int32_t* in_neighbors = new int32_t[num_edges];
+
+    // Copy all incoming neighbors data efficiently
+    std::copy(
+        original.in_neigh(0).begin(),
+        original.in_neigh(num_nodes - 1).end(),
+        in_neighbors);
+
+    // Set up index pointers for each node
+    #pragma omp parallel for
+    for (int64_t n = 0; n < num_nodes; n++) {
+      in_index[n] = in_neighbors +
+          (original.in_neigh(n).begin() - original.in_neigh(0).begin());
+    }
+    // Set the last index pointer
+    in_index[num_nodes] = in_neighbors + num_edges;
+
+    return CSRGraph<int32_t>(
+        num_nodes, out_index, out_neighbors, in_index, in_neighbors);
+  } else {
+    return CSRGraph<int32_t>(num_nodes, out_index, out_neighbors);
+  }
+}
+
+void PageRankParams::storeGraphToFile(
+    const CSRGraph<int32_t>& original,
+    const std::string& filePath) {
+  std::ofstream outFile(filePath, std::ios::binary);
+  if (!outFile.is_open()) {
+    throw std::runtime_error("Unable to open file for writing: " + filePath);
+  }
+
+  // Write basic graph properties
+  bool is_directed = original.directed();
+  int64_t num_nodes = original.num_nodes();
+  int64_t num_edges = original.num_edges();
+
+  outFile.write(
+      reinterpret_cast<const char*>(&is_directed), sizeof(is_directed));
+  outFile.write(reinterpret_cast<const char*>(&num_nodes), sizeof(num_nodes));
+  outFile.write(reinterpret_cast<const char*>(&num_edges), sizeof(num_edges));
+
+  // Write out_index array (size: num_nodes + 1 pointers, but we store offsets)
+  std::vector<int64_t> out_offsets(num_nodes + 1);
+  for (int64_t n = 0; n <= num_nodes; n++) {
+    if (n == 0) {
+      out_offsets[n] = 0;
+    } else if (n == num_nodes) {
+      out_offsets[n] = num_edges;
+    } else {
+      out_offsets[n] =
+          original.out_neigh(n).begin() - original.out_neigh(0).begin();
+    }
+  }
+  outFile.write(
+      reinterpret_cast<const char*>(out_offsets.data()),
+      (num_nodes + 1) * sizeof(int64_t));
+
+  // Write out_neighbors array
+  outFile.write(
+      reinterpret_cast<const char*>(original.out_neigh(0).begin()),
+      num_edges * sizeof(int32_t));
+
+  // If directed, write incoming edges data
+  if (is_directed) {
+    // Write in_index array (as offsets)
+    std::vector<int64_t> in_offsets(num_nodes + 1);
+    for (int64_t n = 0; n <= num_nodes; n++) {
+      if (n == 0) {
+        in_offsets[n] = 0;
+      } else if (n == num_nodes) {
+        in_offsets[n] = num_edges;
+      } else {
+        in_offsets[n] = original.in_neigh(n).begin() - original.in_neigh(0).begin();
+      }
+    }
+    outFile.write(
+        reinterpret_cast<const char*>(in_offsets.data()),
+        (num_nodes + 1) * sizeof(int64_t));
+
+    // Write in_neighbors array
+    outFile.write(
+        reinterpret_cast<const char*>(original.in_neigh(0).begin()),
+        num_edges * sizeof(int32_t));
+  }
+
+  outFile.close();
+}
+
+CSRGraph<int32_t> PageRankParams::loadGraphFromFile(
+    const std::string& filePath) {
+  std::ifstream inFile(filePath, std::ios::binary);
+  if (!inFile.is_open()) {
+    throw std::runtime_error("Unable to open file for reading: " + filePath);
+  }
+
+  // Read basic graph properties
+  bool is_directed;
+  int64_t num_nodes;
+  int64_t num_edges;
+
+  inFile.read(reinterpret_cast<char*>(&is_directed), sizeof(is_directed));
+  inFile.read(reinterpret_cast<char*>(&num_nodes), sizeof(num_nodes));
+  inFile.read(reinterpret_cast<char*>(&num_edges), sizeof(num_edges));
+
+  // Read out_index offsets and convert to pointers
+  std::vector<int64_t> out_offsets(num_nodes + 1);
+  inFile.read(
+      reinterpret_cast<char*>(out_offsets.data()),
+      (num_nodes + 1) * sizeof(int64_t));
+
+  // Allocate and read out_neighbors array
+  int32_t* out_neighbors = new int32_t[num_edges];
+  inFile.read(
+      reinterpret_cast<char*>(out_neighbors), num_edges * sizeof(int32_t));
+
+  // Create out_index pointer array
+  int32_t** out_index = new int32_t*[num_nodes + 1];
+  #pragma omp parallel for
+  for (int64_t n = 0; n <= num_nodes; n++) {
+    out_index[n] = out_neighbors + out_offsets[n];
+  }
+
+  if (is_directed) {
+    // Read in_index offsets and convert to pointers
+    std::vector<int64_t> in_offsets(num_nodes + 1);
+    inFile.read(
+        reinterpret_cast<char*>(in_offsets.data()),
+        (num_nodes + 1) * sizeof(int64_t));
+
+    // Allocate and read in_neighbors array
+    int32_t* in_neighbors = new int32_t[num_edges];
+    inFile.read(
+        reinterpret_cast<char*>(in_neighbors), num_edges * sizeof(int32_t));
+
+    // Create in_index pointer array
+    int32_t** in_index = new int32_t*[num_nodes + 1];
+    #pragma omp parallel for
+    for (int64_t n = 0; n <= num_nodes; n++) {
+      in_index[n] = in_neighbors + in_offsets[n];
+    }
+
+    inFile.close();
+    return CSRGraph<int32_t>(
+        num_nodes, out_index, out_neighbors, in_index, in_neighbors);
+  } else {
+    inFile.close();
+    return CSRGraph<int32_t>(num_nodes, out_index, out_neighbors);
+  }
 }
 
 PageRank::PageRank(CSRGraph<int32_t> graph, int num_pvectors_entries)

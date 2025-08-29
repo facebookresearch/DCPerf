@@ -75,6 +75,9 @@ struct ThreadData {
   std::string random_string;
 };
 
+// Global graph that will be shared across threads
+CSRGraph<int32_t> g_shared_graph;
+
 void ThreadStartup(
     oldisim::NodeThread& thread,
     std::vector<ThreadData>& thread_data,
@@ -85,7 +88,8 @@ void ThreadStartup(
     const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
     const std::shared_ptr<ranking::TimekeeperPool>& timekeeperPool) {
   auto& this_thread = thread_data[thread.get_thread_num()];
-  auto graph = params.buildGraph();
+  // auto graph = params.buildGraph();
+  auto graph = params.makeGraphCopy(g_shared_graph);
   this_thread.cpuThreadPool = cpuThreadPool;
   this_thread.srvCPUThreadPool = srvCPUThreadPool;
   this_thread.srvIOThreadPool = srvIOThreadPool;
@@ -307,6 +311,42 @@ int main(int argc, char** argv) {
   std::vector<ThreadData> thread_data(args.threads_arg);
   ranking::dwarfs::PageRankParams params{
       args.graph_scale_arg, args.graph_degree_arg};
+
+  // create or load a graph
+
+  if (args.load_graph_given) {
+    if (args.instrument_graph_given) {
+      auto start_load = std::chrono::steady_clock::now();
+      g_shared_graph = params.loadGraphFromFile(args.load_graph_arg);
+      auto end_load = std::chrono::steady_clock::now();
+      auto load_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_load - start_load).count();
+      std::cout << "Graph loading time: " << load_duration << " ms" << std::endl;
+    } else {
+      g_shared_graph = params.loadGraphFromFile(args.load_graph_arg);
+    }
+  } else {
+    if (args.instrument_graph_given) {
+      auto start_build = std::chrono::steady_clock::now();
+      g_shared_graph = params.buildGraph();
+      auto end_build = std::chrono::steady_clock::now();
+      auto build_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_build - start_build).count();
+      std::cout << "Graph building time: " << build_duration << " ms" << std::endl;
+
+      if (args.store_graph_given) {
+        auto start_store = std::chrono::steady_clock::now();
+        params.storeGraphToFile(g_shared_graph, args.store_graph_arg);
+        auto end_store = std::chrono::steady_clock::now();
+        auto store_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_store - start_store).count();
+        std::cout << "Graph storing time: " << store_duration << " ms" << std::endl;
+      }
+    } else {
+      g_shared_graph = params.buildGraph();
+      if (args.store_graph_given) {
+        params.storeGraphToFile(g_shared_graph, args.store_graph_arg);
+      }
+    }
+  }
+
   oldisim::LeafNodeServer server(args.port_arg);
   server.SetThreadStartupCallback([&](auto&& thread) {
     return ThreadStartup(

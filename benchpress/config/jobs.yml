@@ -461,6 +461,36 @@
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
           - 'benchmarks/feedsim/src/perf.data'
 
+- name: feedsim_autoscale_mini
+  benchmark: feedsim_autoscale
+  description: >
+    Aggregator like workload. Latency sensitive.
+    The feedsim_autoscale mini benchmark jobs
+    are configured with a fixed QPS.
+  args:
+    - '-n {num_instances}'
+    - '-q {fixed_qps}'
+    - '-d {fixed_qps_duration}'
+    - '-w {warmup_time}'
+    - '-S {graph_store_path}'
+    - '-L {graph_load_path}'
+    - '{extra_args}'
+  vars:
+    - 'num_instances=-1'
+    - 'fixed_qps=100'
+    - 'fixed_qps_duration=300'
+    - 'warmup_time=120'
+    - 'graph_store_path=default_do_not_store'
+    - 'graph_load_path=default_do_not_load'
+    - 'extra_args='
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/src/perf.data'
 
 - name: feedsim_autoscale_arm
   benchmark: feedsim_autoscale
@@ -484,6 +514,38 @@
         args:
           - '-u'   # utilization
           - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/src/perf.data'
+
+- name: feedsim_autoscale_arm_mini
+  benchmark: feedsim_autoscale
+  description: >
+    Aggregator like workload. Latency sensitive.
+    The feedsim_autoscale mini benchmark jobs
+     are configured with a fixed QPS.
+    Parameters tuned for arm.
+  args:
+    - '-n {num_instances}'
+    - '-i {icache_iterations}'
+    - '-q {fixed_qps}'
+    - '-d {fixed_qps_duration}'
+    - '-w {warmup_time}'
+    - '{extra_args}'
+  vars:
+    - 'num_instances=-1'
+    - 'icache_iterations=400000'
+    - 'fixed_qps=100'
+    - 'fixed_qps_duration=300'
+    - 'warmup_time=120'
+    - 'graph_store_path=default_do_not_store'
+    - 'graph_load_path=default_do_not_load'
+    - 'extra_args='
+  hooks:
     - hook: copymove
       options:
         is_move: true

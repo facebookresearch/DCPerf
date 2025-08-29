@@ -42,6 +42,14 @@ class PageRankParams {
   ~PageRankParams();
 
   CSRGraph<int32_t> buildGraph();
+  CSRGraph<int32_t> makeGraphCopy(const CSRGraph<int32_t>& original);
+
+  void storeGraphToFile(
+    const CSRGraph<int32_t>& original,
+    const std::string& filePath);
+
+  CSRGraph<int32_t> loadGraphFromFile(
+    const std::string& filePath);
 
  private:
   struct Impl;
