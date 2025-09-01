@@ -1,5 +1,5 @@
 diff --git a/libavfilter/vf_libvmaf.c b/libavfilter/vf_libvmaf.c
-index 2c99d792af..1d5745bf6b 100644
+index 10d5b7f59b..d7b2550230 100644
 --- a/libavfilter/vf_libvmaf.c
 +++ b/libavfilter/vf_libvmaf.c
 @@ -61,6 +61,7 @@ typedef struct LIBVMAFContext {
@@ -17,11 +17,11 @@ index 2c99d792af..1d5745bf6b 100644
 +    {"aom_ctc", "Set the options for aom_ctc v1.0",                                     OFFSET(aom_ctc), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS},
      { NULL }
  };
- 
+
 @@ -441,6 +443,15 @@ static av_cold int init(AVFilterContext *ctx)
      if (err)
          return AVERROR(EINVAL);
- 
+
 +    if (s->aom_ctc) {
 +        av_free(s->model_cfg);
 +        av_free(s->feature_cfg);

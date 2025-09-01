@@ -18,11 +18,11 @@ declare -A REPOS=(
 
 declare -A TAGS=(
     ['aom']='v3.8.2'
-    ['ffmpeg']='n7.0.1'
-    ['SVT-AV1']='v3.1.0'
+    ['ffmpeg']='n8.0'
+    ['SVT-AV1']='v3.1.2'
     ['vmaf']='v3.0.0'
     ['aom-testing']='81b0dbfc2e357518c23071eb44860ed8637402c2'
-    ['x264']='570f6c70808287fc78e3f8f5372a095ec6ef7878'
+    ['x264']='b35605ace3ddf7c1a5d67a2eb553f034aef41d55'
 )
 
 ##################### SYS CONFIG AND DEPS #########################
@@ -146,7 +146,6 @@ build_ffmpeg()
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
     git apply "${BPKGS_FFMPEG_ROOT}/0001-ffmpeg.patch"
-    git apply "${BPKGS_FFMPEG_ROOT}/0002-ffmpeg.patch"
     mkdir -p _build && cd _build || exit
     if [ -v PKG_CONFIG_PATH ]; then
         PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib/x86_64-linux-gnu/pkgconfig:$FFMPEG_BUILD/lib/aarch64-linux-gnu/pkgconfig \
