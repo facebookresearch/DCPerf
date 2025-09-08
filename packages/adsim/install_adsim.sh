@@ -38,7 +38,7 @@ BENCHPRESS_ROOT="$(readlink -f "$BPKGS_ADSIM_ROOT/../..")"
 BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks/adsim"
 
 # Temporary directory for intermediate build artifacts
-BUILD_DIR="${BENCHPRESS_ROOT}/build"
+BUILD_DIR="${BENCHMARKS_DIR}/build"
 
 ################################################################################
 # Setup Functions

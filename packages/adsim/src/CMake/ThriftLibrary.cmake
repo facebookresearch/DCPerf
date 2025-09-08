@@ -229,9 +229,8 @@ macro(thrift_generate
     ${output_path}/gen-${language}/${source_file_name}_constants.cpp
     ${output_path}/gen-${language}/${source_file_name}_data.cpp
     ${output_path}/gen-${language}/${source_file_name}_types.cpp
-    ${output_path}/gen-${language}/${source_file_name}_types_binary.cpp
     ${output_path}/gen-${language}/${source_file_name}_types_compact.cpp
-    ${output_path}/gen-${language}/${source_file_name}_types_serialization.cpp
+    ${output_path}/gen-${language}/${source_file_name}_types_binary.cpp
   )
   if("${options}" MATCHES "layouts")
     set("${target_file_name}-${language}-SOURCES"

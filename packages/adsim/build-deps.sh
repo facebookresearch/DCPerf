@@ -46,6 +46,7 @@ build_dependency() {
     local dep_name="$1"
     local repo_url="$2"
     local version="$3"
+    local extra_build_args="$4"
 
     echo "Building ${dep_name}..."
 
@@ -77,7 +78,10 @@ build_dependency() {
       build "${dep_name}" --src-dir ${ADSIM_DEPS_DIR}/${dep_name} \
       --install-prefix="${ADSIM_STAGING_DIR}" \
       --install-dir="${ADSIM_STAGING_DIR}" \
-      --verbose
+      --verbose \
+      $extra_build_args
+
+    install_status="$?"
 
     echo "python3 "${ADSIM_DEPS_DIR}/${dep_name}/build/fbcode_builder/getdeps.py" \
       --scratch-path="${ADSIM_STAGING_DIR}/getdeps-scratch" \
@@ -86,16 +90,22 @@ build_dependency() {
       build "${dep_name}" --src-dir ${ADSIM_DEPS_DIR}/${dep_name} \
       --install-prefix="${ADSIM_STAGING_DIR}" \
       --install-dir="${ADSIM_STAGING_DIR}" \
-      --verbose"
+      --verbose \
+      $extra_build_args"
     popd || exit
 
-    echo "${dep_name} build completed successfully"
+    if [ "$install_status" -eq 0 ]; then
+        echo "${dep_name} build completed successfully"
+    else
+        echo "${dep_name} build failed!"
+        exit $install_status
+    fi
 }
 
 # Build core Facebook C++ libraries: async runtime, RPC framework, monitoring
 build_dependency "folly" "https://github.com/facebook/folly.git" "${FOLLY_VERSION}"
 build_dependency "fbthrift" "https://github.com/facebook/fbthrift.git" "${FBTHRIFT_VERSION}"
-build_dependency "fb303" "https://github.com/facebook/fb303.git" "${FB303_VERSION}"
+build_dependency "fb303" "https://github.com/facebook/fb303.git" "${FB303_VERSION}" "--no-deps"
 
 # Build FBGEMM (Facebook General Matrix Multiplication) for ML workload simulation
 ./install_fbgemm.sh
