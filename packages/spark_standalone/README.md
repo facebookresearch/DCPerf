@@ -148,7 +148,7 @@ to run your systems exclusively with IPv6. If your systems only support IPv4,
 we now provide a flag to enable support for it.
 
 * `JAVA_HOME`: You may need to manually set the environment variable `JAVA_HOME`
-to be the path of the JDK if Spark benchmark fails.
+to be the path of the JDK: /usr/lib/jvm/graalvm-jdk-17.0.12+8.1/ if Spark benchmark fails.
 
 ## Also Note
 
@@ -398,7 +398,7 @@ please remove the data from previous runs so that SparkBench can rebuild databas
 
 ```bash
 rm -rf /flash23/warehouse
-rm -rf <benchpressPath>/benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7/metastore_db
+rm -rf <benchpressPath>/benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3/metastore_db
 ```
 
 4. Create the `/flash23` folder. Copy `bpc_t93586_s2_synthetic_5GB`
@@ -408,7 +408,7 @@ Note that SparkBench mini does not require the high I/O throughput
 
 5. Run `spark_standalone_remote_mini` job on a real machine.
 This will create data in `/flash23/warehouse`
-and `<benchpressPath>/benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7/metastore_db`.
+and `<benchpressPath>/benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3/metastore_db`.
 Create a backup of these two folders. By default, this job uses the 5GB dataset.
 If you want to use the 1GB dataset, run the job with specifying the
 `dataset_name` parameter like this:
@@ -425,12 +425,12 @@ with the same commands and options.
 Building database takes a considerable amount of time, so it's advisable to consider
 using the same set of storage nodes and NVMe drives when running SparkBench on another
 compute node server. If you choose to reuse the Spark database in `/flash23/warehouse`,
-please also make sure to copy the folder `metastore_db` under `benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7`
+please also make sure to copy the folder `metastore_db` under `benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3`
 to the new machine's same location, for example:
 
 ```
 # Under the DCPerf folder
-rsync -a benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7/metastore_db root@<target-hostname>:~/DCPerf/benchmarks/spark_standalone/spark-2.4.5-bin-hadoop2.7/
+rsync -a benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3/metastore_db root@<target-hostname>:~/DCPerf/benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3/
 ```
 
 If you do not copy over the `metastore_db` folder, you will see errors like the following
@@ -454,10 +454,10 @@ the better, Spark benchmark also reports `queries_per_hour` which is 3600 divide
 by the execution time. `score` denotes the relative Sparkbench performance to
 DCPerf's baseline.
 For CPU performance analysis, it is
-also helpful to use `execution_time_test_93586-stage-2.0` because Stage 2.0
+also helpful to use `execution_time_test_93586-stage-4.0` because Stage 4.0
 is a compute intensive phase and is much less influenced by I/O. We expect the
 average CPU utilization during the entire benchmark to be around 55~75%. The
-CPU utilization during Stage 2.0 full batch period could reach nearly 100%.
+CPU utilization during Stage 4.0 period could reach nearly 100%.
 
 ```
 {
@@ -493,8 +493,7 @@ CPU utilization during Stage 2.0 full batch period could reach nearly 100%.
     "execution_time_test_93586": 288.3,
     "execution_time_test_93586-stage-0.0": 10.0,
     "execution_time_test_93586-stage-1.0": 67.0,
-    "execution_time_test_93586-stage-2.0": 205.0,
-    "execution_time_test_93586-stage-2.0-fullbatch": 181.0,
+    "execution_time_test_93586-stage-4.0": 205.0,
     "queries_per_hour": 12.4869927159,
     "score": 3.121748179,
     "worker_cores": 172,
@@ -506,7 +505,7 @@ CPU utilization during Stage 2.0 full batch period could reach nearly 100%.
 ```
 
 In the reported metrics, `execution_time_test_93586` is the overall execution time,
-`execution_time_test_93586-stage-2.0` is the execution time of Spark's
+`execution_time_test_93586-stage-4.0` is the execution time of Spark's
 compute-intensive phase.
 
 Spark benchmark will also put its runtime logs into `benchmark_metrics_<run_id>/work` folder.

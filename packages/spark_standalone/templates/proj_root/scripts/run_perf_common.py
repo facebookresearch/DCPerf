@@ -55,7 +55,7 @@ def run_spark_sql(
     if database:
         cmd.extend(["--database", database])
     log_file = sql_file.replace(".sql", ".log")
-    env = {}
+    env = key_environ.copy()
     if node0_only:
         cmd = ["numactl", "--cpunodebind=0", "--membind=0"] + cmd
     run_cmd(cmd, SPARK_HOME, log_file, env, for_real)
@@ -248,7 +248,7 @@ def start(args) -> None:
     # driver
     cmd = ["sbin/start-master.sh"]
     log_file = joinpath(WORK_PATH, "start_master.log")
-    env = {}
+    env = key_environ.copy()
     write_spark_env(args, worker_idx=-1)
     if args.numa == "node0_only":
         cmd = ["numactl", "--cpunodebind=0", "--membind=0"] + cmd
@@ -301,7 +301,7 @@ def start(args) -> None:
     # shuffle server
     cmd = ["sbin/start-shuffle-service.sh"]
     log_file = joinpath(WORK_PATH, "start_shuffle_service.log")
-    env = {}
+    env = key_environ.copy()
     if args.numa == "node0_only":
         cmd = ["numactl", "--cpunodebind=0", "--membind=0"] + cmd
     run_cmd(cmd, SPARK_HOME, log_file, env, args.real)
@@ -309,19 +309,20 @@ def start(args) -> None:
 
 def stop(args) -> None:
     # workers
-    cmd = ["sbin/stop-slave.sh"]
-    log_file = joinpath(WORK_PATH, "stop_slave.log")
-    env = {"SPARK_WORKER_INSTANCES": str(args.num_workers)}
+    cmd = ["sbin/stop-worker.sh"]
+    log_file = joinpath(WORK_PATH, "stop-worker.log")
+    env = key_environ.copy()
+    env["SPARK_WORKER_INSTANCES"] = str(args.num_workers)
     run_cmd(cmd, SPARK_HOME, log_file, env, args.real, check=False)
     # shuffle server
     cmd = ["sbin/stop-shuffle-service.sh"]
     log_file = joinpath(WORK_PATH, "stop_shuffle_service.log")
-    env = {}
+    env = key_environ.copy()
     run_cmd(cmd, SPARK_HOME, log_file, env, args.real, check=False)
     # drvier
     cmd = ["sbin/stop-master.sh"]
     log_file = joinpath(WORK_PATH, "stop_master.log")
-    env = {}
+    env = key_environ.copy()
     run_cmd(cmd, SPARK_HOME, log_file, env, args.real, check=False)
 
 
@@ -405,6 +406,8 @@ def setup(args, init: bool = False) -> None:
     SPARK_CONFIGS = get_standalone_configs(platform)
     # add warehouse directory
     SPARK_CONFIGS["spark.sql.warehouse.dir"] = os.path.abspath(args.database_location)
+    # Add legacy assignment policy for Spark 4.0.0 compatibility
+    SPARK_CONFIGS["spark.sql.storeAssignmentPolicy"] = "LEGACY"
     if init:
         print(f"set database location at {os.path.abspath(args.database_location)}/")
     # update total core count
@@ -429,6 +432,25 @@ def setup(args, init: bool = False) -> None:
         if args.real:
             shutil.copy(
                 start_slave_srcfile, joinpath(SPARK_HOME, "sbin", "start-slave-fb.sh")
+            )
+        # copy custom shuffle service scripts
+        start_shuffle_srcfile = joinpath(
+            PROJ_ROOT, "scripts", "start-shuffle-service.sh"
+        )
+        stop_shuffle_srcfile = joinpath(PROJ_ROOT, "scripts", "stop-shuffle-service.sh")
+        if args.real:
+            shutil.copy(
+                start_shuffle_srcfile,
+                joinpath(SPARK_HOME, "sbin", "start-shuffle-service.sh"),
+            )
+            shutil.copy(
+                stop_shuffle_srcfile,
+                joinpath(SPARK_HOME, "sbin", "stop-shuffle-service.sh"),
+            )
+        log4j2_srcfile = joinpath(CONF_PATH, "log4j2.properties")
+        if args.real:
+            shutil.copy(
+                log4j2_srcfile, joinpath(SPARK_HOME, "conf", "log4j2.properties")
             )
 
 

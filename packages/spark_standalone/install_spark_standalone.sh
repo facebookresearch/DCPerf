@@ -11,13 +11,25 @@ SPARK_PKG_ROOT="$(dirname "$(readlink -f "$0")")"
 TEMPLATES_DIR="${SPARK_PKG_ROOT}/templates"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
+# Detect architecture
+ARCH=$(uname -m)
+GRAALVM_ARCH="x64"
+if [ "$ARCH" = "aarch64" ]; then
+  GRAALVM_ARCH="aarch64"
+fi
+
 # Install system dependencies
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt install -y openjdk-8-jdk fio
-  apt install -y git-lfs
+  apt install -y git-lfs fio
+  wget https://download.oracle.com/graalvm/17/archive/graalvm-jdk-17.0.12_linux-${GRAALVM_ARCH}_bin.tar.gz
+  mkdir -p /usr/lib/jvm/
+  tar -xzf graalvm-jdk-17.0.12_linux-${GRAALVM_ARCH}_bin.tar.gz -C /usr/lib/jvm/
+
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  dnf install -y java-1.8.0-openjdk fio
-  dnf install -y git-lfs
+  dnf install -y git-lfs fio
+  wget https://download.oracle.com/graalvm/17/archive/graalvm-jdk-17.0.12_linux-${GRAALVM_ARCH}_bin.tar.gz
+  mkdir -p /usr/lib/jvm/
+  tar -xzf graalvm-jdk-17.0.12_linux-${GRAALVM_ARCH}_bin.tar.gz -C /usr/lib/jvm/
 fi
 
 # copy over directory
@@ -30,10 +42,10 @@ fi
 
 # download spark
 pushd "${OUT}" || exit 1
-if [ ! -f spark-2.4.5-bin-hadoop2.7.tgz ]; then
-  wget https://archive.apache.org/dist/spark/spark-2.4.5/spark-2.4.5-bin-hadoop2.7.tgz
+if [ ! -f spark-4.0.0-bin-hadoop3.tgz ]; then
+  wget https://archive.apache.org/dist/spark/spark-4.0.0/spark-4.0.0-bin-hadoop3.tgz
 fi
-tar xzf spark-2.4.5-bin-hadoop2.7.tgz
+tar xzf spark-4.0.0-bin-hadoop3.tgz
 popd || exit 1
 
 # create sub directories

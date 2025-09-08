@@ -98,35 +98,8 @@ def read_sys_configs() -> Dict[str, int]:
 
 
 def find_java_home() -> str:
-    # Try finding a home path for java 8
-    candidates = [
-        "/usr/lib/jvm/java-1.8.0-openjdk",
-        "/usr/lib/jvm/java-1.8.0-jre",
-        "/usr/lib/jvm/java-8-openjdk",
-        "/usr/lib/jvm/java-8-jre",
-        "/usr/lib/jvm/openjdk-8",
-        "/usr/lib/jvm/jre-1.8.0",
-        "/usr/lib/jvm/jre-1.8.0-openjdk",
-    ]
-    archname = platform.machine()
-    if archname == "x86_64":
-        archname = "amd64"
-    elif archname == "aarch64":
-        archname = "arm64"
-    for path in candidates:
-        if os.path.exists(f"{path}/bin/java"):
-            return path
-        path_with_arch = f"{path}-{archname}"
-        if os.path.exists(f"{path_with_arch}/bin/java"):
-            return path_with_arch
-    # If none of the candidate exists, try find through `java` command
-    try:
-        java_path = subprocess.check_output(["which", "java"], text=True).strip()
-        java_home = str(pathlib.Path(os.path.realpath(java_path)).parents[1])
-    except subprocess.CalledProcessError:
-        java_home = ""
-
-    return java_home
+    # Always use the specific GraalVM JDK 17.0.12 path
+    return "/usr/lib/jvm/graalvm-jdk-17.0.12+8.1"
 
 
 def read_environ() -> Dict[str, str]:
@@ -135,7 +108,7 @@ def read_environ() -> Dict[str, str]:
     env_vars["PROJ_ROOT"] = "/".join(os.path.abspath(__file__).split("/")[:-2])
     env_vars["JAVA_HOME"] = find_java_home()
     env_vars["SPARK_HOME"] = os.path.join(
-        env_vars["PROJ_ROOT"], "spark-2.4.5-bin-hadoop2.7"
+        env_vars["PROJ_ROOT"], "spark-4.0.0-bin-hadoop3"
     )
     # read from actual environment
     for k in env_vars:
