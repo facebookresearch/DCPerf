@@ -68,6 +68,10 @@ Usage: ${0##*/} [OPTION]...
     -S Store the generated graph to a file (requires a file path)
     -L Load a graph from a file instead of generating one (requires a file path)
     -I Enable timing instrumentation for graph operations (build, store, load)
+    -r QPS increase threshold for steady state detection during warmup (in percentage). If specified and greater than zero, warmup continues until
+       QPS increase is less than this threshold percentage of the previous QPS.
+    -x Maximum number of warmup iterations when using QPS threshold. Default: 10
+    -N No retry mode. Skip sleep and PID checking in load test startup, break immediately without retrying.
 EOF
 }
 
@@ -135,6 +139,14 @@ main() {
     local instrument_graph
     instrument_graph=""
 
+    local qps_threshold
+    qps_threshold=""
+
+    local max_warmup_iterations
+    max_warmup_iterations="10"
+
+    local no_retry_mode
+    no_retry_mode=""
 
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
@@ -189,6 +201,19 @@ main() {
             -I)
                 instrument_graph="--instrument_graph"
                 ;;
+            -r)
+                if [[ "$2" -gt 0 ]]; then
+                    qps_threshold="$2"
+                fi
+                ;;
+            -x)
+                if [[ "$2" -gt 0 ]]; then
+                    max_warmup_iterations="$2"
+                fi
+                ;;
+            -N)
+                no_retry_mode="1"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -199,7 +224,7 @@ main() {
         esac
 
         case $1 in
-            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l|-S|-L)
+            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l|-S|-L|-r|-x)
                 if [ -z "$2" ]; then
                     echo "Invalid option: '$1' requires an argument" 1>&2
                     exit 1
@@ -268,9 +293,23 @@ main() {
 
     # Start DriverNode
     client_monitor_port="$((monitor_port-1000))"
+
+    # Construct QPS threshold and max iterations parameters if specified
+    qps_threshold_args=""
+    if [ -n "$qps_threshold" ]; then
+        qps_threshold_args="-r $qps_threshold -x $max_warmup_iterations"
+    fi
+
+    # Construct no retry mode parameter if specified
+    no_retry_args=""
+    if [ -n "$no_retry_mode" ]; then
+        no_retry_args="-N"
+    fi
+
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
-        scripts/search_qps.sh -w 15 -f 300 -s 95p:500 -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        # shellcheck disable=SC2086
+        scripts/search_qps.sh -w 15 -f 300 -s 95p:500 $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
@@ -279,7 +318,8 @@ main() {
         benchreps_tell_state "after search_qps"
     elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
         benchreps_tell_state "before search_qps"
-        scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        # shellcheck disable=SC2086
+        scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port"
@@ -296,9 +336,11 @@ main() {
             num_workers=$driver_threads
         fi
         benchreps_tell_state "before fixed_qps_exp"
+        # shellcheck disable=SC2086
         scripts/search_qps.sh -s 95p -t "$fixed_qps_duration" \
            -m "$warmup_time" \
            -q "$fixed_qps" \
+           $qps_threshold_args $no_retry_args \
            -o "${FEEDSIM_ROOT}/${result_filename}" \
            -- build/workloads/ranking/DriverNodeRank \
                 --server "0.0.0.0:$port" \

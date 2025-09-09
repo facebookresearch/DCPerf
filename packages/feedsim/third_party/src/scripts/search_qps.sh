@@ -77,6 +77,12 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
                 appending '--threads=T --connections=4' to the driver command during load
                 tests. T will be the lesser of requested_qps / 4 or $(nproc) / 5.
     -o          output filename to record samples as csv. Optional
+    -r          QPS increase threshold for steady state detection during warmup (in percentage).
+                When specified, warmup continues until QPS increase is less than this threshold
+                percentage of the previous QPS. Optional
+    -x          Maximum number of warmup iterations when using QPS threshold. Default: 10
+    -N          No retry mode. Skip sleep and PID checking in load test startup, break immediately
+                without retrying. Optional
 EOF
 }
 
@@ -122,19 +128,28 @@ run_loadtest() {
     local tmp_file=$(mktemp)
     $command $threads_arg $qps_arg &>$tmp_file &
     LOADTEST_PID=$!
-    sleep 7
-    ps -p $LOADTEST_PID -o pid= > /dev/null && break
-    echo "Retrying $r of 3 to start load test..."
+
+    if [ "$no_retry_mode" = "1" ]; then
+      # No retry mode: skip sleep and PID checking, break immediately
+      break
+    else
+      # Normal mode: sleep and check PID
+      sleep 7
+      ps -p $LOADTEST_PID -o pid= > /dev/null && break
+      benchreps_tell_state "Retrying $r of 3 to start load test..."
+    fi
   done
 
   # wait for time
   sleep $experiment_time
+  benchreps_tell_state "after sleeping for experiment_time=${experiment_time} seconds"
 
   # send SIGINT to the command
   kill -SIGINT $LOADTEST_PID
 
   # wait for results to show up and queries to drain
   sleep $wait_time
+  benchreps_tell_state "after sleeping for wait_time=${wait_time} seconds"
 
   # check file for QPS
   if grep -q "#: [0-9]\+.\([0-9]\+\)\? QPS" $tmp_file; then
@@ -216,9 +231,12 @@ load_test_retries=3
 output_csv_file=""
 fixed_qps=""
 auto_driver_threads=""
+qps_threshold=""
+max_warmup_iterations=10
+no_retry_mode=""
 
 OPTIND=1 # Reset is necessary if getopts was used previously in the script.  It is a good idea to make this local in a function.
-while getopts "ht:f:w:m:s:q:ao:" opt; do
+while getopts "ht:f:w:m:s:q:ao:r:x:N" opt; do
   case "$opt" in
     h)
       show_help
@@ -248,6 +266,15 @@ while getopts "ht:f:w:m:s:q:ao:" opt; do
       ;;
     o)
       output_csv_file=$OPTARG
+      ;;
+    r)
+      qps_threshold=$OPTARG
+      ;;
+    x)
+      max_warmup_iterations=$OPTARG
+      ;;
+    N)
+      no_retry_mode=1
       ;;
     '?')
       show_help >&2
@@ -322,8 +349,54 @@ if [ "$warmup_time" -gt 0 ]; then
   benchreps_tell_state "before warmup"
   saved_experiment_time="$experiment_time"
   experiment_time="$warmup_time"
-  run_loadtest peak_qps measured_latency
+
+  if [ -n "$qps_threshold" ]; then
+    # Dynamic QPS-based warmup
+    previous_qps=0
+    warmup_iteration=0
+
+    while [ $warmup_iteration -lt $max_warmup_iterations ]; do
+      run_loadtest current_qps measured_latency
+      benchreps_tell_state "after iteration $warmup_iteration"
+      printf "warmup iteration %d: qps = %.2f, latency = %.2f\n" $warmup_iteration $current_qps $measured_latency >> $BREPS_LFILE
+
+      # Skip first warmup iteration, always do the second round
+      if [ $warmup_iteration -gt 1 ]; then
+        # Calculate percentage increase: (current - previous) / previous * 100
+        if [ $(echo "$previous_qps > 0" | bc) -eq 1 ]; then
+          qps_increase_percentage=$(echo "scale=5; ($current_qps - $previous_qps) / $previous_qps * 100" | bc)
+          # Convert to absolute value for comparison
+          #qps_increase_abs=$(echo "scale=5; ($qps_increase_percentage^2)^0.5" | bc)
+          #qps_increase_check=$(echo "$qps_increase_abs <= $qps_threshold" | bc)
+          qps_increase_check=$(echo "$qps_increase_percentage <= $qps_threshold" | bc)
+
+          if [ $qps_increase_check -eq 1 ]; then
+            printf "QPS steady state reached. QPS increase percentage (%.2f%%) is less than threshold (%.2f%%)\n" $qps_increase_percentage $qps_threshold >> $BREPS_LFILE
+            break
+          fi
+        else
+          # If previous_qps is 0, skip the check for this iteration
+          printf "Previous QPS is 0, skipping threshold check for iteration %d\n" $warmup_iteration >> $BREPS_LFILE
+        fi
+      fi
+
+      previous_qps=$current_qps
+      warmup_iteration=$((warmup_iteration + 1))
+
+      # Wait between warmup iterations (except for the last one)
+      if [ $warmup_iteration -lt $max_warmup_iterations ]; then
+        sleep $wait_time
+      fi
+    done
+
+    peak_qps=$current_qps
+  else
+    # Original fixed warmup time
+    run_loadtest peak_qps measured_latency
+  fi
+
   printf "warmup qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
+  echo "warmup qps = $peak_qps, latency = $measured_latency" >> $BREPS_LFILE
   benchreps_tell_state "after warmup"
   experiment_time="$saved_experiment_time"
 fi
@@ -338,13 +411,16 @@ if [[ -n "$fixed_qps" ]]; then
         collect_perf_record &
     fi
     run_loadtest measured_qps measured_latency $fixed_qps
+
     printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
+    echo "final requested_qps = $fixed_qps, measured_qps = $measured_qps, latency = $measured_latency" >> $BREPS_LFILE
     benchreps_tell_state "after fixed_qps_single"
   else
     for fixed_qps_el in $fixed_qps_array; do
       benchreps_tell_state "before fixed_qps_iter $fixed_qps_el"
       run_loadtest measured_qps measured_latency $fixed_qps_el
       printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps_el $measured_qps $measured_latency
+      echo "final requested_qps = $fixed_qps_el, measured_qps = $measured_qps, latency = $measured_latency" >> $BREPS_LFILE
       benchreps_tell_state "after fixed_qps_iter $fixed_qps_el"
       sleep 7 # wait between iterations
     done

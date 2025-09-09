@@ -3,7 +3,6 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
 BREPS_LFILE=/tmp/feedsim_log.txt
 IS_FIXED_QPS=0
 FIXQPS_SUFFIX=""
@@ -28,9 +27,6 @@ Usage: ${0##*/} [OPTION]...
     -h Display this help and exit
     -n Number of parallel instances to run. Default: $(( ( NCPU + 99 ) / 100 ))
     -i Number of icache iterations to use. Default: 1600000
-    -S Store the generated graph to a file (requires a file path)
-    -L Load a graph from a file instead of generating one (requires a file path)
-    -I Enable timing instrumentation for graph operations (build, store, load)
 
 Any remaining arguments are passed to run.sh
 
@@ -40,10 +36,6 @@ EOF
 SCRIPT_NAME="$(basename "$0")"
 echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
 
-# Initialize variables for graph storage and loading
-STORE_GRAPH=""
-LOAD_GRAPH=""
-INSTRUMENT_GRAPH=""
 
 while [ $# -ne 0 ]; do
     case $1 in
@@ -55,15 +47,7 @@ while [ $# -ne 0 ]; do
         -i)
             NUM_ICACHE_ITERATIONS="$2"
             ;;
-        -S)
-            STORE_GRAPH="-S $2"
-            ;;
-        -L)
-            LOAD_GRAPH="-L $2"
-            ;;
-        -I)
-            INSTRUMENT_GRAPH="-I"
-            ;;
+
         -h|--help)
             show_help >&2
             exit 1
@@ -73,7 +57,7 @@ while [ $# -ne 0 ]; do
     esac
 
     case $1 in
-        -n|-i|-S|-L)
+        -n|-i)
             if [ -z "$2" ]; then
                 echo "Invalid option: '$1' requires an argument" 1>&2
                 exit 1
@@ -129,10 +113,10 @@ echo > $BREPS_LFILE
 # shellcheck disable=SC2086
 for i in $(seq 1 ${NUM_INSTANCES}); do
     CORE_RANGE="$(get_cpu_range "${NUM_INSTANCES}" "$((i - 1))")"
-    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -i ${NUM_ICACHE_ITERATIONS} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt ${STORE_GRAPH} ${LOAD_GRAPH} ${INSTRUMENT_GRAPH} $*"
+    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -i ${NUM_ICACHE_ITERATIONS} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
     echo "$CMD" > "${FEEDSIM_LOG_PREFIX}${i}.log"
     # shellcheck disable=SC2068,SC2069
-    IS_AUTOSCALE_RUN=${NUM_INSTANCES} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -i "${NUM_ICACHE_ITERATIONS}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" ${STORE_GRAPH} ${LOAD_GRAPH} ${INSTRUMENT_GRAPH} $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
+    IS_AUTOSCALE_RUN=${NUM_INSTANCES} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -i "${NUM_ICACHE_ITERATIONS}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
     PIDS+=("$!")
     PHY_CORE_ID=$((PHY_CORE_ID + CORES_PER_INST))
     SMT_ID=$((SMT_ID + CORES_PER_INST))
