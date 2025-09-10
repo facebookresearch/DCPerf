@@ -43,7 +43,7 @@ fi
 # download spark
 pushd "${OUT}" || exit 1
 if [ ! -f spark-4.0.0-bin-hadoop3.tgz ]; then
-  wget https://archive.apache.org/dist/spark/spark-4.0.0/spark-4.0.0-bin-hadoop3.tgz
+  wget https://dlcdn.apache.org/spark/spark-4.0.0/spark-4.0.0-bin-hadoop3.tgz
 fi
 tar xzf spark-4.0.0-bin-hadoop3.tgz
 popd || exit 1
