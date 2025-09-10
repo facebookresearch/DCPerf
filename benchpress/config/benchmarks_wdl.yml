@@ -13,6 +13,7 @@ wdl_bench:
       - app
       - folly
       - fbthrift
+      - vdso
     component:
       - cpu
   metrics: []

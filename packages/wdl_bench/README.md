@@ -24,7 +24,7 @@ WDLBench and its job information are located in separate files. To use it (insta
 ```
 
 ## Run WDLBench
-As of 2024 Q3, we have three libraries included -- `folly`, `lzbench`, and `openssl`,
+As of 2025 Q3, we have the following libraries included -- `folly`, `lzbench`, `openssl`, and `vdso_bench`,
 each can run on a single core or all cores.
 
 for `folly`, the user can choose to run them all together (i.e., run all microbenchmarks with one DCPerf run) or individually (i.e., one microbenchmark per DCPerf run) with different jobs.
@@ -35,11 +35,13 @@ for `folly`, the user can choose to run them all together (i.e., run all microbe
 ```
 for list of functions to run then individually, see [list of benchmarks in folly](#list-of-benchmarks-in-folly).
 
-For `lzbench` and `openssl`, the user can pass parameters to select how to run them.
+For `lzbench`, `openssl` and `vdso_bench`, the user can pass parameters to select how to run them.
 ```
 ./benchpress_cli.py  -b wdl run lzbench -i '{"type": "single_core|all_core"}'
 
 ./benchpress_cli.py  -b wdl run openssl -i '{"type": "single_core|all_core"}'
+
+./benchpress_cli.py  -b wdl run vdso_bench -i '{"type": "single_core|multi_thread"}'
 ```
 For `lzbench` and `openssl`, the user can also pass the `algo` parameter to specify the algorithm used, for `lzbench`, the default algorithm is `zstd`, while for `openssl`, the default algorithm is `ctr` (`aes-256-ctr`).
 

@@ -147,3 +147,28 @@
         after:
           - 'benchmarks/wdl_bench/wdl_bench_results.txt'
           - 'benchmarks/wdl_bench/out_*.json'
+
+- name: vdso_bench
+  benchmark: wdl_bench
+  description: >
+    Common vdso operations. Compute intensive.
+  args:
+    - '--name {name}'
+    - '--type {type}'
+    - '--output {output}'
+  vars:
+    - 'name=vdso_bench'
+    - 'type=single_core'
+    - 'output=wdl_bench_results.txt'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+          - 'benchmarks/wdl_bench/out_*.json'

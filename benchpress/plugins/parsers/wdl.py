@@ -27,7 +27,7 @@ class WDLParser(Parser):
             with open(out_file, "r") as out_f:
                 out = json.load(out_f)
                 for k, v in out.items():
-                    metrics[benchmark + k] = v
+                    metrics[benchmark + "_" + k] = v
 
         if len(metrics.keys()) >= 20:
             metrics = {}

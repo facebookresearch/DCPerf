@@ -121,3 +121,12 @@ def parse_line_openssl(f, sum_c):
     sum_c[name + " 1KB: KB/s"] = float(elements[4][:-1])
     sum_c[name + " 8KB: KB/s"] = float(elements[5][:-1])
     sum_c[name + " 16KB: KB/s"] = float(elements[6][:-1])
+
+
+def parse_line_vdso_bench(f, sum_c):
+    for line in f:
+        elements = line.split()
+        if re.search("Number", elements[0]):
+            name = elements[4]
+            value = float(elements[7])
+            sum_c[name + ": M/s"] = value

@@ -22,6 +22,8 @@ with open(input_file_name) as f:
         parse_line.parse_line_lzbench(f, sum_c)
     elif sys.argv[1] == "openssl":
         parse_line.parse_line_openssl(f, sum_c)
+    elif sys.argv[1] == "vdso_bench":
+        parse_line.parse_line_vdso_bench(f, sum_c)
     else:
         parse_line.parse_line(f, sum_c)
 

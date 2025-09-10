@@ -12,6 +12,7 @@ declare -A REPOS=(
     ['fbthrift']='https://github.com/facebook/fbthrift.git'
     ['lzbench']='https://github.com/inikep/lzbench.git'
     ['openssl']='https://github.com/openssl/openssl.git'
+    ['vdso']='https://github.com/leitao/debug.git'
 )
 
 declare -A TAGS=(
@@ -19,6 +20,7 @@ declare -A TAGS=(
     ['fbthrift']='v2025.08.18.00'
     ['lzbench']='d138844ea56b36ff1c1c43b259c866069deb64ad'
     ['openssl']='openssl-3.3.1'
+    ['vdso']='main'
 )
 
 declare -A DATASETS=(
@@ -152,6 +154,18 @@ build_openssl()
     popd || exit
 }
 
+build_vdso()
+{
+    lib='vdso'
+    pushd "${WDL_SOURCE}"
+    clone $lib || echo "Failed to clone $lib"
+    cd "$lib/vdso_bench" || exit
+    make -j
+    cp ./vdso_bench "${WDL_ROOT}/" || exit
+
+    popd || exit
+}
+
 
 ##################### BUILD AND INSTALL #########################
 
@@ -161,6 +175,7 @@ build_folly
 build_fbthrift
 build_lzbench
 build_openssl
+build_vdso
 
 folly_benchmark_list="concurrency_concurrent_hash_map_bench hash_hash_benchmark hash_maps_bench stats_digest_builder_benchmark fibers_fibers_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark event_base_benchmark iobuf_benchmark function_benchmark random_benchmark small_locks_benchmark range_find_benchmark"
 

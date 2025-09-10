@@ -142,6 +142,14 @@ main() {
             run_allcore "$name" "$algo"
         fi
 
+    elif [ "$name" = "vdso_bench" ]; then
+        run_list=$name
+        if [ "$run_type" = "multi_thread" ]; then
+            ./vdso_bench -t 10 -p 20 > "out_${name}".txt
+        elif [ "$run_type" = "single_core" ]; then
+            ./vdso_bench -t 10 -p 1  > "out_${name}".txt
+        fi
+
     elif [ "$name" != "none" ]; then
         run_list=$name
         if [ "$name" = "small_locks_benchmark" ] || [ "$name" = "iobuf_benchmark" ]; then
