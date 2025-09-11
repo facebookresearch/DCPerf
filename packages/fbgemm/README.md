@@ -1,21 +1,23 @@
 # FBGEMM Embedding Benchmark
-`fbgemm_embedding` is a benchmark that simulates embedding table lookups representative of Model A and Model B workloads. The benchmark closely mimics the hotspot functions in table-based embedding (TBE) inference operations, which are commonly used in recommendation systems and deep learning models.
+`fbgemm_embedding` is a benchmark that simulates embedding table lookups representative of Model A and Model B workloads.
+The benchmark closely mimics the hotspot functions in table-based embedding (TBE) inference operations, which are commonly used in recommendation systems and deep learning models.
 
 ## Installation
-To install the FBGEMM embedding benchmark, execute the following command:
+To install the FBGEMM embedding benchmark, execute one of the following command:
 ```bash
 ./benchpress -b ai install fbgemm_embedding_a_single
 ./benchpress -b ai install fbgemm_embedding_a_spec
 ./benchpress -b ai install fbgemm_embedding_b_spec_int4
 ./benchpress -b ai install fbgemm_embedding_b_spec_int8
 
-./benchpress -b ai install fbgemm_cpu_a
-./benchpress -b ai install fbgemm_cpu_b
+./benchpress -b ai install fbgemm_cpu_fp16
+./benchpress -b ai install fbgemm_cpu_spmdm8
 ```
 
 ## Run FBGEMM Embedding Benchmark
 ### Job - `fbgemm_embedding_a_single`
-`fbgemm_embedding_a_single` simulates the Model A workload using a single representative embedding table. This benchmark is designed to evaluate performance with a simplified embedding configuration.
+`fbgemm_embedding_a_single` simulates the Model A workload using a single representative embedding table.
+This benchmark is designed to evaluate performance with a simplified embedding configuration.
 
 ### Job - `fbgemm_embedding_a_spec`
 `fbgemm_embedding_a_spec` simulates the Model A workload using a representative set of embedding tables with varying bag sizes.
@@ -26,11 +28,13 @@ To install the FBGEMM embedding benchmark, execute the following command:
 ### Job - `fbgemm_embedding_b_spec_int8`
 `fbgemm_embedding_b_spec_int8` simulates the Model B workload using a representative set of embedding tables with int8 quantized precision.
 
-### Job - `fbgemm_embedding_cpu_a`
+### Job - `fbgemm_cpu_fp16`
 `fbgemm_cpu_a` executes the FP16Benchmark from FBGEMM-CPU.
 
 ### Job - `fbgemm_embedding_cpu_b`
 `fbgemm_cpu_b` executes the EmbeddingSpMDM8BitBenchmark from FBGEMM-CPU.
+This is a C++ based micro-benchmark which stresses the TBE kernel.
+This benchmark is used for quick prototyping and performance validation.
 
 To run the FBGEMM embedding benchmarks, please use the following commands:
 ```bash
@@ -39,8 +43,8 @@ To run the FBGEMM embedding benchmarks, please use the following commands:
 ./benchpress -b ai run fbgemm_embedding_b_spec_int4
 ./benchpress -b ai run fbgemm_embedding_b_spec_int8
 
-./benchpress -b ai run fbgemm_embedding_cpu_a
-./benchpress -b ai run fbgemm_embedding_cpu_b
+./benchpress -b ai run fbgemm_cpu_a
+./benchpress -b ai run fbgemm_cpu_spmdm8
 ```
 
 

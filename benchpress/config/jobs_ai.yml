@@ -1,16 +1,16 @@
-- benchmark: fbgemm_embedding_cpu_a
-  name: fbgemm_embedding_cpu_a
+- benchmark: fbgemm
+  name: fbgemm_cpu_fp16
   description: Performance benchmark for FBGEMM_CPU -- FP16Benchmark.
   args:
     - FP16Benchmark
 
-- benchmark: fbgemm_embedding_cpu_b
-  name: fbgemm_embedding_cpu_b
+- benchmark: fbgemm
+  name: fbgemm_cpu_spmdm8
   description: Performance benchmark for FBGEMM_CPU -- EmbeddingSpMDM8BitBenchmark.
   args:
     - EmbeddingSpMDM8BitBenchmark
 
-- benchmark: fbgemm_embedding
+- benchmark: fbgemm
   name: fbgemm_embedding_a_single
   description: Performance benchmark for Model A workload using one single representative embedding table.
   args:
@@ -36,7 +36,7 @@
     - 'copies=16'
     - 'iters=30000'
 
-- benchmark: fbgemm_embedding
+- benchmark: fbgemm
   name: fbgemm_embedding_a_spec
   description: Performance benchmark for Model A workload using a representative set of embedding tables with different bag sizes.
   args:
@@ -62,7 +62,7 @@
     - 'iters=20000'
 
 
-- benchmark: fbgemm_embedding
+- benchmark: fbgemm
   name: fbgemm_embedding_b_spec_int4
   description: Performance benchmark for Model B workload using a representative set of embedding tables with int4 precision.
   args:
@@ -88,7 +88,7 @@
     - 'iters=4000'
 
 
-- benchmark: fbgemm_embedding
+- benchmark: fbgemm
   name: fbgemm_embedding_b_spec_int8
   description: Performance benchmark for Model B workload using a representative set of embedding tables with int8 precision.
   args:

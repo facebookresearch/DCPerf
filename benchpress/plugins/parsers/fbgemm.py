@@ -15,7 +15,18 @@ logger = logging.getLogger(__name__)
 
 class FbgemmParser(Parser):
     def parse(self, stdout, stderr, returncode):
-        # Patterns for the three formats
+        embedding = False
+        metrics = {}
+        for line in stderr:
+            match = re.search(r"BW:\s*(\d+\.\d+)\s*GB/s", line)
+            if match:
+                metrics["bandwidth"] = float(match.group(1))
+                embedding = True
+
+        if embedding:
+            return metrics
+
+        # Patterns for the fbgemm_cpu formats
         cpu_a_pattern = re.compile(
             r"^(BLAS_FP32|FBP_t)\s+m\s*=\s*(\d+)\s+n\s*=\s*(\d+)\s+k\s*=\s*(\d+)\s+Gflops\s*=\s*([\d\.]+)\s+GBytes\s*=\s*([\d\.]+)"
         )
@@ -29,7 +40,6 @@ class FbgemmParser(Parser):
             r"(\d+)\s+bit indices( with prefetching)?\, lengths_sum (\d+)"
         )
 
-        metrics = {}
         embedding_config = {}
         embedding_metrics = []
 

@@ -1,24 +1,8 @@
-fbgemm_embedding:
-  parser: embedding
-  install_script: ./packages/fbgemm/install_embedding.sh
-  cleanup_script: ./packages/fbgemm/cleanup_embedding.sh
-  path: ./benchmarks/fbgemm_embedding/tbe_inference_benchmark
-  metrics:
-    - bandwidth
-
-fbgemm_embedding_cpu_a:
+fbgemm:
   parser: fbgemm
-  install_script: ./packages/fbgemm/install_embedding.sh
-  cleanup_script: ./packages/fbgemm/cleanup_embedding.sh
-  path: ./benchmarks/fbgemm_embedding/FP16Benchmark
-  metrics:
-    - bandwidth
-
-fbgemm_embedding_cpu_b:
-  parser: fbgemm
-  install_script: ./packages/fbgemm/install_embedding.sh
-  cleanup_script: ./packages/fbgemm/cleanup_embedding.sh
-  path: ./benchmarks/fbgemm_embedding/EmbeddingSpMDM8BitBenchmark
+  install_script: ./packages/fbgemm/install_fbgemm_bench.sh
+  cleanup_script: ./packages/fbgemm/cleanup_fbgemm_bench.sh
+  path: ./benchmarks/fbgemm/run.sh
   metrics:
     - bandwidth
 

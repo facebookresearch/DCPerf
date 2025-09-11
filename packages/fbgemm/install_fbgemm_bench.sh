@@ -10,7 +10,7 @@
 ################################################################################
 
 # Directory where benchmark executables will be stored
-BENCHMARKS_DIR="$(pwd)/benchmarks/fbgemm_embedding"
+BENCHMARKS_DIR="$(pwd)/benchmarks/fbgemm"
 
 # Path to Miniconda installation
 MINICONDA_PREFIX=$(pwd)/build/miniconda
@@ -23,6 +23,9 @@ PYTORCH_VERSION=2.7.0
 
 # Name of the conda environment to create
 BUILD_ENV=fbgemm_build_oss_env
+
+# Dir to create FBGEMM_CPU benchmark
+BUILD_DIR=build_shared
 
 # Python version to use
 PYTHON_VERSION=3.13
@@ -529,6 +532,7 @@ install_build_tools () {
     numpy \
     scikit-build \
     tbb \
+    openblas \
     wheel) || return 1
 
 }
@@ -845,7 +849,7 @@ install_tools_and_compilers() {
   # Install the C/C++ compiler in the Conda environment
   # This is needed for compiling C++ extensions in FBGEMM
   echo "[SETUP] Installing C/C++ compiler..."
-  install_cxx_compiler $BUILD_ENV
+  install_cxx_compiler $BUILD_ENV clang
 
   # Install additional build tools required for the project
   # This includes CMake, Ninja, and other build dependencies
@@ -908,6 +912,60 @@ clone_fbgemm_repo() {
   echo "[SETUP] FBGEMM repository setup complete."
 }
 
+# Function to install FBGEMM_CPU requirements and build the library
+# This builds the FBGEMM_CPU library and creates a standalone executable
+install_fbgemm_cpu() {
+  echo "[BUILD] Installing FBGEMM requirements and building the library..."
+
+  # Set the package name based on the build variant
+  # We're building the CPU variant of FBGEMM GPU
+  echo "[BUILD] Setting build configuration variables..."
+  export package_name=fbgemm
+
+  # Set the package channel to 'test'
+  # This is used for package distribution
+  export package_channel=test
+
+  # Set the Python tag based on the Python version
+  # This ensures compatibility with Python 3.13
+  export python_tag=py313
+
+  # Determine the processor architecture
+  # This is used for platform-specific builds
+  # shellcheck disable=SC2155
+  export ARCH=$(uname -m)
+
+  # Set the Python platform name for Linux
+  # This specifies the minimum glibc version required
+  export python_plat_name="manylinux_2_28_${ARCH}"
+
+  # Extract the number of CPU cores on the system
+  # shellcheck disable=SC2155
+  local core=$(lscpu | grep "Core(s)" | awk '{print $NF}') && echo "core = ${core}" || echo "core not found"
+  # shellcheck disable=SC2155
+  local sockets=$(lscpu | grep "Socket(s)" | awk '{print $NF}') && echo "sockets = ${sockets}" || echo "sockets not found"
+  local re='^[0-9]+$'
+
+  local run_multicore=""
+  if [[ $core =~ $re && $sockets =~ $re ]]; then
+    local n_core=$((core * sockets))
+    run_multicore="-j ${n_core}"
+  fi
+
+  # Build and install the FBGEMM library into the Conda environment
+  # We specify the CPU variant to build without CUDA support
+  echo "[BUILD] Building and installing FBGEMM..."
+  pwd
+  # shellcheck disable=SC2086
+  print_exec source .github/scripts/setup_env.bash
+  print_exec build_fbgemm_library $BUILD_ENV cmake $BUILD_DIR static
+
+  cp $BUILD_DIR/bench/FP16Benchmark $BENCHMARKS_DIR/
+  cp $BUILD_DIR/bench/EmbeddingSpMDM8BitBenchmark $BENCHMARKS_DIR/
+
+  echo "[BUILD] FBGEMM_CPU installation complete."
+}
+
 # Function to install FBGEMM requirements and build the library
 # This builds the FBGEMM library and creates a standalone executable
 install_fbgemm() {
@@ -968,7 +1026,7 @@ install_fbgemm() {
   # Return to the previous directory (outside of fbgemm_gpu)
   # This restores the directory we were in before entering fbgemm_gpu
   echo "[BUILD] Returning to previous directory..."
-  popd || exist
+  cd .. || exist
 
   echo "[BUILD] FBGEMM installation complete."
 }
@@ -1024,6 +1082,40 @@ main() {
   # Install FBGEMM requirements and build the library
   echo "[MAIN] Building FBGEMM..."
   install_fbgemm
+
+  # Install FBGEMM_CPU requirements and build the library
+  echo "[MAIN] Building FBGEMM_CPU..."
+  install_fbgemm_cpu
+
+  # Create a run.sh launcher script in the benchmarks directory
+cat > "${BENCHMARKS_DIR}/run.sh" <<'EOF'
+#!/bin/bash
+# Usage: ./run.sh <binary_name> [args...]
+set -e
+
+BIN="$1"
+shift
+
+if [[ -z "$BIN" ]]; then
+  echo "Usage: $0 <binary_name> [args...]"
+  echo "Available binaries:"
+  ls "$(dirname "$0")" | grep -E '^(FP16Benchmark|EmbeddingSpMDM8BitBenchmark|tbe_inference_benchmark)$'
+  exit 1
+fi
+
+BIN_PATH="$(dirname "$0")/$BIN"
+if [[ ! -x "$BIN_PATH" ]]; then
+  echo "Error: Binary '$BIN' not found or not executable in $(dirname "$0")"
+  exit 2
+fi
+
+exec "$BIN_PATH" "$@"
+EOF
+
+  # Make the run.sh script executable
+  chmod +x "${BENCHMARKS_DIR}/run.sh"
+
+  echo "[SETUP] Created launcher script: ${BENCHMARKS_DIR}/run.sh"
 
   # Clean up temporary files and directories
   echo "[MAIN] Cleaning up..."
