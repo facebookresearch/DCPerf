@@ -72,12 +72,12 @@ sudo yum install -y "${JDK_NAME}" || { echo "Could not install ${JDK_NAME} packa
 
 # 4. Install Cassandra
 # Download Cassandra from third-party source
-cassandra_version=3.11.10
+cassandra_version=3.11.19
 CASSANDRA_NAME="apache-cassandra-${cassandra_version}"
 if ! [ -d "${CASSANDRA_NAME}" ]; then
     CASSANDRA_TAR="${CASSANDRA_NAME}-bin.tar.gz"
     if ! [ -f "${CASSANDRA_TAR}" ]; then
-        wget "https://archive.apache.org/dist/cassandra/${cassandra_version}/${CASSANDRA_TAR}"
+        wget "https://dlcdn.apache.org/cassandra/${cassandra_version}/${CASSANDRA_TAR}"
     fi
     tar -xvf "${CASSANDRA_TAR}" -C "${DJANGO_WORKLOAD_ROOT}"
 else

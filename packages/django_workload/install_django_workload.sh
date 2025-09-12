@@ -99,8 +99,8 @@ update-alternatives --set keytool /usr/local/jdk-8u60-64/bin/keytool
 # 4. Install Cassandra
 
 # Download Cassandra from third-party source
-cassandra_version=3.11.10
-wget "https://archive.apache.org/dist/cassandra/${cassandra_version}/apache-cassandra-${cassandra_version}-bin.tar.gz"
+cassandra_version=3.11.19
+wget "https://dlcdn.apache.org/cassandra/${cassandra_version}/apache-cassandra-${cassandra_version}-bin.tar.gz"
 tar -xvf "apache-cassandra-${cassandra_version}-bin.tar.gz" -C "$OUT"
 # Rename
 [ ! -d "$OUT/apache-cassandra" ] && mv "$OUT/apache-cassandra-${cassandra_version}" "$OUT/apache-cassandra"
