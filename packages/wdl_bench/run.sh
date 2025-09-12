@@ -45,7 +45,7 @@ run_allcore()
     for i in $(seq "$nprocs")
     do
         if [ "$1" = "lzbench" ]; then
-            numactl -C "$((i-1))" ./lzbench -e"$2" "${WDL_DATASETS}"/silesia.tar > output_file_$((i-1)) &
+            numactl -C "$((i-1))" ./lzbench -v -e"$2" "${WDL_DATASETS}"/silesia.tar > output_file_$((i-1)) &
         else
             numactl -C "$((i-1))" "./$1" > output_file_$((i-1)) &
         fi
@@ -137,7 +137,7 @@ main() {
     elif [ "$name" = "lzbench" ]; then
         run_list=$name
         if [ "$run_type" = "single_core" ]; then
-            ./lzbench -e"${algo}" "${WDL_DATASETS}/silesia.tar" > "out_${name}".txt
+            ./lzbench -v -e"${algo}" "${WDL_DATASETS}/silesia.tar" > "out_${name}".txt
         elif [ "$run_type" = "all_core" ]; then
             run_allcore "$name" "$algo"
         fi

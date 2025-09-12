@@ -84,7 +84,7 @@ def parse_line(f, sum_c):
 
 def parse_line_lzbench(f, sum_c):
     for line in f:
-        if re.search("silesia", line):
+        if re.search("datasets", line):
             elements = line.split()
             idx_time = 0
             for i in range(len(elements)):
