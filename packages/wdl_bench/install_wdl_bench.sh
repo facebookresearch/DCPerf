@@ -8,7 +8,7 @@ set -Eeuo pipefail
 ##################### BENCHMARK CONFIG #########################
 
 declare -A REPOS=(
-    ['folly']='https://github.com/facebook/folly.git'
+    ['folly']='7bce6fd7626b94e206d9ab66ac1ce34d82a1992c'
     ['fbthrift']='https://github.com/facebook/fbthrift.git'
     ['lzbench']='https://github.com/inikep/lzbench.git'
     ['openssl']='https://github.com/openssl/openssl.git'
