@@ -122,6 +122,7 @@
         is_move: true
         after:
           - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+          - 'benchmarks/wdl_bench/out_*.json'
 
 - name: openssl
   benchmark: wdl_bench
