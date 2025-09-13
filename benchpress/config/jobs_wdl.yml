@@ -104,11 +104,13 @@
     - '--type {type}'
     - '--output {output}'
     - '--algo {algo}'
+    - '--dataset {dataset}'
   vars:
     - 'name=lzbench'
     - 'type=single_core'
     - 'output=wdl_bench_results.txt'
     - 'algo=zstd'
+    - 'dataset=silesia.tar'
   hooks:
     - hook: cpu-mpstat
       options:

@@ -26,6 +26,7 @@ Usage: ${0##*/} [-h] [--type single_core|all_core|multi_thread]
 
     -h Display this help and exit
     -output Result output file name. Default: "wdl_results.txt"
+    -dataset Dataset file name. Default: "silesia.tar"
 EOF
 }
 
@@ -45,7 +46,7 @@ run_allcore()
     for i in $(seq "$nprocs")
     do
         if [ "$1" = "lzbench" ]; then
-            numactl -C "$((i-1))" ./lzbench -v -e"$2" "${WDL_DATASETS}"/silesia.tar > output_file_$((i-1)) &
+            numactl -C "$((i-1))" ./lzbench -v -e"$2" "${WDL_DATASETS}/$3" > output_file_$((i-1)) &
         else
             numactl -C "$((i-1))" "./$1" > output_file_$((i-1)) &
         fi
@@ -76,6 +77,9 @@ main() {
     local algo
     algo="zstd"
 
+    local dataset
+    dataset="silesia.tar"
+
 
     while :; do
         case $1 in
@@ -91,6 +95,9 @@ main() {
             --algo)
                 algo="$2"
                 ;;
+            --dataset)
+                dataset="$2"
+                ;;
             -h)
                 show_help >&2
                 exit 1
@@ -101,7 +108,7 @@ main() {
         esac
 
         case $1 in
-            --output|--type|--name|--algo)
+            --output|--type|--name|--algo|--dataset)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -137,9 +144,9 @@ main() {
     elif [ "$name" = "lzbench" ]; then
         run_list=$name
         if [ "$run_type" = "single_core" ]; then
-            ./lzbench -v -e"${algo}" "${WDL_DATASETS}/silesia.tar" > "out_${name}".txt
+            ./lzbench -v -e"${algo}" "${WDL_DATASETS}/${dataset}" > "out_${name}".txt
         elif [ "$run_type" = "all_core" ]; then
-            run_allcore "$name" "$algo"
+            run_allcore "$name" "$algo" "$dataset"
         fi
 
     elif [ "$name" = "vdso_bench" ]; then
