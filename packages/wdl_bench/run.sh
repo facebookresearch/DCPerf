@@ -29,11 +29,11 @@ Usage: ${0##*/} [-h] [--type single_core|all_core|multi_thread]
 EOF
 }
 
-folly_benchmark_list_single="hash_hash_benchmark hash_maps_bench fibers_fibers_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark event_base_benchmark iobuf_benchmark function_benchmark random_benchmark range_find_benchmark ProtocolBench"
+folly_benchmark_list_single="hash_hash_benchmark container_hash_maps_bench fibers_fibers_benchmark crypto_lt_hash_benchmark memcpy_benchmark memset_benchmark io_async_event_base_benchmark io_iobuf_benchmark function_benchmark random_benchmark range_find_benchmark ProtocolBench"
 
-folly_benchmark_list_all="hash_hash_benchmark lt_hash_benchmark memcpy_benchmark memset_benchmark random_benchmark ProtocolBench"
+folly_benchmark_list_all="hash_hash_benchmark crypto_lt_hash_benchmark memcpy_benchmark memset_benchmark random_benchmark ProtocolBench"
 
-folly_benchmark_list_multi="concurrency_concurrent_hash_map_bench stats_digest_builder_benchmark small_locks_benchmark"
+folly_benchmark_list_multi="concurrency_concurrent_hash_map_bench stats_digest_builder_benchmark synchronization_small_locks_benchmark"
 
 run_list=""
 
@@ -205,7 +205,6 @@ main() {
 
 
     echo "results in each individual json file." | tee -a "${result_filename}"
-
 
     popd
 

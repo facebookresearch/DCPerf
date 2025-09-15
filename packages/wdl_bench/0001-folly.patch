@@ -1,11 +1,11 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 44ba37edd..6ba5a69f1 100644
+index ecc11a796..97e37a5f4 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -566,8 +566,8 @@ install(
+@@ -568,8 +568,8 @@ install(
    COMPONENT dev
  )
-
+ 
 -option(BUILD_TESTS "If enabled, compile the tests." OFF)
 -option(BUILD_BENCHMARKS "If enabled, compile the benchmarks." OFF)
 +option(BUILD_TESTS "If enabled, compile the tests." ON)
@@ -13,66 +13,15 @@ index 44ba37edd..6ba5a69f1 100644
  option(BUILD_BROKEN_TESTS "If enabled, compile tests that are known to be broken." OFF)
  option(BUILD_HANGING_TESTS "If enabled, compile tests that are known to hang." OFF)
  option(BUILD_SLOW_TESTS "If enabled, compile tests that take a while to run in debug mode." OFF)
-@@ -692,6 +692,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-     DIRECTORY container/test/
-       TEST container_access_test SOURCES AccessTest.cpp
-       TEST container_array_test SOURCES ArrayTest.cpp
-+      BENCHMARK hash_maps_bench SOURCES HashMapsBench.cpp
-       BENCHMARK container_bit_iterator_bench SOURCES BitIteratorBench.cpp
-       TEST container_bit_iterator_test SOURCES BitIteratorTest.cpp
-       TEST container_enumerate_test SOURCES EnumerateTest.cpp
-@@ -913,6 +914,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-     DIRECTORY io/test/
-       TEST io_fs_util_test SOURCES FsUtilTest.cpp
-       TEST io_iobuf_test WINDOWS_DISABLED SOURCES IOBufTest.cpp
-+      BENCHMARK iobuf_benchmark WINDOWS_DISABLED SOURCES IOBufBenchmark.cpp
-       TEST io_iobuf_cursor_test SOURCES IOBufCursorTest.cpp
-       TEST io_iobuf_queue_test SOURCES IOBufQueueTest.cpp
-       TEST io_record_io_test WINDOWS_DISABLED SOURCES RecordIOTest.cpp
-@@ -945,6 +947,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-       # TODO: Refactor EventHandlerTest to not use eventfd so it can work on Mac OS X.
-       #TEST io_async_event_handler_test WINDOWS_DISABLED SOURCES EventHandlerTest.cpp
-       TEST io_async_async_timeout_test SOURCES AsyncTimeoutTest.cpp
-+      BENCHMARK event_base_benchmark SOURCES EventBaseBenchmark.cpp
-       TEST io_async_async_udp_socket_test APPLE_DISABLED WINDOWS_DISABLED
-         SOURCES AsyncUDPSocketTest.cpp
-       TEST io_async_delayed_destruction_test SOURCES DelayedDestructionTest.cpp
-@@ -1057,6 +1060,10 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-       TEST synchronization_semaphore_test WINDOWS_DISABLED
-         SOURCES SemaphoreTest.cpp
-       TEST synchronization_small_locks_test SOURCES SmallLocksTest.cpp
-+      BENCHMARK small_locks_benchmark SOURCES SmallLocksBenchmark.cpp
-+
-+    DIRECTORY test/function_benchmark/
-+      BENCHMARK function_benchmark SOURCES main.cpp benchmark_impl.cpp test_functions.cpp
-
-     DIRECTORY synchronization/detail/test/
-       TEST synchronization_detail_hardware_test SOURCES HardwareTest.cpp
-@@ -1139,6 +1146,8 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
+@@ -1148,6 +1148,8 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
        TEST locks_test SOURCES SpinLockTest.cpp
        TEST math_test SOURCES MathTest.cpp
        TEST memcpy_test SOURCES MemcpyTest.cpp
 +      BENCHMARK memcpy_benchmark SOURCES MemcpyBenchmark.cpp
-+      BENCHMARK memset_benchmark SOURCES MemcpyBenchmark.cpp
++      BENCHMARK memset_benchmark SOURCES MemsetBenchmark.cpp
        TEST memory_idler_test SOURCES MemoryIdlerTest.cpp
        TEST memory_test WINDOWS_DISABLED
          SOURCES MemoryTest.cpp
-@@ -1165,6 +1174,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-         SOURCES ProducerConsumerQueueTest.cpp
-       BENCHMARK range_find_benchmark SOURCES RangeFindBenchmark.cpp
-       TEST random_test SOURCES RandomTest.cpp
-+      BENCHMARK random_benchmark SOURCES RandomBenchmark.cpp
-       TEST range_test SOURCES RangeTest.cpp
-       TEST replaceable_test WINDOWS_DISABLED SOURCES ReplaceableTest.cpp
-       TEST scope_guard_test WINDOWS_DISABLED SOURCES ScopeGuardTest.cpp
-@@ -1227,6 +1237,7 @@ if (BUILD_TESTS OR BUILD_BENCHMARKS)
-       DIRECTORY crypto/test/
-         TEST crypto_blake2xb_test SOURCES Blake2xbTest.cpp
-         TEST crypto_lt_hash_test SOURCES LtHashTest.cpp
-+        BENCHMARK lt_hash_benchmark SOURCES LtHashBenchmark.cpp
-     )
-   endif()
-
 diff --git a/folly/concurrency/test/ConcurrentHashMapBench.cpp b/folly/concurrency/test/ConcurrentHashMapBench.cpp
 index 770c47ed0..e1e5bf097 100644
 --- a/folly/concurrency/test/ConcurrentHashMapBench.cpp
@@ -86,16 +35,3 @@ index 770c47ed0..e1e5bf097 100644
      std::cout << "========================= " << std::setw(2) << nthr
                << " threads" << " =========================" << std::endl;
      bench_ctor_dtor(nthr, 0, "CHM ctor/dtor -- empty          ");
-diff --git a/folly/lang/Hint-inl.h b/folly/lang/Hint-inl.h
-index 2c207a551..bd577ed98 100644
---- a/folly/lang/Hint-inl.h
-+++ b/folly/lang/Hint-inl.h
-@@ -115,7 +115,7 @@ FOLLY_ALWAYS_INLINE void compiler_must_not_elide(T const& t, std::true_type) {
-
- template <typename T>
- FOLLY_ALWAYS_INLINE void compiler_must_not_predict(T& t, std::false_type) {
--  asm volatile("" : "+r"(t));
-+  //asm volatile("" : "+r"(t));
- }
-
- template <typename T>

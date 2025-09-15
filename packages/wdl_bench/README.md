@@ -64,7 +64,7 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
    <td>multi_thread (locks, mutex, etc.)</td>
   </tr>
   <tr>
-   <td> event_base_benchmark</td>
+   <td>io_async_event_base_benchmark</td>
    <td>tests on and off speed of EventBase class, a wrapper of all async I/O processing functionalities </td>
    <td>single_core</td>
   </tr>
@@ -84,17 +84,17 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
    <td>single_core</td>
   </tr>
   <tr>
-   <td>hash_maps_bench </td>
+   <td>container_hash_maps_bench </td>
    <td>multiple common operations of the F14 map data structure</td>
    <td>single_core</td>
   </tr>
   <tr>
-   <td>iobuf_benchmark </td>
+   <td>io_iobuf_benchmark </td>
    <td>multiple common operations of IOBuf, which manages heap-allocated byte buffers.</td>
    <td>single_core</td>
   </tr>
   <tr>
-   <td>lt_hash_benchmark</td>
+   <td>crypto_lt_hash_benchmark</td>
    <td>evaluates speed of the lt hash function, which is common in crypto</td>
    <td>single_core, all_core</td>
   </tr>
@@ -114,7 +114,7 @@ For `lzbench` and `openssl`, the user can also pass the `algo` parameter to spec
    <td>single_core, all_core</td>
   </tr>
   <tr>
-   <td>small_locks_benchmark </td>
+   <td>synchronization_small_locks_benchmark </td>
    <td>evaluates performance of multi_thread locks, mutex, atomic operations, etc. </td>
    <td>multi_thread (locks, mutex, etc.)</td>
   </tr>
