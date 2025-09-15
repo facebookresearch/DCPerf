@@ -622,10 +622,13 @@
     - '--ipv4 {ipv4}'
     - '--real'
     - '--sanity {sanity}'
+    - '--local-hostname "{local_hostname}"'
+
   vars:
     - 'ipv4=0'
     - 'sanity=0'
     - 'dataset_name=bpc_t93586_s2_synthetic_5GB'
+    - 'local_hostname='
   hooks:
     - hook: copymove
       options:
