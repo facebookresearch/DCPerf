@@ -292,9 +292,17 @@ def process_metrics(
     elif "tao_bench_autoscale" in bm_name or "tao_bench_standalone" in bm_name:
         db_fields["metrics"] = bm_metrics["metrics"]["total_qps"]
     elif "spark_standalone_remote" in bm_name:
-        db_fields["metrics"] = bm_metrics["metrics"][
-            "execution_time_test_93586-stage-2.0"
-        ]
+        if "execution_time_test_93586-stage-4.0" in bm_metrics["metrics"]:
+            db_fields["metrics"] = bm_metrics["metrics"][
+                "execution_time_test_93586-stage-4.0"
+            ]
+        elif "execution_time_test_93586-stage-2.0" in bm_metrics["metrics"]:
+            db_fields["metrics"] = bm_metrics["metrics"][
+                "execution_time_test_93586-stage-2.0"
+            ]
+        else:
+            print("No known db metrics found for spark_standalone_remote")
+
     elif "video_transcode_bench" in bm_name:
         db_fields["metrics"] = bm_metrics["metrics"]["throughput_all_levels_hmean_MBps"]
     db_fields["others"] = f"'{json.dumps(bm_metrics['metrics'])}'"
