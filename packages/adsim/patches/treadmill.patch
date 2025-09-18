@@ -7524,7 +7524,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +  // Set the usage information
 +  std::string usage("Treadmill loadtester");
 +  google::SetUsageMessage(usage);
-+  folly::init(&argc, &argv);
++  const folly::Init init(&argc, &argv);
 +}
 +
 +} // namespace treadmill

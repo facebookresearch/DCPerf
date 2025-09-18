@@ -39,7 +39,7 @@ using facebook::cea::chips::adsim::AdSimResponse;
 using facebook::cea::chips::adsim::FizzStopTLSConnector;
 
 int main(int argc, char* argv[]) {
-  folly::init(&argc, &argv);
+  const folly::Init init(&argc, &argv);
 
   // create eventbase first so no dangling stack refs on 'client' dealloc
   folly::EventBase evb;
