@@ -600,9 +600,11 @@
     - '--ipv4 {ipv4}'
     - '--real'
     - '--sanity {sanity}'
+    - '--shuffle-partitions {shuffle_partitions}'
   vars:
     - 'ipv4=0'
     - 'sanity=0'
+    - 'shuffle_partitions=200'
   hooks:
     - hook: copymove
       options:
@@ -623,12 +625,14 @@
     - '--real'
     - '--sanity {sanity}'
     - '--local-hostname "{local_hostname}"'
-
+    - '--shuffle-partitions {shuffle_partitions}'
   vars:
     - 'ipv4=0'
     - 'sanity=0'
     - 'dataset_name=bpc_t93586_s2_synthetic_5GB'
     - 'local_hostname='
+    - 'dataset_name=bpc_t93586_s2_synthetic_1GB'
+    - 'shuffle_partitions=20'
   hooks:
     - hook: copymove
       options:

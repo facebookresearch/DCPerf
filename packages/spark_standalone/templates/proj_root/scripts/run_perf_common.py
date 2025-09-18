@@ -90,6 +90,11 @@ def write_sql_create_tables(args) -> List[str]:
     sql_files = []
     filename = joinpath(WORK_PATH, "create_tables.sql")
     with open(filename, "wt") as fp:
+        # Set spark.sql.shuffle.partitions if specified
+        if hasattr(args, "shuffle_partitions") and args.shuffle_partitions:
+            fp.write(
+                f"""SET spark.sql.shuffle.partitions = {args.shuffle_partitions};\n"""
+            )
         fp.write(f"""USE {args.database};""")
         for table_info, query_dir in table_list:
             table_name = table_info["name"]
@@ -600,6 +605,14 @@ def init_parser():
     for x in [create_parser, install_parser]:
         x.add_argument("--worker-cores", "-c", default=None, help=argparse.SUPPRESS)
         x.add_argument("--worker-mem", "-m", default=None, help=argparse.SUPPRESS)
+    # shuffle partitions setting
+    for x in [create_parser, install_parser, exp_parser]:
+        x.add_argument(
+            "--shuffle-partitions",
+            type=int,
+            default=None,
+            help="Set the number of partitions for Spark SQL shuffle operations",
+        )
     # numa setting
     for x in [start_parser, run_parser, exp_parser]:
         x.add_argument(

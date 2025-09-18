@@ -51,7 +51,7 @@ def download_dataset(args):
 
 
 def install_database(args):
-    metadata_dir = os.path.join(SPARK_DIR, "spark-2.4.5-bin-hadoop2.7", "metastore_db")
+    metadata_dir = os.path.join(SPARK_DIR, "spark-4.0.0-bin-hadoop3", "metastore_db")
     database_dir = os.path.join(args.warehouse_dir, f"{args.dataset_name.lower()}.db")
     if os.path.exists(metadata_dir) and os.path.exists(database_dir):
         print("Database already created; directly run test")
@@ -75,6 +75,9 @@ def install_database(args):
         cmd_list.append(args.local_hostname)
     if args.aggressive > 0:
         cmd_list.append(f"--aggressive {args.aggressive}")
+    if hasattr(args, "shuffle_partitions") and args.shuffle_partitions:
+        cmd_list.append("--shuffle-partitions")
+        cmd_list.append(str(args.shuffle_partitions))
     cmd_list.append("--real")
     print("Create database from dataset")
     exec_cmd(" ".join(cmd_list), args.real)
@@ -172,6 +175,9 @@ def run_test(args):
         cmd_list.append(args.local_hostname)
     if args.aggressive > 0:
         cmd_list.append(f"--aggressive {args.aggressive}")
+    if hasattr(args, "shuffle_partitions") and args.shuffle_partitions:
+        cmd_list.append("--shuffle-partitions")
+        cmd_list.append(str(args.shuffle_partitions))
     cmd_list.append("--real")
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
@@ -323,6 +329,12 @@ def init_parser():
         type=str,
         default=SPARK_DIR,
         help="where to point the directory for shuffling & temporary data",
+    )
+    run_parser.add_argument(
+        "--shuffle-partitions",
+        type=int,
+        default=None,
+        help="Set the number of partitions for Spark SQL shuffle operations",
     )
     run_parser.add_argument(
         "--ipv4",
