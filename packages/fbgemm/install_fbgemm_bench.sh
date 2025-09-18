@@ -16,10 +16,15 @@ BENCHMARKS_DIR="$(pwd)/benchmarks/fbgemm"
 MINICONDA_PREFIX=$(pwd)/build/miniconda
 
 # Version of FBGEMM to install
-FBGEMM_VERSION=v1.2.0
+# This is set to a recent commit for now, as the latest release doesn't include the arm-related CMake files fix.
+# This will be updated to the latest release once the fix is included.
+FBGEMM_VERSION=fd32631d837b41251311099c393af7d7be5cfbf5
 
 # Version of PyTorch to install
 PYTORCH_VERSION=2.7.0
+
+# Version of GCC to use for building
+export GCC_VERSION=14.1.0
 
 # Name of the conda environment to create
 BUILD_ENV=fbgemm_build_oss_env
@@ -1016,7 +1021,7 @@ install_fbgemm() {
   # We specify the CPU variant to build without CUDA support
   echo "[BUILD] Building and installing FBGEMM..."
   # shellcheck disable=SC2086
-  print_exec conda run -n $BUILD_ENV python setup.py ${run_multicore} install --package_variant=cpu
+  print_exec conda run -n $BUILD_ENV python setup.py ${run_multicore} install --build-variant=cpu
 
   # Generate a standalone executable for the project
   # This creates a self-contained executable that can be run without Python
