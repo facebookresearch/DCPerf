@@ -6,12 +6,11 @@
 
 # pyre-unsafe
 
-from benchpress.lib import open_source
-
 from .adsim import AdSimParser
 
 from .benchdnn import BenchdnnParser
 from .cachebench import CacheBenchParser
+from .cdn_bench import CDNBenchParser
 from .checkmark import CheckmarkParser
 from .chm import ChmParser
 from .clang import ClangParser
@@ -108,6 +107,7 @@ def register_parsers(factory):
     factory.register("chm", ChmParser)
     factory.register("deser", DeserParser)
     factory.register("adsim", AdSimParser)
+    factory.register("cdn_bench", CDNBenchParser)
 
     # if not open_source:
     #     factory.register("adsim", AdSimParser)
