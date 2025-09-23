@@ -124,7 +124,7 @@ class Job:
                 l.append(str(val))
         return l
 
-    def substitude_vars(self, role, role_input):
+    def substitute_vars(self, role, role_input):
         if len(self.role_args) > 0:
             var_list = self.role_args[role].get("vars", [])
         else:
@@ -158,7 +158,7 @@ class Job:
             logger.error("the job {} does not have roles".format(self.name))
             exit(1)
         elif len(self.role_args) == 0 and role == "":
-            self.substitude_vars(role, role_input)
+            self.substitute_vars(role, role_input)
         elif len(self.role_args) > 0 and role == "":
             logger.error("you must select a role in {} job".format(self.name))
             exit(1)
@@ -167,7 +167,7 @@ class Job:
                 logger.error("must type correct role, current roles are:")
                 logger.error("{}".format(", ".join(self.role_args.keys())))
                 exit(1)
-            self.substitude_vars(role, role_input)
+            self.substitute_vars(role, role_input)
 
     def copy_output(self, stderr, stdout):
         # optionally copy stdout/err of the child process to our own
