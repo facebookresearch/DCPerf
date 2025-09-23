@@ -24,3 +24,7 @@ collect_amd_zen4_perf_counters.sh
 ## ARM (Other)
 
 Use [topdown tool](https://learn.arm.com/install-guides/topdown-tool/).
+
+
+## Note
+When working with AMD Zen5-based CPUs, the `generate_amd_perf_report.py` has to also run on the same CPU; while for other architectures, the `generate_[cpu]_report.py` can be run on any machine.
