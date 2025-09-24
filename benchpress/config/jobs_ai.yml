@@ -14,6 +14,7 @@
   name: fbgemm_embedding_a_single
   description: Performance benchmark for Model A workload using one single representative embedding table.
   args:
+    - tbe_inference_benchmark
     - nbit-cpu
     - '--num-embeddings={embeddings}'
     - '--bag-size={bag_size}'
@@ -40,6 +41,7 @@
   name: fbgemm_embedding_a_spec
   description: Performance benchmark for Model A workload using a representative set of embedding tables with different bag sizes.
   args:
+    - tbe_inference_benchmark
     - nbit-device-with-spec
     - '--num-embeddings-list={embeddings_list}'
     - '--bag-size-list={bag_size_list}'
@@ -66,6 +68,7 @@
   name: fbgemm_embedding_b_spec_int4
   description: Performance benchmark for Model B workload using a representative set of embedding tables with int4 precision.
   args:
+    - tbe_inference_benchmark
     - nbit-device-with-spec
     - '--num-embeddings-list={embeddings_list}'
     - '--bag-size-list={bag_size_list}'
@@ -92,6 +95,7 @@
   name: fbgemm_embedding_b_spec_int8
   description: Performance benchmark for Model B workload using a representative set of embedding tables with int8 precision.
   args:
+    - tbe_inference_benchmark
     - nbit-device-with-spec
     - '--num-embeddings-list={embeddings_list}'
     - '--bag-size-list={bag_size_list}'
