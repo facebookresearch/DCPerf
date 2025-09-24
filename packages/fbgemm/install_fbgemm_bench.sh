@@ -904,7 +904,8 @@ clone_fbgemm_repo() {
   # Clone the FBGEMM repository along with its submodules
   # We specify the version tag to ensure we get the correct version
   echo "[SETUP] Cloning repository with submodules..."
-  git clone --recursive -b ${FBGEMM_VERSION} https://github.com/pytorch/FBGEMM.git fbgemm_${FBGEMM_VERSION}
+  git clone --recursive https://github.com/pytorch/FBGEMM.git fbgemm_${FBGEMM_VERSION}
+  git -C fbgemm_${FBGEMM_VERSION} checkout ${FBGEMM_VERSION}
 
   # Disable the postbuild script to prevent race conditions during linking
   # This is a workaround for a known issue in the build process
