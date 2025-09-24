@@ -253,6 +253,10 @@ def load_config(args) -> config.BenchpressConfig:
     """
     try:
         override_benchmark = False
+        benchmarks_specs = None
+        jobs_specs = None
+        toolchain_specs = None
+
         if args.benchmarks and args.benchmarks in config.ALT_BENCHMARKS_CONFIGS:
             logger.info(f"Using alternative benchmark suite {args.benchmarks}.")
             bm_config_path = config.ALT_BENCHMARKS_CONFIGS[args.benchmarks]
@@ -311,6 +315,14 @@ def load_config(args) -> config.BenchpressConfig:
             toolchain_specs = toolchain_path.open()
             if args.toolchain_file:
                 toolchain_specs_path = os.path.abspath(args.toolchain_file)
+                if not os.path.exists(toolchain_specs_path):
+                    logger.error(
+                        'toolchain file with name "{}" not found'.format(
+                            toolchain_specs_path
+                        )
+                    )
+                    exit(1)
+
                 logger.warning("Overriding default toolchain config!")
                 logger.info(
                     'Loading toolchain config from "{}"'.format(toolchain_specs_path)
