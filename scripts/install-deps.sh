@@ -21,6 +21,8 @@ centos9() {
         $SUDO dnf config-manager --set-enabled crb
     fi
     $SUDO dnf group install -y "Development Tools" --exclude="texlive*"
+
+    $SUDO dnf install -y openssl-devel
 }
 
 centos8() {
@@ -48,6 +50,8 @@ centos8() {
 
     $SUDO dnf install -y gcc-toolset-11
     scl enable gcc-toolset-11 bash
+
+    $SUDO dnf install -y openssl-devel
 }
 
 ubuntu22() {
@@ -56,6 +60,8 @@ ubuntu22() {
     $SUDO apt update
     $SUDO apt install -y python3-pip git lshw sysstat dmidecode
     $SUDO pip3 install click pyyaml tabulate pandas packaging
+
+    $SUDO apt install -y libssl-dev
 }
 
 if [ -f /etc/os-release ]; then
