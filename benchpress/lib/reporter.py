@@ -88,9 +88,10 @@ class JSONFileReporter(Reporter):
 class ScoreReporter(Reporter):
     """Report scores of benchmarks as well as overall DCPerf score"""
 
+    def __init__(self) -> None:
+        self.scores = {}
+
     def report(self, job, metrics):
-        if not hasattr(self, "scores"):
-            self.scores = {}
         job_name = job.name.replace(" ", "_")
 
         if job_name not in baseline.JOB_TO_BM.keys():
