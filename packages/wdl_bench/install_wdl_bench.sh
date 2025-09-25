@@ -16,8 +16,8 @@ declare -A REPOS=(
 )
 
 declare -A TAGS=(
-    ['folly']='v2025.09.15.00'
-    ['fbthrift']='v2025.09.15.00'
+    ['folly']='v2025.09.22.00'
+    ['fbthrift']='v2025.09.22.00'
     ['lzbench']='v2.1'
     ['openssl']='openssl-3.3.1'
     ['vdso']='main'
