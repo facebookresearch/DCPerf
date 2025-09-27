@@ -6,8 +6,9 @@
 
 # pyre-unsafe
 
-from .adsim import AdSimParser
+from benchpress.lib import open_source
 
+from .adsim import AdSimParser
 from .benchdnn import BenchdnnParser
 from .cachebench import CacheBenchParser
 from .cdn_bench import CDNBenchParser
@@ -55,6 +56,9 @@ from .tailbench import TailBenchParser
 from .tao_bench import TaoBenchParser
 from .tao_bench_autoscale import TaoBenchAutoscaleParser
 from .wdl import WDLParser
+
+if not open_source:
+    from .hackperf import HackperfParser
 
 
 def register_parsers(factory):
@@ -109,5 +113,5 @@ def register_parsers(factory):
     factory.register("adsim", AdSimParser)
     factory.register("cdn_bench", CDNBenchParser)
 
-    # if not open_source:
-    #     factory.register("adsim", AdSimParser)
+    if not open_source:
+        factory.register("hackperf", HackperfParser)
