@@ -114,7 +114,7 @@ run_benchmark() {
   DURATION="$_duration" \
   LOG="$_siege_logs_path" \
   SOURCE="$_urls_path" \
-  python3 ./run-siege -i "${iterations}" -r "${reps}"
+  python3 ./run-siege -i "${iterations}" -r "${reps}" -R "${BENCHPRESS_ROOT}/packages/django_workload/templates/siege.conf"
 }
 
 load_snapshot(){
