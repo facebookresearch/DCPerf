@@ -72,6 +72,7 @@ Usage: ${0##*/} [OPTION]...
        QPS increase is less than this threshold percentage of the previous QPS.
     -x Maximum number of warmup iterations when using QPS threshold. Default: 10
     -N No retry mode. Skip sleep and PID checking in load test startup, break immediately without retrying.
+    -D Drain time in seconds. Time to wait for queue to drain after experiments. Default: 5
 EOF
 }
 
@@ -148,6 +149,9 @@ main() {
     local no_retry_mode
     no_retry_mode=""
 
+    local queue_drain_time
+    queue_drain_time="5"
+
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
     fi
@@ -214,6 +218,9 @@ main() {
             -N)
                 no_retry_mode="1"
                 ;;
+            -D)
+                queue_drain_time="$2"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -224,7 +231,7 @@ main() {
         esac
 
         case $1 in
-            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l|-S|-L|-r|-x)
+            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l|-S|-L|-r|-x|-D)
                 if [ -z "$2" ]; then
                     echo "Invalid option: '$1' requires an argument" 1>&2
                     exit 1
@@ -350,7 +357,7 @@ main() {
         benchreps_tell_state "after fixed_qps_exp"
     fi
 
-    sleep 5 # wait for queue to drain
+    sleep "$queue_drain_time" # wait for queue to drain
     kill -SIGINT $LEAF_PID || true > /dev/null # SIGINT so exits cleanly
 }
 

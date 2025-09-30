@@ -148,8 +148,20 @@ run_loadtest() {
   kill -SIGINT $LOADTEST_PID
 
   # wait for results to show up and queries to drain
-  sleep $wait_time
-  benchreps_tell_state "after sleeping for wait_time=${wait_time} seconds"
+  iteration=0
+  while [ $iteration -lt $((wait_time * 10)) ]; do
+      sleep 0.1
+      iteration=$((iteration + 1))
+
+      # Check if QPS results are available in the output file
+      if grep -q "#: [0-9]\+.\([0-9]\+\)\? QPS" $tmp_file; then
+          actual_wait_time=$(echo "scale=1; ${iteration} * 0.1" | bc)
+          benchreps_tell_state "Results available after ${actual_wait_time} seconds"
+          break
+      fi
+  done
+  actual_wait_time=$(echo "scale=1; ${iteration} * 0.1" | bc)
+  benchreps_tell_state "after waiting for results (waited ${actual_wait_time} seconds, max wait_time=${wait_time})"
 
   # check file for QPS
   if grep -q "#: [0-9]\+.\([0-9]\+\)\? QPS" $tmp_file; then

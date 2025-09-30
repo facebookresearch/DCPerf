@@ -476,17 +476,19 @@
     - '-x {max_warmup_iterations}'
     - '-S {graph_store_path}'
     - '-L {graph_load_path}'
+    - '-D {queue_drain_time}'
     - '-N'
     - '{extra_args}'
   vars:
     - 'num_instances=-1'
     - 'fixed_qps=100000'
     - 'fixed_qps_duration=10'
-    - 'warmup_time=4'
+    - 'warmup_time=5'
     - 'qps_percentage_threshold=-1'
     - 'max_warmup_iterations=-1'
     - 'graph_store_path=default_do_not_store'
     - 'graph_load_path=default_do_not_load'
+    - 'queue_drain_time=1'
     - 'extra_args='
   hooks:
     - hook: copymove
@@ -544,6 +546,7 @@
     - '-x {max_warmup_iterations}'
     - '-S {graph_store_path}'
     - '-L {graph_load_path}'
+    - '-D {queue_drain_time}'
     - '-N'
     - '{extra_args}'
   vars:
@@ -551,11 +554,12 @@
     - 'icache_iterations=400000'
     - 'fixed_qps=100000'
     - 'fixed_qps_duration=10'
-    - 'warmup_time=4'
+    - 'warmup_time=5'
     - 'qps_percentage_threshold=-1'
     - 'max_warmup_iterations=-1'
     - 'graph_store_path=default_do_not_store'
     - 'graph_load_path=default_do_not_load'
+    - 'queue_drain_time=1'
     - 'extra_args='
   hooks:
     - hook: copymove
