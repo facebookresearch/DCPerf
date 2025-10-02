@@ -37,6 +37,7 @@ from .mediawiki import MediawikiParser
 from .memcached_bench import MemcachedBenchParser
 from .minebench import KMeansParser, PLSAParser, RSearchParser
 from .mlc import MlcParser
+from .mna_bench import MnaBenchParser
 from .multichase_fairness import MultichaseFairnessParser
 from .multichase_pingpong import MultichasePingpongParser
 from .multichase_pointer import MultichasePointerParser
@@ -79,6 +80,7 @@ def register_parsers(factory):
     factory.register("minebench_kmeans", KMeansParser)
     factory.register("minebench_plsa", PLSAParser)
     factory.register("minebench_rsearch", RSearchParser)
+    factory.register("mna_bench", MnaBenchParser)
     factory.register("multichase_pointer", MultichasePointerParser)
     factory.register("multichase_pingpong", MultichasePingpongParser)
     factory.register("multichase_fairness", MultichaseFairnessParser)
