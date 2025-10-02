@@ -11,7 +11,11 @@ dnf install -y cmake ninja-build flex bison git texinfo \
 
 
 # gengetopt
-curl $(fwdproxy-config curl) -O https://ftp.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz
+# Source the download retry function - assuming this script is in a subdirectory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)"
+BENCHPRESS_ROOT="$(readlink -f "$SCRIPT_DIR/../../../../..")"
+source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
+curl_with_retry "https://ftpmirror.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz"
 tar -xf gengetopt-2.23.tar.xz
 cd gengetopt-2.23
 ./configure
