@@ -19,13 +19,14 @@ apt install -y memcached libmemcached-dev zlib1g-dev screen \
     python3 python3.10-dev python3.10-venv rpm libffi-dev \
     libssl-dev libcrypt-dev
 
-# Clone django-workload git repository
+# Copy django-workload from srcs directory instead of cloning from GitHub
 mkdir -p "${DJANGO_WORKLOAD_ROOT}"
 pushd "${DJANGO_WORKLOAD_ROOT}"
 if ! [ -d "django-workload" ]; then
-    git clone https://github.com/facebookarchive/django-workload
+    mkdir -p "django-workload"
+    cp -r "${DJANGO_PKG_ROOT}/srcs/django-workload/"* "django-workload/"
 else
-    echo "[SKIPPED] cloning django-workload"
+    echo "[SKIPPED] copying django-workload"
 fi
 
 # Download pip third-party dependencies for django-workload
@@ -131,8 +132,10 @@ wget "https://files.pythonhosted.org/packages/11/35/575091de594677e40440a24be319
 popd
 unalias wget 2>/dev/null || echo "[Finished] downloading dependencies"
 
-# Copy run script w/ execute permissions
-install -m755 -D "${TEMPLATES_DIR}/run.sh" "${DJANGO_WORKLOAD_ROOT}/bin/run.sh"
+# Copy bin directory from srcs
+mkdir -p "${DJANGO_WORKLOAD_ROOT}/bin"
+cp -r "${DJANGO_PKG_ROOT}/srcs/bin/"* "${DJANGO_WORKLOAD_ROOT}/bin/"
+chmod +x "${DJANGO_WORKLOAD_ROOT}/bin/"*.sh
 
 # 2. Install JDK
 JDK_NAME=openjdk-11-jdk
@@ -179,7 +182,7 @@ if ! [ -d "cinder" ]; then
     git clone -b cinder/3.10 https://github.com/facebookincubator/cinder.git
     pushd cinder
     mkdir -p cinder-build
-    ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations
+    ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations --enable-shared LN="ln -s"
     make -j
     make install
     popd
@@ -192,8 +195,9 @@ pushd "${DJANGO_SERVER_ROOT}"
 python3.10 -m venv venv_cpython
 
 # Create Cinder virtual env
-"${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin/python3" -m venv venv_cinder
-popd
+CINDER_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
+export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+[ ! -d venv_cinder ] && "${CINDER_INSTALL_PREFIX}/bin/python3" -m venv venv_cinder
 
 # Install packages in both virtual environments
 # First, CPython environment
@@ -202,34 +206,13 @@ set +u
 source ./venv_cpython/bin/activate
 set -u
 
-if ! [ -f setup.py.bak ]; then
-    #sed -i 's/django-cassandra-engine/django-cassandra-engine >= 1.6, < 1.9/' setup.py
-    sed -i '/Django/s/.*//' setup.py
-    sed -i "/uwsgi/s/.*/          'uwsgi',/" setup.py
-    cp setup.py setup.py.bak
-fi
-
-cp setup.py.bak setup.py
-
 # Install dependencies using third_party pip dependencies
 pip3 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
-# Configure Django and uWSGI
-cp "${TEMPLATES_DIR}/cluster_settings.py" "${DJANGO_SERVER_ROOT}/cluster_settings.py.template" || exit 1
-cp "${TEMPLATES_DIR}/uwsgi.ini" "${DJANGO_SERVER_ROOT}/uwsgi.ini" || exit 1
-cp "${TEMPLATES_DIR}/urls_template.txt" "${DJANGO_REPO_ROOT}/client/urls_template.txt" || exit 1
+# No need to copy configuration files as they are already in the srcs directory
 
-# Install the modified run-siege script
-cp "${TEMPLATES_DIR}/run-siege" "${DJANGO_REPO_ROOT}/client/run-siege" || exit 1
-
-# Patch for MLP and icache buster
-# cltorres: Disable MLP patch. MLP implemented in Python does not work as intented due to bytecode abstraction
-# git apply --check "${TEMPLATES_DIR}/django_mlp.patch" && git apply "${TEMPLATES_DIR}/django_mlp.patch"
-pushd "${DJANGO_REPO_ROOT}"
-git apply --check "${TEMPLATES_DIR}/django_genurl.patch" && git apply "${TEMPLATES_DIR}/django_genurl.patch"
-git apply --check "${TEMPLATES_DIR}/django_libib.patch" && git apply "${TEMPLATES_DIR}/django_libib.patch"
-popd # ${DJANGO_REPO_ROOT}
+# No need to apply patches as the code in srcs already has the desired changes
 
 # Build oldisim icache buster library
 set +u
@@ -251,35 +234,19 @@ if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
     rm -rfv build/
 fi
 
-pushd "${BENCHPRESS_ROOT}"
-# Patch for Java
-git apply --check "${TEMPLATES_DIR}/cassandra-env.patch" && git apply "${TEMPLATES_DIR}/cassandra-env.patch"
-git apply --check "${TEMPLATES_DIR}/jvm_options.patch" && git apply "${TEMPLATES_DIR}/jvm_options.patch"
+# Configure Java options directly
 # shellcheck disable=SC2016
 echo 'JVM_OPTS="$JVM_OPTS -Xss512k"' >> "${DJANGO_WORKLOAD_ROOT}/apache-cassandra/conf/cassandra-env.sh"
-# Patch for gen-urls-file
-git apply --check "${TEMPLATES_DIR}/gen-urls-file.patch" && git apply "${TEMPLATES_DIR}/gen-urls-file.patch"
-popd
 
-pushd "${DJANGO_SERVER_ROOT}/django_workload"
-# Patch for URLs
-git apply --check "${TEMPLATES_DIR}/urls.patch" && git apply "${TEMPLATES_DIR}/urls.patch"
-
-# Apply Memcache tuning
-git apply --check "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch" && git apply "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch"
-# Apply db caching
-git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch"
-# Remove duplicate middleware classes
-git apply --check "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch" && git apply "${TEMPLATES_DIR}/0004-del_dup_middleware_classes.patch"
-# Enable Session, Authentication and Message middleware
-git apply --check "${TEMPLATES_DIR}/0005-django_middleware_settings.patch" && git apply "${TEMPLATES_DIR}/0005-django_middleware_settings.patch"
-popd
+# No need to copy template files as they are already in the srcs directory
 
 deactivate
 
 # Now install packages in Cinder environment
 pushd "${DJANGO_SERVER_ROOT}"  # Make sure we're in the right directory
 export CPATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build/include:${DJANGO_SERVER_ROOT}/cinder/Include"
+export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+export CMAKE_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
 source ./venv_cinder/bin/activate
 set -u
 

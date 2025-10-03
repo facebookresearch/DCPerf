@@ -1,0 +1,6 @@
+--index-url https://pypi.python.org/simple/
+Cython<0.25,>=0.20
+
+# prefer the unreleased version of statsd with minor fixes, only on GitHub
+-e git+https://github.com/django-statsd/django-statsd.git@6acbb2743377349a86fc5ce49a7e4bef0462bbbe#egg=django-statsd-mozilla
+-e .

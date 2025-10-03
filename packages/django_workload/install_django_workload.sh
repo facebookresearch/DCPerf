@@ -43,10 +43,10 @@ cd "$BP_TMP" || exit 1
 dnf install -y git memcached libmemcached-devel zlib-devel screen python36 \
     python36-devel python3-numpy
 
-# Clone django-workload git repository
-git clone https://github.com/facebookarchive/django-workload
-# $OUT is set by benchpress and equal to "/path/to/benchpress/benchmarks"
-mv django-workload "${OUT}/"
+# Copy django-workload from srcs directory instead of cloning from GitHub
+mkdir -p "${OUT}/django-workload"
+cp -r "${DJANGO_PKG_ROOT}/srcs/django-workload/"* "${OUT}/django-workload/"
+cp -r "${DJANGO_PKG_ROOT}/srcs/bin" "${OUT}/"
 
 # Download pip third-party dependencies for django-workload
 mkdir -p "${OUT}/django-workload/django-workload/third_party"
@@ -77,8 +77,10 @@ wget "https://files.pythonhosted.org/packages/47/33/c824f799128dfcfce2142f18d9bc
 wget "https://files.pythonhosted.org/packages/c7/75/45234f7b441c59b1eefd31ba3d1041a7e3c89602af24488e2a22e11e7259/uWSGI-2.0.19.1.tar.gz"
 popd
 
-# Copy run script w/ execute permissions
-install -m755 -D "${TEMPLATES_DIR}/run.sh" "${OUT}/bin/run.sh"
+# Copy bin directory from srcs
+mkdir -p "${OUT}/bin"
+cp -r "${DJANGO_PKG_ROOT}/srcs/bin/"* "${OUT}/bin/"
+chmod +x "${OUT}/bin/"*.sh
 
 # 2. Install JDK
 #JDK_NAME=fb-jdk_8u60-64
@@ -125,7 +127,7 @@ if ! [ -d "cinder" ]; then
     git clone -b cinder/3.10 https://github.com/facebookincubator/cinder.git
     pushd cinder
     mkdir -p cinder-build
-    ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations
+    ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations LN="ln -s"
     make -j
     make install
     popd
@@ -152,23 +154,8 @@ pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-
 pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 
-# Configure Django and uWSGI
-cp "${TEMPLATES_DIR}/cluster_settings.py" "${OUT}/django-workload/django-workload/cluster_settings.py.template" || exit 1
-cp "${TEMPLATES_DIR}/uwsgi.ini" "${OUT}/django-workload/django-workload/uwsgi.ini" || exit 1
-cp "${TEMPLATES_DIR}/urls_template.txt" "${OUT}/django-workload/client/urls_template.txt" || exit 1
-
-# Install the modified run-siege script
-cp "${TEMPLATES_DIR}/run-siege" "${DJANGO_REPO_ROOT}/client/run-siege" || exit 1
-
-# Patch for MLP and icache buster
-# cltorres: Disable MLP patch. MLP implemented in Python does not work as intented due to bytecode abstraction
-# git apply --check "${TEMPLATES_DIR}/django_mlp.patch" && git apply "${TEMPLATES_DIR}/django_mlp.patch"
-pushd "${DJANGO_REPO_ROOT}"
-git apply --check "${TEMPLATES_DIR}/django_genurl.patch" && git apply "${TEMPLATES_DIR}/django_genurl.patch"
-git apply --check "${TEMPLATES_DIR}/django_libib.patch" && git apply "${TEMPLATES_DIR}/django_libib.patch"
-popd # ${DJANGO_REPO_ROOT}
-
 # Build oldisim icache buster library
+# Will only build once, the outcome library can be used in both CPython and Cinder
 set +u
 if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
     if [ -z "${IBCC}" ]; then
@@ -187,11 +174,7 @@ if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
     rm -rfv build/
 fi
 
-# Apply Memcache tuning
-cd "${OUT}/django-workload/django-workload/django_workload" || exit 1
-git apply --check "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch" && git apply "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch"
-# Apply db caching
-git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch"
+# No need to copy template files as they are already in the srcs directory
 
 deactivate
 
@@ -206,7 +189,6 @@ pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-
 pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 
-deactivate
 popd  # ${OUT}/django-workload/django-workload
 pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 

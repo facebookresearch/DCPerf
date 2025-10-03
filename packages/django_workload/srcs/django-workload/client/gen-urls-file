@@ -1,0 +1,101 @@
+#!/usr/bin/python3
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+import sys
+#import parser
+import optparse
+import os
+import random
+
+# input file
+URLS_TEMPLATE = "urls_template.txt"
+URLS_OUT = "urls.txt"
+
+
+def get_int_from_str(str_n, line_no):
+    n = 0
+
+    try:
+        n = int(str_n)
+    except ValueError:
+        print ("ERROR: Weight number in " + URLS_TEMPLATE + " file"
+               " at line " + str(line_no) + " is not an int\n")
+        sys.exit(1)
+
+    if (n < 1):
+        print("ERROR: Please provide weight numbers that are >=1"
+              " in the " + URLS_TEMPLATE + " file at"
+              " line " + str(line_no) + "\n")
+        sys.exit(1)
+
+    return n
+
+
+def parse_urls():
+    url_dict = {}
+    total = 0
+    line_no = 1
+
+    # read URL template file
+    with open(URLS_TEMPLATE) as url_template_file:
+        for line in url_template_file:
+            line = line.strip()
+            parts = line.split()
+            if (len(parts) < 2):
+                print ("ERROR: Invalid format for " + URLS_TEMPLATE + " file"
+                       " at line " + str(line_no) + "\n"
+                       "Use the -h option of this program for instructions\n")
+                sys.exit(1)
+            weight = parts.pop()
+            repeat = get_int_from_str(weight, line_no)
+            total = total + repeat
+            request = " ".join(parts)
+            url_dict[request] = repeat
+            line_no = line_no + 1
+
+    # build a random list of URLs with their own repeats
+    url_list = []
+    for request, repeat in url_dict.items():
+        for i in range(repeat):
+            url_list.append(request)
+    random.shuffle(url_list)
+
+    # write to URL input file for Siege
+    with open(URLS_OUT, 'w') as url_file:
+        for current_url in url_list:
+            url_file.write(current_url + "\n")
+
+    print ("File " + URLS_OUT + " generated successfully\n")
+
+
+def main(argv):
+    optparse.OptionParser.format_epilog = lambda self, formatter: self.epilog
+    parser = optparse.OptionParser(
+        usage = "./%prog",
+        epilog =
+"""
+Parse urls_template.txt file to obtain the urls.txt
+input file for Siege. The format of the
+urls_template.txt file is as follows:
+
+http://host:port/page1 w1
+http://host:port/page2 w2
+http://host:port/page3 w3
+
+where w is the weight of that page, expressed as an
+integer. This way, page1 will be acccessed by siege
+roughly w1 / (w1 + w2 + w3) of the total requests
+""")
+
+
+    options, args = parser.parse_args(argv)
+    if len(args) != 0:
+        parser.error("This program takes no arguments")
+
+    parse_urls()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

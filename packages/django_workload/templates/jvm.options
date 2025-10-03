@@ -12,23 +12,6 @@
 -Xss256k
 -XX:StringTableSize=1000003
 
-# CMS settings
--XX:+UseParNewGC
--XX:+UseConcMarkSweepGC
--XX:+CMSParallelRemarkEnabled
--XX:SurvivorRatio=4
--XX:MaxTenuringThreshold=1
--XX:CMSInitiatingOccupancyFraction=60
--XX:+UseCMSInitiatingOccupancyOnly
-
--XX:+CMSScavengeBeforeRemark
--XX:CMSMaxAbortablePrecleanTime=60000
-
--XX:CMSWaitDuration=30000
--XX:+CMSParallelInitialMarkEnabled
--XX:+CMSEdenChunksRecordAlways
--XX:+CMSClassUnloadingEnabled
-
 # Additional settings
 -XX:+UseCondCardMark
 -XX:MaxTenuringThreshold=2
