@@ -457,12 +457,12 @@ class ARMPerfUtil(Monitor):
                 return False
             subprocess.run(["topdown-tool", "--help"], capture_output=True, check=True)
         except subprocess.CalledProcessError as e:
-            print(
+            logger.warning(
                 f"Failed to install topdown-tool. Command: {e.cmd}, exit code: {e.returncode}"
             )
             return False
         except OSError:
-            print("Unable to chdir telemetry-solution/tools/topdown_tool")
+            logger.warning("Unable to chdir telemetry-solution/tools/topdown_tool")
             return False
         return True
 

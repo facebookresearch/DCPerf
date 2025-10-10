@@ -205,7 +205,7 @@ class Job:
         """Dump the run command in a file and execute it."""
         logger.info('Starting "{}"'.format(self.name))
         cmd = self.dry_run(role, role_input)
-        click.echo("Job execution command: {}".format(cmd))
+        click.echo("Job execution command: {}".format(cmd), err=True)
         # add string to cmd so that it dumps the stdout and strerr to different files
         # cmd = cmd + " > benchpress_run_output.txt 2> benchpress_run_error.txt"
 
@@ -237,7 +237,7 @@ class Job:
                 )
             else:
                 cmd = get_safe_cmd([self.binary] + self.args)
-                click.echo("Job execution command: {}".format(cmd))
+                click.echo("Job execution command: {}".format(cmd), err=True)
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -343,7 +343,7 @@ class Job:
         if len(stderr) > TRIM_OUTPUT_LINES:
             output += f"\n[...trimmed to last {TRIM_OUTPUT_LINES} lines...]\n"
         output += "\t{}".format("\n\t".join(stderr[-TRIM_OUTPUT_LINES:]))
-        click.echo(output)
+        click.echo(output, err=True)
 
 
 class JobSuiteBuilder:

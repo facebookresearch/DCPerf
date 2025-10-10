@@ -60,5 +60,4 @@ class MultichasePointerParser(Parser):
                     key = key + " thread count " + thread_count
                 key = key + " latency (ns)"
                 metrics[key] = float(v.strip())
-        print("metrics", metrics)
         return metrics

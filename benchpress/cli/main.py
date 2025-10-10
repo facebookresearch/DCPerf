@@ -240,7 +240,8 @@ def parse_override_job_args(override_job_args):
             (
                 "Could not properly parse --override_job_args flag. "
                 "Run ./automark exec -h to see an example of what to pass in."
-            )
+            ),
+            err=True,
         )
         raise
 
