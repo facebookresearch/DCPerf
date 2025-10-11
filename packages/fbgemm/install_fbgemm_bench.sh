@@ -21,7 +21,7 @@ MINICONDA_PREFIX=$(pwd)/build/miniconda
 FBGEMM_VERSION=fd32631d837b41251311099c393af7d7be5cfbf5
 
 # Version of PyTorch to install
-PYTORCH_VERSION=2.7.0
+PYTORCH_VERSION=2.8.0
 
 # Version of GCC to use for building
 export GCC_VERSION=14.1.0
