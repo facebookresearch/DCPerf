@@ -73,6 +73,9 @@ Usage: ${0##*/} [OPTION]...
     -x Maximum number of warmup iterations when using QPS threshold. Default: 10
     -N No retry mode. Skip sleep and PID checking in load test startup, break immediately without retrying.
     -D Drain time in seconds. Time to wait for queue to drain after experiments. Default: 5
+    -R Seed for LeafNodeRank random number generator. If not provided, current time will be used.
+    -P Seed for PageRank random number generator. If not provided, current time will be used.
+    -C Seed for PointerChase random number generator. If not provided, current time will be used.
 EOF
 }
 
@@ -152,6 +155,15 @@ main() {
     local queue_drain_time
     queue_drain_time="5"
 
+    local leafnoderank_seed
+    leafnoderank_seed=""
+
+    local pagerank_seed
+    pagerank_seed=""
+
+    local pointerchase_seed
+    pointerchase_seed=""
+
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
     fi
@@ -221,6 +233,15 @@ main() {
             -D)
                 queue_drain_time="$2"
                 ;;
+            -R)
+                leafnoderank_seed="--node_rank_seed=$2"
+                ;;
+            -P)
+                pagerank_seed="--page_rank_seed=$2"
+                ;;
+            -C)
+                pointerchase_seed="--pointer_chase_seed=$2"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -231,7 +252,7 @@ main() {
         esac
 
         case $1 in
-            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l|-S|-L|-r|-x|-D)
+            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l|-S|-L|-r|-x|-D|-R|-P|-C)
                 if [ -z "$2" ]; then
                     echo "Invalid option: '$1' requires an argument" 1>&2
                     exit 1
@@ -270,7 +291,10 @@ main() {
         --min_icache_iterations="$icache_iterations" \
         "$store_graph" \
         "$load_graph" \
-        "$instrument_graph" >> $BREPS_LFILE 2>&1 &
+        "$instrument_graph" \
+        "$leafnoderank_seed" \
+        "$pagerank_seed" \
+        "$pointerchase_seed" >> $BREPS_LFILE 2>&1 &
 
     LEAF_PID=$!
 

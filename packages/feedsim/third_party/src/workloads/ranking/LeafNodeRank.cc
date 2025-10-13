@@ -95,15 +95,35 @@ void ThreadStartup(
   this_thread.srvIOThreadPool = srvIOThreadPool;
   this_thread.ioThreadPool = ioThreadPool;
   this_thread.timekeeperPool = timekeeperPool;
+  unsigned noderank_seed;
+  if (args.node_rank_seed_given) {
+    noderank_seed = static_cast<unsigned>(args.node_rank_seed_arg);
+  } else {
+    noderank_seed = std::chrono::system_clock::now().time_since_epoch().count();
+  }
+
+  unsigned page_rank_seed;
+  if (args.page_rank_seed_given) {
+    page_rank_seed = static_cast<unsigned>(args.page_rank_seed_arg);
+  } else {
+    page_rank_seed = std::chrono::system_clock::now().time_since_epoch().count();
+  }
+
+  unsigned pointer_chase_seed;
+  if (args.pointer_chase_seed_given) {
+    pointer_chase_seed = static_cast<unsigned>(args.pointer_chase_seed_arg);
+  } else {
+    pointer_chase_seed =
+        std::chrono::system_clock::now().time_since_epoch().count();
+  }
+
   this_thread.page_ranker = std::make_unique<ranking::dwarfs::PageRank>(
-      std::move(graph), args.cpu_threads_arg);
+      std::move(graph), args.cpu_threads_arg, page_rank_seed);
   this_thread.icache_buster =
       std::make_unique<ICacheBuster>(kNumICacheBusterMethods);
-  this_thread.pointer_chaser =
-      std::make_unique<search::PointerChase>(kPointerChaseSize);
-
-  unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-  this_thread.rng.seed(seed);
+  this_thread.pointer_chaser = std::make_unique<search::PointerChase>(
+      kPointerChaseSize, pointer_chase_seed);
+  this_thread.rng.seed(noderank_seed);
 
   const double alpha = 0.7;
   const double beta = 20000;
@@ -319,8 +339,12 @@ int main(int argc, char** argv) {
       auto start_load = std::chrono::steady_clock::now();
       g_shared_graph = params.loadGraphFromFile(args.load_graph_arg);
       auto end_load = std::chrono::steady_clock::now();
-      auto load_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_load - start_load).count();
-      std::cout << "Graph loading time: " << load_duration << " ms" << std::endl;
+      auto load_duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              end_load - start_load)
+              .count();
+      std::cout << "Graph loading time: " << load_duration << " ms"
+                << std::endl;
     } else {
       g_shared_graph = params.loadGraphFromFile(args.load_graph_arg);
     }
@@ -329,15 +353,23 @@ int main(int argc, char** argv) {
       auto start_build = std::chrono::steady_clock::now();
       g_shared_graph = params.buildGraph();
       auto end_build = std::chrono::steady_clock::now();
-      auto build_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_build - start_build).count();
-      std::cout << "Graph building time: " << build_duration << " ms" << std::endl;
+      auto build_duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              end_build - start_build)
+              .count();
+      std::cout << "Graph building time: " << build_duration << " ms"
+                << std::endl;
 
       if (args.store_graph_given) {
         auto start_store = std::chrono::steady_clock::now();
         params.storeGraphToFile(g_shared_graph, args.store_graph_arg);
         auto end_store = std::chrono::steady_clock::now();
-        auto store_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_store - start_store).count();
-        std::cout << "Graph storing time: " << store_duration << " ms" << std::endl;
+        auto store_duration =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                end_store - start_store)
+                .count();
+        std::cout << "Graph storing time: " << store_duration << " ms"
+                  << std::endl;
       }
     } else {
       g_shared_graph = params.buildGraph();

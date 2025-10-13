@@ -21,14 +21,18 @@
 
 namespace search {
 
-PointerChase::PointerChase(size_t num_elems)
+PointerChase::PointerChase(size_t num_elems, unsigned seed)
     : data_(num_elems), current_index_(0) {
   // Fill data with [0, num_elems)
   std::iota(data_.begin(), data_.end(), 0);
 
   // Make a random permutation over data
-  unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-  std::shuffle(data_.begin(), data_.end(), std::default_random_engine(seed));
+  // Use provided seed, or fall back to time-based seed if seed is 0
+  unsigned actual_seed = seed != 0
+      ? seed
+      : std::chrono::system_clock::now().time_since_epoch().count();
+  std::shuffle(
+      data_.begin(), data_.end(), std::default_random_engine(actual_seed));
 }
 
 void PointerChase::Chase(size_t num_iterations) {
@@ -36,4 +40,4 @@ void PointerChase::Chase(size_t num_iterations) {
     current_index_ = data_[current_index_];
   }
 }
-}  // namespace search
+} // namespace search

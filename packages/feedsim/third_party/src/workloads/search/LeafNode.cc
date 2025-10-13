@@ -26,9 +26,9 @@
 #include "oldisim/QueryContext.h"
 #include "oldisim/Util.h"
 
-#include "PointerChase.h"
 #include "ICacheBuster.h"
 #include "LeafNodeCmdline.h"
+#include "PointerChase.h"
 #include "RequestTypes.h"
 
 // Shared configuration flags
@@ -50,8 +50,9 @@ struct ThreadData {
   std::string random_string;
 };
 
-void ThreadStartup(oldisim::NodeThread& thread,
-                   std::vector<ThreadData>& thread_data) {
+void ThreadStartup(
+    oldisim::NodeThread& thread,
+    std::vector<ThreadData>& thread_data) {
   ThreadData& this_thread = thread_data[thread.get_thread_num()];
 
   // Initialize of I$Buster
@@ -61,8 +62,13 @@ void ThreadStartup(oldisim::NodeThread& thread,
   this_thread.icache_buster.reset(new ICacheBuster(kICacheBusterSize));
 
   // Initialize RNG and latency sampler
-  unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-  this_thread.rng.seed(seed);
+  unsigned node_seed;
+  if (args.node_seed_given) {
+    node_seed = static_cast<unsigned>(args.node_seed_arg);
+  } else {
+    node_seed = std::chrono::system_clock::now().time_since_epoch().count();
+  }
+  this_thread.rng.seed(node_seed);
 
   const double alpha = 0.7;
   const double beta = 20000;
@@ -73,9 +79,10 @@ void ThreadStartup(oldisim::NodeThread& thread,
   this_thread.random_string = RandomString(kMaxResponseSize);
 }
 
-void SearchRequestHandler(oldisim::NodeThread& thread,
-                          oldisim::QueryContext& context,
-                          std::vector<ThreadData>& thread_data) {
+void SearchRequestHandler(
+    oldisim::NodeThread& thread,
+    oldisim::QueryContext& context,
+    std::vector<ThreadData>& thread_data) {
   ThreadData& this_thread = thread_data[thread.get_thread_num()];
   search::PointerChase& chaser = *this_thread.pointer_chaser;
   ICacheBuster& buster = *this_thread.icache_buster;
@@ -123,9 +130,11 @@ int main(int argc, char** argv) {
       std::bind(ThreadStartup, std::placeholders::_1, std::ref(thread_data)));
   server.RegisterQueryCallback(
       search::kSearchRequestType,
-      std::bind(SearchRequestHandler, std::placeholders::_1,
-                std::placeholders::_2,
-                std::ref(thread_data)));
+      std::bind(
+          SearchRequestHandler,
+          std::placeholders::_1,
+          std::placeholders::_2,
+          std::ref(thread_data)));
 
   server.SetNumThreads(args.threads_arg);
   server.SetThreadPinning(!args.noaffinity_given);

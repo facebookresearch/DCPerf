@@ -477,6 +477,9 @@
     - '-S {graph_store_path}'
     - '-L {graph_load_path}'
     - '-D {queue_drain_time}'
+    - '-R {node_rank_seed}'
+    - '-P {page_rank_seed}'
+    - '-C {pointer_chase_seed}'
     - '-N'
     - '{extra_args}'
   vars:
@@ -489,6 +492,9 @@
     - 'graph_store_path=default_do_not_store'
     - 'graph_load_path=default_do_not_load'
     - 'queue_drain_time=1'
+    - 'node_rank_seed=54321'
+    - 'page_rank_seed=12345'
+    - 'pointer_chase_seed=98765'
     - 'extra_args='
   hooks:
     - hook: copymove
