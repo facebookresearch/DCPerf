@@ -81,6 +81,16 @@ else
     echo "[SKIPPED] libevent-2.1.8"
 fi
 
+# Download binutils
+BINUTILS_TARBALL_PATH="${FOLLY_BUILD_ROOT}/downloads/libiberty-binutils-2.42.tar.xz"
+BINUTILS_TARBALL_URL="https://ftpmirror.gnu.org/gnu/binutils/binutils-2.42.tar.xz"
+if ! [ -f "${BINUTILS_TARBALL_PATH}" ]; then
+    echo "Downloading libiberty-binutils-2.42.tar.xz..."
+    source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
+    mkdir -p "$(dirname "${BINUTILS_TARBALL_PATH}")"
+    download_with_retry "${BINUTILS_TARBALL_URL}" "${BINUTILS_TARBALL_PATH}" 5
+fi
+
 # Installing folly
 if ! [ -d "folly" ]; then
     git clone https://github.com/facebook/folly
