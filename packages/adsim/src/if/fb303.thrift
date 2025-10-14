@@ -16,6 +16,8 @@
  * @author Mark Slee <mcslee@facebook.com>
  */
 include "fb303/thrift/fb303_core.thrift"
+include "thrift/annotation/cpp.thrift"
+include "thrift/annotation/thrift.thrift"
 
 namespace java com.facebook.fbcode.fb303
 namespace java.swift com.facebook.swift.fb303
@@ -72,12 +74,14 @@ service FacebookService extends fb303_core.BaseService {
    * must agree on the profile format).
    *
    */
-  string getCpuProfile(1: i32 profileDurationInSec) (thread = 'eb');
+  @cpp.ProcessInEbThreadUnsafe
+  string getCpuProfile(1: i32 profileDurationInSec);
 
   /**
    * Returns a CPU profile, specifying options (see the struct definition).
    */
-  string getCpuProfileWithOptions(1: CpuProfileOptions options) (thread = 'eb');
+  @cpp.ProcessInEbThreadUnsafe
+  string getCpuProfileWithOptions(1: CpuProfileOptions options);
 
   /**
    * Returns a WallTime Profiler data over the given time
@@ -94,7 +98,8 @@ service FacebookService extends fb303_core.BaseService {
    * Returns the 1-minute load average on the system (i.e. the load may not
    * all be coming from the current process).
    */
-  double getLoad() (priority = 'IMPORTANT');
+  @thrift.Priority{level = thrift.RpcPriority.IMPORTANT}
+  double getLoad();
 
   /**
    * Returns the pid of the process
