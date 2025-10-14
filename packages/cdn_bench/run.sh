@@ -5,4 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 set -Eeuo pipefail
 
-echo "Run, World!"
+# start nginx
+nginx
+
+# run load gen
+wrk http://127.0.0.1

@@ -5,4 +5,5 @@
 # LICENSE file in the root directory of this source tree.
 set -Eeuo pipefail
 
-echo "Goodbye, World!"
+# nginx
+sudo dnf remove nginx
