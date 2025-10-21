@@ -504,6 +504,7 @@
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
           - 'benchmarks/feedsim/src/perf.data'
+          - 'benchmarks/feedsim/breakdown.csv'
 
 - name: feedsim_autoscale_arm
   benchmark: feedsim_autoscale
@@ -575,6 +576,7 @@
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
           - 'benchmarks/feedsim/src/perf.data'
+          - 'benchmarks/feedsim/breakdown.csv'
 
 
 - benchmark: spark_standalone

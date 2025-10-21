@@ -15,6 +15,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Calculate BENCHPRESS_ROOT relative to this script location
+# This script is in packages/feedsim/third_party/src/scripts/search_qps.sh
+# So BENCHPRESS_ROOT is 5 levels up (../../../../../../)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)"
+BENCHPRESS_ROOT="$(readlink -f "$SCRIPT_DIR/../../../..")"
+
+
+
 BREPS_LFILE=/tmp/feedsim_log.txt
 
 SCRIPT_NAME="$(basename "$0")"
@@ -23,7 +31,13 @@ echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
 function benchreps_tell_state () {
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
-
+# Source runtime breakdown utilities if they exist
+if [ -f "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh" ]; then
+    source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
+else #throw error if runtime breakdown utils are not found
+    echo "Runtime breakdown utilities not found in ${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh."
+    echo "BENCHPRESS_ROOT: ${BENCHPRESS_ROOT}"
+fi
 
 function tuning_reduce_qps () {
   measured_latency_local=${1}
@@ -83,20 +97,25 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
     -x          Maximum number of warmup iterations when using QPS threshold. Default: 10
     -N          No retry mode. Skip sleep and PID checking in load test startup, break immediately
                 without retrying. Optional
+    -P          PID of the process to log runtime breakdowns. Optional
+    -B          Folder to log runtime breakdowns. Optional
 EOF
 }
 
 # Run the load test and pull results
-# run_loadtest output_qps output_latency [target qps]
+# run_loadtest output_qps output_latency target_qps operation_name
+# Note: target_qps and operation_name can be empty strings
 run_loadtest() {
   local __output_qps=$1
   local __output_latency=$2
+  local target_qps="$3"
+  local operation_name="$4"
   local qps_arg=""
   local threads_arg=""
 
-  # check for optional QPS argument
-  if [ $# -eq 3 ]; then
-    qps_arg="--qps=$3"
+  # check if target_qps is valid (non-empty)
+  if [ -n "$target_qps" ]; then
+    qps_arg="--qps=$target_qps"
   fi
 
   # check if we want auto-adjusted worker thread counts
@@ -141,7 +160,16 @@ run_loadtest() {
   done
 
   # wait for time
+  # Log the start of the main benchmark experiment
+  if [ -n "$operation_name" ]; then
+    log_start "$breakdown_folder" "$operation_name" "$breakdown_pid"
+  fi
+
   sleep $experiment_time
+
+  if [ -n "$operation_name" ]; then
+    log_end "$breakdown_folder" "$operation_name" "$breakdown_pid"
+  fi
   benchreps_tell_state "after sleeping for experiment_time=${experiment_time} seconds"
 
   # send SIGINT to the command
@@ -246,9 +274,11 @@ auto_driver_threads=""
 qps_threshold=""
 max_warmup_iterations=10
 no_retry_mode=""
+breakdown_pid=""
+breakdown_folder=""
 
 OPTIND=1 # Reset is necessary if getopts was used previously in the script.  It is a good idea to make this local in a function.
-while getopts "ht:f:w:m:s:q:ao:r:x:N" opt; do
+while getopts "ht:f:w:m:s:q:ao:r:x:NP:B:" opt; do
   case "$opt" in
     h)
       show_help
@@ -287,6 +317,12 @@ while getopts "ht:f:w:m:s:q:ao:r:x:N" opt; do
       ;;
     N)
       no_retry_mode=1
+      ;;
+    P)
+      breakdown_pid=$OPTARG
+      ;;
+    B)
+      breakdown_folder=$OPTARG
       ;;
     '?')
       show_help >&2
@@ -368,7 +404,7 @@ if [ "$warmup_time" -gt 0 ]; then
     warmup_iteration=0
 
     while [ $warmup_iteration -lt $max_warmup_iterations ]; do
-      run_loadtest current_qps measured_latency
+      run_loadtest current_qps measured_latency "" ""
       benchreps_tell_state "after iteration $warmup_iteration"
       printf "warmup iteration %d: qps = %.2f, latency = %.2f\n" $warmup_iteration $current_qps $measured_latency >> $BREPS_LFILE
 
@@ -404,7 +440,7 @@ if [ "$warmup_time" -gt 0 ]; then
     peak_qps=$current_qps
   else
     # Original fixed warmup time
-    run_loadtest peak_qps measured_latency
+    run_loadtest peak_qps measured_latency "" ""
   fi
 
   printf "warmup qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
@@ -422,7 +458,8 @@ if [[ -n "$fixed_qps" ]]; then
     if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
         collect_perf_record &
     fi
-    run_loadtest measured_qps measured_latency $fixed_qps
+    # $main_operation_name is defined in runtime_breakdown_utils.sh
+    run_loadtest measured_qps measured_latency $fixed_qps "$main_operation_name"
 
     printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps $measured_qps $measured_latency
     echo "final requested_qps = $fixed_qps, measured_qps = $measured_qps, latency = $measured_latency" >> $BREPS_LFILE
@@ -430,7 +467,7 @@ if [[ -n "$fixed_qps" ]]; then
   else
     for fixed_qps_el in $fixed_qps_array; do
       benchreps_tell_state "before fixed_qps_iter $fixed_qps_el"
-      run_loadtest measured_qps measured_latency $fixed_qps_el
+      run_loadtest measured_qps measured_latency $fixed_qps_el ""
       printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps_el $measured_qps $measured_latency
       echo "final requested_qps = $fixed_qps_el, measured_qps = $measured_qps, latency = $measured_latency" >> $BREPS_LFILE
       benchreps_tell_state "after fixed_qps_iter $fixed_qps_el"
@@ -442,7 +479,7 @@ fi
 
 # find peak QPS
 benchreps_tell_state "before peak_qps"
-run_loadtest peak_qps measured_latency
+run_loadtest peak_qps measured_latency "" ""
 printf "peak qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
 benchreps_tell_state "after peak_qps"
 
@@ -465,7 +502,7 @@ while [[ $loop_cond -eq 1 ]]; do
   cur_qps=$(echo "scale=5; ($high_qps + $low_qps) / 2" | bc)
 
   # run experiment and report result
-  run_loadtest measured_qps measured_latency $cur_qps
+  run_loadtest measured_qps measured_latency $cur_qps ""
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
   # set new QPS ranges
@@ -504,7 +541,7 @@ while [[ $loop_cond -eq 1 ]]; do
   fi
 
   # run experiment and report result
-  run_loadtest measured_qps measured_latency $cur_qps
+  run_loadtest measured_qps measured_latency $cur_qps ""
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
   n_iters=$(echo "$n_iters + 1" | bc)
@@ -519,7 +556,7 @@ while [[ $loop_cond -eq 1 ]]; do
   cur_qps=$(echo "scale=5; $cur_qps - (($cur_qps - $measured_qps)/2)" | bc)
 
   # run experiment and report result
-  run_loadtest measured_qps measured_latency $cur_qps
+  run_loadtest measured_qps measured_latency $cur_qps ""
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
   loop_cond=$(echo "($cur_qps > ($measured_qps*1.02))" | bc)
@@ -546,7 +583,7 @@ experiment_time=$final_experiment_time
 if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
     collect_perf_record &
 fi
-run_loadtest measured_qps measured_latency $cur_qps
+run_loadtest measured_qps measured_latency $cur_qps ""
 printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
 # report non-converging error if iteration reaches max tries

@@ -27,6 +27,11 @@ BC_MIN_FN='define min (a, b) { if (a <= b) return (a); return (b); }'
 # Constants
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 FEEDSIM_ROOT_SRC="${FEEDSIM_ROOT}/src"
+BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
+BREAKDOWN_FOLDER="$FEEDSIM_ROOT"
+
+# Source runtime breakdown utilities
+source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
 # Thrift threads: scale with logical CPUs till 216. Having more than that
 # will risk running out of memory and getting killed
@@ -263,6 +268,8 @@ main() {
         shift # pop the previously read argument
     done
 
+    create_breakdown_csv "$BREAKDOWN_FOLDER"
+
     set -u  # Enable unbound variables check from here onwards
 
     # Bring up services
@@ -340,7 +347,7 @@ main() {
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -w 15 -f 300 -s 95p:500 $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        scripts/search_qps.sh -w 15 -f 300 -s 95p:500 -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
@@ -350,7 +357,7 @@ main() {
     elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
         benchreps_tell_state "before search_qps"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port"
@@ -371,6 +378,7 @@ main() {
         scripts/search_qps.sh -s 95p -t "$fixed_qps_duration" \
            -m "$warmup_time" \
            -q "$fixed_qps" \
+           -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" \
            $qps_threshold_args $no_retry_args \
            -o "${FEEDSIM_ROOT}/${result_filename}" \
            -- build/workloads/ranking/DriverNodeRank \
