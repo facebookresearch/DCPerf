@@ -11,6 +11,123 @@ from datetime import datetime
 
 import pandas as pd
 
+default_last_secs = 300
+default_skip_last_secs = 0
+
+
+def parse_breakdown_csv(breakdown_file):
+    """Parse breakdown.csv to extract main_benchmark start and end times.
+
+    Args:
+        breakdown_file: Path to breakdown.csv file
+
+    Returns:
+        Tuple of (start_datetime, end_datetime) or (None, None) if not found
+    """
+    try:
+        print(f"parsing {breakdown_file}")
+        df = pd.read_csv(breakdown_file)
+        main_benchmark_rows = df[df["operation_name"] == "main_benchmark"]
+
+        if len(main_benchmark_rows) == 0:
+            print("No main_benchmark rows found in breakdown.csv")
+            return None, None
+
+        start_row = main_benchmark_rows[
+            main_benchmark_rows["timestamp_type"] == "start"
+        ]
+        end_row = main_benchmark_rows[main_benchmark_rows["timestamp_type"] == "end"]
+
+        if len(start_row) == 0 or len(end_row) == 0:
+            print("No start/end rows found in breakdown.csv")
+            return None, None
+
+        start_time_str = start_row.iloc[0]["timestamp"]
+        end_time_str = end_row.iloc[0]["timestamp"]
+        print(f"start_time_str: {start_time_str}, end_time_str: {end_time_str}")
+
+        # Parse timestamps - format: "2025-10-16 16:59:21.909"
+        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S.%f")
+        end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S.%f")
+        print(f"start_time: {start_time}, end_time: {end_time}")
+        return start_time, end_time
+    except Exception as e:
+        print(f"Error parsing breakdown.csv: {e}")
+        return None, None
+
+
+def parse_metric_timestamps(metric_file):
+    """Parse timestamps from a metric file like mpstat.csv.
+
+    Args:
+        metric_file: Path to metric file (e.g., mpstat.csv)
+
+    Returns:
+        List of datetime objects representing timestamps in the file
+    """
+    try:
+        df = pd.read_csv(metric_file)
+        if "timestamp" not in df.columns:
+            return []
+
+        timestamps = []
+        for ts_str in df["timestamp"]:
+            # Parse time-only format like "05:01:49 PM"
+            try:
+                time_obj = datetime.strptime(ts_str, "%I:%M:%S %p").time()
+                timestamps.append(time_obj)
+            except ValueError:
+                try:
+                    # Try alternative format without AM/PM
+                    time_obj = datetime.strptime(ts_str, "%H:%M:%S").time()
+                    timestamps.append(time_obj)
+                except ValueError:
+                    continue
+
+        return timestamps
+    except Exception as e:
+        print(f"Error parsing metric file {metric_file}: {e}")
+        return []
+
+
+def find_closest_timestamp_index(metric_times, target_datetime):
+    """Find the index of the timestamp in metric_times closest to target_datetime.
+
+    Args:
+        metric_times: List of time objects from metric file
+        target_datetime: Target datetime object
+
+    Returns:
+        Index of closest timestamp, or None if not found
+    """
+    if not metric_times:
+        return None
+
+    target_time = target_datetime.time()
+    min_diff = None
+    closest_idx = None
+
+    for idx, metric_time in enumerate(metric_times):
+        # Calculate time difference in seconds
+        metric_seconds = (
+            metric_time.hour * 3600 + metric_time.minute * 60 + metric_time.second
+        )
+        target_seconds = (
+            target_time.hour * 3600 + target_time.minute * 60 + target_time.second
+        )
+
+        diff = abs(metric_seconds - target_seconds)
+
+        # Handle day boundary case (e.g., target is 23:59, metric is 00:01)
+        if diff > 12 * 3600:  # More than 12 hours difference suggests day boundary
+            diff = 86400 - diff  # 86400 seconds in a day
+
+        if min_diff is None or diff < min_diff:
+            min_diff = diff
+            closest_idx = idx
+
+    return closest_idx
+
 
 def read_benchmark_metrics():
     metrics_jsons = glob.glob("*_metrics_*.json")
@@ -46,7 +163,56 @@ def get_bios_version(system_specs):
     return res
 
 
-def get_start_end_index(df, interval, last_secs, skip_last_secs):
+def get_start_end_index(
+    df, interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
+    """Calculate start and end indices for sampling data from a dataframe.
+
+    If last_secs and skip_last_secs are None, attempts to calculate them from breakdown.csv
+    by finding the closest timestamps in the dataframe's timestamp column.
+
+    Args:
+        df: DataFrame with a 'timestamp' column
+        interval: Metrics collection interval in seconds
+        last_secs: Last N seconds to process, or None
+        skip_last_secs: Last N seconds to skip, or None
+        start_time: Start time in datetime format, or None
+        end_time: End time in datetime format, or None
+
+    Returns:
+        Tuple of (start_index, end_index)
+    """
+    # If both parameters are None, use start and end times from breakdown.csv
+    if last_secs is None and skip_last_secs is None:
+        if start_time is not None and end_time is not None:
+            # Check if timestamp column exists
+            if "timestamp" in df.columns:
+                # Get timestamps from the current dataframe
+                df_timestamps = []
+                for ts_str in df["timestamp"]:
+                    try:
+                        time_obj = datetime.strptime(ts_str, "%I:%M:%S %p").time()
+                        df_timestamps.append(time_obj)
+                    except ValueError:
+                        try:
+                            time_obj = datetime.strptime(ts_str, "%H:%M:%S").time()
+                            df_timestamps.append(time_obj)
+                        except ValueError:
+                            continue
+
+                if df_timestamps:
+                    # Find closest timestamps in this dataframe
+                    start_idx = find_closest_timestamp_index(df_timestamps, start_time)
+                    end_idx = find_closest_timestamp_index(df_timestamps, end_time)
+
+                    if start_idx is not None and end_idx is not None:
+                        return start_idx, end_idx
+
+        # If calculation failed or timestamp column doesn't exist, use default values
+        last_secs = default_last_secs
+        skip_last_secs = default_skip_last_secs
+
+    # Calculate indices using last_secs and skip_last_secs
     if last_secs > 0:
         start_index = (
             len(df)
@@ -71,12 +237,17 @@ def sample_avg_from_csv(
     div=1,
     key_suffix="",
     sanitizer=None,
+    start_time=None,
+    end_time=None,
 ):
     try:
         df_mpstat = pd.read_csv(filename, index_col=False)
     except FileNotFoundError:
         return ""
-    start, end = get_start_end_index(df_mpstat, interval, last_secs, skip_last_secs)
+    start, end = get_start_end_index(
+        df_mpstat, interval, last_secs, skip_last_secs, start_time, end_time
+    )
+    print(f"Sampling {filename} from {start} to {end}")
     samples = df_mpstat.iloc[start:end]
     if len(samples) == 0:
         return ""
@@ -99,7 +270,7 @@ def sample_avg_from_csv(
     return res.to_csv(header=False)
 
 
-def read_mpstat(interval, last_secs, skip_last_secs):
+def read_mpstat(interval, last_secs, skip_last_secs, start_time=None, end_time=None):
     metrics = [
         "%gnice",
         "%guest",
@@ -113,11 +284,17 @@ def read_mpstat(interval, last_secs, skip_last_secs):
         "%usr",
     ]
     return sample_avg_from_csv(
-        "mpstat.csv", interval, last_secs, skip_last_secs, metrics
+        "mpstat.csv",
+        interval,
+        last_secs,
+        skip_last_secs,
+        metrics,
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_memstat(interval, last_secs, skip_last_secs):
+def read_memstat(interval, last_secs, skip_last_secs, start_time=None, end_time=None):
     return sample_avg_from_csv(
         "mem-stat.csv",
         interval,
@@ -126,50 +303,66 @@ def read_memstat(interval, last_secs, skip_last_secs):
         exclude_columns=("index", "timestamp"),
         div=1024**3,
         key_suffix="_GB",
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_cpufreq_scaling(interval, last_secs, skip_last_secs):
+def read_cpufreq_scaling(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
     return sample_avg_from_csv(
         "cpufreq_scaling.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("index", "timestamp"),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_cpufreq_cpuinfo(interval, last_secs, skip_last_secs):
+def read_cpufreq_cpuinfo(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
     return sample_avg_from_csv(
         "cpufreq_cpuinfo.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("index", "timestamp"),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_netstat(interval, last_secs, skip_last_secs):
+def read_netstat(interval, last_secs, skip_last_secs, start_time=None, end_time=None):
     return sample_avg_from_csv(
         "net-stat.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("index", "timestamp"),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_perfstat(interval, last_secs, skip_last_secs):
+def read_perfstat(interval, last_secs, skip_last_secs, start_time=None, end_time=None):
     return sample_avg_from_csv(
         "perf-stat.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("index", "timestamp"),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_amd_perf_collector(interval, last_secs, skip_last_secs):
+def read_amd_perf_collector(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
     def sanitize_metrics(series):
         if series.loc["Total Memory Read BW (MB/s)"] < 0:
             series = series.drop(
@@ -184,56 +377,78 @@ def read_amd_perf_collector(interval, last_secs, skip_last_secs):
         skip_last_secs,
         exclude_columns=("index", "Timestamp_Secs"),
         sanitizer=sanitize_metrics,
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_amd_zen4_perf_collector(interval, last_secs, skip_last_secs):
+def read_amd_zen4_perf_collector(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
     return sample_avg_from_csv(
         "amd-zen4-perf-collector-timeseries.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("index", "Timestamp_Secs"),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_amd_zen5_perf_collector(interval, last_secs, skip_last_secs):
+def read_amd_zen5_perf_collector(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
     return sample_avg_from_csv(
         "amd-zen5-perf-collector-timeseries.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("index", "Timestamp_Secs"),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_nv_perf_collector(interval, last_secs, skip_last_secs):
+def read_nv_perf_collector(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
     return sample_avg_from_csv(
         "nv-perf-collector-timeseries.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("index", "Timestamp_Secs"),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_arm_perf_collector(interval, last_secs, skip_last_secs):
+def read_arm_perf_collector(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
     return sample_avg_from_csv(
         "arm-perf-collector-transposed.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("time",),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
-def read_intel_perfspect(interval, last_secs, skip_last_secs):
+def read_intel_perfspect(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None
+):
     return sample_avg_from_csv(
         "topdown-intel.sys.csv",
         interval,
         last_secs,
         skip_last_secs,
         exclude_columns=("TS",),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
@@ -262,6 +477,14 @@ def process_metrics(
 ):
     if args.dir:
         os.chdir(args.dir)
+
+    # Parse breakdown.csv once to get benchmark start and end times
+    start_time = None
+    end_time = None
+    breakdown_path = "breakdown.csv"
+    if os.path.exists(breakdown_path):
+        start_time, end_time = parse_breakdown_csv(breakdown_path)
+
     columns = "("
     # values = "("
     db_fields = {}
@@ -312,7 +535,9 @@ def process_metrics(
     # benchmark results
     res += unfold_json(bm_metrics["metrics"])
     # mpstat
-    mpstat = read_mpstat(args.interval, args.last_secs, args.skip_last_secs)
+    mpstat = read_mpstat(
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
+    )
     for line in mpstat.splitlines():
         if line:
             key, value = line.split(",")
@@ -322,7 +547,9 @@ def process_metrics(
     res += mpstat
 
     # memstat
-    memstat = read_memstat(args.interval, args.last_secs, args.skip_last_secs)
+    memstat = read_memstat(
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
+    )
     for line in memstat.splitlines():
         if line:
             key, value = line.split(",")
@@ -330,17 +557,19 @@ def process_metrics(
     res += memstat
     # cpufreq
     cpufreq_scaling = read_cpufreq_scaling(
-        args.interval, args.last_secs, args.skip_last_secs
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
     )
     put_value(db_fields, "cpufreq_mhz_scaling", cpufreq_scaling)
     res += cpufreq_scaling
     cpufreq_cpuinfo = read_cpufreq_cpuinfo(
-        args.interval, args.last_secs, args.skip_last_secs
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
     )
     put_value(db_fields, "cpufreq_mhz_cpuinfo", cpufreq_cpuinfo)
     res += cpufreq_cpuinfo
     # netstat
-    netstat = read_netstat(args.interval, args.last_secs, args.skip_last_secs)
+    netstat = read_netstat(
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
+    )
     for line in netstat.splitlines():
         if line:
             if "eth0" in line or "lo" in line:
@@ -349,7 +578,9 @@ def process_metrics(
 
     res += netstat
     # perfstat
-    perfstat = read_perfstat(args.interval, args.last_secs, args.skip_last_secs)
+    perfstat = read_perfstat(
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
+    )
     res += perfstat
     # override cpufreq_mhz_cpuinfo if CPU_CYCLES and CNT_CYCLES exist
     perfstat_kv = {}
@@ -418,7 +649,7 @@ def process_metrics(
     }
 
     amd_perf_collector = read_amd_perf_collector(
-        args.interval, args.last_secs, args.skip_last_secs
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
     )
     for line in amd_perf_collector.splitlines():
         key, value = line.split(",")
@@ -426,7 +657,7 @@ def process_metrics(
             db_fields[f"{Map[key]}"] = value
     res += amd_perf_collector
     amd_zen4_perf_collector = read_amd_zen4_perf_collector(
-        args.interval, args.last_secs, args.skip_last_secs
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
     )
     for line in amd_zen4_perf_collector.splitlines():
         key, value = line.split(",")
@@ -435,7 +666,7 @@ def process_metrics(
     res += amd_zen4_perf_collector
 
     amd_zen5_perf_collector = read_amd_zen5_perf_collector(
-        args.interval, args.last_secs, args.skip_last_secs
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
     )
     for line in amd_zen5_perf_collector.splitlines():
         key, value = line.split(",")
@@ -444,7 +675,7 @@ def process_metrics(
     res += amd_zen5_perf_collector
 
     nv_perf_collector = read_nv_perf_collector(
-        args.interval, args.last_secs, args.skip_last_secs
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
     )
     for line in nv_perf_collector.splitlines():
         key, value = line.split(",")
@@ -452,7 +683,7 @@ def process_metrics(
             db_fields[f"{Map[key]}"] = value
     res += nv_perf_collector
     arm_perf_collector = read_arm_perf_collector(
-        args.interval, args.last_secs, args.skip_last_secs
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
     )
     for line in arm_perf_collector.splitlines():
         key, value = line.split(",")
@@ -460,7 +691,7 @@ def process_metrics(
             db_fields[f"{Map[key]}"] = value
     res += arm_perf_collector
     intel_perfspect = read_intel_perfspect(
-        args.interval, args.last_secs, args.skip_last_secs
+        args.interval, args.last_secs, args.skip_last_secs, start_time, end_time
     )
     res += intel_perfspect
     for line in intel_perfspect.splitlines():
@@ -531,14 +762,14 @@ def init_parser():
     parser.add_argument(
         "--last-secs",
         type=int,
-        default=300,
-        help='Last N seconds of metrics to process as benchmarking stage. Recommended value: Taobench: 600; Feedsim: 300; Spark (full run): value of "execution_time_test_93586"; Spark (stage 2.0): value of "execution_time_test_93586-stage-2.0"; Video Transcode: value of "level6_time_secs"; Django: 300; MediaWiki: 600',
+        default=None,
+        help=f'Last N seconds of metrics to process as benchmarking stage. If not provided and breakdown.csv is not present, use default of {default_last_secs}. Recommended value: Taobench: 600; Feedsim: 300; Spark (full run): value of "execution_time_test_93586"; Spark (stage 2.0): value of "execution_time_test_93586-stage-2.0"; Video Transcode: value of "level6_time_secs"; Django: 300; MediaWiki: 600',
     )
     parser.add_argument(
         "--skip-last-secs",
         type=int,
-        default=0,
-        help="Skip the last N seconds of metrics. Recommended value: Taobench: 120; Feedsim: 30; Spark: 10; Video Transcode: 10; Django: 60; MediaWiki: 30",
+        default=None,
+        help=f"Skip the last N seconds of metrics. If not provided and breakdown.csv is not present, use default of {default_skip_last_secs}. Recommended value: Taobench: 120; Feedsim: 30; Spark: 10; Video Transcode: 10; Django: 60; MediaWiki: 30",
     )
     parser.add_argument(
         "--note", type=str, default="", help="Additional note to be added to the folder"
