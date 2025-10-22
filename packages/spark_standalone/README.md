@@ -398,7 +398,7 @@ please remove the data from previous runs so that SparkBench can rebuild databas
 
 ```bash
 rm -rf /flash23/warehouse
-rm -rf <benchpressPath>/benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3/metastore_db
+rm -rf <benchpressPath>/benchmarks/spark_standalone/spark-4.0.1-bin-hadoop3/metastore_db
 ```
 
 4. Create the `/flash23` folder. Copy `bpc_t93586_s2_synthetic_5GB`
@@ -408,7 +408,7 @@ Note that SparkBench mini does not require the high I/O throughput
 
 5. Run `spark_standalone_remote_mini` job on a real machine.
 This will create data in `/flash23/warehouse`
-and `<benchpressPath>/benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3/metastore_db`.
+and `<benchpressPath>/benchmarks/spark_standalone/spark-4.0.1-bin-hadoop3/metastore_db`.
 Create a backup of these two folders. By default, this job uses the 5GB dataset.
 If you want to use the 1GB dataset, run the job with specifying the
 `dataset_name` parameter like this:
@@ -425,12 +425,12 @@ with the same commands and options.
 Building database takes a considerable amount of time, so it's advisable to consider
 using the same set of storage nodes and NVMe drives when running SparkBench on another
 compute node server. If you choose to reuse the Spark database in `/flash23/warehouse`,
-please also make sure to copy the folder `metastore_db` under `benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3`
+please also make sure to copy the folder `metastore_db` under `benchmarks/spark_standalone/spark-4.0.1-bin-hadoop3`
 to the new machine's same location, for example:
 
 ```
 # Under the DCPerf folder
-rsync -a benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3/metastore_db root@<target-hostname>:~/DCPerf/benchmarks/spark_standalone/spark-4.0.0-bin-hadoop3/
+rsync -a benchmarks/spark_standalone/spark-4.0.1-bin-hadoop3/metastore_db root@<target-hostname>:~/DCPerf/benchmarks/spark_standalone/spark-4.0.1-bin-hadoop3/
 ```
 
 If you do not copy over the `metastore_db` folder, you will see errors like the following
