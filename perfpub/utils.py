@@ -498,6 +498,7 @@ def process_metrics(
     )
     db_fields["bm_datetime"] = f'"{timestamp}"'
     db_fields["run_id"] = f'"{bm_metrics["run_id"]}"'
+
     if "score" in bm_metrics["metrics"]:
         db_fields["score"] = bm_metrics["metrics"]["score"]
 
@@ -724,6 +725,14 @@ def process_metrics(
     # other input
     db_fields["cpu_generation"] = f'"{args.cpu}"'
     db_fields["note"] = f'"{args.note}"'
+
+    if "version_info" in bm_metrics:
+        db_fields["version_source"] = f'"{bm_metrics["version_info"]["source"]}"'
+        res += f"version_source,{db_fields["version_source"]}\n"
+        db_fields["version_uuid"] = f'"{bm_metrics["version_info"]["uuid"]}"'
+        res += f"version_uuid,{db_fields["version_uuid"]}\n"
+        db_fields["version"] = f'"{bm_metrics["version_info"]["version"]}"'
+        res += f"version,{db_fields["version"]}\n"
 
     # benchmark args
     res += "benchmark args,\n"
