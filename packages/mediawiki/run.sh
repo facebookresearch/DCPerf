@@ -187,7 +187,7 @@ function run_benchmark() {
     lg_params="--wrk ${_lg_path}"
     client_threads="${WRK_CLIENT_THREADS}"
   fi
-  if [ "${CLIENT_THREADS}" -gt 0 ]; then
+  if [[ "${CLIENT_THREADS}" -gt 0 ]]; then
     client_threads="${CLIENT_THREADS}"
   fi
 
