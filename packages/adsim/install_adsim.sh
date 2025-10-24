@@ -103,7 +103,7 @@ post_build() {
   # Create library directory and copy all shared libraries
   mkdir -p "${BENCHMARKS_DIR}/lib/"
   cp ${BUILD_DIR}/staging/lib/*.so* "${BENCHMARKS_DIR}/lib/"
-  cp ${BUILD_DIR}/staging/lib64/*.so* "${BENCHMARKS_DIR}/lib/"
+  cp ${BUILD_DIR}/staging/lib64/*.so* "${BENCHMARKS_DIR}/lib/" || true
 
   # Copy runtime configurations, Python scripts, and QPS search tool
   cp -R "${BENCHPRESS_ROOT}/packages/adsim/configs" "${BENCHMARKS_DIR}"
