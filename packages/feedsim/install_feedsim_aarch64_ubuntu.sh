@@ -60,7 +60,7 @@ cd "${FEEDSIM_THIRD_PARTY_SRC}"
 if ! [ -d "gengetopt-2.23" ]; then
     # Source the download retry function
     source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
-    download_with_retry "https://ftpmirror.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz"
+    download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
     tar -xf "gengetopt-2.23.tar.xz"
     cd "gengetopt-2.23"
     ./configure

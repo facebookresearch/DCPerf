@@ -87,7 +87,7 @@ fi
 
 # Download binutils
 BINUTILS_TARBALL_PATH="${FOLLY_BUILD_ROOT}/downloads/libiberty-binutils-2.42.tar.xz"
-BINUTILS_TARBALL_URL="https://ftpmirror.gnu.org/gnu/binutils/binutils-2.42.tar.xz"
+BINUTILS_TARBALL_URL="https://mirrors.ocf.berkeley.edu/gnu/binutils/binutils-2.42.tar.xz"
 if ! [ -f "${BINUTILS_TARBALL_PATH}" ]; then
     echo "Downloading libiberty-binutils-2.42.tar.xz..."
     source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"

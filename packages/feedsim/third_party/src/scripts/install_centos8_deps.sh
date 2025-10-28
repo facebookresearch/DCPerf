@@ -15,7 +15,7 @@ dnf install -y cmake ninja-build flex bison git texinfo \
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)"
 BENCHPRESS_ROOT="$(readlink -f "$SCRIPT_DIR/../../../../..")"
 source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
-curl_with_retry "https://ftpmirror.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz"
+curl_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
 tar -xf gengetopt-2.23.tar.xz
 cd gengetopt-2.23
 ./configure
