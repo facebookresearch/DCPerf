@@ -72,13 +72,17 @@ fi
 
 export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-4.0.3/staging/bin:${PATH}"
 
-git clone https://github.com/fastfloat/fast_float.git
-cd fast_float
-mkdir build && cd build
-cmake ..
-make
-make install
-cd ../
+if ! [ -d "fast_float" ]; then
+    git clone https://github.com/fastfloat/fast_float.git
+    cd fast_float
+    mkdir build && cd build
+    cmake ..
+    make
+    make install
+    cd ../
+else
+    msg "[SKIPPED] fast_float"
+fi
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
