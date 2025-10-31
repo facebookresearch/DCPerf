@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # This source code is licensed under the MIT license found in the
@@ -35,7 +35,7 @@ restart_mariadb_docker() {
     sleep 1
   done
   # Start MariaDB in the background with nohup to ensure it's fully detached
-  nohup mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock > /dev/null 2>&1 &
+  nohup mariadbd --user=mysql --socket=/var/lib/mysql/mysqld.sock &
 }
 
 # Function to restart MariaDB on bare-metal machine

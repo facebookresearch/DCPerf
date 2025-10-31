@@ -16,18 +16,30 @@
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_django.bash"
 # shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_run_django.bash"
+# shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_feedsim.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_run_feedsim.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_tao_bench.bash"
 # shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_run_tao_bench.bash"
+# shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_spark.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_run_spark.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_video_transcode_bench.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_mediawiki.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_run_mediawiki.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_wdl.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_health_check.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_syscall.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_run_syscall.bash"

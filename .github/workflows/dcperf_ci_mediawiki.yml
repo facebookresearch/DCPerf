@@ -53,11 +53,11 @@ jobs:
     steps:
     - name: Setup Build Container (ubuntu-based)
       if: ${{ matrix.host-machine.type == 'ubuntu' }}
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode curl
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode curl numactl lshw procps bc
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}
-      run: dnf update -y; dnf install -y git pciutils which dmidecode
+      run: dnf update -y; dnf install -y git pciutils which  numactl lshw procps-ng bc
 
     - name: Checkout the Repository
       uses: actions/checkout@v4
@@ -87,3 +87,6 @@ jobs:
 
     - name: Install Mediawiki
       run: . $PRELUDE; install_mediawiki $BUILD_ENV
+
+    - name: Run Mediawiki
+      run: . $PRELUDE; run_mediawiki $BUILD_ENV
