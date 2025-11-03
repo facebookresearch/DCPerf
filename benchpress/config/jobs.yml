@@ -641,9 +641,8 @@
   vars:
     - 'ipv4=0'
     - 'sanity=0'
-    - 'dataset_name=bpc_t93586_s2_synthetic_5GB'
-    - 'local_hostname='
     - 'dataset_name=bpc_t93586_s2_synthetic_1GB'
+    - 'local_hostname='
     - 'shuffle_partitions=20'
   hooks:
     - hook: copymove
