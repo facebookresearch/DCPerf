@@ -42,21 +42,18 @@ DECLARE_bool(helpshort);
 #define TCP_BUF_SZ 256
 
 enum class Syscall {
-  CLOCK_GETTIME,
   GETPID,
   NANOSLEEP,
   TCP,
 };
 
 std::unordered_map<std::string, Syscall> syscall_map = {
-    {"clock_gettime", Syscall::CLOCK_GETTIME},
     {"getpid", Syscall::GETPID},
     {"nanosleep", Syscall::NANOSLEEP},
     {"tcp", Syscall::TCP},
 };
 
 std::unordered_map<Syscall, std::string> syscall_name_map = {
-    {Syscall::CLOCK_GETTIME, "clock_gettime"},
     {Syscall::GETPID, "getpid"},
     {Syscall::NANOSLEEP, "nanosleep"},
     {Syscall::TCP, "tcp"},
@@ -133,20 +130,6 @@ void* getpid_worker(void* arg) {
   for (count = 0; run_worker; count++) {
     pid = getpid();
   }
-  worker_counters[worker_id] = count;
-  return nullptr;
-}
-
-void* clock_gettime_worker(void* arg) {
-  int worker_id = static_cast<struct worker_arg*>(arg)->worker_id;
-  unsigned long int count;
-  struct timespec ts;
-  volatile int res = 0;
-
-  for (count = 0; run_worker; count++) {
-    res = clock_gettime(CLOCK_REALTIME, &ts);
-  }
-  assert(res == 0);
   worker_counters[worker_id] = count;
   return nullptr;
 }
@@ -312,9 +295,6 @@ int main(int argc, char** argv) {
 
   if (syscalls_to_test.find(Syscall::GETPID) != syscalls_to_test.end())
     benchmark_worker(getpid_worker, "getpid");
-
-  if (syscalls_to_test.find(Syscall::CLOCK_GETTIME) != syscalls_to_test.end())
-    benchmark_worker(clock_gettime_worker, "clock_gettime");
 
   if (syscalls_to_test.find(Syscall::TCP) != syscalls_to_test.end())
     benchmark_worker(tcp_worker, "tcp");

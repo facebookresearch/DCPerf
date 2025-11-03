@@ -193,7 +193,7 @@ DCPerf's system bench focuses on system performance metrics (kernel scheduler an
     <a href="packages/syscall/README.md">Syscall</a>
    </td>
    <td>C++</td>
-   <td>clock_gettime, getpid, nanosleep, tcp-related</td>
+   <td>getpid, nanosleep, tcp-related</td>
    <td>Common system call benchmarks</td>
   </tr>
 </table>
