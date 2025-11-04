@@ -1115,7 +1115,53 @@ if [[ ! -x "$BIN_PATH" ]]; then
   exit 2
 fi
 
-exec "$BIN_PATH" "$@"
+# Get Platform and architecture
+OS_TYPE="$(uname -s 2>/dev/null || echo "")"
+ARCH_TYPE="$(uname -m 2>/dev/null || echo "")"
+
+# Preload libc10.so on Linux aarch64 platform to avoid duplicated symbol definition for cpuinfo_isa
+# in both libc10.so and libtorch_cpu.so.
+# Related issue: https://github.com/pytorch/pytorch/issues/166703
+# During tbe_inference_benchmark, This duplication causes incorrect SVE2 feature detection in forked child processes,
+# leading to Slow Path execution instead of high-performance Auto-Vector Path on aarch64.
+if [[ "$OS_TYPE" == "Linux" && "$ARCH_TYPE" == "aarch64" ]]; then
+  # Only apply to tbe_inference_benchmark
+  if [[ "$BIN" == "tbe_inference_benchmark" ]]; then
+    # Resolve repository root based on script location
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+    # Expected environment name and Python version
+    BUILD_ENV="fbgemm_build_oss_env"
+    PYTHON_VERSION="3.13"
+
+    # Construct path to libc10.so
+    ENV_PREFIX="${REPO_ROOT}/build/miniconda/envs/${BUILD_ENV}"
+    ENV_LIB="${ENV_PREFIX}/lib"
+    LIBC10_PATH="${ENV_PREFIX}/lib/python${PYTHON_VERSION}/site-packages/torch/lib/libc10.so"
+
+    if [[ -f "$LIBC10_PATH" ]]; then
+      echo "[INFO] Linux + aarch64 detected, target binary is tbe_inference_benchmark, libc10.so found:"
+      echo "       ${LIBC10_PATH}"
+      # Inject LD_PRELOAD
+      exec env \
+        LD_PRELOAD="${LIBC10_PATH}" \
+        "${BIN_PATH}" "$@"
+    else
+      echo "[WARN] Linux + aarch64 detected and target binary is tbe_inference_benchmark,"
+      echo "       but libc10.so not found at:"
+      echo "       ${LIBC10_PATH}"
+      echo "[WARN] Running without LD_PRELOAD"
+      exec "${BIN_PATH}" "$@"
+    fi
+  else
+    # Different binary on aarch64 Linux: run as-is
+    exec "${BIN_PATH}" "$@"
+  fi
+else
+  # Non-aarch64 or non-Linux platform: run as-is
+  exec "${BIN_PATH}" "$@"
+fi
 EOF
 
   # Make the run.sh script executable
