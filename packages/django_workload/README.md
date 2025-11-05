@@ -6,9 +6,12 @@ LICENSE file in the root directory of this source tree.
 -->
 # DjangoBench
 
-DjangoBench uses Django + uwsgi + CassandraDB to run a synthetic website aiming
+DjangoBench uses Django + Proxygen + CassandraDB to run a synthetic website aiming
 to represent IG Django production workload. This workload will push CPU utilization
 to around 95% and measure the max transaction rate it can achieve.
+
+For more details about DjangoBench's software architecture, please refer to
+the doc [here](srcs/proxygen_binding/README.md)
 
 ## System Requirements
 
@@ -20,6 +23,18 @@ client on the same machine.
 
 We recommend placing the DB server machine and the benchmarking machine within the same network
 and maintain the ping latency between them to be in the range of 0.1 and 0.15ms.
+
+In addition, we require a series of ports to be available:
+
+* Cassandra DB node: port 9042
+* Clientserver node:
+  * Main HTTP server port: 8000
+  * Load balancer stats port: 8001
+  * Memcached port: 11811
+  * Server worker ports: The range of \[16667, 16667 \+ `server_workers`)
+    (`server_workers` is equal to the number of CPU logical cores).
+  * Load balancer stats port and server worker starting port are adjustable,
+    but the continuous range of server worker ports must be available.
 
 ## Install django workload
 
@@ -154,6 +169,38 @@ Create a backup of this folder to avoid data loss.
 
 These mini jobs will reuse the dataset generated in the previous step.
 
+### Parameters
+
+We provide the following parameters you can customize for DjangoBench workload:
+
+For `django_workload_default` and `django_workload_arm` jobs:
+
+* Role `clientserver`:
+  * `db_addr` \- **required**, IP address of the Cassandra server
+  * `duration` \- Duration of each iteration of test, default `5M` (5 minutes)
+  * `iterations` \- Number of iterations to run, default 7
+  * `reps`: Number of requests (per client worker) that the load generator will send in each iteration.
+    This will override `duration` and is useful to workaround the hanging problem of Siege (the load generator).
+    Note the total number of requests that Siege will send will be `reps * client_workers`, where
+    `client_workers = 1.2 * NPROC`.
+  * `interpreter` \- Which python interpreter to use: choose between `cpython` or `cinder`.
+    Defaults to `cpython`.
+  * `use_async` \- If this is set to 1, DjangoBench will use this new asynchronous server stack;
+    set to 0 means using the traditional stack. Defaults to 1.
+  * `base_port` \- Starting port that the HTTP server workers will listen to.
+    The range of `[base_port, base_port + nproc)` must be available.
+  * `stats_port` \- Load balancer stats port, defaults 8001
+* Role `standalone`:
+  * Same as role `clientserver` except not having `db_addr`
+
+For `django_workload_custom`:
+
+* Role `clientserver`, there are these extra parameters:
+  * `server_workers` \- number of server workers, required.
+  * `client_workers` \- number of client workers, required
+  * `ib_min` \- ICacheBuster minimum iterations in each request (default `100000`\)
+  * `ib_max` \- ICacheBuster maximum iterations in each request (default `200000`\)
+
 ## Reporting
 
 Once the benchmark finishes on the django benchmarking machine, benchpress will
@@ -218,6 +265,27 @@ Note the `Interpreter` field in the metrics section, which indicates which Pytho
 was used for the benchmark.
 
 ## Troubleshooting
+
+### Checking logs
+
+DjangoBench will produce a series of logs when running the benchmark
+in these paths (based on the DCPerf repo's root folder):
+
+- Load-balanced asynchronous server related:
+  * `benchmarks/django_workload/django-workload/django-workload/lb.log`
+  * `benchmarks/django_workload/django-workload/django-workload/log_load_balancer/*.log`
+- Traditional uWSGI synchronous server log:
+  * `benchmarks/django_workload/django-workload/django-workload/django-uwsgi.log`
+- Siege log:
+  * `benchmarks/django_workload/django-workload/client/*.log`
+  * `/tmp/siege_out_*`
+- Cassandra and memcached log:
+  * `benchmarks/django_workload/cassandra.log`
+  * `benchmarks/django_workload/memcached.log`
+
+After the benchmark finishes, benchpress will move all these logs into the
+`benchmark_metrics_<run_id>` folder. If benchpress did not finish and exited
+unexpectedly, please find the logs in the paths mentioned above.
 
 ### Cassandra could not start
 
@@ -292,6 +360,8 @@ make REPS to be `wc -l /tmp/siege_out_1` divided by the number of your logical
 CPU cores. That way the runtime of each iteration will be close to 5 minutes.
 
 ### Cinder-specific issues
+
+**Note**: Cinder currently does not work on ARM platforms when JIT is enabled
 
 If you encounter issues when running with the Cinder interpreter:
 
