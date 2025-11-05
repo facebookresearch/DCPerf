@@ -41,7 +41,7 @@ cd "$BP_TMP" || exit 1
 
 # Install system dependencies
 dnf install -y git memcached libmemcached-devel zlib-devel screen python36 \
-    python36-devel python3-numpy
+    python36-devel python3-numpy haproxy
 
 # Copy django-workload from srcs directory instead of cloning from GitHub
 mkdir -p "${OUT}/django-workload"
