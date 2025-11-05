@@ -64,12 +64,17 @@ _server_thread = None
 _shutdown_event = threading.Event()
 
 
-def start_proxygen_server():
+def start_proxygen_server(port=None, threads=None):
     """
-    Start Proxygen server in this uWSGI worker process.
+    Start Proxygen server in this uWSGI worker process or standalone.
 
     This function is called by uWSGI's postfork hook to start Proxygen
-    in each worker process after forking.
+    in each worker process after forking, or can be called directly with
+    explicit port and threads arguments for load-balanced setups.
+
+    Args:
+        port: Port to listen on (overrides environment variable)
+        threads: Number of threads (overrides environment variable, 0=auto-detect)
 
     Architecture:
         Proxygen RequestData
@@ -82,10 +87,12 @@ def start_proxygen_server():
     """
     global _proxygen_server, _server_thread
 
-    # Get configuration from environment
+    # Get configuration from environment or arguments
     ip = os.environ.get("PROXYGEN_IP", "0.0.0.0")
-    port = int(os.environ.get("PROXYGEN_PORT", "8000"))
-    threads = int(os.environ.get("PROXYGEN_THREADS", "0"))  # 0 = auto-detect
+    port = port if port is not None else int(os.environ.get("PROXYGEN_PORT", "8000"))
+    threads = (
+        threads if threads is not None else int(os.environ.get("PROXYGEN_THREADS", "0"))
+    )  # 0 = auto-detect
 
     logger.info(
         "Initializing Proxygen server in worker %d: %s:%d with %d threads",
@@ -159,6 +166,40 @@ def signal_handler(signum, frame):
     logger.info("Worker %d received signal %d, shutting down", os.getpid(), signum)
     stop_proxygen_server()
     sys.exit(0)
+
+
+# Standalone mode - for load balanced setups or testing
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Start Proxygen-based Django server",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to listen on",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=0,
+        help="Number of threads (0 = auto-detect based on CPU cores)",
+    )
+
+    args = parser.parse_args()
+
+    start_proxygen_server(port=args.port, threads=args.threads)
+
+    try:
+        # Keep process alive
+        if _proxygen_server:
+            _proxygen_server.wait()
+    except KeyboardInterrupt:
+        logger.info("Received Ctrl+C, shutting down")
+        stop_proxygen_server()
 
 
 # Initialize when module is loaded (works with lazy-apps)
