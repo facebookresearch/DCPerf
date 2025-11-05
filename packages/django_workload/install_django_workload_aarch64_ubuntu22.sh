@@ -14,10 +14,19 @@ DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 DJANGO_SERVER_ROOT="${DJANGO_REPO_ROOT}/django-workload"
 DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
 
-# Install system dependencies
+# =====================================================================
+# Step 1: Install System Dependencies
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 1: Installing System Dependencies"
+echo "====================================================================="
+
 apt install -y memcached libmemcached-dev zlib1g-dev screen \
     python3 python3.10-dev python3.10-venv rpm libffi-dev \
-    libssl-dev libcrypt-dev
+    libssl-dev libcrypt-dev haproxy
+
+echo "System dependencies installed successfully"
 
 # Copy django-workload from srcs directory instead of cloning from GitHub
 mkdir -p "${DJANGO_WORKLOAD_ROOT}"
@@ -28,6 +37,14 @@ if ! [ -d "django-workload" ]; then
 else
     echo "[SKIPPED] copying django-workload"
 fi
+
+# =====================================================================
+# Step 2: Download pip third-party dependencies for django-workload
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 2: Downloading pip third-party dependencies"
+echo "====================================================================="
 
 # Download pip third-party dependencies for django-workload
 if ! [ -d "${DJANGO_WORKLOAD_DEPS}" ]; then
@@ -138,11 +155,22 @@ mkdir -p "${DJANGO_WORKLOAD_ROOT}/bin"
 cp -r "${DJANGO_PKG_ROOT}/srcs/bin/"* "${DJANGO_WORKLOAD_ROOT}/bin/"
 chmod +x "${DJANGO_WORKLOAD_ROOT}/bin/"*.sh
 
-# 2. Install JDK
+echo "Pip dependencies downloaded successfully"
+
+# =====================================================================
+# Step 3: Install JDK and Cassandra
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 3: Installing JDK and Cassandra"
+echo "====================================================================="
+
+# Install JDK
 JDK_NAME=openjdk-11-jdk
 apt install -y "${JDK_NAME}" || { echo "Could not install ${JDK_NAME} package"; exit 1;}
+echo "JDK installed successfully"
 
-# 4. Install Cassandra
+# Install Cassandra
 # Download Cassandra from third-party source
 cassandra_version=3.11.19
 CASSANDRA_NAME="apache-cassandra-${cassandra_version}"
@@ -174,11 +202,32 @@ chmod -R 0700 /data/cassandra
 cp "${TEMPLATES_DIR}/cassandra.yaml" "${CASSANDRA_ROOT}/conf/cassandra.yaml.template" || exit 1
 popd
 
-# 5. Install Django and its dependencies
+echo "JDK and Cassandra installed successfully"
+
+# =====================================================================
+# Step 4: Build CPython 3.10
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 4: Building CPython 3.10"
+echo "====================================================================="
+
 pushd "${DJANGO_SERVER_ROOT}"
 
+# Ubuntu 22 comes with python3.10, so we use system python
+echo "Using system Python 3.10"
+
+echo "CPython 3.10 ready"
+
+# =====================================================================
+# Step 5: Build Cinder 3.10
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 5: Building Cinder 3.10"
+echo "====================================================================="
+
 # Download and build Cinder
-pushd "${DJANGO_SERVER_ROOT}"
 if ! [ -d "cinder" ]; then
     git clone -b cinder/3.10 https://github.com/facebookincubator/cinder.git
     pushd cinder
@@ -188,20 +237,29 @@ if ! [ -d "cinder" ]; then
     make install
     popd
 fi
-popd
+
+CINDER_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
+export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+
+echo "Cinder 3.10 built successfully"
+
+# =====================================================================
+# Step 6: Install Python dependencies in virtual environments
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 6: Installing Python dependencies in virtual environments"
+echo "====================================================================="
 
 # Create virtual environments for both CPython and Cinder
-pushd "${DJANGO_SERVER_ROOT}"
 # Create CPython virtual env
 python3.10 -m venv venv_cpython
 
 # Create Cinder virtual env
-CINDER_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
 export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
 [ ! -d venv_cinder ] && "${CINDER_INSTALL_PREFIX}/bin/python3" -m venv venv_cinder
 
-# Install packages in both virtual environments
-# First, CPython environment
+# Install packages in CPython environment
 set +u
 # shellcheck disable=SC1091
 source ./venv_cpython/bin/activate
@@ -211,9 +269,8 @@ set -u
 pip3 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
-# No need to copy configuration files as they are already in the srcs directory
 
-# No need to apply patches as the code in srcs already has the desired changes
+echo "Dependencies installed in CPython venv"
 
 # Build oldisim icache buster library
 set +u
@@ -239,12 +296,10 @@ fi
 # shellcheck disable=SC2016
 echo 'JVM_OPTS="$JVM_OPTS -Xss512k"' >> "${DJANGO_WORKLOAD_ROOT}/apache-cassandra/conf/cassandra-env.sh"
 
-# No need to copy template files as they are already in the srcs directory
-
 deactivate
 
-# Now install packages in Cinder environment
-pushd "${DJANGO_SERVER_ROOT}"  # Make sure we're in the right directory
+# Install packages in Cinder environment
+pushd "${DJANGO_SERVER_ROOT}"
 export CPATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build/include:${DJANGO_SERVER_ROOT}/cinder/Include"
 export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
 export CMAKE_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
@@ -256,10 +311,111 @@ pip3 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WO
 pip3 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 
+echo "Dependencies installed in Cinder venv"
+
 deactivate
 popd  # ${DJANGO_SERVER_ROOT}
+
+echo "Python dependencies installation completed"
 
 # Install siege
 pushd "${DJANGO_PKG_ROOT}" || exit 1
 bash -x install_siege.sh
 popd
+
+echo "Siege installed successfully"
+
+# =====================================================================
+# Step 7: Build and Install Proxygen (for DjangoBench V2)
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 7: Building and Installing Proxygen"
+echo "====================================================================="
+
+# Clone Proxygen if not already present
+PROXYGEN_VERSION="v2025.10.13.00"
+if [ ! -d "${DJANGO_WORKLOAD_ROOT}/proxygen" ]; then
+    echo "Cloning Proxygen from GitHub..."
+    cd "${DJANGO_WORKLOAD_ROOT}"
+    git clone https://github.com/facebook/proxygen.git
+    cd proxygen
+    git checkout "${PROXYGEN_VERSION}"
+    echo "Proxygen cloned successfully"
+else
+    echo "Proxygen directory already exists at ${DJANGO_WORKLOAD_ROOT}/proxygen"
+    cd "${DJANGO_WORKLOAD_ROOT}/proxygen"
+fi
+
+# Overwrite build script with custom version
+echo "Installing custom build script with -fPIC support..."
+cp "${TEMPLATES_DIR}/build_proxygen.sh" "${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen/build_proxygen.sh"
+chmod +x "${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen/build_proxygen.sh"
+
+# Build Proxygen
+echo "Building Proxygen (this may take 10-20 minutes)..."
+cd "${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen"
+bash -x ./build_proxygen.sh --prefix "${DJANGO_WORKLOAD_ROOT}/proxygen/staging" -j "$(nproc)"
+bash -x ./install.sh
+
+echo "Proxygen built and installed at ${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
+
+# =====================================================================
+# Step 8: Build and Install proxygen_binding (for DjangoBench V2)
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 8: Building and Installing proxygen_binding"
+echo "====================================================================="
+
+# Copy proxygen_binding to django_workload root
+if [ ! -d "${DJANGO_WORKLOAD_ROOT}/proxygen_binding" ]; then
+    echo "Copying proxygen_binding module..."
+    cp -r "${DJANGO_PKG_ROOT}/srcs/proxygen_binding" "${DJANGO_WORKLOAD_ROOT}/"
+    echo "proxygen_binding copied to ${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+else
+    echo "proxygen_binding directory already exists, updating..."
+    rm -rf "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+    cp -r "${DJANGO_PKG_ROOT}/srcs/proxygen_binding" "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+fi
+
+# Set Proxygen installation directory for building proxygen_binding
+export PROXYGEN_INSTALL_DIR="${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
+
+# Build and install in venv_cpython
+echo ""
+echo "Installing proxygen_binding in venv_cpython..."
+cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install pybind11
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install -e .
+echo "proxygen_binding installed in venv_cpython"
+
+# Build and install in venv_cinder
+echo ""
+echo "Installing proxygen_binding in venv_cinder..."
+cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install pybind11
+"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install -e .
+echo "proxygen_binding installed in venv_cinder"
+
+echo ""
+echo "====================================================================="
+echo "DjangoBench installation completed successfully!"
+echo "====================================================================="
+echo ""
+echo "Installation directory: ${DJANGO_WORKLOAD_ROOT}"
+echo ""
+echo "DjangoBench V2 Components (Async HTTP with Proxygen):"
+echo "  - Proxygen: ${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
+echo "  - proxygen_binding: ${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+echo "  - Django workload: ${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload"
+echo ""
+echo "To run DjangoBench V2 with Proxygen (asynchronous HTTP):"
+echo "  cd ${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload"
+echo "  ./run_proxygen.sh"
+echo ""
+echo "To run DjangoBench V1 with uWSGI (traditional):"
+echo "  cd ${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload"
+echo "  ./run.sh"
+echo ""
+echo "====================================================================="
