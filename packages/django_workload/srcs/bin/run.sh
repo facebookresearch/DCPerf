@@ -63,12 +63,76 @@ cleanup() {
 
 trap 'cleanup' ERR EXIT SIGINT SIGTERM
 
+check_port_available() {
+  local port=$1
+  local port_name=$2
+
+  # Check if port is in use
+  if ss -tln | grep -q ":${port} "; then
+    echo "ERROR: Port ${port} (${port_name}) is already in use!"
+
+    # Check if there's a process associated with this port
+    local pid=$(ss -tlnp | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1)
+
+    if [ -n "$pid" ]; then
+      echo "ERROR: Process with PID ${pid} is using port ${port}"
+      echo "Process details:"
+      ps -p "$pid" -o pid,cmd 2>/dev/null || echo "  (Process information unavailable)"
+      echo ""
+      echo "To fix this issue:"
+      echo "  1. Kill the process: kill ${pid}"
+      echo "  2. Or choose a different port using -P (base port) or -T (stats port) options"
+    else
+      echo "WARNING: Port ${port} is in use but no associated process found."
+      echo "This usually means the port is in TIME_WAIT or CLOSE_WAIT state."
+      echo ""
+      echo "To fix this issue:"
+      echo "  1. Wait 2-5 minutes for the port to be released by the kernel"
+      echo "  2. Or choose a different port using -P (base port) or -T (stats port) options"
+      echo "  3. Or run: sudo sysctl -w net.ipv4.tcp_tw_reuse=1 (to reuse TIME_WAIT sockets)"
+    fi
+    return 1
+  fi
+
+  return 0
+}
+
+check_port_range_available() {
+  local base_port=$1
+  local num_workers=$2
+  local lb_port=8000
+  local stats_port=$3
+
+  echo "Checking port availability..."
+
+  # Check load balancer port
+  if ! check_port_available "$lb_port" "Load Balancer"; then
+    return 1
+  fi
+
+  # Check stats port
+  if ! check_port_available "$stats_port" "HAProxy Stats"; then
+    return 1
+  fi
+
+  # Check worker ports (base_port to base_port + num_workers - 1)
+  for ((i=0; i<num_workers; i++)); do
+    local port=$((base_port + i))
+    if ! check_port_available "$port" "Worker $((i+1))"; then
+      return 1
+    fi
+  done
+
+  echo "All ports are available."
+  return 0
+}
+
 show_help() {
 cat <<EOF
 Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] \
 [-d duration of workload] [-p number of repetitions] [-l siege logfile path] \
 [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] \
-[-t snapshot taking] [-I interpreter]
+[-t snapshot taking] [-I interpreter] [-P base port] [-T stats port]
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
@@ -78,6 +142,8 @@ For role "server", "clientserver":
     -m          minimum icachebuster calling rounds (default 100000)
     -M          maximum icachebuster calling rounds (default 200000)
     -I          python interpreter to use (cpython or cinder, default is cpython)
+    -P          base port for Proxygen workers (default 8001)
+    -T          HAProxy stats port (default 16667)
     -L          when provided snapshot loading is enabled, meaning that the database is loaded from a snapshot stored in the specifed path (default disabled)
     -t          when provided snapshot taking is enabled, meaning that the a snapshot of the generetaed database will be stored in the specifed path (default disabled)
     -S          skip the database setup and use the snapshot stored in the Cassandra data directory (default disabled)
@@ -321,16 +387,24 @@ ${python_libs}:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     echo "Running django server with uWSGI + HAProxy load balancing"
     echo "  Workers: ${num_server_workers}"
     echo "  Interpreter: ${interpreter}"
+    echo "  Base port: ${base_port}"
+    echo "  Stats port: ${stats_port}"
     echo "  Load balancer: http://127.0.0.1:8000"
-    echo "  HAProxy stats: http://127.0.0.1:9000/stats"
+    echo "  HAProxy stats: http://127.0.0.1:${stats_port}/stats"
+
+    # Check port availability before starting
+    if ! check_port_range_available "${base_port}" "${num_server_workers}" "${stats_port}"; then
+      echo "ERROR: Cannot start server due to port conflicts"
+      exit 1
+    fi
 
     # Run the load balanced server with uWSGI + Proxygen + HAProxy
     DJANGO_SETTINGS_MODULE=cluster_settings \
       python start_loadbalanced_server.py \
         --use-uwsgi \
         --workers "${num_server_workers}" \
-        --stats-port 9000 \
-        --base-port 16667 \
+        --stats-port "${stats_port}" \
+        --base-port "${base_port}" \
         --log-dir load_balancer_logs \
         > lb.log 2>&1
   else
@@ -396,6 +470,7 @@ start_clientserver() {
   local use_async="${10:-0}"
 
   start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" "${use_async}" &
+  server_pid="$!"
 
   # Wait for the server to start
   local retries_init=150
@@ -405,6 +480,12 @@ start_clientserver() {
       retries=$((retries-1))
       if [[ "$retries" -le 0 ]]; then
           echo "Django server could not start within ${retries_init}s"
+          exit 1
+      fi
+      # fail early if the server process does not exist
+      if ! kill -0 "$server_pid"; then
+          echo "Django server exited unexpectedly, will stop waiting"
+          echo "Please check logs to debug the problems"
           exit 1
       fi
   done
@@ -486,7 +567,13 @@ main() {
   local use_async
   use_async=1
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:SI:A:' OPTION "${@}"; do
+  local base_port
+  base_port=8001
+
+  local stats_port
+  stats_port=16667
+
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:SI:A:P:T:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -568,6 +655,12 @@ main() {
         ;;
       A)
         use_async="${OPTARG}"
+        ;;
+      P)
+        base_port="${OPTARG}"
+        ;;
+      T)
+        stats_port="${OPTARG}"
         ;;
       ?)
         show_help >&2
