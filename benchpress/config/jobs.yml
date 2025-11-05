@@ -189,6 +189,8 @@
         - '-c {db_addr}'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'db_addr'
         - 'duration=5M'
@@ -196,6 +198,8 @@
         - 'reps=0'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
     db:
       args:
         - '-r db'
@@ -208,10 +212,14 @@
         - '-c {db_addr}'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'db_addr'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
     standalone:
       args:
         - '-r standalone'
@@ -223,12 +231,16 @@
         - '-c 127.0.0.1'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
   hooks:
     - hook: copymove
       options:
@@ -259,6 +271,8 @@
         - '-M 100000'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'db_addr'
         - 'duration=5M'
@@ -266,6 +280,8 @@
         - 'reps=0'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
     db:
       args:
         - '-r db'
@@ -280,10 +296,14 @@
         - '-M 100000'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'db_addr'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
     standalone:
       args:
         - '-r standalone'
@@ -297,12 +317,16 @@
         - '-M 100000'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
   hooks:
     - hook: copymove
       options:
@@ -334,12 +358,16 @@
         - '-S'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'duration=1M'
         - 'iterations=1'
         - 'reps=1000'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
   hooks:
     - hook: copymove
       options:
@@ -369,12 +397,16 @@
         - '-S'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'duration=1M'
         - 'iterations=1'
         - 'reps=1000'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
   hooks:
     - hook: copymove
       options:
@@ -408,6 +440,8 @@
         - '-M {ib_max}'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
@@ -419,6 +453,8 @@
         - 'client_workers'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
     client:
       args:
         - '-r client'
@@ -444,6 +480,8 @@
         - '-M {ib_max}'
         - '-I {interpreter}'
         - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'db_addr'
         - 'server_workers'
@@ -451,6 +489,8 @@
         - 'ib_max=200000'
         - 'interpreter=cpython'
         - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
     db:
       args:
         - '-r db'
