@@ -762,8 +762,8 @@ def init_parser():
     parser.add_argument(
         "--cpu",
         type=str,
-        required=True,
-        help="Name of CPU generation (e.g. cpl, milan, bergamo)",
+        default="",
+        help="Name of CPU generation (e.g. cpl, milan, bergamo). Can be omitted if --auto-detect-cpu is used.",
     )
     parser.add_argument(
         "--interval", type=int, default=5, help="Metrics collection interval"
