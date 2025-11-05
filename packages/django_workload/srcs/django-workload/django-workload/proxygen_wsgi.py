@@ -73,8 +73,14 @@ def start_proxygen_server(port=None, threads=None):
     explicit port and threads arguments for load-balanced setups.
 
     Args:
-        port: Port to listen on (overrides environment variable)
+        port: Port to listen on (overrides environment variable and uWSGI worker_id calculation)
         threads: Number of threads (overrides environment variable, 0=auto-detect)
+
+    Port Selection Logic (in order of precedence):
+        1. Explicit port argument (for standalone mode)
+        2. PROXYGEN_PORT environment variable
+        3. Calculate from uWSGI worker_id: PROXYGEN_BASE_PORT + worker_id - 1
+        4. Default to 8000
 
     Architecture:
         Proxygen RequestData
@@ -89,7 +95,30 @@ def start_proxygen_server(port=None, threads=None):
 
     # Get configuration from environment or arguments
     ip = os.environ.get("PROXYGEN_IP", "0.0.0.0")
-    port = port if port is not None else int(os.environ.get("PROXYGEN_PORT", "8000"))
+
+    # Determine port with precedence: argument > env > uWSGI worker_id > default
+    if port is not None:
+        # Explicit port argument (standalone mode)
+        port = port
+    elif "PROXYGEN_PORT" in os.environ:
+        # Environment variable (explicit port)
+        port = int(os.environ["PROXYGEN_PORT"])
+    else:
+        # Try to calculate from uWSGI worker_id
+        try:
+            import uwsgi
+
+            worker_id = uwsgi.worker_id()
+            base_port = int(os.environ.get("PROXYGEN_BASE_PORT", "8001"))
+            port = base_port + worker_id - 1
+            logger.info(
+                f"uWSGI worker {worker_id}: calculated port {port} "
+                f"(base_port={base_port} + worker_id={worker_id} - 1)"
+            )
+        except (ImportError, AttributeError):
+            # Not running under uWSGI or uwsgi.worker_id() not available
+            port = int(os.environ.get("PROXYGEN_PORT", "8000"))
+
     threads = (
         threads if threads is not None else int(os.environ.get("PROXYGEN_THREADS", "0"))
     )  # 0 = auto-detect
