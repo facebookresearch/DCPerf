@@ -235,6 +235,11 @@
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/siege_out_*'
 
 - benchmark: django_workload
   name: django_workload_arm
@@ -304,6 +309,11 @@
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/siege_out_*'
 
 - benchmark: django_workload
   name: django_workload_arm_mini
@@ -336,6 +346,11 @@
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/siege_out_*'
 
 - benchmark: django_workload
   name: django_workload_mini
@@ -366,6 +381,11 @@
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/siege_out_*'
 
 
 - benchmark: django_workload
@@ -445,6 +465,11 @@
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/siege_out_*'
 
 - name: feedsim_default
   benchmark: feedsim
