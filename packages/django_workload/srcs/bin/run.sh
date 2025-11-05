@@ -31,6 +31,21 @@ cleanup() {
 
   # Stop django-workload
   [ -f uwsgi.pid ] && { echo "Stopping uwsgi"; kill -INT "$(cat uwsgi.pid)" || true; }
+
+  # Stop start_loadbalanced_server.py process
+  LOADBALANCER_PID="$(pgrep -f 'start_loadbalanced_server.py')"
+  if [ -n "$LOADBALANCER_PID" ]; then
+    echo "Stopping load balancer (PID: $LOADBALANCER_PID)"
+    kill -TERM "$LOADBALANCER_PID" || true
+    # Wait a bit for graceful shutdown
+    sleep 5
+    # Force kill if still running
+    if kill -0 "$LOADBALANCER_PID" 2>/dev/null; then
+      echo "Force killing load balancer (PID: $LOADBALANCER_PID)"
+      kill -9 "$LOADBALANCER_PID" || true
+    fi
+  fi
+
   # Stop memcached
   [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" || true; }
   # Stop Cassandra
