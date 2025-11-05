@@ -31,7 +31,7 @@
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/synchronization/Baton.h"
 
-#include "./ConcurrentHashMap.h"
+#include "folly/concurrency/ConcurrentHashMap.h"
 
 // Command line flags
 DEFINE_string(distribution_file, "", "Path to the distribution CSV file");
@@ -82,12 +82,7 @@ class AdData {
 
 using AdDataPtr = std::shared_ptr<AdData>;
 // ConcurrentHashMap with 8 shards, F14FastMap backend, and SharedMutex
-using ConcurrentHashMapType = ConcurrentHashMap<
-    AdId,
-    AdDataPtr,
-    8,
-    folly::F14FastMap<AdId, AdDataPtr>,
-    folly::SharedMutex>;
+using ConcurrentHashMapType = folly::ConcurrentHashMap<AdId, AdDataPtr>;
 
 /**
  * Parses distribution file in CSV format (frequency,numKeys)
@@ -380,7 +375,7 @@ class ChmBenchmark {
           [&map, &workingSet, &insertedKeys, startIdx, endIdx]() {
             uint64_t localInsertedKeys = 0;
             for (size_t j = startIdx; j < endIdx; ++j) {
-              map.put(workingSet[j], std::make_shared<AdData>(workingSet[j]));
+              map.insert(workingSet[j], std::make_shared<AdData>(workingSet[j]));
               localInsertedKeys++;
 
               if (localInsertedKeys % PROGRESS_UPDATE_INTERVAL == 0) {
@@ -602,10 +597,10 @@ class ChmBenchmark {
     // Process assigned range of operations
     for (int i = startIdx; i < endIdx; i++) {
       AdId key = preGeneratedKeys[i];
-      auto result = map.getValue(key); // Core benchmark operation
+      auto result = map.find(key); // Core benchmark operation
 
       localOps++;
-      if (result.second) { // Check if key was found
+      if (result != map.end()) { // Check if key was found
         localSuccessfulOps++;
       }
     }
@@ -621,6 +616,7 @@ class ChmBenchmark {
 };
 
 } // namespace chm_benchmark
+
 
 /**
  * Main entry point for the ConcurrentHashMap benchmark

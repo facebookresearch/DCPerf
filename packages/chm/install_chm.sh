@@ -158,7 +158,6 @@ build_benchmark() {
 
   # Copy source files to build directory
   cp "${BENCHPRESS_ROOT}/packages/chm/ChmBenchmark.cpp" "${BUILD_DIR}"
-  cp "${BENCHPRESS_ROOT}/packages/chm/ConcurrentHashMap.h" "${BUILD_DIR}"
   cp "${BENCHPRESS_ROOT}/packages/chm/CMakeLists.txt" "${BUILD_DIR}"
   # Copy distribution model file to benchmarks directory
   cp "${BENCHPRESS_ROOT}/packages/chm/model_a.dist" "${BENCHMARKS_DIR}"

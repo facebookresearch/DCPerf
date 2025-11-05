@@ -11,7 +11,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(folly CONFIG REQUIRED)
 find_package(gflags CONFIG REQUIRED)
+find_package (glog CONFIG REQUIRED)
 add_executable(chm_bench ChmBenchmark.cpp)
 
 
-target_link_libraries(chm_bench PRIVATE Folly::folly)
+target_link_libraries(chm_bench PRIVATE Folly::folly glog::glog)
