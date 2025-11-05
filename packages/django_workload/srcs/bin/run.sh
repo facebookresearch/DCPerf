@@ -248,6 +248,7 @@ start_django_server() {
   local cassandra_addr=$1
   local num_server_workers=$2
   local interpreter=${3:-cpython}
+  local use_async=${4:-0}
 
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -299,13 +300,33 @@ ${python_libs}:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     if [ "$take_a_snapshot" = true ]; then
       take_snapshot
     fi
-  echo "Running django server with ${num_server_workers} uWSGI workers using ${interpreter} interpreter"
 
-  "${venv_dir}"/bin/uwsgi \
-    --ini uwsgi.ini \
-    -H "${SCRIPT_ROOT}/../django-workload/django-workload/${venv_dir}" \
-    --safe-pidfile "${SCRIPT_ROOT}/../uwsgi.pid" \
-    --workers "${num_server_workers}"
+  # Should we run in async mode with load balancing?
+  if [ "${use_async}" = "1" ] || [ "${use_async}" -gt "0" ]; then
+    echo "Running django server with uWSGI + HAProxy load balancing"
+    echo "  Workers: ${num_server_workers}"
+    echo "  Interpreter: ${interpreter}"
+    echo "  Load balancer: http://127.0.0.1:8000"
+    echo "  HAProxy stats: http://127.0.0.1:9000/stats"
+
+    # Run the load balanced server with uWSGI + Proxygen + HAProxy
+    DJANGO_SETTINGS_MODULE=cluster_settings \
+      python start_loadbalanced_server.py \
+        --use-uwsgi \
+        --workers "${num_server_workers}" \
+        --stats-port 9000 \
+        --base-port 16667 \
+        --log-dir load_balancer_logs \
+        > lb.log 2>&1
+  else
+    echo "Running django server with ${num_server_workers} uWSGI workers using ${interpreter} interpreter"
+
+    "${venv_dir}"/bin/uwsgi \
+      --ini uwsgi.ini \
+      -H "${SCRIPT_ROOT}/../django-workload/django-workload/${venv_dir}" \
+      --safe-pidfile "${SCRIPT_ROOT}/../uwsgi.pid" \
+      --workers "${num_server_workers}"
+  fi
 }
 
 start_client() {
@@ -331,6 +352,19 @@ start_client() {
   python_libs="${CPYTHON_PATH}/lib"
   export LD_LIBRARY_PATH="${python_libs}:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
+  # Wait for load balancer to be ready (try to connect to the server)
+  local retries=60
+  echo "Waiting for server to be ready at http://localhost:8000..."
+  while ! curl -s -f http://localhost:8000 > /dev/null 2>&1; do
+    sleep 1
+    retries=$((retries-1))
+    if [[ "$retries" -le 0 ]]; then
+      echo "Server did not become ready within 60 seconds"
+      exit 1
+    fi
+  done
+  echo "Server is ready!"
+
   run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "${iterations}" "${reps}"
 }
 
@@ -343,9 +377,10 @@ start_clientserver() {
   local urls_path=$6
   local iterations="$7"
   local reps="$8"
-  local interpreter="$9"
+  local interpreter="${9:-cpython}"
+  local use_async="${10:-0}"
 
-  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" &
+  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" "${use_async}" &
 
   # Wait for the server to start
   local retries_init=150
@@ -358,7 +393,7 @@ start_clientserver() {
           exit 1
       fi
   done
-  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" localhost "${iterations}" "${reps}"
+  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "127.0.0.1" "${iterations}" "${reps}"
 
   # Report interpreter type
   echo "Interpreter: ${interpreter}"
@@ -399,7 +434,7 @@ main() {
   cassandra_addr_IPV6=''
 
   local server_addr
-  server_addr='::1'
+  server_addr='127.0.0.1'
 
   local cassandra_bind_addr
   cassandra_bind_addr=''
@@ -433,7 +468,10 @@ main() {
   local snapshot_dir
   snapshot_dir="${BENCHPRESS_ROOT}/benchmarks/django_workload/cassandra_snapshots/synthetic_dataset_snapshot"
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:SI:' OPTION "${@}"; do
+  local use_async
+  use_async=1
+
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:SI:A:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -513,6 +551,9 @@ main() {
       I)
         interpreter="${OPTARG}"
         ;;
+      A)
+        use_async="${OPTARG}"
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -546,6 +587,7 @@ main() {
   readonly django_ib_max
   readonly take_a_snapshot
   readonly load_a_snapshot
+  readonly use_async
 
 
   if [ "$role" = "db" ]; then
@@ -554,14 +596,14 @@ main() {
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
-      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}";
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}" "${use_async}";
   elif [ "$role" = "client" ]; then
     start_client "$num_client_workers" "$duration" "$siege_logs_path" \
       "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
     export IB_MIN="${django_ib_min}"
     export IB_MAX="${django_ib_max}"
-    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter";
+    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter" "${use_async}";
     # Report interpreter type
     echo "Interpreter: ${interpreter}"
   elif [ "$role" = "standalone" ]; then
@@ -569,7 +611,8 @@ main() {
     export IB_MAX="${django_ib_max}"
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
-      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter";
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter" \
+      "${use_async}";
     pgrep -f cassandra | xargs kill
 
   else
