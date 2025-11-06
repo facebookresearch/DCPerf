@@ -12,11 +12,16 @@ import re
 import shlex
 import socket
 import subprocess
+
 import sys
 from datetime import datetime
 from parser import TaoBenchParser
 
 import args_utils
+
+# Add parent directory to path to import diagnosis_utils
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from diagnosis_utils import DiagnosisRecorder
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "packages", "tao_bench")
@@ -273,6 +278,9 @@ def distribute_cores(n_parts):
 
 
 def run_server(args):
+    # Create DiagnosisRecorder instance (automatically manages env var for subprocesses)
+    recorder = DiagnosisRecorder.get_instance(root_dir=str(BENCHPRESS_ROOT))
+
     core_ranges = distribute_cores(args.num_servers)
     # memory size - split evenly for each server
     n_mem = float(args.memsize)
@@ -312,7 +320,13 @@ def run_server(args):
     procs = []
     for server in servers:
         print("Spawn server instance: " + " ".join(server[0]))
-        p = subprocess.Popen(server[0], stdout=server[1], stderr=server[1])
+        # Use process group to kill all children
+        p = subprocess.Popen(
+            server[0],
+            stdout=server[1],
+            stderr=server[1],
+            start_new_session=True,  # Create new process group
+        )
         procs.append(p)
     # wait for servers to finish - add extra minute to make sure
     # post-processing will finish
@@ -323,8 +337,18 @@ def run_server(args):
         try:
             (out, err) = p.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
-            p.kill()
+            # Kill the entire process group
+            try:
+                os.killpg(os.getpgid(p.pid), 9)
+            except ProcessLookupError:
+                pass  # Process already terminated
             (out, err) = p.communicate()
+        finally:
+            # Ensure cleanup even if process completed successfully
+            try:
+                os.killpg(os.getpgid(p.pid), 9)
+            except (ProcessLookupError, PermissionError):
+                pass  # Process already terminated or we don't have permission
     for server in servers:
         server[1].close()
     # parse results
@@ -350,6 +374,10 @@ def run_server(args):
             res = parser.parse(log, None, procs[i].returncode)
             if "role" in res and res["role"] == "server":
                 results.append(res)
+    recorder = DiagnosisRecorder.get_instance(root_dir=str(BENCHPRESS_ROOT))
+    recorder.merge_failure_to_results(
+        results_dict=overall,
+    )
 
     for res in results:
         overall["fast_qps"] += res["fast_qps"]
@@ -360,6 +388,7 @@ def run_server(args):
             overall["hit_ratio"] * overall["successful_instances"] + res["hit_ratio"]
         ) / (overall["successful_instances"] + 1)
         overall["successful_instances"] += 1
+
     print(json.dumps(overall, indent=4))
 
 
@@ -478,6 +507,5 @@ if __name__ == "__main__":
         args.num_servers = args_utils.get_default_num_servers()
     if args.memsize == 0:
         args.memsize = args_utils.get_system_memsize_gb()
-    if args.warmup_time == 0:
-        args.warmup_time = args_utils.get_warmup_time(args)
+    args.warmup_time = args_utils.get_warmup_time(args)
     args.func(args)

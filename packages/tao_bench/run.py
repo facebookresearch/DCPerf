@@ -10,11 +10,16 @@ import pathlib
 import re
 import shlex
 import subprocess
+import sys
 import threading
 import time
 from typing import List
 
 import args_utils
+
+# Add parent directory to path to import diagnosis_utils
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from diagnosis_utils import check_port_available, DiagnosisRecorder
 
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
@@ -66,8 +71,18 @@ def run_cmd(
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            print(f"Process timeout expired, terminating process {proc.pid}...")
             proc.terminate()
-            proc.wait()
+            try:
+                # Give the process 5 seconds to terminate gracefully
+                proc.wait(timeout=5)
+                print(f"Process {proc.pid} terminated gracefully")
+            except subprocess.TimeoutExpired:
+                # If it still doesn't terminate, force kill it
+                print(f"Process {proc.pid} didn't respond to SIGTERM, force killing...")
+                proc.kill()
+                proc.wait()
+                print(f"Process {proc.pid} killed successfully")
 
 
 def profile_server():
@@ -117,6 +132,27 @@ def affinitize_nic(args):
 def run_server(args):
     n_cores = len(os.sched_getaffinity(0))
     n_channels = int(n_cores * args.nic_channel_ratio)
+
+    # Determine port number early so we can check if it's available
+    if args.port_number > 0:
+        port_num = args.port_number
+    else:
+        port_num = 11211
+
+    # Initialize DiagnosisRecorder singleton (automatically uses shared file from parent if available)
+    DiagnosisRecorder.get_instance(root_dir=str(BENCHPRESS_ROOT))
+
+    # Check if port is available before starting server (fail fast if not)
+    port_avail = check_port_available(
+        port=port_num,
+        interface="0.0.0.0" if args.interface_name == "lo" else "0.0.0.0",
+        benchmark="tao_bench",
+        root_dir=str(BENCHPRESS_ROOT),
+    )
+    if not port_avail:
+        print("Port is not available, exiting...")
+        sys.exit(1)
+
     if args.interface_name != "lo":
         affinitize_nic(args)
     # number of threads for various paths
@@ -133,14 +169,10 @@ def run_server(args):
         n_slow_threads = max(int(n_threads * args.slow_to_fast_ratio), 1)
     # memory size
     n_mem = int(args.memsize * 1024 * args_utils.MEM_USAGE_FACTOR)
-    # port number
-    if args.port_number > 0:
-        port_num = args.port_number
-    else:
-        port_num = 11211
     print(
         f"Use {n_channels} NIC channels, {n_threads} fast threads and {n_mem} MB cache memory"
     )
+
     s_binary = os.path.join(TAO_BENCH_DIR, "tao_bench_server")
     extended_options = [
         "lru_crawler",

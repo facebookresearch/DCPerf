@@ -221,8 +221,7 @@ if __name__ == "__main__":
         # Set memory size to 75% of system memory in the standalone mode to avoid OOM,
         # because the clients will also use memory on the same system
         args.memsize = args_utils.get_system_memsize_gb() * 0.75
-    if args.warmup_time == 0:
-        args.warmup_time = args_utils.get_warmup_time(args)
+    args.warmup_time = args_utils.get_warmup_time(args)
     args.server_memsize = args.memsize
     args.server_hostname = "localhost"
 

@@ -18,7 +18,7 @@ def get_default_num_servers(max_cores_per_inst=72):
 
 
 def get_warmup_time(args, secs_per_gb=5, min_time=1200):
-    if args.warmup_time > 0:
+    if args.warmup_time >= 0:
         return args.warmup_time
     else:
         time_to_fill = int(secs_per_gb * args.memsize)
