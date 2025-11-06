@@ -15,11 +15,16 @@ default_last_secs = 300
 default_skip_last_secs = 0
 
 
-def parse_breakdown_csv(breakdown_file):
-    """Parse breakdown.csv to extract main_benchmark start and end times.
+def parse_breakdown_csv(breakdown_file, operation_name="main_benchmark"):
+    """Parse breakdown.csv to extract operation start and end times.
+
+    This function validates that:
+    1. All rows with the specified operation_name have the earliest start and latest end times
+    2. For each sub_operation_name with a value, there must be both start and end entries
 
     Args:
         breakdown_file: Path to breakdown.csv file
+        operation_name: Name of the operation to filter by (default: "main_benchmark")
 
     Returns:
         Tuple of (start_datetime, end_datetime) or (None, None) if not found
@@ -27,30 +32,70 @@ def parse_breakdown_csv(breakdown_file):
     try:
         print(f"parsing {breakdown_file}")
         df = pd.read_csv(breakdown_file)
-        main_benchmark_rows = df[df["operation_name"] == "main_benchmark"]
+        operation_rows = df[df["operation_name"] == operation_name]
 
-        if len(main_benchmark_rows) == 0:
-            print("No main_benchmark rows found in breakdown.csv")
+        if len(operation_rows) == 0:
+            print(f"No {operation_name} rows found in breakdown.csv")
             return None, None
 
-        start_row = main_benchmark_rows[
-            main_benchmark_rows["timestamp_type"] == "start"
-        ]
-        end_row = main_benchmark_rows[main_benchmark_rows["timestamp_type"] == "end"]
+        # Validate sub_operation_name entries if the column exists
+        if "sub_operation_name" in operation_rows.columns:
+            # Get rows with non-null sub_operation_name values
+            sub_ops = operation_rows[
+                operation_rows["sub_operation_name"].notna()
+                & (operation_rows["sub_operation_name"] != "")
+            ]
 
-        if len(start_row) == 0 or len(end_row) == 0:
+            if len(sub_ops) > 0:
+                # Check each unique sub_operation_name has both start and end
+                unique_sub_ops = sub_ops["sub_operation_name"].unique()
+                for sub_op_name in unique_sub_ops:
+                    sub_op_rows = sub_ops[sub_ops["sub_operation_name"] == sub_op_name]
+                    has_start = any(sub_op_rows["timestamp_type"] == "start")
+                    has_end = any(sub_op_rows["timestamp_type"] == "end")
+
+                    if not has_start or not has_end:
+                        print(
+                            f"Warning: sub_operation_name '{sub_op_name}' is missing "
+                            f"{'start' if not has_start else 'end'} entry"
+                        )
+
+        # Find earliest start time across all operation rows
+        start_rows = operation_rows[operation_rows["timestamp_type"] == "start"]
+        # Find latest end time across all operation rows
+        end_rows = operation_rows[operation_rows["timestamp_type"] == "end"]
+
+        if len(start_rows) == 0 or len(end_rows) == 0:
             print("No start/end rows found in breakdown.csv")
             return None, None
 
-        start_time_str = start_row.iloc[0]["timestamp"]
-        end_time_str = end_row.iloc[0]["timestamp"]
-        print(f"start_time_str: {start_time_str}, end_time_str: {end_time_str}")
+        # Parse all start timestamps and find the earliest
+        start_times = []
+        for start_time_str in start_rows["timestamp"]:
+            try:
+                start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S.%f")
+                start_times.append(start_time)
+            except ValueError as e:
+                print(f"Error parsing start timestamp '{start_time_str}': {e}")
 
-        # Parse timestamps - format: "2025-10-16 16:59:21.909"
-        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S.%f")
-        end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S.%f")
-        print(f"start_time: {start_time}, end_time: {end_time}")
-        return start_time, end_time
+        # Parse all end timestamps and find the latest
+        end_times = []
+        for end_time_str in end_rows["timestamp"]:
+            try:
+                end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S.%f")
+                end_times.append(end_time)
+            except ValueError as e:
+                print(f"Error parsing end timestamp '{end_time_str}': {e}")
+
+        if len(start_times) == 0 or len(end_times) == 0:
+            print("Failed to parse any valid timestamps")
+            return None, None
+
+        earliest_start = min(start_times)
+        latest_end = max(end_times)
+
+        print(f"start_time: {earliest_start}, end_time: {latest_end}")
+        return earliest_start, latest_end
     except Exception as e:
         print(f"Error parsing breakdown.csv: {e}")
         return None, None
