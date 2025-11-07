@@ -59,6 +59,7 @@ from .wdl import WDLParser
 
 if not open_source:
     from .hackperf import HackperfParser
+    from .ucache_bench import UcacheBenchParser
 
 
 def register_parsers(factory):
@@ -115,3 +116,4 @@ def register_parsers(factory):
 
     if not open_source:
         factory.register("hackperf", HackperfParser)
+        factory.register("ucache_bench", UcacheBenchParser)
