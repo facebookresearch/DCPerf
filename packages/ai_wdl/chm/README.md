@@ -1,21 +1,21 @@
-# Concurrenth Hasmap Benchmark
+# Concurrenth Hashmap Benchmark
 `chm` is a benchmark that simulates a concurrent hashmap workload representative of a widely used model. The benchmark closely mimics the implementation of a production-grade concurrent hashmap and utilizes workload distributions collected from real-world production environments.
 
 ## Installation
-To install Adsim, execute the following command:
+To install `chm`, execute the following command:
 ```bash
 ./benchpress -b ai install chm_a
 ./benchpress -b ai install chm_b
 ```
 
-## Run Adsim
+## Run `chm`
 ### Job - `chm_a` and `chm_b`
 `chm_a` and `chm_b` correspondingly simuate the workload for Model A and Model B.
 
 To run `chm` benchmark, please use following command
 ```bash
 ./benchpress -b ai run chm_a
-./benchpress -b ai run chm_a
+./benchpress -b ai run chm_b
 ```
 
 ## Reporting and Measurement

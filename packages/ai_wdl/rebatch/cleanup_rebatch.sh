@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 BPKGS_REBATCH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
-BENCHPRESS_ROOT="$(readlink -f "$BPKGS_REBATCH_ROOT/../..")"
+BENCHPRESS_ROOT="$(readlink -f "$BPKGS_REBATCH_ROOT/../../..")"
 BENCHMARK_ROOT="${BENCHPRESS_ROOT}/benchmarks"
 
-rm -rf "$BENCHMARK_ROOT/rebatch"
+rm -rf "$BENCHMARK_ROOT/ai_wdl/rebatch"

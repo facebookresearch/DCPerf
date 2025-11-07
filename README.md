@@ -113,34 +113,34 @@ DCPerf includes specialized benchmarks focusing on AI/ML workloads commonly foun
    <td>Application domain they represent</td>
   </tr>
   <tr>
-   <td><a href="packages/fbgemm_gpu/README.md">FBGEMM Embedding</a></td>
-   <td>C++, Python</td>
-   <td>FBGEMM</td>
-   <td>Table-based Embedding Inference, Recommendation Systems</td>
+   <td><a href="packages/adsim/README.md">AdSim</a></td>
+   <td>C++</td>
+   <td>AdSim Framework, Folly, FBThrift, FBGEMM, Treadmill</td>
+   <td>Server-client AI Inference workload Simulation, Model Inference</td>
   </tr>
   <tr>
-   <td><a href="packages/rebatch/README.md">Rebatch</a></td>
+   <td><a href="packages/ai_wdl/fbgemm/README.md">FBGEMM</a> (AI_WDL) </td>
+   <td>C++, Python</td>
+   <td>FBGEMM</td>
+   <td>Table-based Embedding Inference, Recommendation Systems, key GEMM kernels</td>
+  </tr>
+  <tr>
+   <td><a href="packages/ai_wdl/rebatch/README.md">Rebatch</a> (AI_WDL) </td>
    <td>C++</td>
    <td>Memcpy</td>
    <td>Tensor Rebatching, Model Inference Optimization</td>
   </tr>
   <tr>
-   <td><a href="packages/deser/README.md">Tensor Deserialization</a></td>
+   <td><a href="packages/ai_wdl/deser/README.md">Tensor Deserialization</a> (AI_WDL) </td>
    <td>C++</td>
    <td>folly, memcpy</td>
    <td>Tensor Deserialization, Prediction Request Tensor Deserialization</td>
   </tr>
   <tr>
-   <td><a href="packages/chm/README.md">Concurrent HashMap</a></td>
+   <td><a href="packages/ai_wdl/chm/README.md">Concurrent HashMap</a> (AI_WDL) </td>
    <td>C++</td>
    <td>Concurrent Data Structures, folly</td>
    <td>Concurrent HashMap Operations, Model Feature Lookup</td>
-  </tr>
-  <tr>
-   <td><a href="packages/adsim/README.md">AdSim</a></td>
-   <td>C++</td>
-   <td>AdSim Framework, Folly, FBThrift, FBGEMM, Treadmill</td>
-   <td>Server-client AI Inference workload Simulation, Model Inference</td>
   </tr>
 </table>
 

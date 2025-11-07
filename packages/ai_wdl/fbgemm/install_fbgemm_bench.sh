@@ -10,7 +10,7 @@
 ################################################################################
 
 # Directory where benchmark executables will be stored
-BENCHMARKS_DIR="$(pwd)/benchmarks/fbgemm"
+BENCHMARKS_DIR="$(pwd)/benchmarks/ai_wdl/fbgemm"
 
 # Path to Miniconda installation
 MINICONDA_PREFIX=$(pwd)/build/miniconda

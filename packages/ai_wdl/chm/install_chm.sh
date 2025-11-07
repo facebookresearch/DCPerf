@@ -4,8 +4,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-# install_deser.sh: Installation script for Deserialization benchmark
-# This script builds and installs the Folly library dependency and the Deserialization benchmark
+# install_chm.sh: Installation script for Concurrent Hash Map (CHM) benchmark
+# This script builds and installs the Folly library dependency and the CHM benchmark
 
 
 # Exit immediately if a command exits with a non-zero status
@@ -19,7 +19,7 @@ set -x
 ################################################################################
 
 # Directory where benchmark executables will be stored
-BENCHMARKS_DIR="$(pwd)/benchmarks/deser"
+BENCHMARKS_DIR="$(pwd)/benchmarks/ai_wdl/chm"
 
 # Temporary directory for build artifacts
 BUILD_DIR="${BENCHMARKS_DIR}/build"
@@ -28,10 +28,7 @@ BUILD_DIR="${BENCHMARKS_DIR}/build"
 FOLLY_VERSION="v2025.06.23.00"
 
 # Path to directory containing this script
-BPKGS_DESER_ROOT="$(dirname "$(readlink -f "$0")")"
-
-# Root directory of the Benchpress project
-BENCHPRESS_ROOT="$(readlink -f "$BPKGS_DESER_ROOT/../..")"
+BPKGS_CHM_ROOT="$(dirname "$(readlink -f "$0")")"
 
 
 ################################################################################
@@ -70,13 +67,11 @@ install_system_dependencies() {
     echo "Detected Ubuntu system, installing Ubuntu dependencies"
     sudo apt-get update
     sudo apt-get install -y libssl-dev
-    sudo apt-get install -y libjemalloc-dev
     sudo apt-get install -y clang
   elif command -v dnf >/dev/null 2>&1; then
     # CentOS
     echo "Detected CentOS system, installing CentOS dependencies"
     sudo dnf install -y openssl-devel
-    sudo dnf install -y jemalloc
     sudo dnf install -y clang
   else
     echo "ERROR: This script only supports Ubuntu (apt-get) and CentOS (dnf)"
@@ -115,12 +110,12 @@ check_python_version() {
     echo "Detected Ubuntu system, using apt-get"
     sudo apt-get update
     sudo apt-get install -y python3 python3-dev python3-pip
-  elif command -v dnf >/dev/null 2>&1; then
+  elif command -v yum >/dev/null 2>&1; then
     # CentOS
-    echo "Detected CentOS system, using dnf"
+    echo "Detected CentOS system, using yum"
     sudo dnf install -y python3 python3-devel python3-pip
   else
-    echo "ERROR: This script only supports Ubuntu (apt-get) and CentOS (dnf)"
+    echo "ERROR: This script only supports Ubuntu (apt-get) and CentOS (yum)"
     echo "Please install Python 3.6+ manually and run this script again"
     exit 1
   fi
@@ -140,7 +135,7 @@ check_python_version() {
   echo "Python 3.6+ successfully installed"
 }
 
-# Build and install Folly library (required dependency for Deserialization benchmark)
+# Build and install Folly library (required dependency for CHM)
 build_folly() {
   # Clone specific version of Folly with all submodules
   git clone -b $FOLLY_VERSION --recursive https://github.com/facebook/folly.git folly-${FOLLY_VERSION}
@@ -149,33 +144,31 @@ build_folly() {
   # Install system dependencies required by Folly
   sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive
   # Build Folly with system packages allowed and using our build directory
-  python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --scratch-path "${BUILD_DIR}"
+  python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --scratch-path "${BUILD_DIR}" --build-type Release
 
   popd
 }
 
-# Build the Deserialization benchmark
+# Build the Concurrent Hash Map (CHM) benchmark
 build_benchmark() {
-  echo -e "Building Deser benchmark..."
+  echo -e "Building CHM benchmark..."
 
   # Copy source files to build directory
-  cp "${BENCHPRESS_ROOT}/packages/deser/DeserBenchmark.cpp" "${BUILD_DIR}"
-  cp "${BENCHPRESS_ROOT}/packages/deser/memwrap.cpp" "${BUILD_DIR}"
-  cp "${BENCHPRESS_ROOT}/packages/deser/CMakeLists.txt" "${BUILD_DIR}"
-
-  # Assemble model_a.dist from parts
-  cat "${BENCHPRESS_ROOT}/packages/deser/model_a_part_"*.dist > "${BENCHMARKS_DIR}/model_a.dist"
-
-  # Assemble model_b.dist from parts
-  cat "${BENCHPRESS_ROOT}/packages/deser/model_b_part_"*.dist > "${BENCHMARKS_DIR}/model_b.dist"
+  cp "${BPKGS_CHM_ROOT}/ChmBenchmark.cpp" "${BUILD_DIR}"
+  cp "${BPKGS_CHM_ROOT}/ConcurrentHashMap.h" "${BUILD_DIR}"
+  cp "${BPKGS_CHM_ROOT}/CMakeLists.txt" "${BUILD_DIR}"
+  # Copy distribution model file to benchmarks directory
+  cp "${BPKGS_CHM_ROOT}/model_a.dist" "${BENCHMARKS_DIR}"
+  cp "${BPKGS_CHM_ROOT}/model_b.dist" "${BENCHMARKS_DIR}"
 
   # Configure CMake for optimized release build
   cmake -DCMAKE_CXX_FLAGS="-O3 -g1" .
+
   # Build using all available cores
   make -j
 
   # Copy the compiled benchmark to the benchmarks directory
-  cp deser_bench "${BENCHMARKS_DIR}"
+  cp chm_bench "${BENCHMARKS_DIR}"
 
   popd || exit
 }
@@ -199,7 +192,7 @@ main() {
   # Build and install Folly library dependency
   build_folly
 
-  # Build the deserilization benchmark executable
+  # Build the CHM benchmark executable
   build_benchmark
 
 }

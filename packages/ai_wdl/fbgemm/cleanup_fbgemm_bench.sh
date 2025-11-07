@@ -6,8 +6,8 @@
 
 
 AI_BENCH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
-BENCHPRESS_ROOT="$(readlink -f "$AI_BENCH_ROOT/../..")"
-BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks/fbgemm"
+BENCHPRESS_ROOT="$(readlink -f "$AI_BENCH_ROOT/../../..")"
+BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks/ai_wdl/fbgemm"
 FBGEMM_GPU="${BENCHMARKS_DIR}/tbe_inference_benchmark"
 FBGEMM_CPU_A="${BENCHMARKS_DIR}/FP16Benchmark"
 FBGEMM_CPU_B="${BENCHMARKS_DIR}/EmbeddingSpMDM8BitBenchmark"
