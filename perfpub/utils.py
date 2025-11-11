@@ -517,6 +517,179 @@ def put_value(db_fields: dict, key: str, kv: str):
         pass
 
 
+def get_server_info(param):
+    """
+    Query comprehensive server information given a hostname or asset_id
+
+    Args:
+        param (str): The hostname of the server to query or asset_id
+
+    Returns:
+        dict: Dictionary containing Asset ID, LSST, model info, CPU info, and evaluation status
+    """
+
+    from ame.serf.clients.py.serf import Serf3ServiceClient
+    from facebook.core_systems.device.ttypes import EvaluationStatus
+    from facebook.core_systems.logical_server_type.types import LogicalServerSubType
+    from facebook.core_systems.queries.ttypes import BinaryExpression, Operator, Query
+
+    with Serf3ServiceClient() as serf_client:
+        # Check if param is a digit (asset_id) or hostname
+        if param.isdigit():
+            # Query by asset_id
+            query_field = "asset_id"
+            query_value = param
+        else:
+            # Query by hostname
+            query_field = "name"
+            query_value = param
+
+        devices = serf_client.getDevices(
+            query=Query(
+                binExprs=[BinaryExpression(query_field, Operator.EQUAL, [query_value])]
+            ),
+            columns=[
+                "asset_id",
+                "logical_server_subtype",
+                "model_id",
+                "evaluation_status",
+                "name",
+            ],
+        )
+
+        if not devices:
+            return {"error": f"No device found with {query_field}: {param}"}
+
+        device = devices[0]
+
+        # Convert LSST ID to human-readable name
+        try:
+            lsst_name = (
+                LogicalServerSubType(device.logical_server_subtype).name
+                if device.logical_server_subtype
+                else "LSST_UNKNOWN"
+            )
+        except Exception:
+            lsst_name = f"LSST_ID_{device.logical_server_subtype}"
+
+        # Convert evaluation_status to human-readable name
+        try:
+            eval_status_name = (
+                EvaluationStatus._VALUES_TO_NAMES.get(
+                    device.evaluation_status, f"EvalStatus_{device.evaluation_status}"
+                )
+                if hasattr(device, "evaluation_status")
+                else "EVAL_UNKNOWN"
+            )
+            if eval_status_name.startswith("EVAL_"):
+                eval_status_name = eval_status_name[5:]
+
+        except Exception:
+            eval_status_name = f"EvalStatus_{device.evaluation_status if hasattr(device, 'evaluation_status') else 'EVAL_UNKNOWN'}"
+
+        # Query model name from model_id
+        model_name = "MODEL_NAME_UNKNOWN"
+        model_make = "MODEL_MAKE_UNKNOWN"
+        if device.model_id:
+            try:
+                models = serf_client.getModels(
+                    query=Query(
+                        binExprs=[
+                            # pyre-ignore
+                            BinaryExpression(
+                                "id", Operator.EQUAL, [str(device.model_id)]
+                            )
+                        ]
+                    ),
+                    columns=["model", "make"],
+                )
+                if models:
+                    model_name = (
+                        models[0].model if models[0].model else "MODEL_NAME_UNKNOWN"
+                    )
+                    model_make = (
+                        models[0].make if models[0].make else "MODEL_MAKE_UNKNOWN"
+                    )
+            except Exception:
+                model_name = f"ModelID_{device.model_id}"
+
+        # Query CPU information from components
+        cpu_architecture = "Unknown"
+
+        try:
+            # Get active CPU components
+            cpu_components = serf_client.getComponents(
+                query=Query(
+                    binExprs=[
+                        BinaryExpression("device_id", Operator.EQUAL, [str(device.id)]),
+                        BinaryExpression("type", Operator.EQUAL, ["serf.CPU"]),
+                        BinaryExpression("active", Operator.EQUAL, ["1"]),
+                    ]
+                ),
+                columns=["fbpn"],
+            )
+
+            if (
+                cpu_components
+                and cpu_components[0].fbpn
+                and cpu_components[0].fbpn != "Unknown"
+            ):
+                # Query part information - use "*" to get all fields
+                parts = serf_client.getParts(
+                    query=Query(
+                        binExprs=[
+                            BinaryExpression(
+                                "fbpn", Operator.EQUAL, [cpu_components[0].fbpn]
+                            )
+                        ]
+                    ),
+                    columns=["*"],
+                )
+
+                if parts:
+                    part = parts[0]
+
+                    # Get CPU model from manufacturers
+                    if hasattr(part, "manufacturers") and part.manufacturers:
+                        cpu_model = part.manufacturers[0].model
+                        # Extract architecture from model name (first words before core count)
+                        # e.g., "Cooper Lake 26C" -> "COOPER_LAKE"
+                        # e.g., "Bergamo 88C" -> "BERGAMO"
+                        if cpu_model:
+                            # Remove trailing core count pattern (e.g., "26C", "88C")
+                            model_parts = cpu_model.split()
+                            # Filter out parts that look like core counts (number + C)
+                            arch_parts = [
+                                p
+                                for p in model_parts
+                                if not (p.endswith("C") and p[:-1].isdigit())
+                            ]
+                            # Convert to uppercase and replace spaces with underscores
+                            cpu_architecture = (
+                                "_".join(arch_parts).upper()
+                                if arch_parts
+                                else cpu_model.upper()
+                            )
+
+        except Exception:
+            # If parts query fails, architecture remains "Unknown"
+            pass
+
+        return {
+            "hostname": device.name,
+            "asset_id": (
+                device.asset_id
+                if hasattr(device, "asset_id") and device.asset_id
+                else device.id
+            ),
+            "lsst": lsst_name,
+            "model_name": model_name,
+            "model_make": model_make,
+            "cpu_generation": cpu_architecture,
+            "evaluation_status": eval_status_name,
+        }
+
+
 def process_metrics(
     args, additional_processing_on_metrics=None, dump_overall_metrics=None
 ):
@@ -768,7 +941,6 @@ def process_metrics(
     db_fields["bios_release_date"] = f'"{bios_rel_date}"'
 
     # other input
-    db_fields["cpu_generation"] = f'"{args.cpu}"'
     db_fields["note"] = f'"{args.note}"'
 
     if "version_info" in bm_metrics:
@@ -785,6 +957,53 @@ def process_metrics(
     for arg in bm_metrics["benchmark_args"]:
         res += f',"{arg}"\n'
     db_fields["benchmark args"] = f'"{values_benchmarks_args}"'
+
+    # server info from Serf3
+    hostname = bm_metrics["machines"][0].get("hostname", "")
+    if hostname.endswith(".facebook.com") or args.asset_id:
+        if args.asset_id:
+            param = args.asset_id
+        else:
+            param = hostname
+        server_info = get_server_info(param)
+
+        lsst = server_info.get("lsst", "") if not args.lsst else args.lsst
+        asset_id = (
+            server_info.get("asset_id", "") if not args.asset_id else args.asset_id
+        )
+        model_name = (
+            server_info.get("model_name", "")
+            if not args.model_name
+            else args.model_name
+        )
+        model_make = (
+            server_info.get("model_make", "")
+            if not args.model_make
+            else args.model_make
+        )
+        evaluation_status = (
+            server_info.get("evaluation_status", "")
+            if not args.evaluation_status
+            else args.evaluation_status
+        )
+        cpu_generation = server_info.get("cpu_generation", "")
+
+        if "hostname" not in res:
+            hostname = server_info.get("hostname", "")
+            res += f'hostname,"{hostname}"\n'
+
+        db_fields["lsst"] = f'"{lsst}"'
+        db_fields["asset_id"] = f'"{asset_id}"'
+        db_fields["model_name"] = f'"{model_name}"'
+        db_fields["model_make"] = f'"{model_make}"'
+        db_fields["evaluation_status"] = f'"{evaluation_status}"'
+        db_fields["cpu_generation"] = f'"{cpu_generation}"'
+
+        res += f'lsst,"{lsst}"\n'
+        res += f'asset_id,"{asset_id}"\n'
+        res += f'model_name,"{model_name}"\n'
+        res += f'model_make,"{model_make}"\n'
+        res += f'evaluation_status,"{evaluation_status}"\n'
 
     if additional_processing_on_metrics is not None:
         res = additional_processing_on_metrics(
@@ -833,5 +1052,36 @@ def init_parser():
         type=str,
         default="",
         help="Directory where the benchmark_metrics is located",
+    )
+    parser.add_argument(
+        "--lsst",
+        type=str,
+        default="",
+        help="Logical Server SubType (LSST) - overrides Serf3 API value if provided",
+    )
+    parser.add_argument(
+        "--asset-id",
+        type=str,
+        default="",
+        help="asset_id - overrides Serf3 API value if provided",
+    )
+
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default="",
+        help="Server model name - overrides Serf3 API value if provided",
+    )
+    parser.add_argument(
+        "--model-make",
+        type=str,
+        default="",
+        help="Server model make/manufacturer - overrides Serf3 API value if provided",
+    )
+    parser.add_argument(
+        "--evaluation-status",
+        type=str,
+        default="",
+        help="Server evaluation status - overrides Serf3 API value if provided",
     )
     return parser
