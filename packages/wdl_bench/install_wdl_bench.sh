@@ -13,14 +13,18 @@ declare -A REPOS=(
     ['lzbench']='https://github.com/inikep/lzbench.git'
     ['openssl']='https://github.com/openssl/openssl.git'
     ['vdso']='https://github.com/leitao/debug.git'
+    ['libaegis']='https://github.com/aegis-aead/libaegis.git'
+    ['xxhash']='https://github.com/Cyan4973/xxHash.git'
 )
 
 declare -A TAGS=(
-    ['folly']='v2025.09.22.00'
-    ['fbthrift']='v2025.09.22.00'
-    ['lzbench']='v2.1'
-    ['openssl']='openssl-3.3.1'
-    ['vdso']='main'
+    ['folly']='v2025.11.03.00'
+    ['fbthrift']='v2025.11.03.00'
+    ['lzbench']='v2.2'
+    ['openssl']='openssl-3.6.0'
+    ['vdso']='a90085a8e4e1e07a93cc45a68da246fa98a9f831'
+    ['libaegis']='0.4.2'
+    ['xxhash']='136cc1f8fe4d5ea62a7c16c8424d4fa5158f6d68'
 )
 
 declare -A DATASETS=(
@@ -95,7 +99,6 @@ build_folly()
     pushd "${WDL_SOURCE}"
     clone "$lib" || echo "Failed to clone $lib"
     cd "$lib" || exit
-    git apply "${BPKGS_WDL_ROOT}/0001-folly.patch"
 
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive
 
@@ -166,6 +169,40 @@ build_vdso()
     popd || exit
 }
 
+build_libaegis()
+{
+    lib='libaegis'
+    pushd "${WDL_SOURCE}"
+    clone $lib || echo "Failed to clone $lib"
+    ARCH="$(uname -p)"
+    if [ "$ARCH" = "aarch64" ]; then
+        wget https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz
+        tar xvf zig-aarch64-linux-0.15.2.tar.xz
+        mv zig-aarch64-linux-0.15.2 zig
+    else
+        wget https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+        tar xvf zig-x86_64-linux-0.15.2.tar.xz
+        mv zig-x86_64-linux-0.15.2 zig
+    fi
+    cd "$lib" || exit
+    ../zig/zig build -Drelease -Dfavor-performance -Dwith-benchmark
+    cp ./zig-out/bin/benchmark "${WDL_ROOT}/libaegis_benchmark" || exit
+
+    popd || exit
+}
+
+build_xxhash()
+{
+    lib='xxhash'
+    pushd "${WDL_SOURCE}"
+    clone $lib || echo "Failed to clone $lib"
+    cd "$lib" || exit
+    make -C ./tests/bench/ -j
+    cp ./test/bench/benchHash "${WDL_ROOT}/xxhash_benchmark" || exit
+
+    popd || exit
+}
+
 
 ##################### BUILD AND INSTALL #########################
 
@@ -176,6 +213,8 @@ build_fbthrift
 build_lzbench
 build_openssl
 build_vdso
+build_libaegis
+build_xxhash
 
 folly_benchmark_list="concurrency_concurrent_hash_map_bench hash_hash_benchmark container_hash_maps_bench stats_digest_builder_benchmark fibers_fibers_benchmark crypto_lt_hash_benchmark memcpy_benchmark memset_benchmark io_async_event_base_benchmark io_iobuf_benchmark function_benchmark random_benchmark synchronization_small_locks_benchmark range_find_benchmark"
 
