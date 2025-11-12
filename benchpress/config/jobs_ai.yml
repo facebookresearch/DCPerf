@@ -169,6 +169,7 @@
     - '--duration_seconds={duration_seconds}'
     - '--batch_size={batch_size}'
     - '--num_batch_threads={num_batch_threads}'
+    - '--worker_loop_count={worker_loop_count}'
 
   vars:
     - 'distribution_file=benchmarks/chm/model_a.dist'
@@ -176,6 +177,7 @@
     - 'duration_seconds=360'
     - 'batch_size=10000000'
     - 'num_batch_threads=4'
+    - 'worker_loop_count=10'
 
 
 - benchmark: chm
@@ -187,6 +189,7 @@
     - '--duration_seconds={duration_seconds}'
     - '--batch_size={batch_size}'
     - '--num_batch_threads={num_batch_threads}'
+    - '--worker_loop_count={worker_loop_count}'
 
   vars:
     - 'distribution_file=benchmarks/chm/model_b.dist'
@@ -194,6 +197,7 @@
     - 'duration_seconds=360'
     - 'batch_size=10000000'
     - 'num_batch_threads=4'
+    - 'worker_loop_count=10'
 
 
 - benchmark: deser

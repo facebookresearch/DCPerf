@@ -40,6 +40,7 @@ DEFINE_int32(num_batch_threads, 2, "Number of parallel batch threads");
 DEFINE_int32(duration_seconds, 10, "Benchmark duration in seconds");
 DEFINE_int32(initial_capacity, 0, "Initial hash map capacity hint");
 DEFINE_int32(batch_size, 1000, "Operations per batch");
+DEFINE_int32(worker_loop_count, 1, "The loop count worker do its job");
 DEFINE_int32(hit_ratio, 40, "Desired hit ratio (0-100)");
 DEFINE_bool(verbose, false, "Enable verbose output");
 
@@ -307,6 +308,7 @@ class ChmBenchmark {
     int durationSeconds; // Benchmark duration
     int initialCapacity; // Hash map initial capacity hint
     int batchSize; // Operations per batch
+    int worker_loop_count; // The loop count worker do its job
     int hitRatio; // Desired hit ratio (0-100)
     bool verbose; // Enable detailed output
   };
@@ -573,7 +575,8 @@ class ChmBenchmark {
             totalWorkerTimeNs.fetch_add(
                 workerDuration.count(), std::memory_order_relaxed);
           });
-    }
+      }
+
 
     // Generate keys for next batch while current batch executes (latency
     // hiding)
@@ -599,14 +602,16 @@ class ChmBenchmark {
     uint64_t localOps = 0;
     uint64_t localSuccessfulOps = 0;
 
-    // Process assigned range of operations
-    for (int i = startIdx; i < endIdx; i++) {
-      AdId key = preGeneratedKeys[i];
-      auto result = map.getValue(key); // Core benchmark operation
+    for (int loop = 0; loop < config_.worker_loop_count; loop++) {
+      // Process assigned range of operations
+      for (int i = startIdx; i < endIdx; i++) {
+        AdId key = preGeneratedKeys[i];
+        auto result = map.getValue(key); // Core benchmark operation
 
-      localOps++;
-      if (result.second) { // Check if key was found
-        localSuccessfulOps++;
+        localOps++;
+        if (result.second) { // Check if key was found
+          localSuccessfulOps++;
+        }
       }
     }
 
@@ -654,6 +659,7 @@ int main(int argc, char* argv[]) {
       .durationSeconds = FLAGS_duration_seconds,
       .initialCapacity = FLAGS_initial_capacity,
       .batchSize = FLAGS_batch_size,
+      .worker_loop_count = FLAGS_worker_loop_count,
       .hitRatio = FLAGS_hit_ratio,
       .verbose = FLAGS_verbose};
 
