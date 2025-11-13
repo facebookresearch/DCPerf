@@ -812,6 +812,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'perf.data'
 
 - benchmark: tao_bench
@@ -863,6 +864,7 @@
         - '--sanity={sanity}'
         - '--wait-after-warmup={wait_after_warmup}'
         - '--disable-tls={disable_tls}'
+        - '--client-id={client_id}'
         - '--real'
       vars:
         - 'server_hostname'
@@ -876,12 +878,14 @@
         - 'wait_after_warmup=5'
         - 'sanity=0'
         - 'disable_tls=0'
+        - 'client_id=0'
   hooks:
     - hook: copymove
       options:
         is_move: true
         after:
           - 'benchmarks/tao_bench/server.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'perf.data'
 
 - benchmark: tao_bench_autoscale
@@ -939,6 +943,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'tao-bench-server-*.log'
           - 'perf.data'
 
@@ -946,10 +951,8 @@
   name: tao_bench_standalone
   description:
       Spawns multiple Tao benchmark servers depending on the CPU
-      core count. After executing this job, please see the tail
-      of benchpress.log for instructions on starting clients.
-      Clients start on the same instance.
-      MAKE SURE to start clients within 1 minute.
+      core count.
+      This job starts clients Automatically on the same instance.
 
   args:
     - '--num-servers={num_servers}'
@@ -991,6 +994,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'tao-bench-server-*.log'
           - 'client_*.log'
           - 'perf.data'
@@ -1017,6 +1021,9 @@
     - '--num-slow-threads={num_slow_threads}'
     - '--num-fast-threads={num_fast_threads}'
     - '--num-client-threads={num_client_threads}'
+    - '--warmup-timeout-buffer={warmup_timeout_buffer}'
+    - '--test-timeout-buffer={test_timeout_buffer}'
+    - '--postprocessing-timeout-buffer={postprocessing_timeout_buffer}'
   vars:
     - 'num_servers=0'
     - 'memsize=0.5'
@@ -1034,12 +1041,16 @@
     - 'num_slow_threads=0'
     - 'num_fast_threads=0'
     - 'num_client_threads=0'
+    - 'warmup_timeout_buffer=0'
+    - 'test_timeout_buffer=0'
+    - 'postprocessing_timeout_buffer=50'
   hooks:
     - hook: copymove
       options:
         is_move: true
         after:
           - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'tao-bench-server-*.log'
           - 'client_*.log'
           - 'perf.data'
@@ -1094,6 +1105,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'tao-bench-server-*.log'
           - 'perf.data'
 

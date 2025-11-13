@@ -153,6 +153,12 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
         default=0,
         help="randomized nanosleep with exponential backoff",
     )
+    server_parser.add_argument(
+        "--postprocessing-timeout-buffer",
+        type=int,
+        default=60,
+        help="extra time buffer for server to complete postprocessing in seconds",
+    )
     server_parser.add_argument("--real", action="store_true", help="for real")
 
     return get_opt_strings(server_parser)
@@ -224,6 +230,18 @@ def add_common_client_args(client_parser: ArgumentParser) -> List[Tuple[str, str
         type=int,
         default=0,
         help="set to non-zero to disable TLS",
+    )
+    client_parser.add_argument(
+        "--warmup-timeout-buffer",
+        type=int,
+        default=30,
+        help="extra time buffer for warmup phase timeout in seconds",
+    )
+    client_parser.add_argument(
+        "--test-timeout-buffer",
+        type=int,
+        default=30,
+        help="extra time buffer for test phase timeout in seconds",
     )
     client_parser.add_argument("--real", action="store_true", help="for real")
 

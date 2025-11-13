@@ -21,6 +21,9 @@ import args_utils
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from diagnosis_utils import check_port_available, DiagnosisRecorder
 
+sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "common"))
+import breakdown_utils
+
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
@@ -309,18 +312,40 @@ def get_client_cmd(args, n_seconds):
 
 
 def run_client(args):
+    # Only client with ID=1 creates breakdown CSV and logs preprocessing
+    if args.client_id == 1:
+        breakdown_utils.create_breakdown_csv(TAO_BENCH_DIR)
+
     if args.sanity > 0:
         cmd = f"iperf3 -c {args.server_hostname} -P4"
         subprocess.run(shlex.split(cmd))
 
+    if args.client_id == 1:
+        breakdown_utils.log_preprocessing_warmup_start(TAO_BENCH_DIR, "")
+
     print("warm up phase ...")
     cmd = get_client_cmd(args, n_seconds=args.warmup_time)
-    run_cmd(cmd, timeout=args.warmup_time + 30, for_real=args.real)
+    run_cmd(
+        cmd, timeout=args.warmup_time + args.warmup_timeout_buffer, for_real=args.real
+    )
     if args.real and args.wait_after_warmup > 0:
         time.sleep(args.wait_after_warmup)
+
+    # Only client with ID=1 logs breakdown events
+    if args.client_id == 1:
+        # End preprocessing
+        breakdown_utils.log_preprocessing_warmup_end(TAO_BENCH_DIR, "")
+        # Start main benchmark (execution phase only)
+        breakdown_utils.log_main_benchmark_start(TAO_BENCH_DIR, "")
+
     print("execution phase ...")
     cmd = get_client_cmd(args, n_seconds=args.test_time)
-    run_cmd(cmd, timeout=args.test_time + 30, for_real=args.real)
+    run_cmd(cmd, timeout=args.test_time + args.test_timeout_buffer, for_real=args.real)
+
+    # Only client with ID=1 logs breakdown events
+    if args.client_id == 1:
+        # End main benchmark, start postprocessing
+        breakdown_utils.log_main_benchmark_end(TAO_BENCH_DIR, "")
 
 
 def init_parser():
@@ -362,6 +387,12 @@ def init_parser():
 
     # client-side arguments
     args_utils.add_common_client_args(client_parser)
+    client_parser.add_argument(
+        "--client-id",
+        type=int,
+        default=0,
+        help="Client ID for breakdown logging. Only client with ID=1 writes to breakdown.csv",
+    )
 
     # functions
     server_parser.set_defaults(func=run_server)

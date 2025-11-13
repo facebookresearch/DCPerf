@@ -23,6 +23,7 @@ import args_utils
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from diagnosis_utils import DiagnosisRecorder
 
+
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
 TAO_BENCH_DIR = os.path.join(BENCHPRESS_ROOT, "packages", "tao_bench")
 TAO_BENCH_BM_DIR = os.path.join(BENCHPRESS_ROOT, "benchmarks", "tao_bench")
@@ -168,6 +169,8 @@ def gen_client_instructions(args, to_file=True):
                 client_args["clients_per_thread"] = clients_per_thread
             if args.sanity > 0 and i == 0:
                 client_args["sanity"] = args.sanity
+            # Set client_id starting from 1
+            client_args["client_id"] = i + 1
             if args.client_wait_after_warmup >= 0:
                 client_args["wait_after_warmup"] = args.client_wait_after_warmup
             if args.disable_tls != 0:
@@ -202,6 +205,8 @@ def gen_client_instructions(args, to_file=True):
                 client_args["clients_per_thread"] = clients_per_thread
             if args.sanity > 0 and i == 0:
                 client_args["sanity"] = args.sanity
+            # Set client_id starting from 1
+            client_args["client_id"] = i + 1
             if args.client_wait_after_warmup >= 0:
                 client_args["wait_after_warmup"] = args.client_wait_after_warmup
             if args.disable_tls != 0:
@@ -328,10 +333,13 @@ def run_server(args):
             start_new_session=True,  # Create new process group
         )
         procs.append(p)
-    # wait for servers to finish - add extra minute to make sure
+    # wait for servers to finish - add extra time to make sure
     # post-processing will finish
     timeout = (
-        args_utils.get_warmup_time(args) + args.test_time + args.timeout_buffer + 60
+        args_utils.get_warmup_time(args)
+        + args.test_time
+        + args.timeout_buffer
+        + args.postprocessing_timeout_buffer
     )
     for p in procs:
         try:
