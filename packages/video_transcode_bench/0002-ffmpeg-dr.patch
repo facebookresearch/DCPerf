@@ -1,0 +1,90 @@
+diff --git a/fftools/ffmpeg.c b/fftools/ffmpeg.c
+index de607cac93..7b3468f882 100644
+--- a/fftools/ffmpeg.c
++++ b/fftools/ffmpeg.c
+@@ -23,6 +23,24 @@
+  * multimedia converter based on the FFmpeg libraries
+  */
+ 
++// DynamoRIO required start
++#define LINUX
++#if defined(__x86_64__) || defined(__i386__)
++#define X86_64
++#elif defined(__aarch64__) || defined(__arm__)
++#define ARM_64
++#endif
++
++#include "dr_api.h"
++
++#define TRACE_DURATION_S_DEFAULT 2
++#define TRACE_DURATION_S_ENV "TRACE_DURATION_S"
++
++#define ITERATION_WAIT_S_DEFAULT 10
++#define ITERATION_WAIT_S_ENV "ITERATION_WAIT_S"
++
++// DynamoRIO required end
++
+ #include "config.h"
+ 
+ #include <errno.h>
+@@ -960,10 +978,60 @@ static int64_t getmaxrss(void)
+ #endif
+ }
+ 
++
++void *tracing_thread(void *arg);
++
++void *tracing_thread(void* arg) {
++  // Do nothing for now
++
++  int trace_duration_s = TRACE_DURATION_S_DEFAULT;
++  int iteration_wait_s = ITERATION_WAIT_S_DEFAULT;
++
++  char *trace_dur_raw = getenv(TRACE_DURATION_S_ENV);
++  if (trace_dur_raw) {
++    errno = 0;
++    trace_duration_s = strtol(trace_dur_raw, NULL, 0);
++    if (errno != 0) {
++      perror("Unable to parse TRACE_DURATION_S env var");
++      exit(1);
++    }
++  }
++
++  char *iter_wait_raw = getenv(ITERATION_WAIT_S_ENV);
++  if (iter_wait_raw) {
++    errno = 0;
++    iteration_wait_s = strtol(iter_wait_raw, NULL, 0);
++    if (errno != 0) {
++      perror("Unable to parse ITERATION_WAIT_S env var");
++      exit(1);
++    }
++  }
++
++  printf("Tracing duration set to %d, wait between iteration set to %d.\n",
++         trace_duration_s, iteration_wait_s);
++
++  sleep(1);
++  int trace_iter = 0;
++  while (1) {
++    dr_app_setup_and_start();
++    printf("Sleeping for %d seconds\n", trace_duration_s);
++    sleep(trace_duration_s);
++    dr_app_stop_and_cleanup();
++
++    printf("Completed %d iteration\n", trace_iter);
++    trace_iter++;
++    sleep(iteration_wait_s);
++  }
++}
++
++
+ int main(int argc, char **argv)
+ {
+     Scheduler *sch = NULL;
+ 
++    pthread_t tracing_thread_handler;
++    pthread_create(&tracing_thread_handler, NULL, &tracing_thread, NULL);
++
+     int ret;
+     BenchmarkTimeStamps ti;
+ 

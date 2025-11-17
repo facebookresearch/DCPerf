@@ -5,6 +5,17 @@
 # LICENSE file in the root directory of this source tree.
 set -Eeuo pipefail
 
+##################### DYNAMORIO CONFIG #########################
+
+# Needs DR_ROOT to be set to the root of the DynamoRIO installation
+export DR_ROOT="${DR_ROOT:-/home/smahar/DynamoRIO-Linux-11.90.20391}"
+export DR_RELEASE_TYPE="${DR_RELEASE_TYPE:-debug}"
+
+if ! [ -d "$DR_ROOT" ]; then
+    echo "DR_ROOT=$DR_ROOT does not exist, please check!"
+    exit 1
+fi
+
 ##################### BENCHMARK CONFIG #########################
 
 declare -A REPOS=(
@@ -145,7 +156,10 @@ build_ffmpeg()
     lib='ffmpeg'
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
-    git apply "${BPKGS_FFMPEG_ROOT}/0001-ffmpeg.patch"
+    # git apply "${BPKGS_FFMPEG_ROOT}/0001-ffmpeg.patch"
+    git apply "${BPKGS_FFMPEG_ROOT}/0002-ffmpeg-dr.patch"
+
+    export LD_LIBRARY_PATH="$DR_ROOT/tools/lib64/${DR_RELEASE_TYPE}/;$DR_ROOT/lib64/${DR_RELEASE_TYPE}/;$DR_ROOT/ext/lib64/${DR_RELEASE_TYPE}/"
     mkdir -p _build && cd _build || exit
     if [ -v PKG_CONFIG_PATH ]; then
         PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib64/pkgconfig:$FFMPEG_BUILD/lib/pkgconfig:$FFMPEG_BUILD/lib/x86_64-linux-gnu/pkgconfig:$FFMPEG_BUILD/lib/aarch64-linux-gnu/pkgconfig \
@@ -159,9 +173,10 @@ build_ffmpeg()
             --enable-libaom \
             --enable-libsvtav1 \
             --enable-libvmaf \
-            --extra-cflags="-I${FFMPEG_BUILD}/include ${platform_cc_flags}" \
-            --extra-cxxflags="-I${FFMPEG_BUILD}/include ${platform_cc_flags}" \
-            --extra-ldflags="-L${FFMPEG_BUILD}/lib" \
+            --extra-libs="-ldynamorio" \
+            --extra-cflags="-I${FFMPEG_BUILD}/include ${platform_cc_flags} -I${DR_ROOT}/include" \
+            --extra-cxxflags="-I${FFMPEG_BUILD}/include ${platform_cc_flags} -I${DR_ROOT}/include" \
+            --extra-ldflags="-L${FFMPEG_BUILD}/lib -L${DR_ROOT}/lib64/${DR_RELEASE_TYPE}/ -Wl,-rpath=${DR_ROOT}/lib64/${DR_RELEASE_TYPE}/" \
             --prefix="${FFMPEG_BUILD}"
 
     else
@@ -176,9 +191,10 @@ build_ffmpeg()
             --enable-libaom \
             --enable-libsvtav1 \
             --enable-libvmaf \
-            --extra-cflags="-I${FFMPEG_BUILD}/include ${platform_cc_flags}" \
-            --extra-cxxflags="-I${FFMPEG_BUILD}/include ${platform_cc_flags}" \
-            --extra-ldflags="-L${FFMPEG_BUILD}/lib" \
+            --extra-libs="-ldynamorio" \
+            --extra-cflags="-I${FFMPEG_BUILD}/include ${platform_cc_flags} -I${DR_ROOT}/include" \
+            --extra-cxxflags="-I${FFMPEG_BUILD}/include ${platform_cc_flags} -I${DR_ROOT}/include" \
+            --extra-ldflags="-L${FFMPEG_BUILD}/lib -L${DR_ROOT}/lib64/${DR_RELEASE_TYPE}/ -Wl,-rpath=${DR_ROOT}/lib64/${DR_RELEASE_TYPE}/" \
             --prefix="${FFMPEG_BUILD}"
 
     fi
@@ -208,7 +224,6 @@ build_svtav1
 build_aom
 build_vmaf
 build_ffmpeg
-
 
 
 download_testing_scripts
