@@ -773,11 +773,11 @@ def process_metrics(
 
     if "version_info" in bm_metrics:
         db_fields["version_source"] = f'"{bm_metrics["version_info"]["source"]}"'
-        res += f"version_source,{db_fields["version_source"]}\n"
+        res += f"version_source,{db_fields['version_source']}\n"
         db_fields["version_uuid"] = f'"{bm_metrics["version_info"]["uuid"]}"'
-        res += f"version_uuid,{db_fields["version_uuid"]}\n"
+        res += f"version_uuid,{db_fields['version_uuid']}\n"
         db_fields["version"] = f'"{bm_metrics["version_info"]["version"]}"'
-        res += f"version,{db_fields["version"]}\n"
+        res += f"version,{db_fields['version']}\n"
 
     # benchmark args
     res += "benchmark args,\n"
