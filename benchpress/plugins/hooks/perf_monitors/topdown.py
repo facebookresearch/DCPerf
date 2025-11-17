@@ -473,10 +473,11 @@ class ARMPerfUtil(Monitor):
         self.proc = subprocess.Popen(
             [
                 "topdown-tool",
-                "-a",
-                "-i",
+                "--cpu-generate-csv",
+                "metrics",
+                "-I",
                 str(self.interval * 1000),
-                "--csv",
+                "--csv-output-path",
                 self.csvpath,
             ],
             stdout=subprocess.PIPE,
@@ -488,12 +489,101 @@ class ARMPerfUtil(Monitor):
     def write_csv(self):
         """
         Override the original write_csv() method to write a transposed version
-        of CSV table based on what topdown-tool generates
+        of CSV table based on what topdown-tool generates.
+
+        The topdown-tool now writes results to a directory structure:
+        <output_dir>/<timestamp>/cpu/neoverse_v2_metrics.csv
+
+        This method finds the latest timestamp, copies the CSV to the expected
+        location, and cleans up the directory structure.
         """
+        import shutil
+
+        # Check if csvpath exists and is a directory
         if not os.path.exists(self.csvpath):
+            logger.warning(f"Output path {self.csvpath} does not exist")
             return
+
+        if not os.path.isdir(self.csvpath):
+            logger.warning(f"Output path {self.csvpath} is not a directory")
+            return
+
+        # Find the timestamp directory (most recent if multiple exist)
+        timestamp_dirs = []
+        try:
+            for item in os.listdir(self.csvpath):
+                item_path = os.path.join(self.csvpath, item)
+                if os.path.isdir(item_path):
+                    timestamp_dirs.append(item)
+        except OSError as e:
+            logger.warning(f"Error listing directory {self.csvpath}: {e}")
+            return
+
+        if not timestamp_dirs:
+            logger.warning(f"No timestamp directories found in {self.csvpath}")
+            return
+
+        # Sort to get the most recent timestamp directory
+        timestamp_dirs.sort(reverse=True)
+        latest_timestamp = timestamp_dirs[0]
+
+        # Find the CSV file with core_aggregate pattern in the cpu directory
+        cpu_dir = os.path.join(self.csvpath, latest_timestamp, "cpu")
+        if not os.path.exists(cpu_dir):
+            logger.warning(f"CPU directory not found at {cpu_dir}")
+            return
+
+        # Look for files matching the pattern *core_aggregate*_metrics.csv
+        csv_file_path = None
+        try:
+            for filename in os.listdir(cpu_dir):
+                if "core_aggregate" in filename and filename.endswith("_metrics.csv"):
+                    csv_file_path = os.path.join(cpu_dir, filename)
+                    break
+        except OSError as e:
+            logger.warning(f"Error listing CPU directory {cpu_dir}: {e}")
+            return
+
+        if csv_file_path is None or not os.path.exists(csv_file_path):
+            logger.warning(
+                f"CSV file with 'core_aggregate' pattern not found in {cpu_dir}"
+            )
+            return
+
+        # Read the CSV data before cleaning up
+        try:
+            df = pd.read_csv(csv_file_path)
+        except Exception as e:
+            logger.warning(f"Error reading CSV file {csv_file_path}: {e}")
+            return
+
+        # Copy the CSV to a temporary location
+        temp_csv_path = self.csvpath + ".tmp"
+        try:
+            shutil.copy2(csv_file_path, temp_csv_path)
+        except Exception as e:
+            logger.warning(f"Error copying CSV to temp location: {e}")
+            return
+
+        # Clean up the directory structure
+        try:
+            shutil.rmtree(self.csvpath)
+        except Exception as e:
+            logger.warning(f"Error removing directory {self.csvpath}: {e}")
+            # Clean up temp file if directory removal failed
+            if os.path.exists(temp_csv_path):
+                os.remove(temp_csv_path)
+            return
+
+        # Move the CSV to the expected location (now as a file, not directory)
+        try:
+            shutil.move(temp_csv_path, self.csvpath)
+        except Exception as e:
+            logger.warning(f"Error moving temp CSV to {self.csvpath}: {e}")
+            return
+
+        # Now process and write the transposed CSV
         t_csv_path = self.gen_path(f"{self.name}-transposed.csv")
-        df = pd.read_csv(self.csvpath)
         t_rows = []
         for i in range(len(df)):
             metric_key = df.iloc[i]["group"] + "/" + df.iloc[i]["metric"]
