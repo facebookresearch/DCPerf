@@ -120,7 +120,9 @@ main() {
     done
 
 
-
+    if [ "$run_type" = "prod" ]; then
+        bash "${WDL_ROOT}/run_prod.sh"
+    fi
 
     set -u  # Enable unbound variables check from here onwards
     benchreps_tell_state "working on config"

@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import json
 import re
 
 
@@ -130,3 +131,62 @@ def parse_line_vdso_bench(f, sum_c):
             name = elements[4]
             value = float(elements[7])
             sum_c[name + ": M/s"] = value
+
+
+def parse_line_libaegis_benchmark(f, sum_c):
+    for line in f:
+        elements = line.split()
+        if re.search("128L", elements[0]):
+            name = "".join(elements[:-3])
+            value = float(elements[-2])
+            sum_c[name + ": Mb/s"] = value
+
+
+def parse_line_xxhash_benchmark(f, sum_c):
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Detect section headers
+        if "benchmarking large inputs" in line.lower():
+            current_section = "large_inputs"
+            sum_c[current_section] = {}
+        elif "throughput small inputs of fixed size" in line.lower():
+            current_section = "throughput_small_fixed"
+            sum_c[current_section] = {}
+        elif "benchmarking random size inputs" in line.lower():
+            current_section = "random_size_inputs"
+            sum_c[current_section] = {}
+        elif "latency for small inputs of fixed size" in line.lower():
+            current_section = "latency_small_fixed"
+            sum_c[current_section] = {}
+        elif "latency for small inputs of random size" in line.lower():
+            current_section = "latency_small_random"
+            sum_c[current_section] = {}
+        # Parse data lines (format: "xxh3   , value1, value2, ...")
+        elif "," in line and current_section:
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) > 1:
+                hash_name = parts[0]
+                values = [int(v) for v in parts[1:] if v]
+
+                # Create input size keys based on section and position
+                data = {}
+                for i, value in enumerate(values):
+                    if current_section == "large_inputs":
+                        # log9 to log27 (512 bytes to 128 MB)
+                        input_size = f"log{9+i}"
+                    else:
+                        # 1 to N bytes
+                        input_size = f"{i+1}_bytes"
+                    data[input_size] = value
+
+                sum_c[current_section][hash_name] = data
+
+
+def parse_line_container_hash_maps_bench(f, sum_c):
+    data = json.load(f)
+    for k, v in data.items():
+        if re.search("^(Find)|(Insert)|(InsertSqBr)|(Erase)|(Iter)", k):
+            sum_c[k] = v

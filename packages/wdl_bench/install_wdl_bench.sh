@@ -5,6 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 set -Eeuo pipefail
 
+GLIBC_VERSION=$(getconf GNU_LIBC_VERSION | cut -f 2 -d\  )
+
 ##################### BENCHMARK CONFIG #########################
 
 declare -A REPOS=(
@@ -15,16 +17,18 @@ declare -A REPOS=(
     ['vdso']='https://github.com/leitao/debug.git'
     ['libaegis']='https://github.com/aegis-aead/libaegis.git'
     ['xxhash']='https://github.com/Cyan4973/xxHash.git'
+    ['glibc']='https://sourceware.org/git/glibc.git'
 )
 
 declare -A TAGS=(
-    ['folly']='v2025.11.03.00'
-    ['fbthrift']='v2025.11.03.00'
+    ['folly']='v2025.11.17.00'
+    ['fbthrift']='v2025.11.17.00'
     ['lzbench']='v2.2'
     ['openssl']='openssl-3.6.0'
     ['vdso']='a90085a8e4e1e07a93cc45a68da246fa98a9f831'
     ['libaegis']='0.4.2'
     ['xxhash']='136cc1f8fe4d5ea62a7c16c8424d4fa5158f6d68'
+    ['glibc']="glibc-${GLIBC_VERSION}"
 )
 
 declare -A DATASETS=(
@@ -48,12 +52,12 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y cmake autoconf automake flex bison \
     nasm clang patch git libssl-dev \
-    tar unzip perl openssl python3-dev
+    tar unzip perl openssl python3-dev gawk
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch \
-    git tar unzip perl openssl-devel python3-devel
+    git tar unzip perl openssl-devel python3-devel gawk
 fi
 
 
@@ -66,6 +70,11 @@ if ! [ -f "/usr/local/bin/cmake" ]; then
 fi
 
 ##################### BUILD AND INSTALL FUNCTIONS #########################
+
+folly_benchmark_list="concurrency_concurrent_hash_map_bench hash_hash_benchmark container_hash_maps_bench stats_digest_builder_benchmark fibers_fibers_benchmark crypto_lt_hash_benchmark memcpy_benchmark memset_benchmark io_async_event_base_benchmark io_iobuf_benchmark function_benchmark random_benchmark synchronization_small_locks_benchmark synchronization_lifo_sem_bench range_find_benchmark"
+
+fbthrift_benchmark_list="ProtocolBench VarintUtilsBench"
+
 
 clone()
 {
@@ -104,6 +113,10 @@ build_folly()
 
     python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --scratch-path "${WDL_BUILD}"
 
+    for benchmark in $folly_benchmark_list; do
+      cp "$WDL_BUILD/build/folly/$benchmark" "$WDL_ROOT/$benchmark"
+    done
+
     popd || exit
 }
 
@@ -118,6 +131,10 @@ build_fbthrift()
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
 
     python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --scratch-path "${WDL_BUILD}" --extra-cmake-defines='{"enable_tests": "1"}'
+
+    for benchmark in $fbthrift_benchmark_list; do
+      cp "$WDL_BUILD/build/fbthrift/bin/$benchmark" "$WDL_ROOT/$benchmark"
+    done
 
     popd || exit
 }
@@ -198,7 +215,22 @@ build_xxhash()
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
     make -C ./tests/bench/ -j
-    cp ./test/bench/benchHash "${WDL_ROOT}/xxhash_benchmark" || exit
+    cp ./tests/bench/benchHash "${WDL_ROOT}/xxhash_benchmark" || exit
+
+    popd || exit
+}
+
+build_glibc()
+{
+    lib='glibc'
+    pushd "${WDL_SOURCE}"
+    clone $lib || echo "Failed to clone $lib"
+    cd "$lib" || exit
+    mkdir build && cd build
+    ../configure --prefix="${WDL_SOURCE}/glibc/build"
+    make -j
+    make bench
+    cp "${WDL_SOURCE}/glibc/build/benchtests/bench-memcmp" "${WDL_ROOT}/" || exit
 
     popd || exit
 }
@@ -215,21 +247,10 @@ build_openssl
 build_vdso
 build_libaegis
 build_xxhash
-
-folly_benchmark_list="concurrency_concurrent_hash_map_bench hash_hash_benchmark container_hash_maps_bench stats_digest_builder_benchmark fibers_fibers_benchmark crypto_lt_hash_benchmark memcpy_benchmark memset_benchmark io_async_event_base_benchmark io_iobuf_benchmark function_benchmark random_benchmark synchronization_small_locks_benchmark range_find_benchmark"
-
-fbthrift_benchmark_list="ProtocolBench"
-
-for benchmark in $folly_benchmark_list; do
-  cp "$WDL_BUILD/build/folly/$benchmark" "$WDL_ROOT/$benchmark"
-done
-
-for benchmark in $fbthrift_benchmark_list; do
-  cp "$WDL_BUILD/build/fbthrift/bin/$benchmark" "$WDL_ROOT/$benchmark"
-done
-
+build_glibc
 
 cp "${BPKGS_WDL_ROOT}/run.sh" ./
+cp "${BPKGS_WDL_ROOT}/run_prod.sh" ./
 cp "${BPKGS_WDL_ROOT}/convert.py" ./
 cp "${BPKGS_WDL_ROOT}/aggregate_result.py" ./
 cp "${BPKGS_WDL_ROOT}/parse_line.py" ./
