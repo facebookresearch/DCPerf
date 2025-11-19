@@ -68,6 +68,31 @@ If running on ARM platforms, please use the job `feedsim_autoscale_arm` (other u
 ./benchpress_cli.py run feedsim_autoscale_arm
 ```
 
+### Running Feedsim Mini
+
+Feedsim Mini is a shrunken version of Feedsim
+that aims to reduce execution time to a few seconds.
+It includes runtime breakdown tracking capabilities that record
+benchmark timestamps to enable metric filtering for the actual benchmark time,
+which is essential for mini jobs where execution time is only a few seconds.
+
+To run Feedsim Mini, please follow these steps:
+
+1. Make sure that you get the latest version of DCPerf and check out the latest commit in the `v2-beta` branch.
+If you've installed Feedsim with an older version of DCPerf,
+we recommend you clean and re-install Feedsim.
+
+2. Run the `feedsim_autoscale_mini` job:
+
+```bash
+./benchpress_cli.py run feedsim_autoscale_mini
+```
+
+This mini job runs the same workload as the full Feedsim Autoscale but with
+minimal settings to enable quick testing and validation.
+A `breakdown.csv` file will be generated in the results to track runtime breakdowns,
+which can be used to filter metrics for the actual benchmark execution time.
+
 ## Reporting and Measurement
 
 After the feedsim benchmark finishing, benchpress will report the results in

@@ -177,6 +177,31 @@ To start the clients and the server with autoscale on the same benchmarking mach
 ```
 All the parameters used with autoscale can be used with standalone except interface_name.
 
+### Running TaoBench Mini
+
+TaoBench Standalone Mini is a shrunken version of TaoBench Standalone that
+aims to reduce execution time.
+It includes runtime breakdown tracking capabilities that record
+benchmark timestamps to enable metric filtering for the actual benchmark time,
+which is essential for mini jobs where execution time is only a few seconds.
+
+To run TaoBench Standalone Mini, please follow these steps:
+
+1. Make sure that you get the latest version of DCPerf and check out the latest commit in the `v2-beta` branch.
+If you've installed TaoBench with an older version of DCPerf,
+we recommend you clean and re-install TaoBench.
+
+2. Run the `tao_bench_standalone_mini` job:
+
+```bash
+./benchpress_cli.py run tao_bench_standalone_mini
+```
+
+This mini job runs the same workload as the full TaoBench Standalone but with
+minimal settings to enable quick testing and validation.
+A `breakdown.csv` file will be generated in the results to track runtime breakdowns,
+which can be used to filter metrics for the actual benchmark execution time.
+
 ### Result reporting
 
 Once the tao_bench benchmark finishes, benchpress will report the results in JSON format
