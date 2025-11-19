@@ -27,7 +27,7 @@ JSON format like the following:
   "benchmark_args": [
     "--threads=1",
     "--duration=300",
-    "--size-dist=benchmarks/rebatch/model_a.dist",
+    "--size-dist=benchmarks/ai_wdl/rebatch/model_a.dist",
     "--tensors=54",
     "--prefetch=0",
     "--output-tensor-size=5023008",

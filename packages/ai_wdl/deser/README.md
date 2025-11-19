@@ -24,7 +24,7 @@ JSON format like the following:
 ```json
 {
   "benchmark_args": [
-    "--distribution_file=benchmarks/deser/model_a.dist",
+    "--distribution_file=benchmarks/ai_wdl/deser/model_a.dist",
     "--num_threads=16",
     "--duration_seconds=360",
     "--pregenerated_copies=10"

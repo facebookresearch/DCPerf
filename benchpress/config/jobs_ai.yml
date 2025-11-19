@@ -133,7 +133,7 @@
   vars:
     - 'threads=1'
     - 'duration=300'
-    - 'size_dist=benchmarks/rebatch/model_a.dist'
+    - 'size_dist=benchmarks/ai_wdl/rebatch/model_a.dist'
     - 'tensors_num=54'
     - 'prefetch=0'
     - 'output_tensor_size=5023008'
@@ -154,7 +154,7 @@
   vars:
     - 'threads=1'
     - 'duration=300'
-    - 'size_dist=benchmarks/rebatch/model_b.dist'
+    - 'size_dist=benchmarks/ai_wdl/rebatch/model_b.dist'
     - 'tensors_num=53'
     - 'prefetch=0'
     - 'output_tensor_size=2421002'
@@ -210,7 +210,7 @@
     - '--pregenerated_copies={pregenerated_copies}'
 
   vars:
-    - 'distribution_file=benchmarks/deser/model_a.dist'
+    - 'distribution_file=benchmarks/ai_wdl/deser/model_a.dist'
     - 'num_threads=16'
     - 'duration_seconds=360'
     - 'pregenerated_copies=10'
@@ -226,7 +226,7 @@
     - '--pregenerated_copies={pregenerated_copies}'
 
   vars:
-    - 'distribution_file=benchmarks/deser/model_b.dist'
+    - 'distribution_file=benchmarks/ai_wdl/deser/model_b.dist'
     - 'num_threads=16'
     - 'duration_seconds=360'
     - 'pregenerated_copies=10'
