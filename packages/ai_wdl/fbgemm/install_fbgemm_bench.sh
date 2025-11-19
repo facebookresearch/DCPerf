@@ -1131,7 +1131,7 @@ if [[ "$OS_TYPE" == "Linux" && "$ARCH_TYPE" == "aarch64" ]]; then
   if [[ "$BIN" == "tbe_inference_benchmark" ]]; then
     # Resolve repository root based on script location
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
     # Expected environment name and Python version
     BUILD_ENV="fbgemm_build_oss_env"
