@@ -133,6 +133,48 @@ you can run the following:
 ./benchpress_cli.py run oss_performance_mediawiki_mlp -i '{"scale_out": 3}'
 ```
 
+### JIT Monitoring and Translation Cache Dumping
+
+The MediaWiki benchmark supports real-time JIT size monitoring and Translation Cache (TC) dumping for performance analysis. These features can be enabled through the `run.sh` script options.
+
+#### Getting the Command
+
+To see the full `run.sh` command with all available options, use the `--dry-run` flag with benchpress:
+
+```bash
+./benchpress_cli.py run oss_performance_mediawiki_mlp --dry-run
+```
+
+This will display the complete command that benchpress would execute. You can then copy this command and append the JIT monitoring options described below.
+
+#### Available JIT Monitoring Options
+
+The following options can be added to the `run.sh` command:
+
+- `-j`: Enable JIT size monitoring with `dump_jit_size.py`
+- `-J <port>`: Specify JIT monitoring port (default: `localhost:9092`)
+- `-I <seconds>`: Set JIT monitoring interval in seconds (default: `1`)
+- `-O <directory>`: Specify output directory for JIT monitoring files (default: `/tmp/jit_study_output`)
+- `-D`: Enable TC dump with `vm-dump-tc`
+- `-C <seconds>`: Set TC dump interval in seconds (default: `600`)
+
+#### Output Files
+
+When JIT monitoring is enabled, the following files will be generated in the output directory:
+
+- `jit_monitor_<timestamp>.txt`: Human-readable text log with JIT size measurements
+- `jit_monitor_<timestamp>.csv`: CSV file containing timestamp, elapsed time, and JIT size in bytes
+- `tc_dumps_<timestamp>/`: Directory containing TC dump files (when `-D` is enabled)
+  - `tc_dump_*`: Translation cache dump files
+  - `tc_data.txt.gz`: Compressed TC data file
+
+#### Notes
+
+- JIT monitoring runs in the background and automatically stops when the benchmark completes
+- The monitoring script requires `curl` to be installed on the system
+- TC dumps can be large, so ensure sufficient disk space is available when using the `-D` option
+- The default monitoring interval of 1 second provides granular data but may generate large CSV files for long-running benchmarks
+
 ### Running Mediawiki mini
 
 Mediawiki mini is a shrunken version of Mediawiki
