@@ -183,6 +183,10 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
     if hasattr(args, "num_slow_threads") and args.num_slow_threads > 0:
         script_args["--num-slow-threads"] = args.num_slow_threads
 
+    # Add poll_interval if specified
+    if hasattr(args, "poll_interval") and args.poll_interval > 0:
+        script_args["--poll-interval"] = args.poll_interval
+
     cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
 
     for argname, argval in script_args.items():

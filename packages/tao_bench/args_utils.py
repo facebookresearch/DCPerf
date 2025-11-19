@@ -159,6 +159,13 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
         default=60,
         help="extra time buffer for server to complete postprocessing in seconds",
     )
+    server_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=0,
+        help="poll interval in seconds for process completion detection; "
+        + "if > 0, use polling mechanism instead of fixed timeout",
+    )
     server_parser.add_argument("--real", action="store_true", help="for real")
 
     return get_opt_strings(server_parser)

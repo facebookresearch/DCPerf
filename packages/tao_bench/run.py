@@ -17,12 +17,10 @@ from typing import List
 
 import args_utils
 
-# Add parent directory to path to import diagnosis_utils
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-from diagnosis_utils import check_port_available, DiagnosisRecorder
 
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "common"))
 import breakdown_utils
+from diagnosis_utils import check_port_available, DiagnosisRecorder
 
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]

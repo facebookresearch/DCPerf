@@ -1024,6 +1024,7 @@
     - '--warmup-timeout-buffer={warmup_timeout_buffer}'
     - '--test-timeout-buffer={test_timeout_buffer}'
     - '--postprocessing-timeout-buffer={postprocessing_timeout_buffer}'
+    - '--poll-interval={poll_interval}'
   vars:
     - 'num_servers=0'
     - 'memsize=0.5'
@@ -1043,7 +1044,8 @@
     - 'num_client_threads=0'
     - 'warmup_timeout_buffer=0'
     - 'test_timeout_buffer=0'
-    - 'postprocessing_timeout_buffer=50'
+    - 'postprocessing_timeout_buffer=60'
+    - 'poll_interval=0.2'
   hooks:
     - hook: copymove
       options:
