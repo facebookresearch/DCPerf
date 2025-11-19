@@ -906,6 +906,8 @@ clone_fbgemm_repo() {
   echo "[SETUP] Cloning repository with submodules..."
   git clone --recursive https://github.com/pytorch/FBGEMM.git fbgemm_${FBGEMM_VERSION}
   git -C fbgemm_${FBGEMM_VERSION} checkout ${FBGEMM_VERSION}
+ # Cherry-pick the latest commit from the FBGEMM main branch to fix issue https://github.com/pytorch/FBGEMM/pull/5037
+  git -C fbgemm_${FBGEMM_VERSION} cherry-pick 9df97a7090c2c5edecea4fd08bad11ab8a23284c
 
   # Disable the postbuild script to prevent race conditions during linking
   # This is a workaround for a known issue in the build process
