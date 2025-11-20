@@ -18,6 +18,7 @@ declare -A REPOS=(
     ['libaegis']='https://github.com/aegis-aead/libaegis.git'
     ['xxhash']='https://github.com/Cyan4973/xxHash.git'
     ['glibc']='https://sourceware.org/git/glibc.git'
+    ['isa-l']='https://github.com/intel/isa-l.git'
 )
 
 declare -A TAGS=(
@@ -29,6 +30,7 @@ declare -A TAGS=(
     ['libaegis']='0.4.2'
     ['xxhash']='136cc1f8fe4d5ea62a7c16c8424d4fa5158f6d68'
     ['glibc']="glibc-${GLIBC_VERSION}"
+    ['isa-l']='d36de972efc18f2e85ca182a8b6758ecc7da512b'
 )
 
 declare -A DATASETS=(
@@ -51,12 +53,12 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y cmake autoconf automake flex bison \
-    nasm clang patch git libssl-dev \
+    nasm clang patch git libssl-dev libc6-dev\
     tar unzip perl openssl python3-dev gawk
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y cmake autoconf automake flex bison \
-    meson nasm clang patch \
+    meson nasm clang patch glibc-static\
     git tar unzip perl openssl-devel python3-devel gawk
 fi
 
@@ -71,7 +73,7 @@ fi
 
 ##################### BUILD AND INSTALL FUNCTIONS #########################
 
-folly_benchmark_list="concurrency_concurrent_hash_map_bench hash_hash_benchmark container_hash_maps_bench stats_digest_builder_benchmark fibers_fibers_benchmark crypto_lt_hash_benchmark memcpy_benchmark memset_benchmark io_async_event_base_benchmark io_iobuf_benchmark function_benchmark random_benchmark synchronization_small_locks_benchmark synchronization_lifo_sem_bench range_find_benchmark"
+folly_benchmark_list="concurrency_concurrent_hash_map_bench hash_hash_benchmark container_hash_maps_bench stats_digest_builder_benchmark fibers_fibers_benchmark crypto_lt_hash_benchmark memcpy_benchmark memset_benchmark io_async_event_base_benchmark io_iobuf_benchmark function_benchmark random_benchmark synchronization_small_locks_benchmark synchronization_lifo_sem_bench range_find_benchmark hash_checksum_benchmark"
 
 fbthrift_benchmark_list="ProtocolBench VarintUtilsBench"
 
@@ -146,7 +148,7 @@ build_lzbench()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
-    make -j
+    make BUILD_STATIC=1 -j
     cp ./lzbench "${WDL_ROOT}/" || exit
 
     download_dataset 'silesia'
@@ -235,6 +237,20 @@ build_glibc()
     popd || exit
 }
 
+build_isa_l()
+{
+    lib='isa-l'
+    pushd "${WDL_SOURCE}"
+    clone $lib || echo "Failed to clone $lib"
+    cd "$lib" || exit
+    ./autogen.sh
+    ./configure
+    make perfs -j
+    cp ./erasure_code/erasure_code_perf "${WDL_ROOT}/" || exit
+
+    popd || exit
+}
+
 
 ##################### BUILD AND INSTALL #########################
 
@@ -248,6 +264,7 @@ build_vdso
 build_libaegis
 build_xxhash
 build_glibc
+build_isa_l
 
 cp "${BPKGS_WDL_ROOT}/run.sh" ./
 cp "${BPKGS_WDL_ROOT}/run_prod.sh" ./

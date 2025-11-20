@@ -30,6 +30,8 @@ with open(input_file_name) as f:
         parse_line.parse_line_xxhash_benchmark(f, sum_c)
     elif sys.argv[1] == "container_hash_maps_bench":
         parse_line.parse_line_container_hash_maps_bench(f, sum_c)
+    elif sys.argv[1] == "erasure_code_perf":
+        parse_line.parse_line_erasure_code_perf(f, sum_c)
     else:
         parse_line.parse_line(f, sum_c)
 

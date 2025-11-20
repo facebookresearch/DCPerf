@@ -30,11 +30,11 @@ Usage: ${0##*/} [-h] [--type single_core|all_core|multi_thread]
 EOF
 }
 
-prod_benchmark_list_mem="memcpy_benchmark bench-memcmp"
+prod_benchmark_list_mem="memcpy_benchmark bench-memcmp memset_benchmark"
 prod_benchmark_list_hash="hash_hash_benchmark xxhash_benchmark"
 prod_benchmark_compression="lzbench"
 prod_benchmark_crypto="openssl libaegis_benchmark"
-prod_benchmark_checksum="hash_checksum_benchmark"
+prod_benchmark_checksum="hash_checksum_benchmark erasure_code_perf"
 prod_benchmark_rng="random_benchmark"
 prod_benchmark_chm="concurrency_concurrent_hash_map_bench"
 prod_benchmark_thrift="ProtocolBench VarintUtilsBench"
@@ -42,15 +42,27 @@ prod_benchmark_f14="container_hash_maps_bench"
 prod_benchmark_lock="synchronization_small_locks_benchmark synchronization_lifo_sem_bench"
 prod_benchmark_vdso="vdso_bench"
 
-prod_benchmarks="memcpy_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench"
+prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench"
 
-benchmark_non_json_list=("openssl" "libaegis_benchmark" "lzbench" "vdso_bench" "xxhash_benchmark" "concurrency_concurrent_hash_map_bench" "container_hash_maps_bench")
+benchmark_non_json_list=("openssl" "libaegis_benchmark" "lzbench" "vdso_bench" "xxhash_benchmark" "concurrency_concurrent_hash_map_bench" "container_hash_maps_bench" "erasure_code_perf")
+
+exec_non_json() {
+  local input="$1"
+  for item in "${benchmark_non_json_list[@]}"; do
+    if [[ "$item" == "$input" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
 
 run_list=""
 
 declare -A prod_benchmark_config=(
     ['random_benchmark']="--bm_regex=xoshiro --json"
     ['memcpy_benchmark']="--json"
+    ['memset_benchmark']="--json"
     ['hash_hash_benchmark']="--bm_regex=RapidHash --json"
     ['hash_checksum_benchmark']="--json"
     ['synchronization_lifo_sem_bench']="--bm_min_iters=1000000 --json"
@@ -59,12 +71,13 @@ declare -A prod_benchmark_config=(
     ['ProtocolBench']="--bm_regex=\"(^Binary)|(^Compact)Protocol\" --json"
     ['VarintUtilsBench']=" --json"
     ['concurrency_concurrent_hash_map_bench']=""
-    ['lzbench']="-v -ezstd1,3 ${WDL_DATASETS}/${dataset}"
+    ['lzbench']="-v -ezstd,1,3 ${WDL_DATASETS}/silesia.tar"
     ['openssl']="speed -seconds 20 -evp aes-256-gcm"
     ['vdso_bench']="-t 10 -p 20"
     ['libaegis_benchmark']=""
     ['xxhash_benchmark']="xxh3"
     ['bench-memcmp']=""
+    ['erase_code_perf']=""
 )
 
 main() {
@@ -123,12 +136,12 @@ main() {
             ldconfig
         fi
         out_file=""
-        if [[ " $benchmark_non_json_list{[*]} " =~ " ${benchmark} " ]]; then
+        if exec_non_json "${benchmark}"; then
             out_file="out_${benchmark}.txt"
         else
             out_file="out_${benchmark}.json"
         fi
-         "./${benchmark}" "${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
+        bash -c "./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
         if [ "$benchmark" = "openssl" ]; then
             unset LD_LIBRARY_PATH
             ldconfig
@@ -142,7 +155,7 @@ main() {
     fi
 
     for benchmark in $run_list; do
-        if [[ " $benchmark_non_json_list{[*]} " =~ " ${benchmark} " ]]; then
+        if exec_non_json "${benchmark}"; then
             python3 ./convert.py "$benchmark"
         fi
     done

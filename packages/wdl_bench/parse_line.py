@@ -190,3 +190,12 @@ def parse_line_container_hash_maps_bench(f, sum_c):
     for k, v in data.items():
         if re.search("^(Find)|(Insert)|(InsertSqBr)|(Erase)|(Iter)", k):
             sum_c[k] = v
+
+
+def parse_line_erasure_code_perf(f, sum_c):
+    for line in f:
+        elements = line.split()
+        if re.search("warm", elements[0]):
+            name = elements[0]
+            value = float(elements[-2])
+            sum_c[name + ": MB/s"] = value

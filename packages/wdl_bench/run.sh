@@ -122,6 +122,7 @@ main() {
 
     if [ "$run_type" = "prod" ]; then
         bash "${WDL_ROOT}/run_prod.sh"
+        exit 0
     fi
 
     set -u  # Enable unbound variables check from here onwards
