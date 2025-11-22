@@ -41,8 +41,17 @@ prod_benchmark_thrift="ProtocolBench VarintUtilsBench"
 prod_benchmark_f14="container_hash_maps_bench"
 prod_benchmark_lock="synchronization_small_locks_benchmark synchronization_lifo_sem_bench"
 prod_benchmark_vdso="vdso_bench"
+prod_benchmark_math="benchsleef128"
 
-prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench"
+prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench benchsleef128"
+if [ -f "./benchsleef256" ]; then
+    prod_benchmark_math+=" benchsleef256"
+    prod_benchmarks+=" benchsleef256"
+fi
+if [ -f "./benchsleef512" ]; then
+    prod_benchmark_math+=" benchsleef512"
+    prod_benchmarks+=" benchsleef512"
+fi
 
 benchmark_non_json_list=("openssl" "libaegis_benchmark" "lzbench" "vdso_bench" "xxhash_benchmark" "concurrency_concurrent_hash_map_bench" "container_hash_maps_bench" "erasure_code_perf")
 
@@ -78,6 +87,9 @@ declare -A prod_benchmark_config=(
     ['xxhash_benchmark']="xxh3"
     ['bench-memcmp']=""
     ['erase_code_perf']=""
+    ['benchsleef128']="--benchmark_format=json"
+    ['benchsleef256']="--benchmark_format=json"
+    ['benchsleef512']="--benchmark_format=json"
 )
 
 main() {
@@ -141,7 +153,13 @@ main() {
         else
             out_file="out_${benchmark}.json"
         fi
-        bash -c "./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
+        if [ "$benchmark" = "bench-memcmp" ]; then
+            pushd "${WDL_BUILD}/glibc-build"
+            bash -c "./testrun.sh ./benchtests/${benchmark} -- ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${WDL_ROOT}/${out_file}"
+            popd
+        else
+            bash -c "./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
+        fi
         if [ "$benchmark" = "openssl" ]; then
             unset LD_LIBRARY_PATH
             ldconfig

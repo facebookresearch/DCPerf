@@ -19,6 +19,7 @@ declare -A REPOS=(
     ['xxhash']='https://github.com/Cyan4973/xxHash.git'
     ['glibc']='https://sourceware.org/git/glibc.git'
     ['isa-l']='https://github.com/intel/isa-l.git'
+    ['sleef']='https://github.com/shibatch/sleef.git'
 )
 
 declare -A TAGS=(
@@ -31,6 +32,7 @@ declare -A TAGS=(
     ['xxhash']='136cc1f8fe4d5ea62a7c16c8424d4fa5158f6d68'
     ['glibc']="glibc-${GLIBC_VERSION}"
     ['isa-l']='d36de972efc18f2e85ca182a8b6758ecc7da512b'
+    ['sleef']='3.8'
 )
 
 declare -A DATASETS=(
@@ -148,7 +150,7 @@ build_lzbench()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
-    make BUILD_STATIC=1 -j
+    make BUILD_STATIC=1 -j "$(nproc)"
     cp ./lzbench "${WDL_ROOT}/" || exit
 
     download_dataset 'silesia'
@@ -168,7 +170,7 @@ build_openssl()
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
     ./Configure --prefix="${WDL_BUILD}/openssl" --openssldir="${WDL_BUILD}/openssl"
-    make -j
+    make -j "$(nproc)"
     make install
     cp "${WDL_BUILD}/openssl/bin/openssl" "${WDL_ROOT}/" || exit
 
@@ -182,7 +184,7 @@ build_vdso()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     cd "$lib/vdso_bench" || exit
-    make -j
+    make -j "$(nproc)"
     cp ./vdso_bench "${WDL_ROOT}/" || exit
 
     popd || exit
@@ -216,7 +218,7 @@ build_xxhash()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
-    make -C ./tests/bench/ -j
+    make -C ./tests/bench/ -j "$(nproc)"
     cp ./tests/bench/benchHash "${WDL_ROOT}/xxhash_benchmark" || exit
 
     popd || exit
@@ -227,13 +229,13 @@ build_glibc()
     lib='glibc'
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
-    cd "$lib" || exit
-    mkdir build && cd build
-    ../configure --prefix="${WDL_SOURCE}/glibc/build"
-    make -j
-    make bench
-    cp "${WDL_SOURCE}/glibc/build/benchtests/bench-memcmp" "${WDL_ROOT}/" || exit
+    pushd "${WDL_BUILD}"
+    mkdir glibc-build && cd glibc-build
+    "${WDL_SOURCE}/$lib"/configure --prefix="${WDL_BUILD}/glibc-build"
+    make -j "$(nproc)"
+    make bench-build -j "$(nproc)"
 
+    popd || exit
     popd || exit
 }
 
@@ -247,6 +249,53 @@ build_isa_l()
     ./configure
     make perfs -j
     cp ./erasure_code/erasure_code_perf "${WDL_ROOT}/" || exit
+
+    popd || exit
+}
+
+build_sleef()
+{
+    lib='sleef'
+    pushd "${WDL_SOURCE}"
+    clone $lib || echo "Failed to clone $lib"
+    cd "$lib" || exit
+    # Please do not change tabs in the following patch to spaces because git apply
+    # is very sensitive to tabs and spaces.
+    git apply - << 'EOF'
+diff --git a/src/libm-benchmarks/CMakeLists.txt b/src/libm-benchmarks/CMakeLists.txt
+index 379e541..7e8895d 100644
+--- a/src/libm-benchmarks/CMakeLists.txt
++++ b/src/libm-benchmarks/CMakeLists.txt
+@@ -13,6 +13,7 @@ ExternalProject_Add(googlebenchmark
+   CMAKE_ARGS -DBENCHMARK_DOWNLOAD_DEPENDENCIES=ON
+              -DCMAKE_BUILD_TYPE=Release
+              -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/googlebench
++             -DCMAKE_INSTALL_LIBDIR=lib
+              -DBENCHMARK_ENABLE_GTEST_TESTS=OFF
+ )
+ include_directories(${CMAKE_BINARY_DIR}/googlebench/include)
+@@ -56,4 +57,4 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
+ 	target_compile_options(benchsleef512 PRIVATE ${EXTRA_CFLAGS} "-mavx512f" "-DARCH_VECT_LEN=512")
+ 	target_link_libraries(benchsleef512 sleef ${GOOGLE_BENCH_LIBS})
+ 	add_dependencies(benchsleef512 googlebenchmark)
+-endif()
+\ No newline at end of file
++endif()
+--
+EOF
+    mkdir build && cd build
+    cmake -DCMAKE_BUILD_TYPE=Release -DSLEEF_BUILD_BENCH=on ../
+    make -j "$(nproc)"
+    # Copy benchsleef128
+    cp "${WDL_SOURCE}/sleef/build/bin/benchsleef128" "${WDL_ROOT}/" || exit 1
+    # Copy benchsleef256 if it exists
+    if [ -f "${WDL_SOURCE}/sleef/build/bin/benchsleef256" ]; then
+        cp "${WDL_SOURCE}/sleef/build/bin/benchsleef256" "${WDL_ROOT}/" || exit 1
+    fi
+    # Copy benchsleef512 if it exists
+    if [ -f "${WDL_SOURCE}/sleef/build/bin/benchsleef512" ]; then
+        cp "${WDL_SOURCE}/sleef/build/bin/benchsleef512" "${WDL_ROOT}/" || exit 1
+    fi
 
     popd || exit
 }
@@ -265,6 +314,7 @@ build_libaegis
 build_xxhash
 build_glibc
 build_isa_l
+build_sleef
 
 cp "${BPKGS_WDL_ROOT}/run.sh" ./
 cp "${BPKGS_WDL_ROOT}/run_prod.sh" ./
