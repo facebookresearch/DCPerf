@@ -86,7 +86,7 @@ declare -A prod_benchmark_config=(
     ['libaegis_benchmark']=""
     ['xxhash_benchmark']="xxh3"
     ['bench-memcmp']=""
-    ['erase_code_perf']=""
+    ['erasure_code_perf']=""
     ['benchsleef128']="--benchmark_format=json"
     ['benchsleef256']="--benchmark_format=json"
     ['benchsleef512']="--benchmark_format=json"
