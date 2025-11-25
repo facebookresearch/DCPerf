@@ -1,4 +1,4 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates and Contributors
+# Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
@@ -102,6 +102,7 @@ include(build-wangle)
 include(build-mvfst)
 include(build-fbthrift)
 include(${oldisim_SOURCE_DIR}/third_party/fbthrift/ThriftLibrary.cmake)
+
 
 # Add global include directories to fix include path issues
 include_directories(
