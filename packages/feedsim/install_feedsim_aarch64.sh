@@ -70,7 +70,7 @@ cd "${FEEDSIM_THIRD_PARTY_SRC}"
 DEP_CMAKE_VERSION="4.0.3"
 # Installing cmake
 if ! [ -d "cmake-${DEP_CMAKE_VERSION}-linux-aarch64" ]; then
-    wget "https://github.com/Kitware/CMake/releases/download/v${DEP_CMAKE_VERSION}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz"
+    wget "https://github.com/Kitware/CMake/releases/download/v${DEP_CMAKE_VERSION}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz" -O "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz"
     verify_checksum "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz" "391da1544ef50ac31300841caaf11db4de3976cdc4468643272e44b3f4644713"
     tar xfz "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz"
     export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64/bin:${PATH}"
@@ -112,8 +112,7 @@ fi
 DEP_BOOST_VERSION="1_88_0"
 # Installing Boost
 if ! [ -d "boost_${DEP_BOOST_VERSION}" ]; then
-
-    wget "https://archives.boost.io/release/$(echo $DEP_BOOST_VERSION | sed 's/_/./g')/source/boost_${DEP_BOOST_VERSION}.tar.gz"
+    wget "https://archives.boost.io/release/$(echo $DEP_BOOST_VERSION | sed 's/_/./g')/source/boost_${DEP_BOOST_VERSION}.tar.gz" -O "boost_${DEP_BOOST_VERSION}.tar.gz"
     verify_checksum "boost_${DEP_BOOST_VERSION}.tar.gz" "3621533e820dcab1e8012afd583c0c73cf0f77694952b81352bf38c1488f9cb4"
     tar -xzf "boost_${DEP_BOOST_VERSION}.tar.gz"
     cd "boost_${DEP_BOOST_VERSION}"
@@ -159,7 +158,7 @@ fi
 DEP_JEMALLOC_VERSION="5.3.0"
 # Installing JEMalloc
 if ! [ -d "jemalloc-${DEP_JEMALLOC_VERSION}" ]; then
-    wget "https://github.com/jemalloc/jemalloc/releases/download/${DEP_JEMALLOC_VERSION}/jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2"
+    wget "https://github.com/jemalloc/jemalloc/releases/download/${DEP_JEMALLOC_VERSION}/jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2" -O "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2"
     verify_checksum "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2" "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa"
     bunzip2 "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2"
     tar -xvf "jemalloc-${DEP_JEMALLOC_VERSION}.tar"
@@ -175,7 +174,7 @@ fi
 DEP_LIBEVENT_VERSION="2.1.12-stable"
 # Installing libevent
 if ! [ -d "libevent-${DEP_LIBEVENT_VERSION}" ]; then
-    wget "https://github.com/libevent/libevent/releases/download/release-${DEP_LIBEVENT_VERSION}/libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
+    wget "https://github.com/libevent/libevent/releases/download/release-${DEP_LIBEVENT_VERSION}/libevent-${DEP_LIBEVENT_VERSION}.tar.gz" -O "libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
     verify_checksum "libevent-${DEP_LIBEVENT_VERSION}.tar.gz" "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
     tar -xzf "libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
     cd "libevent-${DEP_LIBEVENT_VERSION}"
