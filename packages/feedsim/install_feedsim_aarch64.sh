@@ -18,7 +18,6 @@ cleanup() {
   trap - SIGINT SIGTERM ERR EXIT
 }
 
-
 msg() {
   echo >&2 -e "${1-}"
 }
@@ -56,7 +55,6 @@ fi
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 # Installing cmake-4.0.3
-
 if ! [ -d "cmake-4.0.3" ]; then
     wget "https://github.com/Kitware/CMake/releases/download/v4.0.3/cmake-4.0.3.tar.gz"
     tar -zxf "cmake-4.0.3.tar.gz"
@@ -72,13 +70,15 @@ fi
 
 export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-4.0.3/staging/bin:${PATH}"
 
-git clone https://github.com/fastfloat/fast_float.git
-cd fast_float
-mkdir build && cd build
-cmake ..
-make
-make install
-cd ../
+if ! [ -d "fast_float" ]; then
+    git clone https://github.com/fastfloat/fast_float.git
+    cd fast_float
+    mkdir build && cd build
+    cmake ..
+    make
+    make install
+    cd ../
+fi
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
@@ -151,7 +151,7 @@ else
 fi
 
 # Installing libevent
-if ! [ -d "libevent-2.1.11-stable" ]; then
+if ! [ -d "libevent-2.1.12-stable" ]; then
     wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
     tar -xzf "libevent-2.1.12-stable.tar.gz"
     cd "libevent-2.1.12-stable"
