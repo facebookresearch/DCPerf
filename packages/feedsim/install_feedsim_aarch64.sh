@@ -29,7 +29,7 @@ verify_checksum() {
     local expected_checksum="$2"
 
     if ! [ -f "$file" ]; then
-        echo "File not found: $file"
+        echo "WARNING: File not found: $file"
         exit 1
     fi
 
@@ -236,5 +236,5 @@ cmake -G Ninja \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     ../
 
-ninja-build -v -j1
+ninja-build -j"$(nproc)"
 msg "Building FeedSim ... DONE"
