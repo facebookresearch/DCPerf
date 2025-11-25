@@ -172,7 +172,7 @@
     - '--worker_loop_count={worker_loop_count}'
 
   vars:
-    - 'distribution_file=benchmarks/chm/model_a.dist'
+    - 'distribution_file=benchmarks/ai_wdl/chm/model_a.dist'
     - 'num_threads=80'
     - 'duration_seconds=360'
     - 'batch_size=10000000'
@@ -192,7 +192,7 @@
     - '--worker_loop_count={worker_loop_count}'
 
   vars:
-    - 'distribution_file=benchmarks/chm/model_b.dist'
+    - 'distribution_file=benchmarks/ai_wdl/chm/model_b.dist'
     - 'num_threads=80'
     - 'duration_seconds=360'
     - 'batch_size=10000000'
