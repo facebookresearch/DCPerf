@@ -16,7 +16,7 @@ input_file_name = "out_" + sys.argv[1] + ".txt"
 
 
 with open(input_file_name) as f:
-    if sys.argv[1] == "concurrency_concurrent_hash_map_benchmark":
+    if sys.argv[1] == "concurrency_concurrent_hash_map_bench":
         parse_line.parse_line_chm(f, sum_c)
     elif sys.argv[1] == "lzbench":
         parse_line.parse_line_lzbench(f, sum_c)

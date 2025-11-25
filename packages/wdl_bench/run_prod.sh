@@ -132,7 +132,7 @@ main() {
     set -u  # Enable unbound variables check from here onwards
     benchreps_tell_state "working on config"
     pushd "${WDL_ROOT}"
-
+    rm -f out_*.txt out_*.json
     #run
     benchreps_tell_state "start"
 

@@ -137,7 +137,7 @@ def parse_line_libaegis_benchmark(f, sum_c):
     for line in f:
         elements = line.split()
         if re.search("128L", elements[0]):
-            name = "".join(elements[:-3])
+            name = " ".join(elements[:-2])
             value = float(elements[-2])
             sum_c[name + ": Mb/s"] = value
 
