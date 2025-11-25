@@ -196,6 +196,9 @@ cp "${TEMPLATES_DIR}/jvm.options" "${CASSANDRA_ROOT}/conf/jvm.options" || exit 1
 mkdir -p /data/cassandra/{commitlog,data,saved_caches,hints}/
 chmod -R 0700 /data/cassandra
 
+# Create logs directory for Cassandra JVM GC logging
+mkdir -p "${CASSANDRA_ROOT}/logs"
+
 # Copy configurations
 cp "${TEMPLATES_DIR}/cassandra.yaml" "${CASSANDRA_ROOT}/conf/cassandra.yaml.template" || exit 1
 popd

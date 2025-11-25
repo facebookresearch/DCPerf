@@ -55,11 +55,11 @@ jobs:
     steps:
     - name: Setup Build Container (ubuntu-based)
       if: ${{ matrix.host-machine.type == 'ubuntu' }}
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget libpython2-dev python3-dev
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget libpython2-dev python3-dev numactl lshw dmidecode procps netcat bc
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}
-      run: dnf update -y; dnf install -y git pciutils which python3-devel ; dnf group install -y "Development Tools" --exclude="texlive*"
+      run: dnf update -y; dnf install -y git pciutils which python3-devel numactl lshw dmidecode procps-ng nmap-ncat bc; dnf group install -y "Development Tools" --exclude="texlive*"
 
     - name: Checkout the Repository
       uses: actions/checkout@v4
@@ -86,3 +86,6 @@ jobs:
 
     - name: Install Django
       run: . $PRELUDE; install_django $BUILD_ENV
+
+    - name: Run Django
+      run: . $PRELUDE; run_django $BUILD_ENV

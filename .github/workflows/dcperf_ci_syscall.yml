@@ -55,11 +55,11 @@ jobs:
     steps:
     - name: Setup Build Container (ubuntu-based)
       if: ${{ matrix.host-machine.type == 'ubuntu' }}
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode pkgconf
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode pkgconf numactl lshw procps
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}
-      run: dnf update -y; dnf install -y git pciutils which dmidecode
+      run: dnf update -y; dnf install -y git pciutils which dmidecode numactl lshw procps-ng
 
     - name: Checkout the Repository
       uses: actions/checkout@v4
@@ -86,4 +86,6 @@ jobs:
 
     - name: Install Syscall
       run: . $PRELUDE; install_syscall $BUILD_ENV
-      continue-on-error: false
+
+    - name: Run Syscall
+      run: . $PRELUDE; run_syscall $BUILD_ENV

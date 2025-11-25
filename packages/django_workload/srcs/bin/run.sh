@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # This source code is licensed under the MIT license found in the
@@ -50,6 +50,7 @@ cleanup() {
   [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" || true; }
   # Stop Cassandra
   [ -f cassandra.pid ] && { echo "Stopping cassandra"; kill "$(cat cassandra.pid)" || true; }
+  cat cassandra.log
   # Kill Siege
   SIEGE_PID="$(pgrep siege)"
   [ -n "$SIEGE_PID" ] && { echo "Killing siege"; kill -9 "$SIEGE_PID" || true; }
@@ -320,6 +321,9 @@ start_cassandra() {
   sed "s/__CONCUR_WRITES__/${cassandra_concur_writes}/g" < \
     ${CASSANDRA_YAML}.tmp > ${CASSANDRA_YAML}.tmp2
   mv -f "${CASSANDRA_YAML}.tmp2" "${CASSANDRA_YAML}"
+
+  # Create logs directory if it doesn't exist (required for JVM GC logging)
+  mkdir -p ./apache-cassandra/logs
 
   ./apache-cassandra/bin/cassandra -R -f -p cassandra.pid > cassandra.log 2>&1
 

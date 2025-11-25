@@ -4,9 +4,9 @@
 # LICENSE file in the root directory of this source tree.
 # Note: Make sure -Djava.net.preferIPv4Stack=true is not set or is set to false. Otherwise Cassandra won't bind to the IPv6 address
 
--Xms16G
--Xmx24G
--Xmn4G
+-Xms2G
+-Xmx4G
+-Xmn512M
 
 -XX:+HeapDumpOnOutOfMemoryError
 -Xss256k

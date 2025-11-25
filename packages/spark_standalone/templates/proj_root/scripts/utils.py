@@ -86,6 +86,11 @@ def read_sys_configs() -> Dict[str, int]:
             sys_configs["sockets"] = int(item["data"])
         if item["field"].startswith("Model name"):
             sys_configs["arch"] = item["data"]
+
+    # Set default value for arch if not found
+    if "arch" not in sys_configs:
+        sys_configs["arch"] = platform.machine()
+
     sys_configs["cores"] = (
         sys_configs["threads_per_core"]
         * sys_configs["cores_per_socket"]
