@@ -99,8 +99,8 @@ include(build-fmt)
 include(build-folly)
 include(build-fizz)
 include(build-wangle)
-include(build-fbthrift)
 include(build-mvfst)
+include(build-fbthrift)
 include(${oldisim_SOURCE_DIR}/third_party/fbthrift/ThriftLibrary.cmake)
 
 # Add global include directories to fix include path issues
