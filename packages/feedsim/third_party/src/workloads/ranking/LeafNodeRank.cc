@@ -45,8 +45,8 @@
 
 #include "if/gen-cpp2/ranking_types.h"
 
-#include "../search/ICacheBuster.h"
-#include "../search/PointerChase.h"
+#include "icachebuster/ICacheBuster.h"
+#include "pointerchase/PointerChase.h"
 
 #include "generators/RankingGenerators.h"
 

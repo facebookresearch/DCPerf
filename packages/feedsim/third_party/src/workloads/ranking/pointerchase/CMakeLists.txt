@@ -6,3 +6,22 @@
 cmake_minimum_required(VERSION 3.12)
 
 add_library(PointerChaser PointerChase.cc)
+
+find_program(GENGETOPT_EXECUTABLE gengetopt REQUIRED)
+# Generate getopts for PointerChaseTest
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/PointerChaseTestCmdline.h
+           ${CMAKE_CURRENT_BINARY_DIR}/PointerChaseTestCmdline.cc
+    COMMAND ${GENGETOPT_EXECUTABLE}
+        -i ${CMAKE_CURRENT_SOURCE_DIR}/PointerChaseTestCmdline.ggo
+        -F PointerChaseTestCmdline
+        --output-dir=${CMAKE_CURRENT_BINARY_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/PointerChaseTestCmdline.ggo
+)
+add_custom_target(
+    pointerChaseTest_gengetopt ALL
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/PointerChaseTestCmdline.h
+            ${CMAKE_CURRENT_BINARY_DIR}/PointerChaseTestCmdline.cc
+)
+add_executable(PointerChaseTest PointerChaseTest.cc)
+target_link_libraries(PointerChaseTest PointerChaser)

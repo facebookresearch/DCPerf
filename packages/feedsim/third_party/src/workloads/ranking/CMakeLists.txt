@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.12)
 project(oldisim_ranking)
 
 add_subdirectory(icachebuster)
-
+add_subdirectory(pointerchase)
 find_package(Boost 1.53.0
     COMPONENTS
         context
