@@ -38,28 +38,8 @@ add_dependencies(leafnodecmdline leafnode_gengetopt)
 
 # Generate ICacheBuster methods
 #file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gen_icache_buster.py
-        --num_methods "${ICACHEBUSTER_NUM_METHODS}"
-        --num_splits "${ICACHEBUSTER_NUM_SPLITS}"
-        --output_dir ${CMAKE_CURRENT_BINARY_DIR}
-)
-add_custom_target(
-    genicache ALL
-    DEPENDS
-        ${CMAKE_CURRENT_BINARY_DIR}/ICacheBuster.cc
-        ${CMAKE_CURRENT_BINARY_DIR}/ICacheBuster.h)
 
-# Define ICacheBuster library target
-file(GLOB icache_srclist "${CMAKE_CURRENT_BINARY_DIR}/ICacheBuster*")
-add_library(icachebuster ${icache_srclist})
 
-target_include_directories(icachebuster PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/ ${JEMALLOC_INCLUDE_DIR})
-target_compile_features(icachebuster PRIVATE cxx_std_11)
-add_dependencies(icachebuster genicache)
-
-add_library(PointerChaser PointerChase.cc)
-target_compile_features(icachebuster PRIVATE cxx_std_11)
 
 
 # Build LeafNode binary

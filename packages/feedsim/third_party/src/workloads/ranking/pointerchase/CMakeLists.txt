@@ -1,11 +1,8 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Copyright (c) Meta Platforms, Inc. and affiliates & Contributors
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
 cmake_minimum_required(VERSION 3.12)
-project(oldisim_workloads)
 
-include_directories(${CMAKE_CURRENT_LIST_DIR})
-
-add_subdirectory(ranking)
+add_library(PointerChaser PointerChase.cc)
