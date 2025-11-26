@@ -220,11 +220,19 @@ class UWSGIManager:
             logger.error(f"Error streaming logs for {prefix}: {e}")
 
     def _check_port_available(self, port: int) -> bool:
-        """Check if a port is available for binding."""
+        """Check if a port is available for binding.
+
+        Uses SO_REUSEADDR to match the behavior of Proxygen servers,
+        which also use SO_REUSEADDR. This allows binding even when
+        connections are in TIME_WAIT state, avoiding false negatives.
+        """
         import socket
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
+            # Set SO_REUSEADDR to match Proxygen's socket options
+            # This allows binding even if connections are in TIME_WAIT
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("0.0.0.0", port))
             sock.close()
             return True

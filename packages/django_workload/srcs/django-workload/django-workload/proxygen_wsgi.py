@@ -191,7 +191,12 @@ def stop_proxygen_server():
 
 
 def signal_handler(signum, frame):
-    """Handle shutdown signals"""
+    """
+    Handle shutdown signals (for standalone mode only).
+
+    NOTE: This handler is NOT called when running under uWSGI!
+    uWSGI intercepts signals and uses its signal framework instead.
+    """
     logger.info("Worker %d received signal %d, shutting down", os.getpid(), signum)
     stop_proxygen_server()
     sys.exit(0)

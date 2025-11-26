@@ -76,12 +76,14 @@ class ProxygenServer {
 
     py::gil_scoped_release release;
 
-    // Configure socket options to enable SO_REUSEPORT
-    // This allows multiple worker processes to bind to the same port
-    // Essential for uWSGI multi-worker setup where each worker runs its own
-    // Proxygen server
+    // Configure socket options for robust port handling:
+    // - SO_REUSEPORT: Allows multiple worker processes to bind to the same port
+    //   (essential for uWSGI multi-worker setup)
+    // - SO_REUSEADDR: Allows binding to ports in TIME_WAIT state
+    //   (enables immediate restart without "Address already in use" errors)
     folly::SocketOptionMap socket_options;
     socket_options[{SOL_SOCKET, SO_REUSEPORT}] = 1;
+    socket_options[{SOL_SOCKET, SO_REUSEADDR}] = 1;
 
     HTTPServer::IPConfig ip_config(
         folly::SocketAddress(ip_, port_, true), HTTPServer::Protocol::HTTP);
@@ -133,7 +135,7 @@ class ProxygenServer {
 
     LOG(INFO) << "Proxygen server started on " << ip_ << ":" << port_
               << " with " << actual_threads
-              << " threads (SO_REUSEPORT enabled)";
+              << " threads (SO_REUSEPORT + SO_REUSEADDR enabled)";
   }
 
   void stop() {

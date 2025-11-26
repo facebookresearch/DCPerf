@@ -13,6 +13,7 @@ DJANGO_SERVER_ROOT="$(readlink -f "${SCRIPT_ROOT}/../django-workload/django-work
 CPYTHON_PATH="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build"
 CINDER_PATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
 MEMCACHED_PID=
+CASSANDRA_PID=
 CLEANUP_REQS=0
 TABLE_NAMES="bundle_entry_model bundle_seen_model feed_entry_model inbox_entries user_model"
 CASSANDRA_DATA_PATH="/data/cassandra/data"
@@ -29,8 +30,25 @@ cleanup() {
   echo "Stopping services ..."
   cd "${SCRIPT_ROOT}/.." || exit 1
 
-  # Stop django-workload
-  [ -f uwsgi.pid ] && { echo "Stopping uwsgi"; kill -INT "$(cat uwsgi.pid)" || true; }
+  # Stop django-workload (send INT for graceful shutdown)
+  if [ -f uwsgi.pid ]; then
+    echo "Stopping uwsgi gracefully"
+    kill -INT "$(cat uwsgi.pid)" 2>/dev/null || true
+
+    # Wait for uwsgi to shutdown gracefully
+    local retries=10
+    while [ -f uwsgi.pid ] && [ "$retries" -gt 0 ]; do
+      sleep 1
+      retries=$((retries - 1))
+    done
+
+    # Force kill if still running
+    if [ -f uwsgi.pid ]; then
+      echo "Force killing uwsgi"
+      kill -9 "$(cat uwsgi.pid)" 2>/dev/null || true
+      rm -f uwsgi.pid
+    fi
+  fi
 
   # Stop start_loadbalanced_server.py process
   LOADBALANCER_PID="$(pgrep -f 'start_loadbalanced_server.py')"
@@ -45,14 +63,35 @@ cleanup() {
       kill -9 "$LOADBALANCER_PID" || true
     fi
   fi
-
   # Stop memcached
-  [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" || true; }
-  # Stop Cassandra
-  [ -f cassandra.pid ] && { echo "Stopping cassandra"; kill "$(cat cassandra.pid)" || true; }
+  [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" 2>/dev/null || true; }
+
+  # Stop Cassandra using PID file
+  if [ -f cassandra.pid ]; then
+    CASS_PID="$(cat cassandra.pid)"
+    echo "Stopping cassandra (PID: $CASS_PID)"
+    kill -TERM "$CASS_PID" 2>/dev/null || true
+
+    # Wait for Cassandra to shutdown gracefully
+    local retries=10
+    while kill -0 "$CASS_PID" 2>/dev/null && [ "$retries" -gt 0 ]; do
+      sleep 1
+      retries=$((retries - 1))
+    done
+
+    # Force kill if still running
+    if kill -0 "$CASS_PID" 2>/dev/null; then
+      echo "Force killing Cassandra (PID: $CASS_PID)"
+      kill -9 "$CASS_PID" 2>/dev/null || true
+    fi
+
+    rm -f cassandra.pid
+  fi
+
   # Kill Siege
   SIEGE_PID="$(pgrep siege)"
-  [ -n "$SIEGE_PID" ] && { echo "Killing siege"; kill -9 "$SIEGE_PID" || true; }
+  [ -n "$SIEGE_PID" ] && { echo "Killing siege"; kill -9 "$SIEGE_PID" 2>/dev/null || true; }
+
   echo "Done"
   if [ "$CLEANUP_REQS" -gt 0 ]; then
     exit
@@ -67,15 +106,16 @@ check_port_available() {
   local port=$1
   local port_name=$2
 
-  # Check if port is in use
+  # Check for LISTENING sockets only (TIME_WAIT won't appear here)
+  # With SO_REUSEADDR enabled, TIME_WAIT sockets won't prevent binding
   if ss -tln | grep -q ":${port} "; then
-    echo "ERROR: Port ${port} (${port_name}) is already in use!"
+    echo "ERROR: Port ${port} (${port_name}) has an active LISTENING socket!"
 
     # Check if there's a process associated with this port
     local pid=$(ss -tlnp | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1)
 
     if [ -n "$pid" ]; then
-      echo "ERROR: Process with PID ${pid} is using port ${port}"
+      echo "ERROR: Process with PID ${pid} is actively listening on port ${port}"
       echo "Process details:"
       ps -p "$pid" -o pid,cmd 2>/dev/null || echo "  (Process information unavailable)"
       echo ""
@@ -83,17 +123,19 @@ check_port_available() {
       echo "  1. Kill the process: kill ${pid}"
       echo "  2. Or choose a different port using -P (base port) or -T (stats port) options"
     else
-      echo "WARNING: Port ${port} is in use but no associated process found."
-      echo "This usually means the port is in TIME_WAIT or CLOSE_WAIT state."
+      echo "WARNING: Port ${port} appears to be listening but no process ID found."
+      echo "This is unusual and may indicate a kernel-level issue."
       echo ""
       echo "To fix this issue:"
-      echo "  1. Wait 2-5 minutes for the port to be released by the kernel"
+      echo "  1. Try running the benchmark anyway (SO_REUSEADDR may allow binding)"
       echo "  2. Or choose a different port using -P (base port) or -T (stats port) options"
-      echo "  3. Or run: sudo sysctl -w net.ipv4.tcp_tw_reuse=1 (to reuse TIME_WAIT sockets)"
+      echo "  3. Or check for zombie processes: ps aux | grep defunct"
     fi
     return 1
   fi
 
+  # With SO_REUSEADDR enabled, we don't need to check for TIME_WAIT sockets
+  # The kernel will allow us to bind even if old connections are in TIME_WAIT
   return 0
 }
 
@@ -321,8 +363,16 @@ start_cassandra() {
     ${CASSANDRA_YAML}.tmp > ${CASSANDRA_YAML}.tmp2
   mv -f "${CASSANDRA_YAML}.tmp2" "${CASSANDRA_YAML}"
 
-  ./apache-cassandra/bin/cassandra -R -f -p cassandra.pid > cassandra.log 2>&1
+  # Start Cassandra in the background and capture its PID
+  ./apache-cassandra/bin/cassandra -R -f > cassandra.log 2>&1 &
+  CASSANDRA_PID=$!
 
+  # Write PID to file for cleanup() function
+  echo "$CASSANDRA_PID" > cassandra.pid
+
+  echo "Cassandra started with PID: $CASSANDRA_PID"
+
+  wait "${CASSANDRA_PID}"
 }
 
 start_django_server() {
