@@ -30,3 +30,24 @@ target_include_directories(icachebuster PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/ ${JE
 target_compile_features(icachebuster PRIVATE cxx_std_11)
 add_dependencies(icachebuster genicache)
 target_compile_features(icachebuster PRIVATE cxx_std_11)
+
+find_program(GENGETOPT_EXECUTABLE gengetopt REQUIRED)
+# Generate getopts for PointerChaseTest
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ICacheBusterTestCmdline.h
+           ${CMAKE_CURRENT_BINARY_DIR}/ICacheBusterTestCmdline.cc
+    COMMAND ${GENGETOPT_EXECUTABLE}
+        -i ${CMAKE_CURRENT_SOURCE_DIR}/ICacheBusterTestCmdline.ggo
+        -F ICacheBusterTestCmdline
+        --output-dir=${CMAKE_CURRENT_BINARY_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/ICacheBusterTestCmdline.ggo
+)
+add_custom_target(
+    icacheBusterTest_gengetopt ALL
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ICacheBusterTestCmdline.h
+            ${CMAKE_CURRENT_BINARY_DIR}/ICacheBusterTestCmdline.cc
+)
+add_executable(ICacheBusterTest ICacheBusterTest.cc ${CMAKE_CURRENT_BINARY_DIR}/ICacheBusterTestCmdline.cc)
+add_dependencies(ICacheBusterTest icacheBusterTest_gengetopt)
+target_link_libraries(ICacheBusterTest icachebuster OLDISim::OLDISim)
+target_include_directories(ICacheBusterTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

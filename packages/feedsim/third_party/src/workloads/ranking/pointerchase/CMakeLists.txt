@@ -23,5 +23,7 @@ add_custom_target(
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/PointerChaseTestCmdline.h
             ${CMAKE_CURRENT_BINARY_DIR}/PointerChaseTestCmdline.cc
 )
-add_executable(PointerChaseTest PointerChaseTest.cc)
-target_link_libraries(PointerChaseTest PointerChaser)
+add_executable(PointerChaseTest PointerChaseTest.cc ${CMAKE_CURRENT_BINARY_DIR}/PointerChaseTestCmdline.cc)
+add_dependencies(PointerChaseTest pointerChaseTest_gengetopt)
+target_link_libraries(PointerChaseTest PointerChaser OLDISim::OLDISim)
+target_include_directories(PointerChaseTest PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
