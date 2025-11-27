@@ -37,6 +37,7 @@
 DEFINE_string(distribution_file, "", "Path to the distribution CSV file");
 DEFINE_int32(num_threads, 4, "Number of worker threads per batch");
 DEFINE_int32(num_batch_threads, 2, "Number of parallel batch threads");
+DEFINE_bool(autoscale, false, "Use all available cpu threads");
 DEFINE_int32(duration_seconds, 10, "Benchmark duration in seconds");
 DEFINE_int32(initial_capacity, 0, "Initial hash map capacity hint");
 DEFINE_int32(batch_size, 1000, "Operations per batch");
@@ -634,6 +635,30 @@ class ChmBenchmark {
 int main(int argc, char* argv[]) {
   // Parse command line flags
   gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+  // Check autoscale
+  if(FLAGS_autoscale){
+    cpu_set_t mask;
+    CPU_ZERO(&mask);
+
+    if (sched_getaffinity(0, sizeof(mask), &mask) == -1) {
+        std::cerr << "sched_getaffinity error!";
+        return 1;
+    }
+    int num_threads = 0;
+    for (int i = 0; i < CPU_SETSIZE; i++) {
+        if (CPU_ISSET(i, &mask)) {
+            num_threads++;
+        }
+    }
+
+    if (0 >= num_threads) {
+      std::cerr << "Failed to get available cpu threads!\n";
+      return 1;
+    }
+    FLAGS_num_threads = num_threads;
+    std::cout << "Autoscaled: " << FLAGS_num_threads << std::endl;
+  }
 
   if (FLAGS_distribution_file.empty()) {
     std::cerr

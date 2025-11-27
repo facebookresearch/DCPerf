@@ -199,6 +199,43 @@
     - 'num_batch_threads=4'
     - 'worker_loop_count=10'
 
+- benchmark: chm
+  name: chm_autoscale_a
+  description: Concurrent hash map benchmark for Model A with all available cpu threads.
+  args:
+    - '--distribution_file={distribution_file}'
+    - '--duration_seconds={duration_seconds}'
+    - '--batch_size={batch_size}'
+    - '--num_batch_threads={num_batch_threads}'
+    - '--worker_loop_count={worker_loop_count}'
+    - '--autoscale={autoscale}'
+
+  vars:
+    - 'distribution_file=benchmarks/ai_wdl/chm/model_a.dist'
+    - 'duration_seconds=360'
+    - 'batch_size=10000000'
+    - 'num_batch_threads=4'
+    - 'worker_loop_count=10'
+    - 'autoscale=true'
+
+- benchmark: chm
+  name: chm_autoscale_b
+  description: Concurrent hash map benchmark for Model B with all available cpu threads.
+  args:
+    - '--distribution_file={distribution_file}'
+    - '--duration_seconds={duration_seconds}'
+    - '--batch_size={batch_size}'
+    - '--num_batch_threads={num_batch_threads}'
+    - '--worker_loop_count={worker_loop_count}'
+    - '--autoscale={autoscale}'
+
+  vars:
+    - 'distribution_file=benchmarks/ai_wdl/chm/model_b.dist'
+    - 'duration_seconds=360'
+    - 'batch_size=10000000'
+    - 'num_batch_threads=4'
+    - 'worker_loop_count=10'
+    - 'autoscale=true'
 
 - benchmark: deser
   name: deser_a

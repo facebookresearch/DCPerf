@@ -11,11 +11,14 @@ To install `chm`, execute the following command:
 ## Run `chm`
 ### Job - `chm_a` and `chm_b`
 `chm_a` and `chm_b` correspondingly simuate the workload for Model A and Model B.
+`chm_autoscale_a` and `chm_autoscale_b` sets num_threads to the number of all available cpu threads.
 
 To run `chm` benchmark, please use following command
 ```bash
 ./benchpress -b ai run chm_a
 ./benchpress -b ai run chm_b
+./benchpress -b ai run chm_autoscale_a
+./benchpress -b ai run chm_autoscale_b
 ```
 
 ## Reporting and Measurement
