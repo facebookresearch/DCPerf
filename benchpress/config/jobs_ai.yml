@@ -297,3 +297,9 @@
         - 'lat_target_ms=100'
         - 'timeout=1800'
         - 'request_size_multiplier=6'
+
+- benchmark: type_conversion
+  name: type_conversion
+  description: Benchmark for common AI data type conversion
+  args:
+    - '--benchmark_format=json'

@@ -55,6 +55,7 @@ from .syscall import SyscallParser
 from .tailbench import TailBenchParser
 from .tao_bench import TaoBenchParser
 from .tao_bench_autoscale import TaoBenchAutoscaleParser
+from .type_conversion import TypeConversionParser
 from .wdl import WDLParser
 
 if not open_source:
@@ -113,7 +114,7 @@ def register_parsers(factory):
     factory.register("deser", DeserParser)
     factory.register("adsim", AdSimParser)
     factory.register("cdn_bench", CDNBenchParser)
-
+    factory.register("type_conversion", TypeConversionParser)
     if not open_source:
         factory.register("hackperf", HackperfParser)
         factory.register("ucache_bench", UcacheBenchParser)

@@ -52,3 +52,11 @@ adsim:
     - final_requested_qps
     - target_latency_msec
     - target_latency_percentile
+
+type_conversion:
+  parser: type_conversion
+  install_script: ./packages/ai_wdl/type_conversion/install_type_conversion.sh
+  cleanup_script: ./packages/ai_wdl/type_conversion/cleanup_type_conversion.sh
+  path: ./benchmarks/ai_wdl/type_conversion/type_conversion_bench
+  metrics:
+    - elem/s
