@@ -23,9 +23,14 @@ ExternalProject_Add(fmt
 # Specify include dir
 ExternalProject_Get_Property(fmt INSTALL_DIR)
 
-set(FMT_LIBRARIES
-  ${INSTALL_DIR}/lib64/libfmt.a
-  )
+set(FMT_LIBRARIES "")
+if(EXISTS "${INSTALL_DIR}/lib64/libfmt.a")
+  set(FMT_LIBRARIES "${INSTALL_DIR}/lib64/libfmt.a")
+elseif(EXISTS "${INSTALL_DIR}/lib/libfmt.a")
+  set(FMT_LIBRARIES "${INSTALL_DIR}/lib/libfmt.a")
+else()
+  message(FATAL_ERROR "fmt static library not found in lib or lib64")
+endif()
 message(STATUS "fmt Library: ${FMT_LIBRARIES}")
 
 mark_as_advanced(
