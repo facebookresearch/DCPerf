@@ -53,6 +53,7 @@ def _log_breakdown_entry(
     pid: int,
     timestamp_type: str,
     sub_operation_name: str = "",
+    timestamp=None,
 ) -> None:
     """
     Log an entry to the breakdown CSV file.
@@ -63,106 +64,155 @@ def _log_breakdown_entry(
         pid: Process ID
         timestamp_type: Type of timestamp ('start' or 'end')
         sub_operation_name: Optional sub-operation name
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
     csv_file = Path(folder_path) / BREAKDOWN_FILE_NAME
 
     # Get timestamp in format: YYYY-MM-DD HH:MM:SS.mmm (milliseconds)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    if timestamp is None:
+        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    elif isinstance(timestamp, float):
+        # Convert Unix timestamp (float) to formatted string
+        timestamp_str = datetime.fromtimestamp(timestamp).strftime(
+            "%Y-%m-%d %H:%M:%S.%f"
+        )[:-3]
+    else:
+        # Use the string timestamp as-is
+        timestamp_str = timestamp
 
     with open(csv_file, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(
-            [operation_name, pid, timestamp_type, timestamp, sub_operation_name]
+            [operation_name, pid, timestamp_type, timestamp_str, sub_operation_name]
         )
 
 
-def log_preprocessing_start(folder_path: str, pid: int) -> None:
+def log_preprocessing_start(folder_path: str, pid: int, timestamp=None) -> None:
     """
     Log the start of the preprocessing operation.
 
     Args:
         folder_path: Path to the folder containing the CSV file
         pid: Process ID
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
-    _log_breakdown_entry(folder_path, PREPROCESSING_OPERATION_NAME, pid, "start")
+    _log_breakdown_entry(
+        folder_path, PREPROCESSING_OPERATION_NAME, pid, "start", timestamp=timestamp
+    )
 
 
-def log_preprocessing_end(folder_path: str, pid: int) -> None:
+def log_preprocessing_end(folder_path: str, pid: int, timestamp=None) -> None:
     """
     Log the end of the preprocessing operation.
 
     Args:
         folder_path: Path to the folder containing the CSV file
         pid: Process ID
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
-    _log_breakdown_entry(folder_path, PREPROCESSING_OPERATION_NAME, pid, "end")
+    _log_breakdown_entry(
+        folder_path, PREPROCESSING_OPERATION_NAME, pid, "end", timestamp=timestamp
+    )
 
 
-def log_preprocessing_warmup_start(folder_path: str, pid: int) -> None:
+def log_preprocessing_warmup_start(folder_path: str, pid: int, timestamp=None) -> None:
     """
     Log the start of the preprocessing warmup sub-operation.
 
     Args:
         folder_path: Path to the folder containing the CSV file
         pid: Process ID
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
     _log_breakdown_entry(
-        folder_path, PREPROCESSING_OPERATION_NAME, pid, "start", "warmup"
+        folder_path,
+        PREPROCESSING_OPERATION_NAME,
+        pid,
+        "start",
+        "warmup",
+        timestamp=timestamp,
     )
 
 
-def log_preprocessing_warmup_end(folder_path: str, pid: int) -> None:
+def log_preprocessing_warmup_end(folder_path: str, pid: int, timestamp=None) -> None:
     """
     Log the end of the preprocessing warmup sub-operation.
 
     Args:
         folder_path: Path to the folder containing the CSV file
         pid: Process ID
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
     _log_breakdown_entry(
-        folder_path, PREPROCESSING_OPERATION_NAME, pid, "end", "warmup"
+        folder_path,
+        PREPROCESSING_OPERATION_NAME,
+        pid,
+        "end",
+        "warmup",
+        timestamp=timestamp,
     )
 
 
-def log_main_benchmark_start(folder_path: str, pid: int) -> None:
+def log_main_benchmark_start(folder_path: str, pid: int, timestamp=None) -> None:
     """
     Log the start of the main benchmark operation.
 
     Args:
         folder_path: Path to the folder containing the CSV file
         pid: Process ID
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
-    _log_breakdown_entry(folder_path, MAIN_OPERATION_NAME, pid, "start")
+    _log_breakdown_entry(
+        folder_path, MAIN_OPERATION_NAME, pid, "start", timestamp=timestamp
+    )
 
 
-def log_main_benchmark_end(folder_path: str, pid: int) -> None:
+def log_main_benchmark_end(folder_path: str, pid: int, timestamp=None) -> None:
     """
     Log the end of the main benchmark operation.
 
     Args:
         folder_path: Path to the folder containing the CSV file
         pid: Process ID
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
-    _log_breakdown_entry(folder_path, MAIN_OPERATION_NAME, pid, "end")
+    _log_breakdown_entry(
+        folder_path, MAIN_OPERATION_NAME, pid, "end", timestamp=timestamp
+    )
 
 
-def log_postprocessing_start(folder_path: str, pid: int) -> None:
+def log_postprocessing_start(folder_path: str, pid: int, timestamp=None) -> None:
     """
     Log the start of the postprocessing operation.
 
     Args:
         folder_path: Path to the folder containing the CSV file
         pid: Process ID
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
-    _log_breakdown_entry(folder_path, POSTPROCESSING_OPERATION_NAME, pid, "start")
+    _log_breakdown_entry(
+        folder_path, POSTPROCESSING_OPERATION_NAME, pid, "start", timestamp=timestamp
+    )
 
 
-def log_postprocessing_end(folder_path: str, pid: int) -> None:
+def log_postprocessing_end(folder_path: str, pid: int, timestamp=None) -> None:
     """
     Log the end of the postprocessing operation.
 
     Args:
         folder_path: Path to the folder containing the CSV file
         pid: Process ID
+        timestamp: Optional timestamp. Can be a string (formatted as 'YYYY-MM-DD HH:MM:SS.mmm'),
+                   a float (Unix timestamp), or None. If not provided, current timestamp will be used
     """
-    _log_breakdown_entry(folder_path, POSTPROCESSING_OPERATION_NAME, pid, "end")
+    _log_breakdown_entry(
+        folder_path, POSTPROCESSING_OPERATION_NAME, pid, "end", timestamp=timestamp
+    )

@@ -11,8 +11,12 @@ import pathlib
 import re
 import shlex
 import subprocess
+import sys
 import threading
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).parents[2] / "common"))
+import breakdown_utils
 
 SRC_DATASET = "bpc_t93586_s2_synthetic"
 
@@ -196,6 +200,73 @@ def run_test(args):
         t_prof.join()
 
 
+def extract_stage_4_timestamps(log_file):
+    """
+    Parse the Spark log file to extract Stage 4.0 start and end timestamps.
+    Returns a tuple of (start_timestamp, end_timestamp) as datetime objects,
+    or (None, None) if Stage 4.0 is not found.
+    """
+    if not os.path.exists(log_file):
+        print(f"Log file {log_file} not found")
+        return (None, None)
+
+    stage_4_start = None
+    stage_4_end = None
+
+    with open(log_file, "r") as f:
+        for line in f:
+            parts = line.split(" ", maxsplit=2)
+            if len(parts) < 3:
+                continue
+
+            timestr = parts[0] + " " + parts[1]
+            try:
+                timestamp = datetime.datetime.strptime(timestr, "%y/%m/%d %H:%M:%S")
+            except ValueError:
+                continue
+
+            # Check if this line mentions stage 4.0 (case-insensitive)
+            if re.search(r"stage 4\.0", parts[2], re.IGNORECASE):
+                if stage_4_start is None:
+                    stage_4_start = timestamp
+                stage_4_end = timestamp
+
+    if stage_4_start is not None:
+        print(f"Found Stage 4.0: start={stage_4_start}, end={stage_4_end}")
+
+    return (stage_4_start, stage_4_end)
+
+
+def log_stage_4_to_breakdown(log_file, breakdown_dir):
+    """
+    Extract Stage 4.0 timestamps from the Spark log and write them to breakdown.csv
+    """
+
+    stage_4_start, stage_4_end = extract_stage_4_timestamps(log_file)
+
+    if stage_4_start is None or stage_4_end is None:
+        print("Stage 4.0 timestamps not found in log file")
+        print(f"Checking log file: {log_file}")
+        if os.path.exists(log_file):
+            print(f"Log file exists, size: {os.path.getsize(log_file)} bytes")
+        return
+
+    # Convert datetime objects to Unix timestamps
+    start_timestamp = stage_4_start.timestamp()
+    end_timestamp = stage_4_end.timestamp()
+
+    # End preprocessing, start main benchmark
+    breakdown_utils.log_preprocessing_end(breakdown_dir, os.getpid(), start_timestamp)
+    breakdown_utils.log_main_benchmark_start(
+        breakdown_dir, os.getpid(), start_timestamp
+    )
+    # End main benchmark, start postprocessing
+    breakdown_utils.log_main_benchmark_end(breakdown_dir, os.getpid(), end_timestamp)
+    breakdown_utils.log_postprocessing_start(breakdown_dir, os.getpid(), end_timestamp)
+
+    print(f"Logged Stage 4.0 timestamps: {start_timestamp} to {end_timestamp}")
+
+
 def setup(args):
     print("Step 1: Export SSDs from remote storage nodes")
     print("\ta. find machines that can provide a total of 3+ SSDs")
@@ -246,6 +317,11 @@ def run(args):
             )
             return
     exec_cmd(f"mkdir -p {WORK_DIR}")
+
+    # Create breakdown CSV file for runtime tracking in SPARK_DIR
+    breakdown_utils.create_breakdown_csv(SPARK_DIR)
+    breakdown_utils.log_preprocessing_start(SPARK_DIR, os.getpid())
+
     if args.sanity > 0:
         cmd = "fio \
             --rw=randrw \
@@ -288,7 +364,16 @@ def run(args):
     exec_cmd(f"mkdir -p {DATASET_DIR}")
     download_dataset(args)
     install_database(args)
+
     run_test(args)
+
+    # Ensure log file is flushed to disk
+    log_file_path = os.path.join(WORK_DIR, "release_test_93586.log")
+    # Log Stage 4.0 timestamps for main benchmark
+    log_stage_4_to_breakdown(log_file_path, SPARK_DIR)
+
+    # Postprocessing complete
+    breakdown_utils.log_postprocessing_end(SPARK_DIR, os.getpid())
 
 
 def init_parser():
