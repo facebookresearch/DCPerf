@@ -252,6 +252,7 @@
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
           - '/tmp/siege_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
   name: django_workload_arm
@@ -338,6 +339,7 @@
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
           - '/tmp/siege_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
   name: django_workload_arm_mini
@@ -379,6 +381,7 @@
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
           - '/tmp/siege_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
   name: django_workload_mini
@@ -418,6 +421,7 @@
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
           - '/tmp/siege_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 
 - benchmark: django_workload
@@ -510,6 +514,7 @@
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
           - '/tmp/siege_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 - name: feedsim_default
   benchmark: feedsim

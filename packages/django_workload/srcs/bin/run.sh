@@ -18,6 +18,11 @@ CLEANUP_REQS=0
 TABLE_NAMES="bundle_entry_model bundle_seen_model feed_entry_model inbox_entries user_model"
 CASSANDRA_DATA_PATH="/data/cassandra/data"
 KEY_SPACE_NAME="db"
+BREAKDOWN_FOLDER="${SCRIPT_ROOT}/.."
+
+# Source runtime breakdown utilities
+source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
+
 if [ -z "$JAVA_HOME" ]; then
   _JAVA_HOME="$("${BENCHPRESS_ROOT}"/packages/common/find_java_home.py)"
   export JAVA_HOME="${_JAVA_HOME}"
@@ -432,7 +437,7 @@ ${python_libs}:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
       take_snapshot
     fi
 
-  # Should we run in async mode with load balancing?
+    # Should we run in async mode with load balancing?
   if [ "${use_async}" = "1" ] || [ "${use_async}" -gt "0" ]; then
     echo "Running django server with uWSGI + HAProxy load balancing"
     echo "  Workers: ${num_server_workers}"
@@ -519,6 +524,9 @@ start_clientserver() {
   local interpreter="${9:-cpython}"
   local use_async="${10:-0}"
 
+  create_breakdown_csv "$BREAKDOWN_FOLDER"
+  log_preprocessing_start "$BREAKDOWN_FOLDER" "$$"
+
   start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" "${use_async}" &
   server_pid="$!"
 
@@ -529,20 +537,35 @@ start_clientserver() {
       sleep 1
       retries=$((retries-1))
       if [[ "$retries" -le 0 ]]; then
-          echo "Django server could not start within ${retries_init}s"
-          exit 1
+          echo "ERROR: Django server could not start within ${retries_init}s"
+          cleanup
+          return 1
       fi
       # fail early if the server process does not exist
-      if ! kill -0 "$server_pid"; then
-          echo "Django server exited unexpectedly, will stop waiting"
+      if ! kill -0 "$server_pid" 2>/dev/null; then
+          echo "ERROR: Django server exited unexpectedly, stopping execution"
           echo "Please check logs to debug the problems"
-          exit 1
+          cleanup
+          return 1
       fi
   done
+
+
+  local django_server_pid
+  django_server_pid="$server_pid"
+
+  log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
+  log_main_benchmark_start "$BREAKDOWN_FOLDER" "$django_server_pid"
+
   start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "127.0.0.1" "${iterations}" "${reps}"
+
+  log_main_benchmark_end "$BREAKDOWN_FOLDER" "$django_server_pid"
+  log_postprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
   # Report interpreter type
   echo "Interpreter: ${interpreter}"
+
+  log_postprocessing_end "$BREAKDOWN_FOLDER" "$$"
 }
 
 main() {
