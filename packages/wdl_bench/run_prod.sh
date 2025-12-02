@@ -172,15 +172,17 @@ main() {
         rm "${result_filename}"
     fi
 
+    echo "benchmark results:" "$run_list" | tee -a "${result_filename}"
+    echo "---------------------------------------------" | tee -a "${result_filename}"
     for benchmark in $run_list; do
         if exec_non_json "${benchmark}"; then
             python3 ./convert.py "$benchmark"
         fi
+        python3 ./scoring.py "$benchmark" | tee -a "${result_filename}"
     done
-    echo "benchmark results:" "$run_list" | tee -a "${result_filename}"
 
-
-    echo "results in each individual json file." | tee -a "${result_filename}"
+    echo "---------------------------------------------" | tee -a "${result_filename}"
+    echo "detailed results in each individual json file." | tee -a "${result_filename}"
 
     popd
 

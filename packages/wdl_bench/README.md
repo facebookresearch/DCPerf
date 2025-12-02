@@ -6,131 +6,98 @@ LICENSE file in the root directory of this source tree.
 -->
 # WDLBench
 
-This is a benchmark that covers many widely distributed libraries and functions, which consume a considerable amount of CPU cycles in the datacenter.
+WDLBench is a comprehensive benchmark suite that covers widely distributed libraries (WDL) and key operations that consume considerable CPU cycles in Meta's datacenter fleet. It provides the opportunities for both aggregate production-level metrics and detailed microbenchmark analysis.
 
+The way to use WDLBench is to run the pre-configured production benchmark set first and get an overall scores for each benchmark. Then, you can run individual microbenchmarks to dive deep into specific operations for hardware exploration and software optimization.
 
-
-## Usage
-WDLBench and its job information are located in separate files. To use it (install, run, list, etc.), please **always** specify the path:
-```
-./benchpress_cli.py  -b wdl install|run|list|others ...
-```
-
-
-## Install WDLBench
+## 1. Install WDLBench
 
 ```
 ./benchpress_cli.py  -b wdl install folly_single_core
 ```
 
-## Run WDLBench
-As of 2025 Q3, we have the following libraries included -- `folly`, `lzbench`, `openssl`, and `vdso_bench`,
-each can run on a single core or all cores.
 
-for `folly`, the user can choose to run them all together (i.e., run all microbenchmarks with one DCPerf run) or individually (i.e., one microbenchmark per DCPerf run) with different jobs.
+This installs all production benchmarks including:
+- **Memory operations**: memcpy, memset, memcmp
+- **Hash functions**: RapidHash, xxHash
+- **Compression**: lzbench (zstd)
+- **Cryptography**: OpenSSL (AES-256-GCM), libaegis
+- **Checksum & Error Correction**: checksum, erasure codes (Reed-Solomon)
+- **Random Number Generation**: xoshiro
+- **Concurrency**: ConcurrentHashMap, locks, mutexes
+- **Serialization**: Thrift Protocol (Binary, Compact), Varint
+- **Data Structures**: F14 maps (folly)
+- **System Calls**: vdso_bench
+- **Math**: SLEEF SIMD math functions
+
+## 2. Run Production Benchmark Suite
+
+Get scores for the key WDL operations in Meta's fleet:
+```bash
+./benchpress_cli.py -b wdl run prod_set
 ```
-./benchpress_cli.py  -b wdl run folly_single_core|folly_all_core|folly_multi_thread
 
-./benchpress_cli.py  -b wdl run folly_individual -i '{"name": "function_name"}'
+This runs the comprehensive production benchmark set and generates:
+- **Aggregate scores** for each benchmark
+- **Consolidated results** in `wdl_bench_results.txt`
+- **Detailed metrics** in individual `out_<benchmark>.json` files
+
+The prod_set includes **prod-like** configurations.
+
+### Aggregate Scores
+After running `prod_set`, check `wdl_bench_results.txt` for:
+- **Performance scores** for each benchmark (compared to the runs on a baseline CPU)
+- **Summary of operations tested**
+
+### Detailed Metrics
+Individual `out_<benchmark>.json` files contain:
+- **Throughput** (iterations/second) for each operation
+
+### Scoring and Baselines
+
+WDLBench includes baseline results for comparison:
+- Baseline results are stored in `baseline_results/`
+- The `scoring.py` script compares your results against baselines
+- Scores are normalized and reported in `wdl_bench_results.txt`
+
+To generate aggregate scores across categories:
+```bash
+python3 aggregate_result.py
 ```
-for list of functions to run then individually, see [list of benchmarks in folly](#list-of-benchmarks-in-folly).
 
-For `lzbench`, `openssl` and `vdso_bench`, the user can pass parameters to select how to run them.
+## 3. Run Individual Microbenchmarks
+
+Dive deep into specific operations:
+
+#### Run a specific benchmark:
+```bash
+./benchpress_cli.py -b wdl run prod_set -i '{"name": "memcpy_benchmark"}'
+./benchpress_cli.py -b wdl run prod_set -i '{"name": "hash_hash_benchmark"}'
+./benchpress_cli.py -b wdl run prod_set -i '{"name": "lzbench"}'
 ```
-./benchpress_cli.py  -b wdl run lzbench -i '{"type": "single_core|all_core"}'
 
-./benchpress_cli.py  -b wdl run openssl -i '{"type": "single_core|all_core"}'
+#### Run individual folly microbenchmarks:
+```bash
+# Single-core benchmarks
+./benchpress_cli.py -b wdl run folly_individual -i '{"name": "function_benchmark"}'
+./benchpress_cli.py -b wdl run folly_individual -i '{"name": "hash_hash_benchmark"}'
+./benchpress_cli.py -b wdl run folly_individual -i '{"name": "io_iobuf_benchmark"}'
 
-./benchpress_cli.py  -b wdl run vdso_bench -i '{"type": "single_core|multi_thread"}'
+# Multi-threaded benchmarks
+./benchpress_cli.py -b wdl run folly_individual -i '{"name": "concurrency_concurrent_hash_map_benchmark"}'
+./benchpress_cli.py -b wdl run folly_individual -i '{"name": "synchronization_small_locks_benchmark"}'
 ```
-For `lzbench` and `openssl`, the user can also pass the `algo` parameter to specify the algorithm used, for `lzbench`, the default algorithm is `zstd`, while for `openssl`, the default algorithm is `ctr` (`aes-256-ctr`).
 
-## benchmarks in folly
+For a complete list of folly microbenchmarks, see [Benchmarks in Folly](#benchmarks-in-folly).
 
-<table>
-  <tr>
-   <td>name </td>
-   <td>Description</td>
-   <td>catagories</td>
-  </tr>
-  <tr>
-   <td>concurrency_concurrent_hash_map_benchmark</td>
-   <td>multiple common operations of the folly::ConcurrentHashMap data structure</td>
-   <td>multi_thread (locks, mutex, etc.)</td>
-  </tr>
-  <tr>
-   <td>stats_digest_builder_benchmark </td>
-   <td>append operations to a single DigestBuilder buffer from multiple threads</td>
-   <td>multi_thread (locks, mutex, etc.)</td>
-  </tr>
-  <tr>
-   <td>io_async_event_base_benchmark</td>
-   <td>tests on and off speed of EventBase class, a wrapper of all async I/O processing functionalities </td>
-   <td>single_core</td>
-  </tr>
-  <tr>
-   <td>fibers_fibers_benchmark </td>
-   <td> multiple common operations of FiberManager, which allows semi-parallel task execution on the same thread</td>
-   <td>single_core</td>
-  </tr>
-  <tr>
-   <td>function_benchmark </td>
-   <td>evaluates function call performance</td>
-   <td>single_core</td>
-  </tr>
-  <tr>
-   <td>hash_hash_benchmark </td>
-   <td>evaluates speed of three hash functions: SpookyHashV2, FNV64, and MurmurHash</td>
-   <td>single_core</td>
-  </tr>
-  <tr>
-   <td>container_hash_maps_bench </td>
-   <td>multiple common operations of the F14 map data structure</td>
-   <td>single_core</td>
-  </tr>
-  <tr>
-   <td>io_iobuf_benchmark </td>
-   <td>multiple common operations of IOBuf, which manages heap-allocated byte buffers.</td>
-   <td>single_core</td>
-  </tr>
-  <tr>
-   <td>crypto_lt_hash_benchmark</td>
-   <td>evaluates speed of the lt hash function, which is common in crypto</td>
-   <td>single_core, all_core</td>
-  </tr>
-  <tr>
-   <td>memcpy_benchmark </td>
-   <td>measures and compares memcpy from glibc and folly on vairous sizes </td>
-   <td>single_core, all_core</td>
-  </tr>
-  <tr>
-   <td>memset_benchmark </td>
-   <td>measures and compares memset from glibc and folly on vairous sizes </td>
-   <td>single_core, all_core</td>
-  </tr>
-  <tr>
-   <td>random_benchmark </td>
-   <td>evaluates speed of various random number generation functions </td>
-   <td>single_core, all_core</td>
-  </tr>
-  <tr>
-   <td>synchronization_small_locks_benchmark </td>
-   <td>evaluates performance of multi_thread locks, mutex, atomic operations, etc. </td>
-   <td>multi_thread (locks, mutex, etc.)</td>
-  </tr>
-  <tr>
-   <td>ProtocolBench </td>
-   <td>evaluates performance of various thrift RPC protocol operations</td>
-   <td>single_core, all_core</td>
-  </tr>
-</table>
+#### Customize benchmark parameters:
+```bash
+# Run lzbench with different compression algorithm
+./benchpress_cli.py -b wdl run lzbench -i '{"type": "single_core", "algo": "lz4"}'
 
+# Run OpenSSL with different cipher
+./benchpress_cli.py -b wdl run openssl -i '{"type": "single_core", "algo": "cbc"}'
 
-
-## Reporting and Measurement
-For now, for each benchmark, we report the results in the `out_name.json` file in `benchmark_metrics_<uuid>` folder. In the JSON file,
-the keys are the items run in the benchmark, and the values are the corresponding performance
-numbers (typically throughput (iterations per second)).
-
-In future, we plan to add reference performance numbers of each benchmark as baseline, and DCPerf
-can automatically compare the performance of your run against the default reference run.
+# Run vdso_bench on all cores
+./benchpress_cli.py -b wdl run vdso_bench -i '{"type": "multi_thread"}'
+```

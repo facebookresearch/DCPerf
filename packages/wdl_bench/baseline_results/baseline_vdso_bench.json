@@ -1,0 +1,14 @@
+{
+    "CLOCK_BOOTTIME: M/s": 36.19,
+    "CLOCK_BOOTTIME_ALARM: M/s": 0.18,
+    "CLOCK_MONOTONIC: M/s": 36.27,
+    "CLOCK_MONOTONIC_COARSE: M/s": 127.16,
+    "CLOCK_MONOTONIC_RAW: M/s": 33.36,
+    "CLOCK_PROCESS_CPUTIME_ID: M/s": 1.14,
+    "CLOCK_REALTIME: M/s": 36.21,
+    "CLOCK_REALTIME_ALARM: M/s": 0.18,
+    "CLOCK_REALTIME_COARSE: M/s": 127.53,
+    "CLOCK_THREAD_CPUTIME_ID: M/s": 4.29,
+    "get_cntvct: M/s": 65.31,
+    "getpid: M/s": 12.42
+}

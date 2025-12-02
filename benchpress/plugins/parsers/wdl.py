@@ -15,22 +15,11 @@ from benchpress.lib.parser import Parser
 class WDLParser(Parser):
     def parse(self, stdout, stderr, returncode):
         metrics = {}
-        benchmarks = []
         for line in stdout:
-            if re.search("benchmark results", line):
-                benchmarks = line.split(":")[1].split()
-                break
+            if re.search("score:", line):
+                benchmark = line.split()[0]
+                metrics[benchmark] = float(line.split(":")[-1])
 
-        for benchmark in benchmarks:
-            out_file = "benchmarks/wdl_bench/out_" + benchmark + ".json"
-
-            with open(out_file, "r") as out_f:
-                out = json.load(out_f)
-                for k, v in out.items():
-                    metrics[benchmark + "_" + k] = v
-
-        if len(metrics.keys()) >= 20:
-            metrics = {}
-            metrics["results in each out_benchmark_name.json file"] = benchmarks
+        metrics["detailed results in each out_benchmark_name.json file"] = " "
 
         return metrics
