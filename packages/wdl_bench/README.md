@@ -6,14 +6,14 @@ LICENSE file in the root directory of this source tree.
 -->
 # WDLBench
 
-WDLBench is a comprehensive benchmark suite that covers widely distributed libraries (WDL) and key operations that consume considerable CPU cycles in Meta's datacenter fleet. It provides the opportunities for both aggregate production-level metrics and detailed microbenchmark analysis.
+WDLBench is a comprehensive benchmark suite that covers widely distributed libraries (WDL, a.k.a. "datacenter tax") and key operations that consume considerable CPU cycles in Meta's datacenter fleet. It provides the opportunities for both aggregate production-level metrics and detailed microbenchmark analysis.
 
 The way to use WDLBench is to run the pre-configured production benchmark set first and get an overall scores for each benchmark. Then, you can run individual microbenchmarks to dive deep into specific operations for hardware exploration and software optimization.
 
 ## 1. Install WDLBench
 
 ```
-./benchpress_cli.py  -b wdl install folly_single_core
+./benchpress_cli.py -b wdl install prod_set
 ```
 
 
@@ -101,3 +101,11 @@ For a complete list of folly microbenchmarks, see [Benchmarks in Folly](#benchma
 # Run vdso_bench on all cores
 ./benchpress_cli.py -b wdl run vdso_bench -i '{"type": "multi_thread"}'
 ```
+
+
+## 4. More references of WDL at Meta
+We encourage you to check out the following publications for more information on WDL at Meta, such as CPU cycles breakdown, data size distribution, and so on:
+
+[Accelerometer: Understanding Acceleration Opportunities for Data Center Overheads at Hyperscale (ASPLOS 2020)](https://dl.acm.org/doi/abs/10.1145/3373376.3378450)
+
+[Characterization of Data Compression in Datacenters (ISPASS 2023)](https://ieeexplore.ieee.org/abstract/document/10158161)
