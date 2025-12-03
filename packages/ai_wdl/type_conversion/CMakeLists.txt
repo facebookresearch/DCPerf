@@ -19,6 +19,9 @@ else()
     message(FATAL_ERROR "Unsupported CPU arch: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
+# Disable loop unrolling and autovec since we want to control manually
+add_compile_options(-march=native -fno-unroll-loops -fno-vectorize)
+
 find_package(benchmark REQUIRED)
 add_executable(type_conversion_bench type_conversion_bench.cpp)
 

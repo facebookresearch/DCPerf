@@ -24,14 +24,16 @@
 
 class FPTypeConv : public benchmark::Fixture {
  public:
-  static const size_t buf_size = 16 * 1024; // 16KB
+  static const size_t buf_size =
+      18 * 1024; // 18KB to support unrolling of 2, 4, 6 and 8
+  static_assert(buf_size % 3 == 0 && buf_size % 8 == 0);
   static const size_t alignment = 4096; // 4KB-aligned
-  static const uint32_t crc32_fp32_to_fp16_validation_result = 2156484379;
-  static const uint32_t crc32_fp16_to_fp32_validation_result = 2206894496;
-  static const uint32_t crc32_fp32_to_bf16_validation_result = 3316124917;
-  static const uint32_t crc32_bf16_to_fp32_validation_result = 3095326091;
-  static const uint32_t crc32_fp32_to_uint8_validation_result = 3015812566;
-  static const uint32_t crc32_uint8_to_fp32_validation_result = 2455075569;
+  static const uint32_t crc32_fp32_to_fp16_validation_result = 3373450706;
+  static const uint32_t crc32_fp16_to_fp32_validation_result = 2626649712;
+  static const uint32_t crc32_fp32_to_bf16_validation_result = 2148563683;
+  static const uint32_t crc32_bf16_to_fp32_validation_result = 4258514672;
+  static const uint32_t crc32_fp32_to_uint8_validation_result = 3504027484;
+  static const uint32_t crc32_uint8_to_fp32_validation_result = 736930253;
 
   float* fp32_buf = nullptr;
   uint16_t* half_buf = nullptr;
@@ -130,451 +132,770 @@ struct CpuFeatures {
 
 static CpuFeatures Cpu;
 
+template <int unroll>
 __attribute__((target("fp16"))) __attribute__((noinline)) void
-fp32_to_fp16_neon(const float* fp32_buf, uint16_t* half_buf, size_t n_elem) {
+fp32_to_fp16_neon(
+    const float* __restrict__ fp32_buf,
+    float16_t* __restrict__ half_buf,
+    size_t n_elem) {
   size_t i;
   const size_t vl = 4;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    float32x4_t f0 = vld1q_f32(fp32_buf + i + 0 * vl);
-    float32x4_t f1 = vld1q_f32(fp32_buf + i + 1 * vl);
-    float32x4_t f2 = vld1q_f32(fp32_buf + i + 2 * vl);
-    float32x4_t f3 = vld1q_f32(fp32_buf + i + 3 * vl);
 
-    float16x4_t h0 = vcvt_f16_f32(f0);
-    float16x4_t h1 = vcvt_f16_f32(f1);
-    float16x4_t h2 = vcvt_f16_f32(f2);
-    float16x4_t h3 = vcvt_f16_f32(f3);
+#define PROCESS_VECTOR_PAIR(idx)                                           \
+  float32x4_t f##idx##_0 = vld1q_f32(fp32_buf + i + (idx * 2 + 0) * vl);   \
+  float32x4_t f##idx##_1 = vld1q_f32(fp32_buf + i + (idx * 2 + 1) * vl);   \
+  float16x4_t h##idx##_low = vcvt_f16_f32(f##idx##_0);                     \
+  float16x8_t h##idx##_full = vcvt_high_f16_f32(h##idx##_low, f##idx##_1); \
+  vst1q_f16(half_buf + i + (idx * 2) * vl, h##idx##_full);
 
-    float16x8_t h01_packed = vcombine_f16(h0, h1);
-    float16x8_t h23_packed = vcombine_f16(h2, h3);
-    vst1q_f16(reinterpret_cast<float16_t*>(half_buf) + i + 0 * vl, h01_packed);
-    vst1q_f16(reinterpret_cast<float16_t*>(half_buf) + i + 2 * vl, h23_packed);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_fp16_neon)(benchmark::State& state) {
-  if (!Cpu.fp16) {
-    state.SkipWithError("Skipping: CPU does not support FEAT_FP16");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_fp16_neon(fp32_buf, half_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(half_buf),
-      buf_size,
-      crc32_fp32_to_fp16_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("fp16"))) __attribute__((noinline)) void
-fp16_to_fp32_neon(const float16_t* half_buf, float* fp32_buf, size_t n_elem) {
-  size_t i;
-  const size_t vhl = 8;
-  const size_t vwl = vhl / 2;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vwl) {
-    float16x8_t h0 = vld1q_f16(half_buf + i + 0 * vhl);
-    float16x8_t h1 = vld1q_f16(half_buf + i + 1 * vhl);
-
-    float32x4_t f00 = vcvt_f32_f16(vget_low_f16(h0));
-    float32x4_t f01 = vcvt_high_f32_f16(h0);
-    float32x4_t f10 = vcvt_f32_f16(vget_low_f16(h1));
-    float32x4_t f11 = vcvt_high_f32_f16(h1);
-
-    vst1q_f32(fp32_buf + i + 0 * vwl, f00);
-    vst1q_f32(fp32_buf + i + 1 * vwl, f01);
-    vst1q_f32(fp32_buf + i + 2 * vwl, f10);
-    vst1q_f32(fp32_buf + i + 3 * vwl, f11);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp16_to_fp32_neon)(benchmark::State& state) {
-  if (!Cpu.fp16) {
-    state.SkipWithError("Skipping: CPU does not support FEAT_FP16");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp16_to_fp32_neon(reinterpret_cast<float16_t*>(half_buf), fp32_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_fp16_to_fp32_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("sve"))) __attribute__((noinline)) void
-fp32_to_fp16_sve(const float* fp32_buf, uint16_t* half_buf, size_t n_elem) {
-  size_t i;
-  const size_t vl = svcntw();
-  const size_t simd_count = 4;
-  svbool_t pg = svptrue_b16();
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    svfloat32_t f0 = svld1_f32(pg, fp32_buf + i + 0 * vl);
-    svfloat32_t f1 = svld1_f32(pg, fp32_buf + i + 1 * vl);
-    svfloat32_t f2 = svld1_f32(pg, fp32_buf + i + 2 * vl);
-    svfloat32_t f3 = svld1_f32(pg, fp32_buf + i + 3 * vl);
-    svfloat16_t h0 = svcvt_f16_f32_x(pg, f0);
-    svfloat16_t h1 = svcvt_f16_f32_x(pg, f1);
-    svfloat16_t h2 = svcvt_f16_f32_x(pg, f2);
-    svfloat16_t h3 = svcvt_f16_f32_x(pg, f3);
-    svfloat16_t h01_packed = svuzp1_f16(h0, h1);
-    svfloat16_t h23_packed = svuzp1_f16(h2, h3);
-    svst1_f16(
-        pg, reinterpret_cast<float16_t*>(half_buf) + i + 0 * vl, h01_packed);
-    svst1_f16(
-        pg, reinterpret_cast<float16_t*>(half_buf) + i + 2 * vl, h23_packed);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_fp16_sve)(benchmark::State& state) {
-  if (!Cpu.sve) {
-    state.SkipWithError("Skipping: CPU does not support SVE");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_fp16_sve(fp32_buf, half_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(half_buf),
-      buf_size,
-      crc32_fp32_to_fp16_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("sve"))) __attribute__((noinline)) void
-fp16_to_fp32_sve(const float16_t* half_buf, float* fp32_buf, size_t n_elem) {
-  size_t i;
-  const size_t vhl = svcnth();
-  const size_t vwl = vhl / 2;
-  const size_t simd_count = 4;
-  svbool_t pg = svptrue_b32();
-  for (i = 0; i < n_elem; i += simd_count * vwl) {
-    svfloat16_t h0 = svreinterpret_f16_s32(
-        svld1sh_s32(pg, (int16_t*)half_buf + i + 0 * vwl));
-    svfloat16_t h1 = svreinterpret_f16_s32(
-        svld1sh_s32(pg, (int16_t*)half_buf + i + 1 * vwl));
-    svfloat16_t h2 = svreinterpret_f16_s32(
-        svld1sh_s32(pg, (int16_t*)half_buf + i + 2 * vwl));
-    svfloat16_t h3 = svreinterpret_f16_s32(
-        svld1sh_s32(pg, (int16_t*)half_buf + i + 3 * vwl));
-
-    svfloat32_t f0 = svcvt_f32_f16_x(pg, h0);
-    svfloat32_t f1 = svcvt_f32_f16_x(pg, h1);
-    svfloat32_t f2 = svcvt_f32_f16_x(pg, h2);
-    svfloat32_t f3 = svcvt_f32_f16_x(pg, h3);
-
-    svst1_f32(pg, fp32_buf + i + 0 * vwl, f0);
-    svst1_f32(pg, fp32_buf + i + 1 * vwl, f1);
-    svst1_f32(pg, fp32_buf + i + 2 * vwl, f2);
-    svst1_f32(pg, fp32_buf + i + 3 * vwl, f3);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp16_to_fp32_sve)(benchmark::State& state) {
-  if (!Cpu.sve) {
-    state.SkipWithError("Skipping: CPU does not support SVE");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp16_to_fp32_sve(reinterpret_cast<float16_t*>(half_buf), fp32_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_fp16_to_fp32_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("bf16"))) __attribute__((noinline)) void
-fp32_to_bf16_neon(const float* fp32_buf, uint16_t* half_buf, size_t n_elem) {
-  size_t i;
-  const size_t vl = 4;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    float32x4_t f0 = vld1q_f32(fp32_buf + i + 0 * vl);
-    float32x4_t f1 = vld1q_f32(fp32_buf + i + 1 * vl);
-    float32x4_t f2 = vld1q_f32(fp32_buf + i + 2 * vl);
-    float32x4_t f3 = vld1q_f32(fp32_buf + i + 3 * vl);
-
-    bfloat16x4_t h0 = vcvt_bf16_f32(f0);
-    bfloat16x4_t h1 = vcvt_bf16_f32(f1);
-    bfloat16x4_t h2 = vcvt_bf16_f32(f2);
-    bfloat16x4_t h3 = vcvt_bf16_f32(f3);
-
-    bfloat16x8_t h01_packed = vcombine_bf16(h0, h1);
-    bfloat16x8_t h23_packed = vcombine_bf16(h2, h3);
-
-    vst1q_bf16(
-        reinterpret_cast<bfloat16_t*>(half_buf) + i + 0 * vl, h01_packed);
-    vst1q_bf16(
-        reinterpret_cast<bfloat16_t*>(half_buf) + i + 2 * vl, h23_packed);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_bf16_neon)(benchmark::State& state) {
-  if (!Cpu.bf16) {
-    state.SkipWithError("Skipping: CPU does not support FEAT_BF16");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_bf16_neon(fp32_buf, half_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(half_buf),
-      buf_size,
-      crc32_fp32_to_bf16_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("bf16"))) __attribute__((noinline)) void
-bf16_to_fp32_neon(const bfloat16_t* half_buf, float* fp32_buf, size_t n_elem) {
-  size_t i;
-  const size_t vhl = 8;
-  const size_t vwl = vhl / 2;
-  const size_t simd_count = 4;
-  uint16x8_t hz = vdupq_n_u16(0);
-  // bf16 to fp32 is as simple as a left shift by 16. However, it is faster to
-  // use zip1/zip2 instructions instead of sshl/ushl due to higher reciprocal
-  // throughput. For example, zip1/zip2's reciprocal throughput is 4 while
-  // sshl/ushl's throughput is 2 on Arm Neoverse V2.
-  for (i = 0; i < n_elem; i += simd_count * vwl) {
-    uint16x8_t h0 = vreinterpretq_u16_bf16(vld1q_bf16(half_buf + i + 0 * vhl));
-    uint16x8_t h1 = vreinterpretq_u16_bf16(vld1q_bf16(half_buf + i + 1 * vhl));
-
-    float32x4_t f00 = vreinterpretq_f32_u16(vzip1q_u16(hz, h0));
-    float32x4_t f01 = vreinterpretq_f32_u16(vzip2q_u16(hz, h0));
-    float32x4_t f10 = vreinterpretq_f32_u16(vzip1q_u16(hz, h1));
-    float32x4_t f11 = vreinterpretq_f32_u16(vzip2q_u16(hz, h1));
-
-    vst1q_f32(fp32_buf + i + 0 * vwl, f00);
-    vst1q_f32(fp32_buf + i + 1 * vwl, f01);
-    vst1q_f32(fp32_buf + i + 2 * vwl, f10);
-    vst1q_f32(fp32_buf + i + 3 * vwl, f11);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, bf16_to_fp32_neon)(benchmark::State& state) {
-  if (!Cpu.bf16) {
-    state.SkipWithError("Skipping: CPU does not support FEAT_BF16");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    bf16_to_fp32_neon(
-        reinterpret_cast<bfloat16_t*>(half_buf), fp32_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_bf16_to_fp32_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("sve, bf16"))) __attribute__((noinline)) void
-fp32_to_bf16_sve(const float* fp32_buf, uint16_t* half_buf, size_t n_elem) {
-  const size_t vl = svcntw();
-  size_t i;
-  const size_t simd_count = 4;
-  svbool_t pg = svptrue_b16();
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    svfloat32_t f0 = svld1_f32(pg, fp32_buf + i + 0 * vl);
-    svfloat32_t f1 = svld1_f32(pg, fp32_buf + i + 1 * vl);
-    svfloat32_t f2 = svld1_f32(pg, fp32_buf + i + 2 * vl);
-    svfloat32_t f3 = svld1_f32(pg, fp32_buf + i + 3 * vl);
-
-    svbfloat16_t h0 = svcvt_bf16_f32_x(pg, f0);
-    svbfloat16_t h1 = svcvt_bf16_f32_x(pg, f1);
-    svbfloat16_t h2 = svcvt_bf16_f32_x(pg, f2);
-    svbfloat16_t h3 = svcvt_bf16_f32_x(pg, f3);
-
-    svbfloat16_t h01_packed = svuzp1_bf16(h0, h1);
-    svbfloat16_t h23_packed = svuzp1_bf16(h2, h3);
-
-    svst1_bf16(
-        pg, reinterpret_cast<bfloat16_t*>(half_buf) + i + 0 * vl, h01_packed);
-    svst1_bf16(
-        pg, reinterpret_cast<bfloat16_t*>(half_buf) + i + 2 * vl, h23_packed);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_bf16_sve)(benchmark::State& state) {
-  if (!Cpu.sve || !Cpu.bf16) {
-    state.SkipWithError("Skipping: CPU does not support SVE+FEAT_BF16");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_bf16_sve(fp32_buf, half_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(half_buf),
-      buf_size,
-      crc32_fp32_to_bf16_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("sve, bf16"))) __attribute__((noinline)) void
-bf16_to_fp32_sve(const bfloat16_t* half_buf, float* fp32_buf, size_t n_elem) {
-  size_t i;
-  const size_t vhl = svcnth();
-  const size_t vwl = vhl / 2;
-  const size_t simd_count = 4;
-  svbool_t pg = svptrue_b16();
-  svbfloat16_t hz = svreinterpret_bf16_u16(svdup_u16(0));
-  // bf16 to fp32 is as simple as a left-shift by 16, which can be more
-  // efficiently done through sve zip1/zip2 instructions.
-  // N.B.: sve does not support left-shift and widening, so if zip1/zip2
-  //       is not used, we would have to do unpacking first and then left
-  //.      shift within each 32-bit element, slower than zip1/zip2.
-  for (i = 0; i < n_elem; i += simd_count * vwl) {
-    svbfloat16_t h0 = svld1_bf16(pg, half_buf + i + 0 * vhl);
-    svbfloat16_t h1 = svld1_bf16(pg, half_buf + i + 1 * vhl);
-
-    svfloat32_t f00 = svreinterpret_f32_bf16(svzip1_bf16(hz, h0));
-    svfloat32_t f01 = svreinterpret_f32_bf16(svzip2_bf16(hz, h0));
-    svfloat32_t f10 = svreinterpret_f32_bf16(svzip1_bf16(hz, h1));
-    svfloat32_t f11 = svreinterpret_f32_bf16(svzip2_bf16(hz, h1));
-
-    svst1_f32(pg, fp32_buf + i + 0 * vwl, f00);
-    svst1_f32(pg, fp32_buf + i + 1 * vwl, f01);
-    svst1_f32(pg, fp32_buf + i + 2 * vwl, f10);
-    svst1_f32(pg, fp32_buf + i + 3 * vwl, f11);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, bf16_to_fp32_sve)(benchmark::State& state) {
-  if (!Cpu.sve || !Cpu.bf16) {
-    state.SkipWithError("Skipping: CPU does not support SVE+FEAT_BF16");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    bf16_to_fp32_sve(reinterpret_cast<bfloat16_t*>(half_buf), fp32_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_bf16_to_fp32_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-template <bool saturate>
-__attribute__((noinline)) void
-fp32_to_u8_neon(const float* fp32_buf, uint8_t* uint8_buf, size_t n_elem) {
-  size_t i;
-  const size_t vl = 4;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    float32x4_t f0 = vld1q_f32(fp32_buf + i + 0 * vl);
-    float32x4_t f1 = vld1q_f32(fp32_buf + i + 1 * vl);
-    float32x4_t f2 = vld1q_f32(fp32_buf + i + 2 * vl);
-    float32x4_t f3 = vld1q_f32(fp32_buf + i + 3 * vl);
-
-    // Round to nearest integer
-    uint32x4_t i0 = vcvtnq_u32_f32(f0);
-    uint32x4_t i1 = vcvtnq_u32_f32(f1);
-    uint32x4_t i2 = vcvtnq_u32_f32(f2);
-    uint32x4_t i3 = vcvtnq_u32_f32(f3);
-
-    uint16x8_t i01;
-    uint16x8_t i23;
-    uint8x16_t i0123;
-    if constexpr (saturate) {
-      // Narrow from uint32 to uint16 with saturation
-      i01 = vcombine_u16(vqmovn_u32(i0), vqmovn_u32(i1));
-      i23 = vcombine_u16(vqmovn_u32(i2), vqmovn_u32(i3));
-
-      // Narrow from uint16 to uint8 with saturation
-      i0123 = vcombine_u8(vqmovn_u16(i01), vqmovn_u16(i23));
-    } else {
-      // Narrow from uint32 to uint16
-      i01 = vcombine_u16(vmovn_u32(i0), vmovn_u32(i1));
-      i23 = vcombine_u16(vmovn_u32(i2), vmovn_u32(i3));
-
-      // Narrow from uint16 to uint8
-      i0123 = vcombine_u8(vmovn_u16(i01), vmovn_u16(i23));
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+      PROCESS_VECTOR_PAIR(3)
     }
-
-    vst1q_u8(uint8_buf + i, i0123);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_u8_saturate_neon)(benchmark::State& state) {
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_u8_neon<true>(fp32_buf, uint8_buf, n_elem);
-  }
-
-  check_result(
-      state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_u8_narrow_neon)(benchmark::State& state) {
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_u8_neon<false>(fp32_buf, uint8_buf, n_elem);
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+    }
   }
 
-  check_result(
-      state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
+#undef PROCESS_VECTOR_PAIR
 }
 
-__attribute__((noinline)) void
-u8_to_fp32_neon(const uint8_t* uint8_buf, float* fp32_buf, size_t n_elem) {
+#define FP32_TO_FP16_NEON(UC)                                              \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, fp32_to_fp16_##UC##_neon)(benchmark::State & state) {    \
+    if (!Cpu.fp16) {                                                       \
+      state.SkipWithError("Skipping: CPU does not support FEAT_FP16");     \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      fp32_to_fp16_neon<UC>(                                               \
+          fp32_buf, reinterpret_cast<float16_t*>(half_buf), n_elem);       \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(half_buf),                              \
+        buf_size,                                                          \
+        crc32_fp32_to_fp16_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+FP32_TO_FP16_NEON(2)
+FP32_TO_FP16_NEON(4)
+FP32_TO_FP16_NEON(6)
+FP32_TO_FP16_NEON(8)
+
+template <int unroll>
+__attribute__((target("fp16"))) __attribute__((noinline)) void
+fp16_to_fp32_neon(
+    const float16_t* __restrict__ half_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
+  size_t i;
+  const size_t vhl = 8;
+  const size_t vwl = vhl / 2;
+
+#define PROCESS_VECTOR_PAIR(idx)                                   \
+  float16x8_t h##idx##_0 = vld1q_f16(half_buf + i + idx * vhl);    \
+  float32x4_t f##idx##_0 = vcvt_f32_f16(vget_low_f16(h##idx##_0)); \
+  float32x4_t f##idx##_1 = vcvt_high_f32_f16(h##idx##_0);          \
+  vst1q_f32(fp32_buf + i + (idx * 2 + 0) * vwl, f##idx##_0);       \
+  vst1q_f32(fp32_buf + i + (idx * 2 + 1) * vwl, f##idx##_1);
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+      PROCESS_VECTOR_PAIR(3)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
+}
+
+#define FP16_TO_FP32_NEON(UC)                                              \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, fp16_to_fp32_##UC##_neon)(benchmark::State & state) {    \
+    if (!Cpu.fp16) {                                                       \
+      state.SkipWithError("Skipping: CPU does not support FEAT_FP16");     \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      fp16_to_fp32_neon<UC>(                                               \
+          reinterpret_cast<float16_t*>(half_buf), fp32_buf, n_elem);       \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(fp32_buf),                              \
+        buf_size,                                                          \
+        crc32_fp16_to_fp32_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+FP16_TO_FP32_NEON(2)
+FP16_TO_FP32_NEON(4)
+FP16_TO_FP32_NEON(6)
+FP16_TO_FP32_NEON(8)
+
+template <int unroll, bool combined_write>
+__attribute__((target("sve"))) __attribute__((noinline)) void fp32_to_fp16_sve(
+    const float* __restrict__ fp32_buf,
+    uint16_t* __restrict__ half_buf,
+    size_t n_elem) {
+  size_t i;
+  const size_t vl = svcntw();
+  svbool_t pg = svptrue_b16();
+
+#define PROCESS_VECTOR_PAIR(idx)                                             \
+  svfloat32_t f##idx##_0 = svld1_f32(pg, fp32_buf + i + (idx * 2 + 0) * vl); \
+  svfloat32_t f##idx##_1 = svld1_f32(pg, fp32_buf + i + (idx * 2 + 1) * vl); \
+  svfloat16_t h##idx##_0 = svcvt_f16_f32_x(pg, f##idx##_0);                  \
+  svfloat16_t h##idx##_1 = svcvt_f16_f32_x(pg, f##idx##_1);                  \
+  if constexpr (combined_write) {                                            \
+    svfloat16_t h##idx##_packed = svuzp1_f16(h##idx##_0, h##idx##_1);        \
+    svst1_f16(                                                               \
+        pg,                                                                  \
+        reinterpret_cast<float16_t*>(half_buf) + i + (idx * 2) * vl,         \
+        h##idx##_packed);                                                    \
+  } else {                                                                   \
+    svst1h_u32(                                                              \
+        pg,                                                                  \
+        half_buf + i + (idx * 2 + 0) * vl,                                   \
+        svreinterpret_u32_f16(h##idx##_0));                                  \
+    svst1h_u32(                                                              \
+        pg,                                                                  \
+        half_buf + i + (idx * 2 + 1) * vl,                                   \
+        svreinterpret_u32_f16(h##idx##_1));                                  \
+  }
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+      PROCESS_VECTOR_PAIR(3)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
+}
+
+#define FP32_TO_FP16_CW_SVE(UC)                                            \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, fp32_to_fp16_cw_##UC##_sve)(benchmark::State & state) {  \
+    if (!Cpu.sve) {                                                        \
+      state.SkipWithError("Skipping: CPU does not support SVE");           \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      fp32_to_fp16_sve<UC, true>(fp32_buf, half_buf, n_elem);              \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(half_buf),                              \
+        buf_size,                                                          \
+        crc32_fp32_to_fp16_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+FP32_TO_FP16_CW_SVE(2)
+FP32_TO_FP16_CW_SVE(4)
+FP32_TO_FP16_CW_SVE(6)
+FP32_TO_FP16_CW_SVE(8)
+
+#define FP32_TO_FP16_SVE(UC)                                                   \
+  BENCHMARK_F(FPTypeConv, fp32_to_fp16_##UC##_sve)(benchmark::State & state) { \
+    if (!Cpu.sve) {                                                            \
+      state.SkipWithError("Skipping: CPU does not support SVE");               \
+      return;                                                                  \
+    }                                                                          \
+    const size_t n_elem = buf_size / sizeof(float);                            \
+    for (auto _ : state) {                                                     \
+      fp32_to_fp16_sve<UC, false>(fp32_buf, half_buf, n_elem);                 \
+    }                                                                          \
+    check_result(                                                              \
+        state,                                                                 \
+        reinterpret_cast<uint8_t*>(half_buf),                                  \
+        buf_size,                                                              \
+        crc32_fp32_to_fp16_validation_result);                                 \
+    state.counters["elem/s"] = benchmark::Counter(                             \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);     \
+  }
+
+FP32_TO_FP16_SVE(2)
+FP32_TO_FP16_SVE(4)
+FP32_TO_FP16_SVE(6)
+FP32_TO_FP16_SVE(8)
+
+template <int unroll>
+__attribute__((target("sve"))) __attribute__((noinline)) void fp16_to_fp32_sve(
+    const float16_t* __restrict__ half_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
+  size_t i;
+  const size_t vhl = svcnth();
+  const size_t vwl = vhl / 2;
+  svbool_t pg = svptrue_b32();
+
+#define PROCESS_VECTOR_PAIR(idx)                                      \
+  svfloat16_t h##idx##_0 = svreinterpret_f16_s32(                     \
+      svld1sh_s32(pg, (int16_t*)half_buf + i + (idx * 2 + 0) * vwl)); \
+  svfloat16_t h##idx##_1 = svreinterpret_f16_s32(                     \
+      svld1sh_s32(pg, (int16_t*)half_buf + i + (idx * 2 + 1) * vwl)); \
+  svfloat32_t f##idx##_0 = svcvt_f32_f16_x(pg, h##idx##_0);           \
+  svfloat32_t f##idx##_1 = svcvt_f32_f16_x(pg, h##idx##_1);           \
+  svst1_f32(pg, fp32_buf + i + (idx * 2 + 0) * vwl, f##idx##_0);      \
+  svst1_f32(pg, fp32_buf + i + (idx * 2 + 1) * vwl, f##idx##_1);
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+      PROCESS_VECTOR_PAIR(3)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
+}
+
+#define FP16_TO_FP32_SVE(UC)                                                   \
+  BENCHMARK_F(FPTypeConv, fp16_to_fp32_##UC##_sve)(benchmark::State & state) { \
+    if (!Cpu.sve) {                                                            \
+      state.SkipWithError("Skipping: CPU does not support SVE");               \
+      return;                                                                  \
+    }                                                                          \
+    const size_t n_elem = buf_size / sizeof(float);                            \
+    for (auto _ : state) {                                                     \
+      fp16_to_fp32_sve<UC>(                                                    \
+          reinterpret_cast<float16_t*>(half_buf), fp32_buf, n_elem);           \
+    }                                                                          \
+    check_result(                                                              \
+        state,                                                                 \
+        reinterpret_cast<uint8_t*>(fp32_buf),                                  \
+        buf_size,                                                              \
+        crc32_fp16_to_fp32_validation_result);                                 \
+    state.counters["elem/s"] = benchmark::Counter(                             \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);     \
+  }
+
+FP16_TO_FP32_SVE(2)
+FP16_TO_FP32_SVE(4)
+FP16_TO_FP32_SVE(6)
+FP16_TO_FP32_SVE(8)
+
+template <int unroll>
+__attribute__((target("bf16"))) __attribute__((noinline)) void
+fp32_to_bf16_neon(
+    const float* __restrict__ fp32_buf,
+    bfloat16_t* __restrict__ half_buf,
+    size_t n_elem) {
+  size_t i;
+  const size_t vl = 4;
+
+#define PROCESS_VECTOR_PAIR(idx)                                         \
+  float32x4_t f##idx##_0 = vld1q_f32(fp32_buf + i + (idx * 2 + 0) * vl); \
+  float32x4_t f##idx##_1 = vld1q_f32(fp32_buf + i + (idx * 2 + 1) * vl); \
+  bfloat16x8_t h##idx##_full = vcvtq_low_bf16_f32(f##idx##_0);           \
+  h##idx##_full = vcvtq_high_bf16_f32(h##idx##_full, f##idx##_1);        \
+  vst1q_bf16(half_buf + i + (idx * 2) * vl, h##idx##_full);
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+      PROCESS_VECTOR_PAIR(3)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
+}
+
+#define FP32_TO_BF16_NEON(UC)                                              \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, fp32_to_bf16_##UC##_neon)(benchmark::State & state) {    \
+    if (!Cpu.bf16) {                                                       \
+      state.SkipWithError("Skipping: CPU does not support FEAT_BF16");     \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      fp32_to_bf16_neon<UC>(                                               \
+          fp32_buf, reinterpret_cast<bfloat16_t*>(half_buf), n_elem);      \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(half_buf),                              \
+        buf_size,                                                          \
+        crc32_fp32_to_bf16_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+FP32_TO_BF16_NEON(2)
+FP32_TO_BF16_NEON(4)
+FP32_TO_BF16_NEON(6)
+FP32_TO_BF16_NEON(8)
+
+template <int unroll, bool packing>
+__attribute__((target("bf16"))) __attribute__((noinline)) void
+bf16_to_fp32_neon(
+    const bfloat16_t* __restrict__ half_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
+  size_t i;
+  const size_t vhl = 8;
+  const size_t vwl = vhl / 2;
+  [[maybe_unused]] uint16x8_t hz = vdupq_n_u16(0);
+
+#define PROCESS_VECTOR_PAIR(idx)                                  \
+  bfloat16x8_t h##idx##_0 = vld1q_bf16(half_buf + i + idx * vhl); \
+  float32x4_t f##idx##_0, f##idx##_1;                             \
+  if constexpr (packing) {                                        \
+    f##idx##_0 = vreinterpretq_f32_u16(                           \
+        vzip1q_u16(hz, vreinterpretq_u16_bf16(h##idx##_0)));      \
+    f##idx##_1 = vreinterpretq_f32_u16(                           \
+        vzip2q_u16(hz, vreinterpretq_u16_bf16(h##idx##_0)));      \
+  } else {                                                        \
+    f##idx##_0 = vcvtq_low_f32_bf16(h##idx##_0);                  \
+    f##idx##_1 = vcvtq_high_f32_bf16(h##idx##_0);                 \
+  }                                                               \
+  vst1q_f32(fp32_buf + i + (idx * 2 + 0) * vwl, f##idx##_0);      \
+  vst1q_f32(fp32_buf + i + (idx * 2 + 1) * vwl, f##idx##_1);
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+      PROCESS_VECTOR_PAIR(3)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
+}
+
+#define BF16_TO_FP32_PK_NEON(UC)                                           \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, bf16_to_fp32_##UC##_pk_neon)(benchmark::State & state) { \
+    if (!Cpu.bf16) {                                                       \
+      state.SkipWithError("Skipping: CPU does not support FEAT_BF16");     \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      bf16_to_fp32_neon<UC, true>(                                         \
+          reinterpret_cast<bfloat16_t*>(half_buf), fp32_buf, n_elem);      \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(fp32_buf),                              \
+        buf_size,                                                          \
+        crc32_bf16_to_fp32_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+BF16_TO_FP32_PK_NEON(2)
+BF16_TO_FP32_PK_NEON(4)
+BF16_TO_FP32_PK_NEON(6)
+BF16_TO_FP32_PK_NEON(8)
+
+#define BF16_TO_FP32_NEON(UC)                                              \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, bf16_to_fp32_##UC##_neon)(benchmark::State & state) {    \
+    if (!Cpu.bf16) {                                                       \
+      state.SkipWithError("Skipping: CPU does not support FEAT_BF16");     \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      bf16_to_fp32_neon<UC, false>(                                        \
+          reinterpret_cast<bfloat16_t*>(half_buf), fp32_buf, n_elem);      \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(fp32_buf),                              \
+        buf_size,                                                          \
+        crc32_bf16_to_fp32_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+BF16_TO_FP32_NEON(2)
+BF16_TO_FP32_NEON(4)
+BF16_TO_FP32_NEON(6)
+BF16_TO_FP32_NEON(8)
+
+template <int unroll, bool combined_write>
+__attribute__((target("sve, bf16"))) __attribute__((noinline)) void
+fp32_to_bf16_sve(
+    const float* __restrict__ fp32_buf,
+    uint16_t* __restrict__ half_buf,
+    size_t n_elem) {
+  const size_t vl = svcntw();
+  size_t i;
+  svbool_t pg = svptrue_b16();
+
+#define PROCESS_VECTOR_PAIR(idx)                                             \
+  svfloat32_t f##idx##_0 = svld1_f32(pg, fp32_buf + i + (idx * 2 + 0) * vl); \
+  svfloat32_t f##idx##_1 = svld1_f32(pg, fp32_buf + i + (idx * 2 + 1) * vl); \
+  svbfloat16_t h##idx##_0 = svcvt_bf16_f32_x(pg, f##idx##_0);                \
+  svbfloat16_t h##idx##_1 = svcvt_bf16_f32_x(pg, f##idx##_1);                \
+  if constexpr (combined_write) {                                            \
+    svbfloat16_t h##idx##_packed = svuzp1_bf16(h##idx##_0, h##idx##_1);      \
+    svst1_bf16(                                                              \
+        pg,                                                                  \
+        reinterpret_cast<bfloat16_t*>(half_buf) + i + (idx * 2) * vl,        \
+        h##idx##_packed);                                                    \
+  } else {                                                                   \
+    svst1h_u32(                                                              \
+        pg,                                                                  \
+        half_buf + i + (idx * 2 + 0) * vl,                                   \
+        svreinterpret_u32_bf16(h##idx##_0));                                 \
+    svst1h_u32(                                                              \
+        pg,                                                                  \
+        half_buf + i + (idx * 2 + 1) * vl,                                   \
+        svreinterpret_u32_bf16(h##idx##_1));                                 \
+  }
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+      PROCESS_VECTOR_PAIR(3)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
+}
+
+#define FP32_TO_BF16_CW_SVE(UC)                                            \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, fp32_to_bf16_cw_##UC##_sve)(benchmark::State & state) {  \
+    if (!Cpu.sve || !Cpu.bf16) {                                           \
+      state.SkipWithError("Skipping: CPU does not support SVE+FEAT_BF16"); \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      fp32_to_bf16_sve<UC, true>(fp32_buf, half_buf, n_elem);              \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(half_buf),                              \
+        buf_size,                                                          \
+        crc32_fp32_to_bf16_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+FP32_TO_BF16_CW_SVE(2)
+FP32_TO_BF16_CW_SVE(4)
+FP32_TO_BF16_CW_SVE(6)
+FP32_TO_BF16_CW_SVE(8)
+
+#define FP32_TO_BF16_SVE(UC)                                                   \
+  BENCHMARK_F(FPTypeConv, fp32_to_bf16_##UC##_sve)(benchmark::State & state) { \
+    if (!Cpu.sve || !Cpu.bf16) {                                               \
+      state.SkipWithError("Skipping: CPU does not support SVE+FEAT_BF16");     \
+      return;                                                                  \
+    }                                                                          \
+    const size_t n_elem = buf_size / sizeof(float);                            \
+    for (auto _ : state) {                                                     \
+      fp32_to_bf16_sve<UC, false>(fp32_buf, half_buf, n_elem);                 \
+    }                                                                          \
+    check_result(                                                              \
+        state,                                                                 \
+        reinterpret_cast<uint8_t*>(half_buf),                                  \
+        buf_size,                                                              \
+        crc32_fp32_to_bf16_validation_result);                                 \
+    state.counters["elem/s"] = benchmark::Counter(                             \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);     \
+  }
+
+FP32_TO_BF16_SVE(2)
+FP32_TO_BF16_SVE(4)
+FP32_TO_BF16_SVE(6)
+FP32_TO_BF16_SVE(8)
+
+template <int unroll>
+__attribute__((target("sve2, bf16"))) __attribute__((noinline)) void
+bf16_to_fp32_sve(
+    const bfloat16_t* __restrict__ half_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
+  size_t i;
+  const size_t vhl = svcnth();
+  const size_t vwl = vhl / 2;
+  svbool_t pg = svptrue_b16();
+  [[maybe_unused]] svbfloat16_t hz = svreinterpret_bf16_u16(svdup_u16(0));
+
+#define PROCESS_VECTOR_PAIR(idx)                                      \
+  svbfloat16_t h##idx##_0 = svld1_bf16(pg, half_buf + i + idx * vhl); \
+  svfloat32_t f##idx##_0, f##idx##_1;                                 \
+  f##idx##_0 = svreinterpret_f32_bf16(svzip1_bf16(hz, h##idx##_0));   \
+  f##idx##_1 = svreinterpret_f32_bf16(svzip2_bf16(hz, h##idx##_0));   \
+  svst1_f32(pg, fp32_buf + i + (idx * 2 + 0) * vwl, f##idx##_0);      \
+  svst1_f32(pg, fp32_buf + i + (idx * 2 + 1) * vwl, f##idx##_1);
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+      PROCESS_VECTOR_PAIR(3)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+      PROCESS_VECTOR_PAIR(2)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+      PROCESS_VECTOR_PAIR(1)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vwl) {
+      PROCESS_VECTOR_PAIR(0)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
+}
+
+#define BF16_TO_FP32_SVE(UC)                                                   \
+  BENCHMARK_F(FPTypeConv, bf16_to_fp32_##UC##_sve)(benchmark::State & state) { \
+    if (!Cpu.sve || !Cpu.bf16) {                                               \
+      state.SkipWithError("Skipping: CPU does not support SVE+FEAT_BF16");     \
+      return;                                                                  \
+    }                                                                          \
+    const size_t n_elem = buf_size / sizeof(float);                            \
+    for (auto _ : state) {                                                     \
+      bf16_to_fp32_sve<UC>(                                                    \
+          reinterpret_cast<bfloat16_t*>(half_buf), fp32_buf, n_elem);          \
+    }                                                                          \
+    check_result(                                                              \
+        state,                                                                 \
+        reinterpret_cast<uint8_t*>(fp32_buf),                                  \
+        buf_size,                                                              \
+        crc32_bf16_to_fp32_validation_result);                                 \
+    state.counters["elem/s"] = benchmark::Counter(                             \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);     \
+  }
+
+BF16_TO_FP32_SVE(2)
+BF16_TO_FP32_SVE(4)
+BF16_TO_FP32_SVE(6)
+BF16_TO_FP32_SVE(8)
+
+template <int unroll, bool saturate>
+__attribute__((noinline)) void fp32_rz_to_u8_neon(
+    const float* __restrict__ fp32_buf,
+    uint8_t* __restrict__ uint8_buf,
+    size_t n_elem) {
+  size_t i;
+  const size_t vl = 4;
+
+#define PROCESS_VECTOR_PAIR(idx, f0, f1, i0, i1, i01, i01_half)  \
+  float32x4_t f0 = vld1q_f32(fp32_buf + i + (idx * 2 * vl));     \
+  float32x4_t f1 = vld1q_f32(fp32_buf + i + (idx * 2 + 1) * vl); \
+  int32x4_t i0 = vcvtq_s32_f32(f0);                              \
+  int32x4_t i1 = vcvtq_s32_f32(f1);                              \
+  uint16x8_t i01;                                                \
+  uint8x8_t i01_half;                                            \
+  if constexpr (saturate) {                                      \
+    i01 = vcombine_u16(vqmovun_s32(i0), vqmovun_s32(i1));        \
+    i01_half = vqmovn_u16(i01);                                  \
+  } else {                                                       \
+    i01 = vcombine_u16(vmovn_u32(i0), vmovn_u32(i1));            \
+    i01_half = vmovn_u16(i01);                                   \
+  }                                                              \
+  vst1_u8(uint8_buf + i + idx * 8, i01_half);
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0, f0, f1, i0, i1, i01, i01_half)
+      PROCESS_VECTOR_PAIR(1, f2, f3, i2, i3, i23, i23_half)
+      PROCESS_VECTOR_PAIR(2, f4, f5, i4, i5, i45, i45_half)
+      PROCESS_VECTOR_PAIR(3, f6, f7, i6, i7, i67, i67_half)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0, f0, f1, i0, i1, i01, i01_half)
+      PROCESS_VECTOR_PAIR(1, f2, f3, i2, i3, i23, i23_half)
+      PROCESS_VECTOR_PAIR(2, f4, f5, i4, i5, i45, i45_half)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0, f0, f1, i0, i1, i01, i01_half)
+      PROCESS_VECTOR_PAIR(1, f2, f3, i2, i3, i23, i23_half)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR_PAIR(0, f0, f1, i0, i1, i01, i01_half)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
+}
+
+#define FP32_RZ_TO_U8_SATURATE_NEON(UC)                                     \
+  BENCHMARK_F(FPTypeConv, fp32_rz_to_u8_saturate_##UC##_neon)(              \
+      benchmark::State & state) {                                           \
+    const size_t n_elem = buf_size / sizeof(float);                         \
+    for (auto _ : state) {                                                  \
+      fp32_rz_to_u8_neon<UC, true>(fp32_buf, uint8_buf, n_elem);            \
+    }                                                                       \
+    check_result(                                                           \
+        state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result); \
+    state.counters["elem/s"] = benchmark::Counter(                          \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);  \
+  }
+
+FP32_RZ_TO_U8_SATURATE_NEON(2)
+FP32_RZ_TO_U8_SATURATE_NEON(4)
+FP32_RZ_TO_U8_SATURATE_NEON(6)
+FP32_RZ_TO_U8_SATURATE_NEON(8)
+
+#define FP32_RZ_TO_U8_NARROW_NEON(UC)                                       \
+  BENCHMARK_F(FPTypeConv, fp32_rz_to_u8_narrow_##UC##_neon)(                \
+      benchmark::State & state) {                                           \
+    const size_t n_elem = buf_size / sizeof(float);                         \
+    for (auto _ : state) {                                                  \
+      fp32_rz_to_u8_neon<UC, false>(fp32_buf, uint8_buf, n_elem);           \
+    }                                                                       \
+    check_result(                                                           \
+        state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result); \
+    state.counters["elem/s"] = benchmark::Counter(                          \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);  \
+  }
+
+FP32_RZ_TO_U8_NARROW_NEON(2)
+FP32_RZ_TO_U8_NARROW_NEON(4)
+FP32_RZ_TO_U8_NARROW_NEON(6)
+FP32_RZ_TO_U8_NARROW_NEON(8)
+
+template <int unroll>
+__attribute__((noinline)) void u8_to_fp32_neon(
+    const uint8_t* __restrict__ uint8_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
   size_t i;
   const size_t vl = 16;
 
@@ -602,171 +923,249 @@ u8_to_fp32_neon(const uint8_t* uint8_buf, float* fp32_buf, size_t n_elem) {
       255,
       255};
 
-  for (i = 0; i < n_elem; i += vl) {
-    uint8x16_t i0 = vld1q_u8(uint8_buf + i);
-
-    uint32x4_t i0_0 = vreinterpretq_u32_u8(vqtbl1q_u8(i0, idx_0));
-    uint32x4_t i0_1 = vreinterpretq_u32_u8(vqtbl1q_u8(i0, idx_1));
-    uint32x4_t i0_2 = vreinterpretq_u32_u8(vqtbl1q_u8(i0, idx_2));
-    uint32x4_t i0_3 = vreinterpretq_u32_u8(vqtbl1q_u8(i0, idx_3));
-
-    // Convert uint32 to float32
-    float32x4_t f0 = vcvtq_f32_u32(i0_0);
-    float32x4_t f1 = vcvtq_f32_u32(i0_1);
-    float32x4_t f2 = vcvtq_f32_u32(i0_2);
-    float32x4_t f3 = vcvtq_f32_u32(i0_3);
-
-    // Store results - 4 writes
-    vst1q_f32(fp32_buf + i + 0, f0);
-    vst1q_f32(fp32_buf + i + 4, f1);
-    vst1q_f32(fp32_buf + i + 8, f2);
-    vst1q_f32(fp32_buf + i + 12, f3);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, u8_to_fp32_neon)(benchmark::State& state) {
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    u8_to_fp32_neon(uint8_buf, fp32_buf, n_elem);
+#define PROCESS_VECTOR_PAIR(i0, idx0, idx1, offset)               \
+  {                                                               \
+    uint32x4_t i0_0 = vreinterpretq_u32_u8(vqtbl1q_u8(i0, idx0)); \
+    uint32x4_t i0_1 = vreinterpretq_u32_u8(vqtbl1q_u8(i0, idx1)); \
+    float32x4_t f0 = vcvtq_f32_u32(i0_0);                         \
+    float32x4_t f1 = vcvtq_f32_u32(i0_1);                         \
+    vst1q_f32(fp32_buf + i + offset, f0);                         \
+    vst1q_f32(fp32_buf + i + offset + 4, f1);                     \
   }
 
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_uint8_to_fp32_validation_result);
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += vl * 2) {
+      uint8x16_t i0 = vld1q_u8(uint8_buf + i);
+      uint8x16_t i1 = vld1q_u8(uint8_buf + i + 16);
+      PROCESS_VECTOR_PAIR(i0, idx_0, idx_1, 0)
+      PROCESS_VECTOR_PAIR(i0, idx_2, idx_3, 8)
+      PROCESS_VECTOR_PAIR(i1, idx_0, idx_1, 16)
+      PROCESS_VECTOR_PAIR(i1, idx_2, idx_3, 24)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += vl + vl / 2) {
+      // Make sure the three reads are all aligned.
+      uint8x16_t i0 = vcombine_u8(vld1_u8(uint8_buf + i), vdup_n_u8(0));
+      uint8x16_t i1 = vcombine_u8(vld1_u8(uint8_buf + i + 8), vdup_n_u8(0));
+      uint8x16_t i2 = vcombine_u8(vld1_u8(uint8_buf + i + 16), vdup_n_u8(0));
 
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
+      PROCESS_VECTOR_PAIR(i0, idx_0, idx_1, 0)
+      PROCESS_VECTOR_PAIR(i1, idx_0, idx_1, 8)
+      PROCESS_VECTOR_PAIR(i2, idx_0, idx_1, 16)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += vl) {
+      uint8x16_t i0 = vld1q_u8(uint8_buf + i);
+
+      PROCESS_VECTOR_PAIR(i0, idx_0, idx_1, 0)
+      PROCESS_VECTOR_PAIR(i0, idx_2, idx_3, 8)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += vl / 2) {
+      uint8x16_t i0 = vcombine_u8(vld1_u8(uint8_buf + i), vdup_n_u8(0));
+
+      PROCESS_VECTOR_PAIR(i0, idx_0, idx_1, 0)
+    }
+  }
+
+#undef PROCESS_VECTOR_PAIR
 }
 
-template <bool saturate>
+#define U8_TO_FP32_NEON(UC)                                                   \
+  BENCHMARK_F(FPTypeConv, u8_to_fp32_##UC##_neon)(benchmark::State & state) { \
+    const size_t n_elem = buf_size / sizeof(float);                           \
+    for (auto _ : state) {                                                    \
+      u8_to_fp32_neon<UC>(uint8_buf, fp32_buf, n_elem);                       \
+    }                                                                         \
+    check_result(                                                             \
+        state,                                                                \
+        reinterpret_cast<uint8_t*>(fp32_buf),                                 \
+        buf_size,                                                             \
+        crc32_uint8_to_fp32_validation_result);                               \
+    state.counters["elem/s"] = benchmark::Counter(                            \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);    \
+  }
+
+U8_TO_FP32_NEON(2)
+U8_TO_FP32_NEON(4)
+U8_TO_FP32_NEON(6)
+U8_TO_FP32_NEON(8)
+
+template <int unroll, bool saturate>
 __attribute__((target("sve2"))) __attribute__((noinline)) void
-fp32_to_u8_sve(const float* fp32_buf, uint8_t* uint8_buf, size_t n_elem) {
+fp32_rz_to_u8_sve(
+    const float* __restrict__ fp32_buf,
+    uint8_t* __restrict__ uint8_buf,
+    size_t n_elem) {
   size_t i;
   const size_t vl = svcntw();
-  const size_t simd_count = 4;
   svbool_t pg = svptrue_b32();
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    svfloat32_t f0 = svld1_f32(pg, fp32_buf + i + 0 * vl);
-    svfloat32_t f1 = svld1_f32(pg, fp32_buf + i + 1 * vl);
-    svfloat32_t f2 = svld1_f32(pg, fp32_buf + i + 2 * vl);
-    svfloat32_t f3 = svld1_f32(pg, fp32_buf + i + 3 * vl);
+  [[maybe_unused]] svint32_t zero = svdup_s32(0);
+  [[maybe_unused]] svint32_t two_fifty_five = svdup_s32(255);
+#define PROCESS_VECTOR(idx)                                    \
+  svfloat32_t f##idx = svld1_f32(pg, fp32_buf + i + idx * vl); \
+  svint32_t i##idx = svcvt_s32_f32_x(pg, f##idx);              \
+  if constexpr (saturate) {                                    \
+    i##idx = svmin_s32_x(pg, i##idx, two_fifty_five);          \
+    i##idx = svmax_s32_x(pg, i##idx, zero);                    \
+  }                                                            \
+  svst1b_s32(pg, reinterpret_cast<int8_t*>(uint8_buf) + i + idx * vl, i##idx);
 
-    // Round to nearest integral, ties to even (banker's rounding)
-    // svrintn rounds to nearest as float, then svcvt truncates the
-    // already-rounded value.
-    // N.B.: SVE does not have an instruction equivalent to neon fcvtnu
-    //       so we have to round to nearest integral and then convert
-    //       to uint32.
-    svfloat32_t r0 = svrintn_f32_x(pg, f0);
-    svfloat32_t r1 = svrintn_f32_x(pg, f1);
-    svfloat32_t r2 = svrintn_f32_x(pg, f2);
-    svfloat32_t r3 = svrintn_f32_x(pg, f3);
-
-    // Convert float to uint32 (truncate, but already rounded)
-    svuint32_t i0 = svcvt_u32_f32_x(pg, r0);
-    svuint32_t i1 = svcvt_u32_f32_x(pg, r1);
-    svuint32_t i2 = svcvt_u32_f32_x(pg, r2);
-    svuint32_t i3 = svcvt_u32_f32_x(pg, r3);
-
-    if constexpr (saturate) {
-      i0 = svmin_u32_x(pg, i0, svdup_u32(255));
-      i1 = svmin_u32_x(pg, i1, svdup_u32(255));
-      i2 = svmin_u32_x(pg, i2, svdup_u32(255));
-      i3 = svmin_u32_x(pg, i3, svdup_u32(255));
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+      PROCESS_VECTOR(6)
+      PROCESS_VECTOR(7)
     }
-
-    svst1b_u32(pg, uint8_buf + i + 0 * vl, i0);
-    svst1b_u32(pg, uint8_buf + i + 1 * vl, i1);
-    svst1b_u32(pg, uint8_buf + i + 2 * vl, i2);
-    svst1b_u32(pg, uint8_buf + i + 3 * vl, i3);
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+    }
   }
+
+#undef PROCESS_VECTOR
 }
 
-BENCHMARK_F(FPTypeConv, fp32_to_u8_saturate_sve)(benchmark::State& state) {
-  if (!Cpu.sve) {
-    state.SkipWithError("Skipping: CPU does not support SVE");
-    return;
+#define FP32_RZ_TO_U8_SATURATE_SVE(UC)                                      \
+  BENCHMARK_F(FPTypeConv, fp32_rz_to_u8_saturate_##UC##_sve)(               \
+      benchmark::State & state) {                                           \
+    if (!Cpu.sve) {                                                         \
+      state.SkipWithError("Skipping: CPU does not support SVE");            \
+      return;                                                               \
+    }                                                                       \
+    const size_t n_elem = buf_size / sizeof(float);                         \
+    for (auto _ : state) {                                                  \
+      fp32_rz_to_u8_sve<UC, true>(fp32_buf, uint8_buf, n_elem);             \
+    }                                                                       \
+    check_result(                                                           \
+        state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result); \
+    state.counters["elem/s"] = benchmark::Counter(                          \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);  \
   }
 
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_u8_sve<true>(fp32_buf, uint8_buf, n_elem);
+FP32_RZ_TO_U8_SATURATE_SVE(2)
+FP32_RZ_TO_U8_SATURATE_SVE(4)
+FP32_RZ_TO_U8_SATURATE_SVE(6)
+FP32_RZ_TO_U8_SATURATE_SVE(8)
+
+#define FP32_RZ_TO_U8_NARROW_SVE(UC)                                           \
+  BENCHMARK_F(                                                                 \
+      FPTypeConv, fp32_rz_to_u8_narrow_##UC##_sve)(benchmark::State & state) { \
+    if (!Cpu.sve) {                                                            \
+      state.SkipWithError("Skipping: CPU does not support SVE");               \
+      return;                                                                  \
+    }                                                                          \
+    const size_t n_elem = buf_size / sizeof(float);                            \
+    for (auto _ : state) {                                                     \
+      fp32_rz_to_u8_sve<UC, false>(fp32_buf, uint8_buf, n_elem);               \
+    }                                                                          \
+    check_result(                                                              \
+        state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result);    \
+    state.counters["elem/s"] = benchmark::Counter(                             \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);     \
   }
 
-  check_result(
-      state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result);
+FP32_RZ_TO_U8_NARROW_SVE(2)
+FP32_RZ_TO_U8_NARROW_SVE(4)
+FP32_RZ_TO_U8_NARROW_SVE(6)
+FP32_RZ_TO_U8_NARROW_SVE(8)
 
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_u8_narrow_sve)(benchmark::State& state) {
-  if (!Cpu.sve) {
-    state.SkipWithError("Skipping: CPU does not support SVE");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_u8_sve<false>(fp32_buf, uint8_buf, n_elem);
-  }
-
-  check_result(
-      state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("sve"))) __attribute__((noinline)) void
-uint8_to_fp32_sve(const uint8_t* uint8_buf, float* fp32_buf, size_t n_elem) {
+template <int unroll>
+__attribute__((target("sve"))) __attribute__((noinline)) void u8_to_fp32_sve(
+    const uint8_t* __restrict__ uint8_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
   size_t i;
-  const size_t simd_count = 4;
   const size_t vl_s32 = svcntw();
   svbool_t pg = svptrue_b32();
-  for (i = 0; i < n_elem; i += simd_count * vl_s32) {
-    // Load uint8 and widen directly to uint32 in a single instruction
-    svuint32_t i0 = svld1ub_u32(pg, uint8_buf + i + 0 * vl_s32);
-    svuint32_t i1 = svld1ub_u32(pg, uint8_buf + i + 1 * vl_s32);
-    svuint32_t i2 = svld1ub_u32(pg, uint8_buf + i + 2 * vl_s32);
-    svuint32_t i3 = svld1ub_u32(pg, uint8_buf + i + 3 * vl_s32);
 
-    // Convert uint32 to float32
-    svfloat32_t f0 = svcvt_f32_u32_x(pg, i0);
-    svfloat32_t f1 = svcvt_f32_u32_x(pg, i1);
-    svfloat32_t f2 = svcvt_f32_u32_x(pg, i2);
-    svfloat32_t f3 = svcvt_f32_u32_x(pg, i3);
+#define PROCESS_VECTOR(idx)                                          \
+  svuint32_t i##idx = svld1ub_u32(pg, uint8_buf + i + idx * vl_s32); \
+  svfloat32_t f##idx = svcvt_f32_u32_x(pg, i##idx);                  \
+  svst1_f32(pg, fp32_buf + i + idx * vl_s32, f##idx);
 
-    // Store results - 4 writes
-    svst1_f32(pg, fp32_buf + i + 0 * vl_s32, f0);
-    svst1_f32(pg, fp32_buf + i + 1 * vl_s32, f1);
-    svst1_f32(pg, fp32_buf + i + 2 * vl_s32, f2);
-    svst1_f32(pg, fp32_buf + i + 3 * vl_s32, f3);
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl_s32) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+      PROCESS_VECTOR(6)
+      PROCESS_VECTOR(7)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl_s32) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl_s32) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl_s32) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+    }
   }
+
+#undef PROCESS_VECTOR
 }
 
-BENCHMARK_F(FPTypeConv, uint8_to_fp32_sve)(benchmark::State& state) {
-  if (!Cpu.sve) {
-    state.SkipWithError("Skipping: CPU does not support SVE");
-    return;
+#define U8_TO_FP32_SVE(UC)                                                   \
+  BENCHMARK_F(FPTypeConv, u8_to_fp32_##UC##_sve)(benchmark::State & state) { \
+    if (!Cpu.sve) {                                                          \
+      state.SkipWithError("Skipping: CPU does not support SVE");             \
+      return;                                                                \
+    }                                                                        \
+    const size_t n_elem = buf_size / sizeof(float);                          \
+    for (auto _ : state) {                                                   \
+      u8_to_fp32_sve<UC>(uint8_buf, fp32_buf, n_elem);                       \
+    }                                                                        \
+    check_result(                                                            \
+        state,                                                               \
+        reinterpret_cast<uint8_t*>(fp32_buf),                                \
+        buf_size,                                                            \
+        crc32_uint8_to_fp32_validation_result);                              \
+    state.counters["elem/s"] = benchmark::Counter(                           \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);   \
   }
 
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    uint8_to_fp32_sve(uint8_buf, fp32_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_uint8_to_fp32_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
+U8_TO_FP32_SVE(2)
+U8_TO_FP32_SVE(4)
+U8_TO_FP32_SVE(6)
+U8_TO_FP32_SVE(8)
 
 #else
 
@@ -783,345 +1182,593 @@ struct CpuFeatures {
 
 static CpuFeatures Cpu;
 
+template <int unroll>
 __attribute__((target("avx512f"))) __attribute__((noinline)) void
-fp32_to_fp16_avx512(const float* fp32_buf, uint16_t* half_buf, size_t n_elem) {
+fp32_to_fp16_avx512(
+    const float* __restrict__ fp32_buf,
+    uint16_t* __restrict__ half_buf,
+    size_t n_elem) {
   const size_t vl = 16;
   size_t i;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    __m512 f0 = _mm512_loadu_ps(fp32_buf + i + 0 * vl);
-    __m512 f1 = _mm512_loadu_ps(fp32_buf + i + 1 * vl);
-    __m512 f2 = _mm512_loadu_ps(fp32_buf + i + 2 * vl);
-    __m512 f3 = _mm512_loadu_ps(fp32_buf + i + 3 * vl);
 
-    __m256i h0 = _mm512_cvtps_ph(f0, 0);
-    __m256i h1 = _mm512_cvtps_ph(f1, 0);
-    __m256i h2 = _mm512_cvtps_ph(f2, 0);
-    __m256i h3 = _mm512_cvtps_ph(f3, 0);
+#define PROCESS_VECTOR(idx)                                 \
+  __m512 f##idx = _mm512_loadu_ps(fp32_buf + i + idx * vl); \
+  __m256i h##idx = _mm512_cvtps_ph(f##idx, 0);              \
+  _mm256_storeu_si256(                                      \
+      reinterpret_cast<__m256i*>(&half_buf[i + idx * vl]), h##idx);
 
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&half_buf[i + 0 * vl]), h0);
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&half_buf[i + 1 * vl]), h1);
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&half_buf[i + 2 * vl]), h2);
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&half_buf[i + 3 * vl]), h3);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_fp16_avx512)(benchmark::State& state) {
-  if (!Cpu.avx512f) {
-    state.SkipWithError("Skipping: CPU does not support AVX512F");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_fp16_avx512(fp32_buf, half_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(half_buf),
-      buf_size,
-      crc32_fp32_to_fp16_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("avx512f"))) __attribute__((noinline)) void
-fp16_to_fp32_avx512(const uint16_t* half_buf, float* fp32_buf, size_t n_elem) {
-  const size_t vl = 16;
-  size_t i;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    __m256i h0 = _mm256_loadu_si256(
-        reinterpret_cast<const __m256i*>(&half_buf[i + 0 * vl]));
-    __m256i h1 = _mm256_loadu_si256(
-        reinterpret_cast<const __m256i*>(&half_buf[i + 1 * vl]));
-    __m256i h2 = _mm256_loadu_si256(
-        reinterpret_cast<const __m256i*>(&half_buf[i + 2 * vl]));
-    __m256i h3 = _mm256_loadu_si256(
-        reinterpret_cast<const __m256i*>(&half_buf[i + 3 * vl]));
-
-    __m512 f0 = _mm512_cvtph_ps(h0);
-    __m512 f1 = _mm512_cvtph_ps(h1);
-    __m512 f2 = _mm512_cvtph_ps(h2);
-    __m512 f3 = _mm512_cvtph_ps(h3);
-
-    _mm512_storeu_ps(fp32_buf + i + 0 * vl, f0);
-    _mm512_storeu_ps(fp32_buf + i + 1 * vl, f1);
-    _mm512_storeu_ps(fp32_buf + i + 2 * vl, f2);
-    _mm512_storeu_ps(fp32_buf + i + 3 * vl, f3);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp16_to_fp32_avx512)(benchmark::State& state) {
-  if (!Cpu.avx512f) {
-    state.SkipWithError("Skipping: CPU does not support AVX512F");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp16_to_fp32_avx512(half_buf, fp32_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_fp16_to_fp32_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("avx512f, avx512bf16"))) __attribute__((noinline)) void
-fp32_to_bf16_avx512(const float* fp32_buf, uint16_t* half_buf, size_t n_elem) {
-  const size_t vl = 16;
-  size_t i;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    __m512 f0 = _mm512_loadu_ps(fp32_buf + i + 0 * vl);
-    __m512 f1 = _mm512_loadu_ps(fp32_buf + i + 1 * vl);
-    __m512 f2 = _mm512_loadu_ps(fp32_buf + i + 2 * vl);
-    __m512 f3 = _mm512_loadu_ps(fp32_buf + i + 3 * vl);
-
-    __m256i h0 = _mm512_cvtneps_pbh(f0);
-    __m256i h1 = _mm512_cvtneps_pbh(f1);
-    __m256i h2 = _mm512_cvtneps_pbh(f2);
-    __m256i h3 = _mm512_cvtneps_pbh(f3);
-
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&half_buf[i + 0 * vl]), h0);
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&half_buf[i + 1 * vl]), h1);
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&half_buf[i + 2 * vl]), h2);
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(&half_buf[i + 3 * vl]), h3);
-  }
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_bf16_avx512)(benchmark::State& state) {
-  if (!Cpu.avx512bf16) {
-    state.SkipWithError("Skipping: CPU does not support AVX512F+AVX512BF16");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_bf16_avx512(fp32_buf, half_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(half_buf),
-      buf_size,
-      crc32_fp32_to_bf16_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-__attribute__((target("avx512f"))) __attribute__((noinline)) void
-bf16_to_fp32_avx512(const uint16_t* half_buf, float* fp32_buf, size_t n_elem) {
-  const size_t vl = 16;
-  size_t i;
-  const size_t simd_count = 4;
-  __m256i zero = _mm256_setzero_si256();
-  // BF16 to FP32 is a simple left shift by 16 bits
-  // Use unpack instructions for efficient conversion
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    __m256i h0 = _mm256_loadu_si256(
-        reinterpret_cast<const __m256i*>(&half_buf[i + 0 * vl]));
-    __m256i h1 = _mm256_loadu_si256(
-        reinterpret_cast<const __m256i*>(&half_buf[i + 1 * vl]));
-    __m256i h2 = _mm256_loadu_si256(
-        reinterpret_cast<const __m256i*>(&half_buf[i + 2 * vl]));
-    __m256i h3 = _mm256_loadu_si256(
-        reinterpret_cast<const __m256i*>(&half_buf[i + 3 * vl]));
-
-    __m512i f0 = _mm512_cvtepu16_epi32(h0);
-    __m512i f1 = _mm512_cvtepu16_epi32(h1);
-    __m512i f2 = _mm512_cvtepu16_epi32(h2);
-    __m512i f3 = _mm512_cvtepu16_epi32(h3);
-
-    f0 = _mm512_slli_epi32(f0, 16);
-    f1 = _mm512_slli_epi32(f1, 16);
-    f2 = _mm512_slli_epi32(f2, 16);
-    f3 = _mm512_slli_epi32(f3, 16);
-
-    _mm512_storeu_ps(fp32_buf + i + 0 * vl, _mm512_castsi512_ps(f0));
-    _mm512_storeu_ps(fp32_buf + i + 1 * vl, _mm512_castsi512_ps(f1));
-    _mm512_storeu_ps(fp32_buf + i + 2 * vl, _mm512_castsi512_ps(f2));
-    _mm512_storeu_ps(fp32_buf + i + 3 * vl, _mm512_castsi512_ps(f3));
-  }
-}
-
-BENCHMARK_F(FPTypeConv, bf16_to_fp32_avx512)(benchmark::State& state) {
-  if (!Cpu.avx512f) {
-    state.SkipWithError("Skipping: CPU does not support AVX512F");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    bf16_to_fp32_avx512(half_buf, fp32_buf, n_elem);
-  }
-
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_bf16_to_fp32_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-template <bool saturate>
-__attribute__((target("avx512f, avx512bw"))) __attribute__((noinline)) void
-fp32_to_u8_avx512(const float* fp32_buf, uint8_t* uint8_buf, size_t n_elem) {
-  const size_t vl = 16;
-  size_t i;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    __m512 f0 = _mm512_loadu_ps(fp32_buf + i + 0 * vl);
-    __m512 f1 = _mm512_loadu_ps(fp32_buf + i + 1 * vl);
-    __m512 f2 = _mm512_loadu_ps(fp32_buf + i + 2 * vl);
-    __m512 f3 = _mm512_loadu_ps(fp32_buf + i + 3 * vl);
-
-    // Convert float to int32 with rounding to nearest (banker's rounding)
-    // This is a single instruction, more efficient than separate round +
-    // convert
-    __m512i i0 = _mm512_cvt_roundps_epi32(
-        f0, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    __m512i i1 = _mm512_cvt_roundps_epi32(
-        f1, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    __m512i i2 = _mm512_cvt_roundps_epi32(
-        f2, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    __m512i i3 = _mm512_cvt_roundps_epi32(
-        f3, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-
-    if constexpr (saturate) {
-      // Narrow from uint32 to uint16 with saturation (packs interleave)
-      __m512i i01_16 = _mm512_packus_epi32(i0, i1);
-      __m512i i23_16 = _mm512_packus_epi32(i2, i3);
-
-      // Narrow from uint16 to uint8 with saturation
-      __m512i i0123_8 = _mm512_packus_epi16(i01_16, i23_16);
-
-      // After two packs, each dword contains 4 consecutive uint8 values from
-      // one source. Dwords are interleaved, so we just need to permute at
-      // dword-level to get: [i0[0..15], i1[0..15], i2[0..15], i3[0..15]]
-      const __m512i perm_idx = _mm512_setr_epi32(
-          0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15);
-      i0123_8 = _mm512_permutexvar_epi32(perm_idx, i0123_8);
-
-      _mm512_storeu_si512(reinterpret_cast<__m512i*>(uint8_buf + i), i0123_8);
-    } else {
-      _mm512_mask_cvtusepi32_storeu_epi8(
-          reinterpret_cast<__m512i*>(uint8_buf + i), 0xFFFF, i0);
-      _mm512_mask_cvtusepi32_storeu_epi8(
-          reinterpret_cast<__m512i*>(uint8_buf + i + 16), 0xFFFF, i1);
-      _mm512_mask_cvtusepi32_storeu_epi8(
-          reinterpret_cast<__m512i*>(uint8_buf + i + 32), 0xFFFF, i2);
-      _mm512_mask_cvtusepi32_storeu_epi8(
-          reinterpret_cast<__m512i*>(uint8_buf + i + 48), 0xFFFF, i3);
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+      PROCESS_VECTOR(6)
+      PROCESS_VECTOR(7)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
     }
   }
+
+#undef PROCESS_VECTOR
 }
 
-BENCHMARK_F(FPTypeConv, fp32_to_u8_saturate_avx512)(benchmark::State& state) {
-  if (!Cpu.avx512f) {
-    state.SkipWithError("Skipping: CPU does not support AVX512F");
-    return;
+#define FP32_TO_FP16_AVX512(UC)                                            \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, fp32_to_fp16_##UC##_avx512)(benchmark::State & state) {  \
+    if (!Cpu.avx512f) {                                                    \
+      state.SkipWithError("Skipping: CPU does not support AVX512F");       \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      fp32_to_fp16_avx512<UC>(fp32_buf, half_buf, n_elem);                 \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(half_buf),                              \
+        buf_size,                                                          \
+        crc32_fp32_to_fp16_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
   }
 
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_u8_avx512<true>(fp32_buf, uint8_buf, n_elem);
-  }
+FP32_TO_FP16_AVX512(2)
+FP32_TO_FP16_AVX512(4)
+FP32_TO_FP16_AVX512(6)
+FP32_TO_FP16_AVX512(8)
 
-  check_result(
-      state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_u8_narrow_avx512)(benchmark::State& state) {
-  if (!Cpu.avx512f) {
-    state.SkipWithError("Skipping: CPU does not support AVX512F");
-    return;
-  }
-
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    fp32_to_u8_avx512<false>(fp32_buf, uint8_buf, n_elem);
-  }
-
-  check_result(
-      state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
-}
-
+template <int unroll>
 __attribute__((target("avx512f"))) __attribute__((noinline)) void
-u8_to_fp32_avx512(const uint8_t* uint8_buf, float* fp32_buf, size_t n_elem) {
+fp16_to_fp32_avx512(
+    const uint16_t* __restrict__ half_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
   const size_t vl = 16;
   size_t i;
-  const size_t simd_count = 4;
-  for (i = 0; i < n_elem; i += simd_count * vl) {
-    // Load 4 separate 128-bit chunks (16 uint8 values each)
-    // This is faster than loading 512-bit and extracting due to better port
-    // distribution
-    __m128i i0_0 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i*>(uint8_buf + i + 0 * vl));
-    __m128i i0_1 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i*>(uint8_buf + i + 1 * vl));
-    __m128i i0_2 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i*>(uint8_buf + i + 2 * vl));
-    __m128i i0_3 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i*>(uint8_buf + i + 3 * vl));
 
-    // Zero-extend uint8 to uint32
-    __m512i i32_0 = _mm512_cvtepu8_epi32(i0_0);
-    __m512i i32_1 = _mm512_cvtepu8_epi32(i0_1);
-    __m512i i32_2 = _mm512_cvtepu8_epi32(i0_2);
-    __m512i i32_3 = _mm512_cvtepu8_epi32(i0_3);
+#define PROCESS_VECTOR(idx)                                       \
+  __m256i h##idx = _mm256_loadu_si256(                            \
+      reinterpret_cast<const __m256i*>(&half_buf[i + idx * vl])); \
+  __m512 f##idx = _mm512_cvtph_ps(h##idx);                        \
+  _mm512_storeu_ps(fp32_buf + i + idx * vl, f##idx);
 
-    // Convert uint32 to float32
-    __m512 f0 = _mm512_cvtepi32_ps(i32_0);
-    __m512 f1 = _mm512_cvtepi32_ps(i32_1);
-    __m512 f2 = _mm512_cvtepi32_ps(i32_2);
-    __m512 f3 = _mm512_cvtepi32_ps(i32_3);
-
-    // Store results
-    _mm512_storeu_ps(fp32_buf + i + 0 * vl, f0);
-    _mm512_storeu_ps(fp32_buf + i + 1 * vl, f1);
-    _mm512_storeu_ps(fp32_buf + i + 2 * vl, f2);
-    _mm512_storeu_ps(fp32_buf + i + 3 * vl, f3);
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+      PROCESS_VECTOR(6)
+      PROCESS_VECTOR(7)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+    }
   }
+
+#undef PROCESS_VECTOR
 }
 
-BENCHMARK_F(FPTypeConv, u8_to_fp32_avx512)(benchmark::State& state) {
-  if (!Cpu.avx512f) {
-    state.SkipWithError("Skipping: CPU does not support AVX512F");
-    return;
+#define FP16_TO_FP32_AVX512(UC)                                            \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, fp16_to_fp32_##UC##_avx512)(benchmark::State & state) {  \
+    if (!Cpu.avx512f) {                                                    \
+      state.SkipWithError("Skipping: CPU does not support AVX512F");       \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      fp16_to_fp32_avx512<UC>(half_buf, fp32_buf, n_elem);                 \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(fp32_buf),                              \
+        buf_size,                                                          \
+        crc32_fp16_to_fp32_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
   }
 
-  const size_t n_elem = buf_size / sizeof(float);
-  for (auto _ : state) {
-    u8_to_fp32_avx512(uint8_buf, fp32_buf, n_elem);
+FP16_TO_FP32_AVX512(2)
+FP16_TO_FP32_AVX512(4)
+FP16_TO_FP32_AVX512(6)
+FP16_TO_FP32_AVX512(8)
+
+template <int unroll>
+__attribute__((target("avx512f, avx512bf16"))) __attribute__((noinline)) void
+fp32_to_bf16_avx512(
+    const float* __restrict__ fp32_buf,
+    uint16_t* __restrict__ half_buf,
+    size_t n_elem) {
+  const size_t vl = 16;
+  size_t i;
+
+#define PROCESS_VECTOR(idx)                                 \
+  __m512 f##idx = _mm512_loadu_ps(fp32_buf + i + idx * vl); \
+  __m256i h##idx = _mm512_cvtneps_pbh(f##idx);              \
+  _mm256_storeu_si256(                                      \
+      reinterpret_cast<__m256i*>(&half_buf[i + idx * vl]), h##idx);
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+      PROCESS_VECTOR(6)
+      PROCESS_VECTOR(7)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+    }
   }
 
-  check_result(
-      state,
-      reinterpret_cast<uint8_t*>(fp32_buf),
-      buf_size,
-      crc32_uint8_to_fp32_validation_result);
-
-  state.counters["elem/s"] = benchmark::Counter(
-      double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
+#undef PROCESS_VECTOR
 }
+
+#define FP32_TO_BF16_AVX512(UC)                                            \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, fp32_to_bf16_##UC##_avx512)(benchmark::State & state) {  \
+    if (!Cpu.avx512bf16) {                                                 \
+      state.SkipWithError(                                                 \
+          "Skipping: CPU does not support AVX512F+AVX512BF16");            \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      fp32_to_bf16_avx512<UC>(fp32_buf, half_buf, n_elem);                 \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(half_buf),                              \
+        buf_size,                                                          \
+        crc32_fp32_to_bf16_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+FP32_TO_BF16_AVX512(2)
+FP32_TO_BF16_AVX512(4)
+FP32_TO_BF16_AVX512(6)
+FP32_TO_BF16_AVX512(8)
+
+template <int unroll>
+__attribute__((target("avx512f"))) __attribute__((noinline)) void
+bf16_to_fp32_avx512(
+    const uint16_t* __restrict__ half_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
+  const size_t vl = 16;
+  size_t i;
+
+#define PROCESS_VECTOR(idx)                                       \
+  __m256i h##idx = _mm256_loadu_si256(                            \
+      reinterpret_cast<const __m256i*>(&half_buf[i + idx * vl])); \
+  __m512i f##idx##_i = _mm512_cvtepu16_epi32(h##idx);             \
+  f##idx##_i = _mm512_slli_epi32(f##idx##_i, 16);                 \
+  _mm512_storeu_ps(fp32_buf + i + idx * vl, _mm512_castsi512_ps(f##idx##_i));
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+      PROCESS_VECTOR(6)
+      PROCESS_VECTOR(7)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+    }
+  }
+
+#undef PROCESS_VECTOR
+}
+
+#define BF16_TO_FP32_AVX512(UC)                                            \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, bf16_to_fp32_##UC##_avx512)(benchmark::State & state) {  \
+    if (!Cpu.avx512f) {                                                    \
+      state.SkipWithError("Skipping: CPU does not support AVX512F");       \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      bf16_to_fp32_avx512<UC>(half_buf, fp32_buf, n_elem);                 \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(fp32_buf),                              \
+        buf_size,                                                          \
+        crc32_bf16_to_fp32_validation_result);                             \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+BF16_TO_FP32_AVX512(2)
+BF16_TO_FP32_AVX512(4)
+BF16_TO_FP32_AVX512(6)
+BF16_TO_FP32_AVX512(8)
+
+template <int unroll, bool saturate>
+__attribute__((target("avx512f, avx512bw"))) __attribute__((noinline)) void
+fp32_rz_to_u8_avx512(
+    const float* __restrict__ fp32_buf,
+    uint8_t* __restrict__ uint8_buf,
+    size_t n_elem) {
+  const size_t vl = 16;
+  size_t i;
+
+#define PROCESS_VECTOR_SATURATE(idx)                        \
+  __m512 f##idx = _mm512_loadu_ps(fp32_buf + i + idx * vl); \
+  __m512i i##idx = _mm512_cvt_roundps_epi32(                \
+      f##idx, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+
+#define PROCESS_VECTOR_NARROW(idx)                          \
+  __m512 f##idx = _mm512_loadu_ps(fp32_buf + i + idx * vl); \
+  __m512i i##idx = _mm512_cvt_roundps_epi32(                \
+      f##idx, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);      \
+  _mm512_mask_cvtusepi32_storeu_epi8(                       \
+      reinterpret_cast<__m512i*>(uint8_buf + i + idx * vl), 0xFFFF, i##idx);
+
+  if constexpr (saturate) {
+    if constexpr (unroll == 8) {
+      for (i = 0; i < n_elem; i += unroll * vl) {
+        PROCESS_VECTOR_SATURATE(0)
+        PROCESS_VECTOR_SATURATE(1)
+        PROCESS_VECTOR_SATURATE(2)
+        PROCESS_VECTOR_SATURATE(3)
+        PROCESS_VECTOR_SATURATE(4)
+        PROCESS_VECTOR_SATURATE(5)
+        PROCESS_VECTOR_SATURATE(6)
+        PROCESS_VECTOR_SATURATE(7)
+
+        __m512i i01_16 = _mm512_packus_epi32(i0, i1);
+        __m512i i23_16 = _mm512_packus_epi32(i2, i3);
+        __m512i i45_16 = _mm512_packus_epi32(i4, i5);
+        __m512i i67_16 = _mm512_packus_epi32(i6, i7);
+
+        __m512i i0123_8 = _mm512_packus_epi16(i01_16, i23_16);
+        __m512i i4567_8 = _mm512_packus_epi16(i45_16, i67_16);
+
+        const __m512i perm_idx = _mm512_setr_epi32(
+            0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15);
+        i0123_8 = _mm512_permutexvar_epi32(perm_idx, i0123_8);
+        i4567_8 = _mm512_permutexvar_epi32(perm_idx, i4567_8);
+
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(uint8_buf + i), i0123_8);
+        _mm512_storeu_si512(
+            reinterpret_cast<__m512i*>(uint8_buf + i + 4 * vl), i4567_8);
+      }
+    } else if constexpr (unroll == 6) {
+      for (i = 0; i < n_elem; i += unroll * vl) {
+        PROCESS_VECTOR_SATURATE(0)
+        PROCESS_VECTOR_SATURATE(1)
+        PROCESS_VECTOR_SATURATE(2)
+        PROCESS_VECTOR_SATURATE(3)
+        PROCESS_VECTOR_SATURATE(4)
+        PROCESS_VECTOR_SATURATE(5)
+
+        __m512i i01_16 = _mm512_packus_epi32(i0, i1);
+        __m512i i23_16 = _mm512_packus_epi32(i2, i3);
+        __m512i i45_16 = _mm512_packus_epi32(i4, i5);
+
+        __m512i i0123_8 = _mm512_packus_epi16(i01_16, i23_16);
+        __m512i i45xx_8 = _mm512_packus_epi16(i45_16, i45_16);
+
+        const __m512i perm_idx = _mm512_setr_epi32(
+            0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15);
+        i0123_8 = _mm512_permutexvar_epi32(perm_idx, i0123_8);
+        i45xx_8 = _mm512_permutexvar_epi32(perm_idx, i45xx_8);
+
+        _mm256_storeu_si256(
+            reinterpret_cast<__m256i*>(uint8_buf + i),
+            _mm512_castsi512_si256(i0123_8));
+        _mm256_storeu_si256(
+            reinterpret_cast<__m256i*>(uint8_buf + i + 2 * vl),
+            _mm512_extracti32x8_epi32(i0123_8, 1));
+        _mm256_storeu_si256(
+            reinterpret_cast<__m256i*>(uint8_buf + i + 4 * vl),
+            _mm512_castsi512_si256(i45xx_8));
+      }
+    } else if constexpr (unroll == 4) {
+      for (i = 0; i < n_elem; i += unroll * vl) {
+        PROCESS_VECTOR_SATURATE(0)
+        PROCESS_VECTOR_SATURATE(1)
+        PROCESS_VECTOR_SATURATE(2)
+        PROCESS_VECTOR_SATURATE(3)
+
+        __m512i i01_16 = _mm512_packus_epi32(i0, i1);
+        __m512i i23_16 = _mm512_packus_epi32(i2, i3);
+
+        __m512i i0123_8 = _mm512_packus_epi16(i01_16, i23_16);
+
+        const __m512i perm_idx = _mm512_setr_epi32(
+            0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15);
+        i0123_8 = _mm512_permutexvar_epi32(perm_idx, i0123_8);
+
+        _mm512_storeu_si512(reinterpret_cast<__m512i*>(uint8_buf + i), i0123_8);
+      }
+    } else if constexpr (unroll == 2) {
+      for (i = 0; i < n_elem; i += unroll * vl) {
+        PROCESS_VECTOR_SATURATE(0)
+        PROCESS_VECTOR_SATURATE(1)
+
+        __m512i i01_16 = _mm512_packus_epi32(i0, i1);
+        __m512i i01_8 = _mm512_packus_epi16(i01_16, i01_16);
+
+        const __m512i perm_idx = _mm512_setr_epi32(
+            0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15);
+        i01_8 = _mm512_permutexvar_epi32(perm_idx, i01_8);
+
+        _mm256_storeu_si256(
+            reinterpret_cast<__m256i*>(uint8_buf + i),
+            _mm512_castsi512_si256(i01_8));
+      }
+    }
+  } else {
+    if constexpr (unroll == 8) {
+      for (i = 0; i < n_elem; i += unroll * vl) {
+        PROCESS_VECTOR_NARROW(0)
+        PROCESS_VECTOR_NARROW(1)
+        PROCESS_VECTOR_NARROW(2)
+        PROCESS_VECTOR_NARROW(3)
+        PROCESS_VECTOR_NARROW(4)
+        PROCESS_VECTOR_NARROW(5)
+        PROCESS_VECTOR_NARROW(6)
+        PROCESS_VECTOR_NARROW(7)
+      }
+    } else if constexpr (unroll == 6) {
+      for (i = 0; i < n_elem; i += unroll * vl) {
+        PROCESS_VECTOR_NARROW(0)
+        PROCESS_VECTOR_NARROW(1)
+        PROCESS_VECTOR_NARROW(2)
+        PROCESS_VECTOR_NARROW(3)
+        PROCESS_VECTOR_NARROW(4)
+        PROCESS_VECTOR_NARROW(5)
+      }
+    } else if constexpr (unroll == 4) {
+      for (i = 0; i < n_elem; i += unroll * vl) {
+        PROCESS_VECTOR_NARROW(0)
+        PROCESS_VECTOR_NARROW(1)
+        PROCESS_VECTOR_NARROW(2)
+        PROCESS_VECTOR_NARROW(3)
+      }
+    } else if constexpr (unroll == 2) {
+      for (i = 0; i < n_elem; i += unroll * vl) {
+        PROCESS_VECTOR_NARROW(0)
+        PROCESS_VECTOR_NARROW(1)
+      }
+    }
+  }
+
+#undef PROCESS_VECTOR_SATURATE
+#undef PROCESS_VECTOR_NARROW
+}
+
+#define FP32_RZ_TO_U8_SATURATE_AVX512(UC)                                   \
+  BENCHMARK_F(FPTypeConv, fp32_rz_to_u8_saturate_##UC##_avx512)(            \
+      benchmark::State & state) {                                           \
+    if (!Cpu.avx512f) {                                                     \
+      state.SkipWithError("Skipping: CPU does not support AVX512F");        \
+      return;                                                               \
+    }                                                                       \
+    const size_t n_elem = buf_size / sizeof(float);                         \
+    for (auto _ : state) {                                                  \
+      fp32_rz_to_u8_avx512<UC, true>(fp32_buf, uint8_buf, n_elem);          \
+    }                                                                       \
+    check_result(                                                           \
+        state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result); \
+    state.counters["elem/s"] = benchmark::Counter(                          \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);  \
+  }
+
+FP32_RZ_TO_U8_SATURATE_AVX512(2)
+FP32_RZ_TO_U8_SATURATE_AVX512(4)
+FP32_RZ_TO_U8_SATURATE_AVX512(6)
+FP32_RZ_TO_U8_SATURATE_AVX512(8)
+
+#define FP32_RZ_TO_U8_NARROW_AVX512(UC)                                     \
+  BENCHMARK_F(FPTypeConv, fp32_rz_to_u8_narrow_##UC##_avx512)(              \
+      benchmark::State & state) {                                           \
+    if (!Cpu.avx512f) {                                                     \
+      state.SkipWithError("Skipping: CPU does not support AVX512F");        \
+      return;                                                               \
+    }                                                                       \
+    const size_t n_elem = buf_size / sizeof(float);                         \
+    for (auto _ : state) {                                                  \
+      fp32_rz_to_u8_avx512<UC, false>(fp32_buf, uint8_buf, n_elem);         \
+    }                                                                       \
+    check_result(                                                           \
+        state, uint8_buf, buf_size, crc32_fp32_to_uint8_validation_result); \
+    state.counters["elem/s"] = benchmark::Counter(                          \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);  \
+  }
+
+FP32_RZ_TO_U8_NARROW_AVX512(2)
+FP32_RZ_TO_U8_NARROW_AVX512(4)
+FP32_RZ_TO_U8_NARROW_AVX512(6)
+FP32_RZ_TO_U8_NARROW_AVX512(8)
+
+template <int unroll>
+__attribute__((target("avx512f"))) __attribute__((noinline)) void
+u8_to_fp32_avx512(
+    const uint8_t* __restrict__ uint8_buf,
+    float* __restrict__ fp32_buf,
+    size_t n_elem) {
+  const size_t vl = 16;
+  size_t i;
+
+#define PROCESS_VECTOR(idx)                                        \
+  __m128i i##idx##_0 = _mm_loadu_si128(                            \
+      reinterpret_cast<const __m128i*>(uint8_buf + i + idx * vl)); \
+  __m512i i32_##idx = _mm512_cvtepu8_epi32(i##idx##_0);            \
+  __m512 f##idx = _mm512_cvtepi32_ps(i32_##idx);                   \
+  _mm512_storeu_ps(fp32_buf + i + idx * vl, f##idx);
+
+  if constexpr (unroll == 8) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+      PROCESS_VECTOR(6)
+      PROCESS_VECTOR(7)
+    }
+  } else if constexpr (unroll == 6) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+      PROCESS_VECTOR(4)
+      PROCESS_VECTOR(5)
+    }
+  } else if constexpr (unroll == 4) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+      PROCESS_VECTOR(2)
+      PROCESS_VECTOR(3)
+    }
+  } else if constexpr (unroll == 2) {
+    for (i = 0; i < n_elem; i += unroll * vl) {
+      PROCESS_VECTOR(0)
+      PROCESS_VECTOR(1)
+    }
+  }
+
+#undef PROCESS_VECTOR
+}
+
+#define U8_TO_FP32_AVX512(UC)                                              \
+  BENCHMARK_F(                                                             \
+      FPTypeConv, u8_to_fp32_##UC##_avx512)(benchmark::State & state) {    \
+    if (!Cpu.avx512f) {                                                    \
+      state.SkipWithError("Skipping: CPU does not support AVX512F");       \
+      return;                                                              \
+    }                                                                      \
+    const size_t n_elem = buf_size / sizeof(float);                        \
+    for (auto _ : state) {                                                 \
+      u8_to_fp32_avx512<UC>(uint8_buf, fp32_buf, n_elem);                  \
+    }                                                                      \
+    check_result(                                                          \
+        state,                                                             \
+        reinterpret_cast<uint8_t*>(fp32_buf),                              \
+        buf_size,                                                          \
+        crc32_uint8_to_fp32_validation_result);                            \
+    state.counters["elem/s"] = benchmark::Counter(                         \
+        double(n_elem) * state.iterations(), benchmark::Counter::kIsRate); \
+  }
+
+U8_TO_FP32_AVX512(2)
+U8_TO_FP32_AVX512(4)
+U8_TO_FP32_AVX512(6)
+U8_TO_FP32_AVX512(8)
 
 #endif
 
@@ -1209,7 +1856,6 @@ BENCHMARK_F(FPTypeConv, fp32_to_fp16_scalar)(benchmark::State& state) {
   size_t i;
   const size_t n_elem = buf_size / sizeof(float);
   for (auto _ : state) {
-#pragma clang loop unroll(disable) vectorize(disable)
     for (i = 0; i < n_elem; i += 1) {
       half_buf[i] = fp32_to_fp16_scalar(fp32_buf[i]);
     }
@@ -1261,7 +1907,6 @@ BENCHMARK_F(FPTypeConv, fp16_to_fp32_scalar)(benchmark::State& state) {
   size_t i;
   const size_t n_elem = buf_size / sizeof(float);
   for (auto _ : state) {
-#pragma clang loop unroll(disable) vectorize(disable)
     for (i = 0; i < n_elem; i += 1) {
       fp32_buf[i] = fp16_to_fp32_scalar(half_buf[i]);
     }
@@ -1308,7 +1953,6 @@ BENCHMARK_F(FPTypeConv, fp32_to_bf16_scalar)(benchmark::State& state) {
   size_t i;
   const size_t n_elem = buf_size / sizeof(float);
   for (auto _ : state) {
-#pragma clang loop unroll(disable) vectorize(disable)
     for (i = 0; i < n_elem; i += 1) {
       half_buf[i] = fp32_to_bf16_scalar(fp32_buf[i]);
     }
@@ -1333,7 +1977,6 @@ BENCHMARK_F(FPTypeConv, bf16_to_fp32_scalar)(benchmark::State& state) {
   size_t i;
   const size_t n_elem = buf_size / sizeof(float);
   for (auto _ : state) {
-#pragma clang loop unroll(disable) vectorize(disable)
     for (i = 0; i < n_elem; i += 1) {
       fp32_buf[i] = bf16_to_fp32_scalar(half_buf[i]);
     }
@@ -1349,29 +1992,28 @@ BENCHMARK_F(FPTypeConv, bf16_to_fp32_scalar)(benchmark::State& state) {
       double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
 }
 
-static __attribute__((noinline)) uint8_t fp32_to_u8_saturate_scalar(float f) {
-  // Round to nearest integer with ties to even (banker's rounding)
-  // nearbyintf respects the current rounding mode set by fesetround
-  // (FE_TONEAREST)
-  int32_t rounded = static_cast<int32_t>(std::nearbyintf(f));
+template <bool saturate>
+static __attribute__((noinline)) uint8_t fp32_rz_to_u8_scalar(float f) {
+  int32_t rounded = static_cast<int32_t>(f);
 
-  // Clamp to uint8 range [0, 257]
-  if (rounded > 255) {
-    return 255;
-  } else if (rounded < 0) {
-    return 0;
-  } else {
-    return static_cast<uint8_t>(rounded);
+  if constexpr (saturate) {
+    if (rounded > 255) {
+      return 255;
+    } else if (rounded < 0) {
+      return 0;
+    }
   }
+
+  return static_cast<uint8_t>(rounded);
 }
 
-BENCHMARK_F(FPTypeConv, fp32_to_u8_saturate_scalar)(benchmark::State& state) {
+BENCHMARK_F(FPTypeConv, fp32_rz_to_u8_saturate_scalar)(
+    benchmark::State& state) {
   size_t i;
   const size_t n_elem = buf_size / sizeof(float);
   for (auto _ : state) {
-#pragma clang loop unroll(disable) vectorize(disable)
     for (i = 0; i < n_elem; i += 1) {
-      uint8_buf[i] = fp32_to_u8_saturate_scalar(fp32_buf[i]);
+      uint8_buf[i] = fp32_rz_to_u8_scalar<true>(fp32_buf[i]);
     }
   }
 
@@ -1382,18 +2024,12 @@ BENCHMARK_F(FPTypeConv, fp32_to_u8_saturate_scalar)(benchmark::State& state) {
       double(n_elem) * state.iterations(), benchmark::Counter::kIsRate);
 }
 
-static __attribute__((noinline)) uint8_t fp32_to_u8_narrow_scalar(float f) {
-  int32_t rounded = static_cast<int32_t>(std::nearbyintf(f));
-  return static_cast<uint8_t>(rounded);
-}
-
-BENCHMARK_F(FPTypeConv, fp32_to_u8_narrow_scalar)(benchmark::State& state) {
+BENCHMARK_F(FPTypeConv, fp32_rz_to_u8_narrow_scalar)(benchmark::State& state) {
   size_t i;
   const size_t n_elem = buf_size / sizeof(float);
   for (auto _ : state) {
-#pragma clang loop unroll(disable) vectorize(disable)
     for (i = 0; i < n_elem; i += 1) {
-      uint8_buf[i] = fp32_to_u8_narrow_scalar(fp32_buf[i]);
+      uint8_buf[i] = fp32_rz_to_u8_scalar<false>(fp32_buf[i]);
     }
   }
 
@@ -1412,7 +2048,6 @@ BENCHMARK_F(FPTypeConv, u8_to_fp32_scalar)(benchmark::State& state) {
   size_t i;
   const size_t n_elem = buf_size / sizeof(float);
   for (auto _ : state) {
-#pragma clang loop unroll(disable) vectorize(disable)
     for (i = 0; i < n_elem; i += 1) {
       fp32_buf[i] = u8_to_fp32_scalar(uint8_buf[i]);
     }
