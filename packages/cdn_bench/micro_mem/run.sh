@@ -3,6 +3,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+echo "MEM"
 set -Eeuo pipefail
 
 MEM_MICRO_DIR="$(dirname "$(readlink -f "$0")")"
@@ -14,7 +15,7 @@ LOG_FILE="${3:-stream_run.log}"
 
 # Source file and binary name
 SRC="stream.c"
-BIN="stream-super-large-array"
+BIN="stream"
 
 # Change to mem_micro directory
 cd "$MEM_MICRO_DIR" || exit 1
@@ -26,7 +27,7 @@ if [ ! -f "$SRC" ]; then
 fi
 
 # Compile the STREAM benchmark
-echo "Compiling $SRC with STREAM_ARRAY_SIZE=$ARRAY_SIZE and NTIMES=$NTIMES..."
+echo "Compiling $SRC with stream array size = $ARRAY_SIZE and iterations =$NTIMES..."
 gcc -O -mcmodel=large -DSTREAM_ARRAY_SIZE="$ARRAY_SIZE" -DNTIMES="$NTIMES" "$SRC" -o "$BIN"
 
 # Check compilation success
@@ -35,21 +36,16 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
-# Run perf stat and collect all output to log file
-echo "Running perf stat on $BIN and logging output to $LOG_FILE..."
-{
-  echo "====================================================================="
-  echo "STREAM Benchmark Execution"
-  echo "====================================================================="
-  echo "Script: $0"
-  echo "Execution Date: $(date '+%Y-%m-%d %H:%M:%S')"
-  echo "Arguments Passed:"
-  echo "  - STREAM_ARRAY_SIZE: $ARRAY_SIZE"
-  echo "  - NTIMES: $NTIMES"
-  echo "  - LOG_FILE: $LOG_FILE"
-  echo "====================================================================="
-  echo ""
-  perf stat -e cycles,instructions,cache-references,cache-misses,LLC-load-misses,LLC-store-misses ./"$BIN" 2>&1
-} > "$LOG_FILE" 2>&1
-
-echo "Done. Output collected in $LOG_FILE."
+# Run perf stat and output to stdout
+echo "MEM"
+echo "====================================================================="
+echo "STREAM Benchmark Execution"
+echo "====================================================================="
+echo "Script: $0"
+echo "Execution Date: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Arguments Passed:"
+echo "  - STREAM_ARRAY_SIZE: $ARRAY_SIZE"
+echo "  - NTIMES: $NTIMES"
+echo "====================================================================="
+echo ""
+perf stat -e cycles,instructions,cache-references,cache-misses,LLC-load-misses,LLC-store-misses ./"$BIN" 2>&1
