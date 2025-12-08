@@ -11,7 +11,6 @@ MEM_MICRO_DIR="$(dirname "$(readlink -f "$0")")"
 # Parse arguments with defaults
 ARRAY_SIZE="${1:-201326592}"
 NTIMES="${2:-100}"
-LOG_FILE="${3:-stream_run.log}"
 
 # Source file and binary name
 SRC="stream.c"
@@ -36,7 +35,7 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
-# Run perf stat and output to stdout
+# Collect system metadata before benchmark
 echo "MEM"
 echo "====================================================================="
 echo "STREAM Benchmark Execution"
@@ -47,5 +46,81 @@ echo "Arguments Passed:"
 echo "  - STREAM_ARRAY_SIZE: $ARRAY_SIZE"
 echo "  - NTIMES: $NTIMES"
 echo "====================================================================="
+./"$BIN" 2>&1
 echo ""
-perf stat -e cycles,instructions,cache-references,cache-misses,LLC-load-misses,LLC-store-misses ./"$BIN" 2>&1
+
+# Get memory information
+echo "Total Memory: $(free -h | awk '/^Mem:/ {print $2}')\n"
+echo "====================================================================="
+echo "Memory Configuration"
+echo "====================================================================="
+echo "Memory Channels:"
+dmidecode -t memory 2>/dev/null | grep -E 'Locator|Size|Speed|Type:' | head -20 || echo "dmidecode not available"
+echo ""
+
+# Run STREAM benchmark with comprehensive perf monitoring
+echo "====================================================================="
+echo "Running STREAM Benchmark with Performance Monitoring"
+echo "====================================================================="
+echo ""
+
+# Run perf stat with extended memory and hardware counters(Captured with built in perfstat counters)
+
+# Post-benchmark metrics collection
+echo ""
+echo "====================================================================="
+echo "Post-Benchmark Metrics"
+echo "====================================================================="
+
+# Memory Allocation/Deallocation Patterns
+echo ""
+echo "Peak Memory Usage (High-Water Mark):"
+echo "RSS Peak: $(grep VmHWM /proc/$$/status 2>/dev/null || echo 'Not available')"
+echo "Current Memory Usage:"
+free -h
+echo ""
+
+# Resource Utilization and Scaling (Captured in mpstat.log)
+
+# NUMA latency matrix if numactl is available
+echo "====================================================================="
+echo "NUMA Latency Matrix"
+echo "====================================================================="
+if command -v numactl &> /dev/null; then
+    echo "NUMA distances (lower is better):"
+    numactl --hardware | grep -A 100 "node distances"
+else
+    echo "numactl not available for NUMA latency measurement"
+fi
+echo ""
+
+# Cache hierarchy information
+echo "====================================================================="
+echo "Cache Hierarchy"
+echo "====================================================================="
+lscpu | grep -E 'cache|Cache'
+echo ""
+
+# Page size information
+echo "====================================================================="
+echo "Memory Page Configuration"
+echo "====================================================================="
+echo "Default page size: $(getconf PAGESIZE) bytes"
+if [ -d /sys/kernel/mm/hugepages ]; then
+    echo "Huge pages configuration:"
+    for hp in /sys/kernel/mm/hugepages/hugepages-*; do
+        if [ -d "$hp" ]; then
+            size=$(basename "$hp" | sed 's/hugepages-//')
+            nr=$(cat "$hp/nr_hugepages" 2>/dev/null)
+            free=$(cat "$hp/free_hugepages" 2>/dev/null)
+            echo "  $size: $nr total, $free free"
+        fi
+    done
+else
+    echo "Huge pages not configured"
+fi
+echo ""
+
+echo "====================================================================="
+echo "Benchmark Execution Complete"
+echo "====================================================================="
