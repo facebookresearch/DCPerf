@@ -115,7 +115,7 @@ build_folly()
 
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive
 
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --scratch-path "${WDL_BUILD}"
+    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}"
 
     for benchmark in $folly_benchmark_list; do
       cp "$WDL_BUILD/build/folly/$benchmark" "$WDL_ROOT/$benchmark"
@@ -134,7 +134,7 @@ build_fbthrift()
 
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
 
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --scratch-path "${WDL_BUILD}" --extra-cmake-defines='{"enable_tests": "1"}'
+    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines='{"enable_tests": "1"}'
 
     for benchmark in $fbthrift_benchmark_list; do
       cp "$WDL_BUILD/build/fbthrift/bin/$benchmark" "$WDL_ROOT/$benchmark"
