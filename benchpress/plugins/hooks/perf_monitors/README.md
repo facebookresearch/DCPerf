@@ -14,6 +14,7 @@ while running DCPerf benchmarks.
 | [cpufreq_scaling](#cpufreq_scaling) <br> [cpufreq_cpuinfo](#cpufreq_cpuinfo) | Monitors CPU frequency during benchmarks. |
 | [topdown](#topdown) | Monitors uArch and top-down telemetries such as cache miss rates, memory bandwidth, and frontend/backend boundedness. |
 | [perfstat](#perfstat) | Collects performance counters through the `perf stat` command. Includes IPC by default. |
+| [vmstat](#vmstat) | Collects memory and uarchitecture counters through the `vmstat -s` command. |          
 
 ## Getting started
 
@@ -175,6 +176,54 @@ index,timestamp,eth0_rx_bytes_per_sec,eth0_rx_packets_per_sec,eth0_tx_bytes_per_
 3,11:40:02 AM,1192.808,6.194,3829.974,7.592,119.68,0.999,1048.952,8.791,376.224,2.997,5332.074,6.593,2835.368,8.991,498.902,4.795,734927.861,516.084,734927.861,516.084,
 4,11:40:07 AM,957.044,5.195,4437.366,5.994,124.476,0.999,1506.695,9.59,159.041,1.399,114.685,0.999,3114.089,10.19,43185.85,32.368,1073164.132,2896.706,1073164.132,2896.706,
 5,11:40:12 AM,474492398.205,315435.441,1838215.502,18091.69,2030.368,7.992,3408.588,16.583,88168680.613,58690.05,356612.422,3508.088,221889436.894,147617.631,840583.755,8146.645,3284434.002,2046.551,3284434.002,2046.551,
+
+```
+### `vmstat`
+
+This monitors CPU utilization during benchmark through parsing the output of
+`vmstat -s` command.
+
+#### Requirements
+
+- `vmstat` command (available in `sysstat` package)
+
+#### Parameters
+
+- `interval`: Metrics collection interval in seconds, default is `5`
+
+#### Output
+
+`benchmark_metrics_<run_id>/vmstat.csv`
+
+Sample content:
+
+```
+117093168 K total memory
+42901652 K used memory
+56998024 K active memory
+45728820 K inactive memory
+3309336 K free memory
+3208 K buffer memory
+72156096 K swap cache
+134217720 K total swap
+27119104 K used swap
+107098616 K free swap
+492368500 non-nice user cpu ticks
+3876770 nice user cpu ticks
+208221694 system cpu ticks
+24025210143 idle cpu ticks
+7968016 IO-wait cpu ticks
+27936311 IRQ cpu ticks
+27679620 softirq cpu ticks
+689622 stolen cpu ticks
+15925982586 pages paged in
+23550029636 pages paged out
+444694015 pages swapped in
+58422703 pages swapped out
+3356694331 interrupts
+1489709339 CPU context switches
+1760963740 boot time
+414504000 forks
 ```
 
 ### `cpufreq_scaling`

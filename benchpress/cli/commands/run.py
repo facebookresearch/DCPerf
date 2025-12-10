@@ -129,6 +129,7 @@ class RunCommand(BenchpressCommand):
         os_release_data = sys_specs.get_os_release_data()
         kernel_cmdline = sys_specs.get_kernel_cmdline()
         dmidecode_data = sys_specs.get_dmidecode_data()
+        numa_topology = sys_specs.get_numa_topology()
         numastat_data = sys_specs.get_numastat()
         ulimit_data = sys_specs.get_ulimit()
         sys_packages = []
@@ -146,6 +147,7 @@ class RunCommand(BenchpressCommand):
 
         sys_specs_dict = {}
         sys_specs_dict["cpu_topology"] = cpu_topology
+        sys_specs_dict["numa_topology"] = numa_topology
         sys_specs_dict["os_kernel"] = os_kernel_data
         sys_specs_dict["kernel_cmdline"] = kernel_cmdline
         sys_specs_dict["dmidecode"] = dmidecode_data

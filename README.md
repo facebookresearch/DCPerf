@@ -337,7 +337,7 @@ Install git, pip, then install click, pyyaml, tabulate and pandas:
 
 ```bash
 sudo apt update
-sudo apt install -y python3-pip git
+sudo apt install -y python3-pip git numactl sysstat
 sudo pip3 install click pyyaml tabulate pandas packaging
 ```
 
