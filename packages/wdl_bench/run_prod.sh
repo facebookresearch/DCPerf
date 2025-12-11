@@ -44,14 +44,6 @@ prod_benchmark_vdso="vdso_bench"
 prod_benchmark_math="benchsleef128"
 
 prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench benchsleef128"
-if [ -f "./benchsleef256" ]; then
-    prod_benchmark_math+=" benchsleef256"
-    prod_benchmarks+=" benchsleef256"
-fi
-if [ -f "./benchsleef512" ]; then
-    prod_benchmark_math+=" benchsleef512"
-    prod_benchmarks+=" benchsleef512"
-fi
 
 benchmark_non_json_list=("openssl" "libaegis_benchmark" "lzbench" "vdso_bench" "xxhash_benchmark" "concurrency_concurrent_hash_map_bench" "container_hash_maps_bench" "erasure_code_perf")
 
@@ -133,6 +125,16 @@ main() {
     benchreps_tell_state "working on config"
     pushd "${WDL_ROOT}"
     rm -f out_*.txt out_*.json
+
+    if [ -f "./benchsleef256" ]; then
+        prod_benchmark_math+=" benchsleef256"
+        prod_benchmarks+=" benchsleef256"
+    fi
+    if [ -f "./benchsleef512" ]; then
+        prod_benchmark_math+=" benchsleef512"
+        prod_benchmarks+=" benchsleef512"
+    fi
+
     #run
     benchreps_tell_state "start"
 
