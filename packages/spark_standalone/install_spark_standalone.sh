@@ -21,16 +21,12 @@ fi
 # Install system dependencies
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y git-lfs fio
-  wget https://download.oracle.com/graalvm/17/archive/graalvm-jdk-17.0.12_linux-${GRAALVM_ARCH}_bin.tar.gz
-  mkdir -p /usr/lib/jvm/
-  tar -xzf graalvm-jdk-17.0.12_linux-${GRAALVM_ARCH}_bin.tar.gz -C /usr/lib/jvm/
-
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y git-lfs fio
-  wget https://download.oracle.com/graalvm/17/archive/graalvm-jdk-17.0.12_linux-${GRAALVM_ARCH}_bin.tar.gz
-  mkdir -p /usr/lib/jvm/
-  tar -xzf graalvm-jdk-17.0.12_linux-${GRAALVM_ARCH}_bin.tar.gz -C /usr/lib/jvm/
 fi
+wget https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-17.0.9/graalvm-community-jdk-17.0.9_linux-${GRAALVM_ARCH}_bin.tar.gz
+mkdir -p /usr/lib/jvm/
+tar -xzf graalvm-community-jdk-17.0.9_linux-${GRAALVM_ARCH}_bin.tar.gz -C /usr/lib/jvm/
 
 # copy over directory
 if [ ! -d "${OUT}/scripts" ]; then
