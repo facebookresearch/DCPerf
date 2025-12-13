@@ -321,6 +321,7 @@ cp "${BPKGS_WDL_ROOT}/run_prod.sh" ./
 cp "${BPKGS_WDL_ROOT}/convert.py" ./
 cp "${BPKGS_WDL_ROOT}/aggregate_result.py" ./
 cp "${BPKGS_WDL_ROOT}/parse_line.py" ./
+cp "${BPKGS_WDL_ROOT}/scoring.py" ./
 
 cp "${BPKGS_WDL_ROOT}/baseline_results" ./ -r
 
