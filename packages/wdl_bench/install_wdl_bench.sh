@@ -56,7 +56,8 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y cmake autoconf automake flex bison \
     nasm clang patch git libssl-dev libc6-dev\
-    tar unzip perl openssl python3-dev gawk libstdc++6 python3-numpy
+    tar unzip perl openssl python3-dev gawk libstdc++6 python3-numpy \
+    glibc-source
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y cmake autoconf automake flex bison \
@@ -87,6 +88,10 @@ clone()
     if ! git clone "${repo}" "${lib}" 2>/dev/null && [ -d "${lib}" ]; then
         echo "Clone failed because the folder ${lib} exists"
         return 1
+    fi
+    if [ ! -d "${lib}" ]; then
+        echo "Failed to clone ${lib} and directory does not exist."
+        exit 1
     fi
     pushd "$lib" || exit 1
     tag=${TAGS[$lib]}
@@ -228,7 +233,16 @@ build_glibc()
 {
     lib='glibc'
     pushd "${WDL_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+        # Ubuntu may tweak some glibc configurations that may break build,
+        # so we should not use the official glibc. Instead, we extract the
+        # glibc source code from the glibc-source package under /usr/src/glibc/
+        mkdir "$lib"
+        tar -xJf /usr/src/glibc/glibc-"${GLIBC_VERSION}".tar.xz -C "$lib" --strip-components=1
+    else
+        clone $lib || echo "Failed to clone $lib"
+    fi
+
     pushd "${WDL_BUILD}"
     mkdir glibc-build && cd glibc-build
     "${WDL_SOURCE}/$lib"/configure --prefix="${WDL_BUILD}/glibc-build"
@@ -305,16 +319,60 @@ EOF
 
 pushd "${WDL_ROOT}"
 
-build_folly
-build_fbthrift
-build_lzbench
-build_openssl
-build_vdso
-build_libaegis
-build_xxhash
-build_glibc
-build_isa_l
-build_sleef
+TARGET=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --name)
+            [[ -n "$2" ]] || { echo "Invalid option: $1 requires an argument"; exit 1; }
+            TARGET="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: $0 [--name <component>]"
+            echo "If --name is omitted, ALL components will be built."
+            exit 0
+            ;;
+        *)
+            echo "Unsupported arg: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$TARGET" ]]; then
+    echo "No --name specified. Defaulting to building EVERYTHING."
+    TARGET="all"
+fi
+
+case "$TARGET" in
+    all)
+        build_folly
+        build_fbthrift
+        build_lzbench
+        build_openssl
+        build_vdso
+        build_libaegis
+        build_xxhash
+        build_glibc
+        build_isa_l
+        build_sleef
+        ;;
+    folly)    build_folly ;;
+    fbthrift) build_fbthrift ;;
+    lzbench)  build_lzbench ;;
+    openssl)  build_openssl ;;
+    vdso)     build_vdso ;;
+    libaegis) build_libaegis ;;
+    xxhash)   build_xxhash ;;
+    glibc)    build_glibc ;;
+    isa_l)    build_isa_l ;;
+    sleef)    build_sleef ;;
+    *)
+        echo "Error: Unknown build target '$TARGET'"
+        exit 1
+        ;;
+esac
 
 cp "${BPKGS_WDL_ROOT}/run.sh" ./
 cp "${BPKGS_WDL_ROOT}/run_prod.sh" ./

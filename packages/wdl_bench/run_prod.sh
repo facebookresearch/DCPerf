@@ -22,11 +22,10 @@ WDL_BUILD="${WDL_ROOT}/wdl_build"
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [--type single_core|all_core|multi_thread]
+Usage: ${0##*/} [-h] [--name benchmark_name]
 
     -h Display this help and exit
-    -output Result output file name. Default: "wdl_results.txt"
-    -dataset Dataset file name. Default: "silesia.tar"
+    -name Benchmark name. Default: "all"
 EOF
 }
 
@@ -41,9 +40,9 @@ prod_benchmark_thrift="ProtocolBench VarintUtilsBench"
 prod_benchmark_f14="container_hash_maps_bench"
 prod_benchmark_lock="synchronization_small_locks_benchmark synchronization_lifo_sem_bench"
 prod_benchmark_vdso="vdso_bench"
-prod_benchmark_math="benchsleef128"
+prod_benchmark_math="benchsleef128 benchsleef256 benchsleef512"
 
-prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench benchsleef128"
+prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench benchsleef128 benchsleef256 benchsleef512"
 
 benchmark_non_json_list=("openssl" "libaegis_benchmark" "lzbench" "vdso_bench" "xxhash_benchmark" "concurrency_concurrent_hash_map_bench" "container_hash_maps_bench" "erasure_code_perf")
 
@@ -67,7 +66,7 @@ declare -A prod_benchmark_config=(
     ['hash_hash_benchmark']="--bm_regex=RapidHash --json"
     ['hash_checksum_benchmark']="--json"
     ['synchronization_lifo_sem_bench']="--bm_min_iters=1000000 --json"
-    ['synchronization_small_locks_benchmark']="--bm_min_iters=1000000 --bm_regex=folly_RWSpinlock --json"
+    ['synchronization_small_locks_benchmark']="--bm_min_iters=1000000 --bm_regex=\"(atomic_cas|atomics_fetch_add|std_mutex_simple).*\" -run_fairness=false -unlocked_work 0 --json"
     ['container_hash_maps_bench']="--bm_regex=\"f14(vec)|(val)\" --json" # filter find, insert, InsertSqBr, erase, and Iter operations in results parse script
     ['ProtocolBench']="--bm_regex=\"(^Binary)|(^Compact)Protocol\" --json"
     ['VarintUtilsBench']=" --json"
@@ -91,58 +90,49 @@ main() {
     local name
     name="none"
 
-
-    while :; do
-        case $1 in
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
             --name)
+                [[ -n "$2" ]] || { echo "Invalid option: $1 requires an argument" 1>&2; exit 1; }
                 name="$2"
+                shift 2
                 ;;
-            -h)
+            -h|--help)
                 show_help >&2
+                exit 0
+                ;;
+            *)
+                echo "Unsupported arg: $1"
                 exit 1
                 ;;
-            *)  # end of input
-                echo "Unsupported arg $1"
-                break
         esac
-
-        case $1 in
-            --name)
-                if [ -z "$2" ]; then
-                    echo "Invalid option: $1 requires an argument" 1>&2
-                    exit 1
-                fi
-                shift   # Additional shift for the argument
-                ;;
-        esac
-        shift
     done
-
-
-
 
     set -u  # Enable unbound variables check from here onwards
     benchreps_tell_state "working on config"
     pushd "${WDL_ROOT}"
     rm -f out_*.txt out_*.json
 
-    if [ -f "./benchsleef256" ]; then
-        prod_benchmark_math+=" benchsleef256"
-        prod_benchmarks+=" benchsleef256"
-    fi
-    if [ -f "./benchsleef512" ]; then
-        prod_benchmark_math+=" benchsleef512"
-        prod_benchmarks+=" benchsleef512"
-    fi
-
     #run
     benchreps_tell_state "start"
 
+    prod_benchmark_candidates=""
     if [ "$name" != "none" ]; then
-        run_list="$name"
+        prod_benchmark_candidates=$name
     else
-        run_list="$prod_benchmarks"
+        prod_benchmark_candidates=$prod_benchmarks
     fi
+
+    valid_prod_benchmarks=()
+    for bin in $prod_benchmark_candidates; do
+        if [ -f "./$bin" ]; then
+            valid_prod_benchmarks+=("$bin")
+            # echo "Adding $bin to run list"
+        else
+            echo "Skipping $bin (does not exist)"
+        fi
+    done
+    run_list="${valid_prod_benchmarks[*]}"
 
     for benchmark in $run_list; do
         if [ "$benchmark" = "openssl" ]; then
