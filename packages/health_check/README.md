@@ -79,6 +79,38 @@ should be higher than 15k.  If you see very low calls per second per thread and
 high CPU utilization, it's likely you'll encounter performance bottleneck in TaoBench
 due to nanosleep() and/or task scheduling.
 
+### Sleep Benchmark
+
+The Sleep benchmark is a simple utility that sleeps for a specified duration. Its
+primary purpose is to allow users to leverage Benchpress's Perf Monitoring Hook
+to collect performance metrics while running external workloads that are not part
+of DCPerf.
+
+**Use Case**: When you want to monitor system performance metrics (CPU utilization,
+memory usage, micro-architecture telemetries, etc.) for an external application or
+workload using Benchpress's performance monitoring infrastructure.
+
+**Usage**:
+
+```bash
+./benchpress_cli.py run sleep -i '{"duration": "60"}'
+```
+
+Where `duration` is the time in seconds to sleep (and collect metrics if perf
+hooks are enabled).
+
+**Example with Perf Monitoring**:
+
+To monitor an external workload for 5 minutes while collecting performance metrics:
+
+```bash
+./benchpress_cli.py run sleep -i '{"duration": "300"}' --hook perf
+```
+
+This allows you to start your external workload separately and use Benchpress's
+monitoring infrastructure to collect performance data during the sleep period.
+
+
 ## Reporting
 
 Once the benchmark finishes on the server benchmarking machine, benchpress will
