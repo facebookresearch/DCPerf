@@ -24,7 +24,7 @@ from .bundle_tray import BundleTray
 from .clips import Clips
 from .feed import Feed
 from .feed_timeline import FeedTimeline
-from .inbox import Inbox
+from .inbox_handler import Inbox
 from .models import BundleSeenModel
 
 from .users import require_user

@@ -18,6 +18,7 @@ import os
 import random
 import socket
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -47,6 +48,7 @@ from mock_services import (
     MockAdsService,
     MockClipsDiscoverService,
     MockContentFilterService,
+    MockInboxService,
     MockRankingService,
     MockReelsTrayService,
     MockUserPreferenceService,
@@ -62,6 +64,16 @@ from mock_services.ttypes import (
     FetchAdsResponse,
     FilterContentRequest,
     FilterContentResponse,
+    InboxGetThreadsResponse,
+    InboxMessagePreview,
+    InboxMessagePreviewsResponse,
+    InboxSpamCheckResponse,
+    InboxSpamCheckResult,
+    InboxThread,
+    InboxUserMetadata,
+    InboxUserMetadataResponse,
+    IrisSubscriptionState,
+    IrisSubscriptionStateResponse,
     RankItemsRequest,
     RankItemsResponse,
     ReelsTrayResponse,
@@ -523,6 +535,286 @@ class MockClipsDiscoverServiceHandler:
         )
 
 
+class MockInboxServiceHandler:
+    """
+    Handler implementation for MockInboxService.
+
+    Models the activity.api.views.inbox endpoint from production IG Django
+    server. This service handles the Instagram Direct inbox - the messaging
+    feature that allows users to send and receive direct messages.
+
+    Key production patterns modeled:
+    - Thread list fetching with pagination
+    - Message preview aggregation
+    - Spam filtering via microservice
+    - User metadata fetching via NodeAPI/LazyUserDict
+    - Iris subscription for real-time updates
+    - Read state management and badge calculation
+
+    Each RPC call creates Python↔Thrift boundary crossings for realistic
+    I-cache pressure simulation.
+    """
+
+    # Configuration matching production patterns
+    MAX_THREADS_PER_PAGE = 20
+    MESSAGE_PREVIEW_LENGTH = 50
+
+    def getThreads(self, request) -> InboxGetThreadsResponse:
+        """
+        Gets inbox threads for a viewer.
+
+        Models fetching thread lists from Direct cache and database.
+        Includes pagination support via cursor.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with viewer info)
+        - Thread generation with metadata
+        - Thrift serialization (response with threads and paging)
+        """
+        viewer_id = request.viewer_id
+        page_size = min(request.page_size, self.MAX_THREADS_PER_PAGE)
+        include_spam = request.include_spam
+        current_time = int(time.time())
+
+        # Generate mock threads
+        threads = []
+        for i in range(page_size):
+            thread_id = f"thread_{viewer_id}_{i}_{random.randint(1000, 9999)}"
+            num_participants = random.randint(2, 8)
+            participant_ids = [
+                f"user_{random.randint(1, 10000)}" for _ in range(num_participants)
+            ]
+
+            is_spam = random.random() < 0.05 if include_spam else False
+            thread_types = ["private", "group"]
+
+            thread = InboxThread(
+                thread_id=thread_id,
+                participant_ids=participant_ids,
+                last_activity_at=current_time - random.randint(0, 86400 * 7),
+                unread_count=random.randint(0, 10) if random.random() < 0.3 else 0,
+                is_spam=is_spam,
+                is_muted=random.random() < 0.1,
+                thread_type=random.choice(thread_types),
+                title=f"Chat {i}" if random.random() < 0.3 else None,
+            )
+            threads.append(thread)
+
+        # Sort by last activity
+        threads.sort(key=lambda t: t.last_activity_at, reverse=True)
+
+        # Generate next cursor
+        next_cursor = None
+        if threads:
+            next_cursor = f"cursor_{threads[-1].thread_id}"
+
+        response = InboxGetThreadsResponse(
+            threads=threads,
+            total_threads=len(threads),
+            next_cursor=next_cursor,
+            has_more=True,
+            request_id=f"inbox_threads_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def getMessagePreviews(self, request) -> InboxMessagePreviewsResponse:
+        """
+        Gets message previews for threads.
+
+        Models fetching the latest messages for inbox display.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with thread IDs)
+        - Message preview generation
+        - Thrift serialization (response with previews map)
+        """
+        thread_ids = request.thread_ids
+        messages_per_thread = request.messages_per_thread
+        current_time = int(time.time())
+
+        message_types = ["text", "media", "link", "voice", "video_call"]
+        sample_texts = [
+            "Hey, how are you?",
+            "Check this out!",
+            "Thanks!",
+            "See you later",
+            "Sounds good",
+            "👍",
+            "😂",
+            "Sent a photo",
+            "Shared a reel",
+            "Voice message",
+        ]
+
+        previews = {}
+        for thread_id in thread_ids:
+            messages = []
+            for m in range(messages_per_thread):
+                message = InboxMessagePreview(
+                    message_id=f"msg_{thread_id}_{m}_{random.randint(1000, 9999)}",
+                    thread_id=thread_id,
+                    sender_id=f"user_{random.randint(1, 10000)}",
+                    text_preview=random.choice(sample_texts),
+                    timestamp=current_time - random.randint(0, 3600),
+                    message_type=random.choice(message_types),
+                    is_unsent=random.random() < 0.02,
+                )
+                messages.append(message)
+            previews[thread_id] = messages
+
+        response = InboxMessagePreviewsResponse(
+            previews=previews,
+            request_id=f"inbox_previews_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def checkThreadsSpam(self, request) -> InboxSpamCheckResponse:
+        """
+        Checks threads for spam.
+
+        Models calling the spam filtering microservice.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with thread IDs)
+        - Spam score computation
+        - Thrift serialization (response with spam results)
+        """
+        thread_ids = request.thread_ids
+        spam_reasons = [
+            "suspicious_links",
+            "mass_messaging",
+            "keyword_match",
+            "new_account",
+            "reported_user",
+        ]
+
+        results = {}
+        for thread_id in thread_ids:
+            spam_score = random.random()
+            is_spam = spam_score > 0.8
+
+            result = InboxSpamCheckResult(
+                thread_id=thread_id,
+                is_spam=is_spam,
+                spam_score=spam_score,
+                spam_reason=random.choice(spam_reasons) if is_spam else None,
+            )
+            results[thread_id] = result
+
+        response = InboxSpamCheckResponse(
+            results=results,
+            request_id=f"inbox_spam_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def getUserMetadata(self, request) -> InboxUserMetadataResponse:
+        """
+        Gets user metadata for inbox participants.
+
+        Models the NodeAPI/LazyUserDict pattern for batch user fetching.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with user IDs)
+        - User metadata generation
+        - Thrift serialization (response with metadata map)
+        """
+        user_ids = request.user_ids
+        current_time = int(time.time())
+        presence_statuses = ["active", "recently_active", "offline"]
+
+        sample_usernames = [
+            "alice",
+            "bob",
+            "charlie",
+            "diana",
+            "emma",
+            "frank",
+            "grace",
+            "henry",
+            "ivy",
+            "jack",
+        ]
+        sample_names = [
+            "Alice Smith",
+            "Bob Jones",
+            "Charlie Brown",
+            "Diana Prince",
+            "Emma Watson",
+            "Frank Miller",
+            "Grace Lee",
+            "Henry Ford",
+            "Ivy Chen",
+            "Jack Wilson",
+        ]
+
+        metadata = {}
+        for i, user_id in enumerate(user_ids):
+            username = sample_usernames[i % len(sample_usernames)]
+            full_name = sample_names[i % len(sample_names)]
+
+            user_meta = InboxUserMetadata(
+                user_id=user_id,
+                username=f"{username}_{user_id[-4:]}",
+                full_name=full_name,
+                profile_pic_url=f"https://cdn.example.com/pics/{user_id}.jpg",
+                is_verified=random.random() < 0.05,
+                is_private=random.random() < 0.3,
+                presence_status=random.choice(presence_statuses),
+                last_active_at=current_time - random.randint(0, 3600)
+                if random.random() < 0.5
+                else None,
+            )
+            metadata[user_id] = user_meta
+
+        response = InboxUserMetadataResponse(
+            metadata=metadata,
+            total_fetched=len(metadata),
+            request_id=f"inbox_meta_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def getIrisState(self, request) -> IrisSubscriptionStateResponse:
+        """
+        Gets Iris subscription state for real-time inbox updates.
+
+        Models checking Iris for pending updates and resnapshot triggers.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with viewer ID)
+        - Subscription state generation
+        - Thrift serialization (response with Iris state)
+        """
+        viewer_id = request.viewer_id
+        current_time = int(time.time())
+        has_updates = random.random() < 0.2
+
+        pending_threads = []
+        if has_updates:
+            num_pending = random.randint(1, 5)
+            pending_threads = [
+                f"thread_{viewer_id}_{random.randint(1000, 9999)}"
+                for _ in range(num_pending)
+            ]
+
+        state = IrisSubscriptionState(
+            sequence_id=random.randint(1000000, 9999999),
+            snapshot_at=current_time - random.randint(0, 300),
+            has_pending_updates=has_updates,
+            pending_thread_ids=pending_threads,
+        )
+
+        response = IrisSubscriptionStateResponse(
+            state=state,
+            request_id=f"pubsub_state_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+
 class MockReelsTrayServiceHandler:
     """
     Handler implementation for MockReelsTrayService.
@@ -847,6 +1139,7 @@ def main():
     pref_handler = MockUserPreferenceServiceHandler()
     clips_handler = MockClipsDiscoverServiceHandler()
     reels_tray_handler = MockReelsTrayServiceHandler()
+    inbox_handler = MockInboxServiceHandler()
 
     print("[ThriftServer] Created handlers for all services")
 
@@ -859,8 +1152,8 @@ def main():
     print(f"[ThriftServer] Starting Thrift server on {HOST}:{PORT}")
     print(f"[ThriftServer] Thread pool size: {MAX_WORKERS} concurrent connections")
     print(
-        "[ThriftServer] Supporting 6 services: Ads, Ranking, ContentFilter, "
-        "UserPreference, ClipsDiscover, ReelsTray"
+        "[ThriftServer] Supporting 7 services: Ads, Ranking, ContentFilter, "
+        "UserPreference, ClipsDiscover, ReelsTray, Inbox"
     )
     print("[ThriftServer] Each RPC creates Python↔Thrift boundary crossings")
     print("[ThriftServer] Server accepts connections from any network interface")
@@ -896,6 +1189,7 @@ def main():
                     pref_handler,
                     clips_handler,
                     reels_tray_handler,
+                    inbox_handler,
                 )
 
     except KeyboardInterrupt:
@@ -923,6 +1217,7 @@ def handle_client(
     pref_handler,
     clips_handler,
     reels_tray_handler,
+    inbox_handler,
 ):
     """Handle a single client connection with all services."""
     try:
@@ -938,6 +1233,7 @@ def handle_client(
         pref_processor = MockUserPreferenceService.Processor(pref_handler)
         clips_processor = MockClipsDiscoverService.Processor(clips_handler)
         reels_tray_processor = MockReelsTrayService.Processor(reels_tray_handler)
+        inbox_processor = MockInboxService.Processor(inbox_handler)
 
         try:
             while True:
@@ -993,6 +1289,24 @@ def handle_client(
                     reels_tray_processor.process_getTrayBucketClips(
                         rseqid, iprot, oprot, None
                     )
+                # Inbox service methods
+                elif method_name in ["getThreads"]:
+                    iprot.readMessageEnd()
+                    inbox_processor.process_getThreads(rseqid, iprot, oprot, None)
+                elif method_name in ["getMessagePreviews"]:
+                    iprot.readMessageEnd()
+                    inbox_processor.process_getMessagePreviews(
+                        rseqid, iprot, oprot, None
+                    )
+                elif method_name in ["checkThreadsSpam"]:
+                    iprot.readMessageEnd()
+                    inbox_processor.process_checkThreadsSpam(rseqid, iprot, oprot, None)
+                elif method_name in ["getUserMetadata"]:
+                    iprot.readMessageEnd()
+                    inbox_processor.process_getUserMetadata(rseqid, iprot, oprot, None)
+                elif method_name in ["getIrisState"]:
+                    iprot.readMessageEnd()
+                    inbox_processor.process_getIrisState(rseqid, iprot, oprot, None)
                 else:
                     print(f"[ThriftServer] WARNING: Unknown method '{method_name}'")
                     iprot.skip(TBinaryProtocol.TType.STRUCT)

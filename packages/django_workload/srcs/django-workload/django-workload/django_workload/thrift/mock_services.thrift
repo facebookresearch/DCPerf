@@ -358,3 +358,137 @@ struct TrayBucketClipsResponse {
   3: bool more_available;
   4: string request_id;
 }
+
+// ============================================================================
+// Inbox Service - Models activity.api.views.inbox
+// ============================================================================
+
+service MockInboxService {
+  InboxGetThreadsResponse getThreads(1: InboxGetThreadsRequest request);
+  InboxMessagePreviewsResponse getMessagePreviews(
+    1: InboxMessagePreviewsRequest request,
+  );
+  InboxSpamCheckResponse checkThreadsSpam(1: InboxSpamCheckRequest request);
+  InboxUserMetadataResponse getUserMetadata(
+    1: InboxUserMetadataRequest request,
+  );
+  IrisSubscriptionStateResponse getIrisState(
+    1: IrisSubscriptionStateRequest request,
+  );
+}
+
+// Thread data structure
+struct InboxThread {
+  1: string thread_id;
+  2: list<string> participant_ids;
+  3: i64 last_activity_at;
+  4: i32 unread_count;
+  5: bool is_spam;
+  6: bool is_muted;
+  7: string thread_type;
+  8: optional string title;
+}
+
+// Message preview structure
+struct InboxMessagePreview {
+  1: string message_id;
+  2: string thread_id;
+  3: string sender_id;
+  4: string text_preview;
+  5: i64 timestamp;
+  6: string message_type;
+  7: bool is_unsent;
+}
+
+// User metadata for inbox participants
+struct InboxUserMetadata {
+  1: string user_id;
+  2: string username;
+  3: string full_name;
+  4: string profile_pic_url;
+  5: bool is_verified;
+  6: bool is_private;
+  7: string presence_status;
+  8: optional i64 last_active_at;
+}
+
+// Spam check result
+struct InboxSpamCheckResult {
+  1: string thread_id;
+  2: bool is_spam;
+  3: double spam_score;
+  4: optional string spam_reason;
+}
+
+// Iris subscription state
+struct IrisSubscriptionState {
+  1: i64 sequence_id;
+  2: i64 snapshot_at;
+  3: bool has_pending_updates;
+  4: list<string> pending_thread_ids;
+}
+
+// Request to get threads
+struct InboxGetThreadsRequest {
+  1: i64 viewer_id;
+  2: optional string cursor;
+  3: i32 page_size;
+  4: bool include_spam;
+}
+
+// Response with threads
+struct InboxGetThreadsResponse {
+  1: list<InboxThread> threads;
+  2: i32 total_threads;
+  3: optional string next_cursor;
+  4: bool has_more;
+  5: string request_id;
+}
+
+// Request for message previews
+struct InboxMessagePreviewsRequest {
+  1: list<string> thread_ids;
+  2: i32 messages_per_thread;
+}
+
+// Response with message previews
+struct InboxMessagePreviewsResponse {
+  1: map<string, list<InboxMessagePreview>> previews;
+  2: string request_id;
+}
+
+// Request to check threads for spam
+struct InboxSpamCheckRequest {
+  1: list<string> thread_ids;
+  2: i64 viewer_id;
+}
+
+// Response with spam check results
+struct InboxSpamCheckResponse {
+  1: map<string, InboxSpamCheckResult> results;
+  2: string request_id;
+}
+
+// Request for user metadata
+struct InboxUserMetadataRequest {
+  1: list<string> user_ids;
+  2: i64 viewer_id;
+}
+
+// Response with user metadata
+struct InboxUserMetadataResponse {
+  1: map<string, InboxUserMetadata> metadata;
+  2: i32 total_fetched;
+  3: string request_id;
+}
+
+// Request for Iris subscription state
+struct IrisSubscriptionStateRequest {
+  1: i64 viewer_id;
+}
+
+// Response with Iris subscription state
+struct IrisSubscriptionStateResponse {
+  1: IrisSubscriptionState state;
+  2: string request_id;
+}
