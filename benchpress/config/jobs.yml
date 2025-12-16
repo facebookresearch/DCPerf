@@ -187,39 +187,45 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c {db_addr}'
-        - '-I {interpreter}'
-        - '-A {use_async}'
-        - '-P {base_port}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
         - '-T {stats_port}'
+        - '--use-jit {use_jit}'
       vars:
         - 'db_addr'
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
-        - 'interpreter=cpython'
+        - 'interpreter=cinder'
         - 'use_async=1'
         - 'base_port=16667'
         - 'stats_port=8001'
+        - 'use_jit=1'
     db:
       args:
         - '-r db'
         - '-b {bind_ip}'
+        - '--thrift-server-workers {thrift_server_workers}'
       vars:
         - 'bind_ip=default'
+        - 'thrift_server_workers=32'
     server:
       args:
         - '-r server'
         - '-c {db_addr}'
-        - '-I {interpreter}'
-        - '-A {use_async}'
-        - '-P {base_port}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
         - '-T {stats_port}'
+        - '--use-jit {use_jit}'
       vars:
         - 'db_addr'
-        - 'interpreter=cpython'
+        - 'interpreter=cinder'
         - 'use_async=1'
         - 'base_port=16667'
         - 'stats_port=8001'
+        - 'use_jit=1'
     standalone:
       args:
         - '-r standalone'
@@ -229,18 +235,22 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c 127.0.0.1'
-        - '-I {interpreter}'
-        - '-A {use_async}'
-        - '-P {base_port}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
         - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--thrift-server-workers {thrift_server_workers}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
-        - 'interpreter=cpython'
+        - 'interpreter=cinder'
         - 'use_async=1'
         - 'base_port=16667'
         - 'stats_port=8001'
+        - 'use_jit=1'
+        - 'thrift_server_workers=32'
   hooks:
     - hook: copymove
       options:
@@ -268,10 +278,11 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c {db_addr}'
-        - '-I {interpreter}'
-        - '-A {use_async}'
-        - '-P {base_port}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
         - '-T {stats_port}'
+        - '--use-jit {use_jit}'
       vars:
         - 'db_addr'
         - 'duration=5M'
@@ -281,26 +292,31 @@
         - 'use_async=1'
         - 'base_port=16667'
         - 'stats_port=8001'
+        - 'use_jit=0'
     db:
       args:
         - '-r db'
         - '-b {bind_ip}'
+        - '--thrift-server-workers {thrift_server_workers}'
       vars:
         - 'bind_ip=default'
+        - 'thrift_server_workers=32'
     server:
       args:
         - '-r server'
         - '-c {db_addr}'
-        - '-I {interpreter}'
-        - '-A {use_async}'
-        - '-P {base_port}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
         - '-T {stats_port}'
+        - '--use-jit {use_jit}'
       vars:
         - 'db_addr'
         - 'interpreter=cpython'
         - 'use_async=1'
         - 'base_port=16667'
         - 'stats_port=8001'
+        - 'use_jit=0'
     standalone:
       args:
         - '-r standalone'
@@ -310,10 +326,12 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c 127.0.0.1'
-        - '-I {interpreter}'
-        - '-A {use_async}'
-        - '-P {base_port}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
         - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--thrift-server-workers {thrift_server_workers}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
@@ -322,6 +340,8 @@
         - 'use_async=1'
         - 'base_port=16667'
         - 'stats_port=8001'
+        - 'use_jit=0'
+        - 'thrift_server_workers=32'
   hooks:
     - hook: copymove
       options:
@@ -476,17 +496,19 @@
         - 'db_addr'
         - 'server_workers'
         - 'interpreter=cpython'
-        - 'use_async=1'
         - 'base_port=16667'
         - 'stats_port=8001'
+        - 'use_jit=0'
     db:
       args:
         - '-r db'
         - '-y {concur_writes}'
         - '-b {bind_ip}'
+        - '--thrift-server-workers {thrift_server_workers}'
       vars:
         - 'concur_writes'
         - 'bind_ip=default'
+        - 'thrift_server_workers=32'
   hooks:
     - hook: copymove
       options:

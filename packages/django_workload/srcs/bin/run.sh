@@ -242,16 +242,26 @@ cat <<EOF
 Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] \
 [-d duration of workload] [-p number of repetitions] [-l siege logfile path] \
 [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] \
-[-t snapshot taking] [-I interpreter] [-P base port] [-T stats port] [-W thrift_servers]
+[-t snapshot taking] [--interpreter cpython|cinder] [--base-port port] [-T stats port] \
+[--thrift-server-workers num] [--use-async 0|1] [--use-jit 0|1] [--skip-datagen 0|1]
+
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
 For role "server", "clientserver":
     -w          number of server workers (default NPROC)
     -c          ip address of the cassandra server (required)
-    -I          python interpreter to use (cpython or cinder, default is cpython)
-    -P          base port for Proxygen workers (default 8001)
-    -T          HAProxy stats port (default 16667)
+    --interpreter
+                python interpreter to use (cpython or cinder, default is cpython)
+    --base-port
+                base port for Proxygen workers (default 16667)
+    -T          HAProxy stats port (default 8001)
+    --use-async
+                set to 1 to enable async mode with load balancing (default 1)
+    --use-jit   set to a positive number to enable JIT (Cinder on x86 only).
+                If enabled, sets PYTHONJIT environment variables. (default 0)
+    --skip-datagen
+                set to 1 to skip data generation and use existing data (default 0)
     -L          when provided snapshot loading is enabled, meaning that the database is loaded from a snapshot stored in the specifed path (default disabled)
     -t          when provided snapshot taking is enabled, meaning that the a snapshot of the generetaed database will be stored in the specifed path (default disabled)
     -S          skip the database setup and use the snapshot stored in the Cassandra data directory (default disabled)
@@ -270,7 +280,8 @@ For role "client":
 For role "db":
     -y          number of cassandra concurrent writes (default 128)
     -b          ip address that cassandra will bind to (default to the first IP from "hostname -i": $(hostname -i))
-    -W          number of thrift server workers (default: min(nproc, 32)
+    --thrift-server-workers
+                number of thrift server workers (default: min(nproc, 32))
 
 
 EOF
@@ -488,9 +499,21 @@ start_django_server() {
   local num_server_workers=$2
   local interpreter=${3:-cpython}
   local use_async=${4:-0}
+  local use_jit=${5:-0}
 
   # Export FBTHRIFT_PREFIX for thrift Python bindings
   export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
+
+  # Enable JIT if requested (Cinder on x86 only)
+  if [ "${use_jit}" -gt 0 ] && [ "${interpreter}" = "cinder" ]; then
+    echo "Enabling Cinder JIT..."
+    export PYTHONJIT=1
+    export PYTHONJITWRITEPROFILE=/tmp/cinder-jit.profile
+    export PYTHONJITPROFILEINTERP=1
+    export PYTHONJITPROFILEINTERPPERIOD=10
+    export PYTHONJITDUMPSTATS=1
+    export PYTHONJITALLSTATICFUNCTIONS=1
+  fi
 
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -629,11 +652,12 @@ start_clientserver() {
   local reps="$8"
   local interpreter="${9:-cpython}"
   local use_async="${10:-0}"
+  local use_jit="${11:-0}"
 
   create_breakdown_csv "$BREAKDOWN_FOLDER"
   log_preprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
-  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" "${use_async}" &
+  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" "${use_async}" "${use_jit}" &
   server_pid="$!"
 
   # Wait for the server to start
@@ -733,10 +757,10 @@ main() {
   use_async=1
 
   local base_port
-  base_port=8001
+  base_port=16667
 
   local stats_port
-  stats_port=16667
+  stats_port=8001
 
   local thrift_server_workers
   thrift_server_workers=32
@@ -744,7 +768,80 @@ main() {
     thrift_server_workers="$(nproc)"
   fi
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:L:t:SI:A:P:T:W:' OPTION "${@}"; do
+  local use_jit
+  use_jit=0
+
+  local skip_datagen
+  skip_datagen=0
+
+  # Parse long options manually
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --interpreter)
+        interpreter="$2"
+        shift 2
+        ;;
+      --interpreter=*)
+        interpreter="${1#*=}"
+        shift
+        ;;
+      --use-async)
+        use_async="$2"
+        shift 2
+        ;;
+      --use-async=*)
+        use_async="${1#*=}"
+        shift
+        ;;
+      --base-port)
+        base_port="$2"
+        shift 2
+        ;;
+      --base-port=*)
+        base_port="${1#*=}"
+        shift
+        ;;
+      --thrift-server-workers)
+        thrift_server_workers="$2"
+        shift 2
+        ;;
+      --thrift-server-workers=*)
+        thrift_server_workers="${1#*=}"
+        shift
+        ;;
+      --use-jit)
+        use_jit="$2"
+        shift 2
+        ;;
+      --use-jit=*)
+        use_jit="${1#*=}"
+        shift
+        ;;
+      --skip-datagen)
+        skip_datagen="$2"
+        shift 2
+        ;;
+      --skip-datagen=*)
+        skip_datagen="${1#*=}"
+        shift
+        ;;
+      --)
+        shift
+        args+=("$@")
+        break
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  # Reset positional parameters to remaining args for getopts
+  set -- "${args[@]}"
+
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:L:t:ST:h' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -815,20 +912,12 @@ main() {
       S)
         skip_data_setup=true
         ;;
-      I)
-        interpreter="${OPTARG}"
-        ;;
-      A)
-        use_async="${OPTARG}"
-        ;;
-      P)
-        base_port="${OPTARG}"
-        ;;
       T)
         stats_port="${OPTARG}"
         ;;
-      W)
-        thrift_server_workers="${OPTARG}"
+      h)
+        show_help
+        exit 0
         ;;
       ?)
         show_help >&2
@@ -862,6 +951,11 @@ main() {
   readonly take_a_snapshot
   readonly load_a_snapshot
   readonly use_async
+  readonly use_jit
+  readonly skip_datagen
+
+  # Export skip_datagen as environment variable for use in start_django_server
+  export SKIP_DATAGEN="${skip_datagen}"
 
 
   if [ "$role" = "db" ]; then
@@ -869,12 +963,12 @@ main() {
     start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
   elif [ "$role" = "clientserver" ]; then
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
-      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}" "${use_async}";
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}" "${use_async}" "${use_jit}";
   elif [ "$role" = "client" ]; then
     start_client "$num_client_workers" "$duration" "$siege_logs_path" \
       "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
-    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter" "${use_async}";
+    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter" "${use_async}" "${use_jit}";
     # Report interpreter type
     echo "Interpreter: ${interpreter}"
   elif [ "$role" = "standalone" ]; then
@@ -882,7 +976,7 @@ main() {
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
       "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter" \
-      "${use_async}";
+      "${use_async}" "${use_jit}";
     pgrep -f cassandra | xargs kill
 
   else
