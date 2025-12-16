@@ -48,6 +48,7 @@ from mock_services import (
     MockClipsDiscoverService,
     MockContentFilterService,
     MockRankingService,
+    MockReelsTrayService,
     MockUserPreferenceService,
 )
 from mock_services.ttypes import (
@@ -63,6 +64,14 @@ from mock_services.ttypes import (
     FilterContentResponse,
     RankItemsRequest,
     RankItemsResponse,
+    ReelsTrayResponse,
+    TrayBucket,
+    TrayBucketClipsResponse,
+    TrayPagingInfo,
+    TrayRankingResponse,
+    TrayReelItem,
+    TrayUserMetadata,
+    UserMetadataBatchResponse,
     UserPreferencesRequest,
     UserPreferencesResponse,
 )
@@ -514,6 +523,313 @@ class MockClipsDiscoverServiceHandler:
         )
 
 
+class MockReelsTrayServiceHandler:
+    """
+    Handler implementation for MockReelsTrayService.
+
+    Models the feed.api.views.reels_tray endpoint from production IG Django
+    server. This service handles the stories/reels tray - the horizontal
+    scrollable bar at the top of the Instagram feed showing profile bubbles
+    for users with active Stories/Reels.
+
+    Key production patterns modeled:
+    - RankedTrayCache: Caching of ranked tray results
+    - IGML Pipelines (Shots/Brewery/Barkeep): ML-based ranking
+    - NodeAPI/LazyUserDict: User metadata fetching
+    - Partial Materialization: First N buckets fully filled, rest skeletons
+
+    Each RPC call creates Python↔Thrift boundary crossings for realistic
+    I-cache pressure simulation.
+    """
+
+    # Configuration matching production patterns
+    NUM_FILLED_BUCKETS = 4  # First N buckets are fully materialized
+    MAX_ITEMS_PER_BUCKET = 10  # Maximum stories/reels per bucket
+
+    def getTray(self, request) -> ReelsTrayResponse:
+        """
+        Gets the stories/reels tray for a viewer.
+
+        Models the full production flow:
+        1. Check RankedTrayCache for prefetched results
+        2. Source candidate users with active stories
+        3. Rank via IGML pipelines (Shots/Brewery/Barkeep)
+        4. Fetch user metadata via NodeAPI/LazyUserDict
+        5. Build buckets with partial materialization
+        6. Insert self story and live stories
+        7. Cache results for future requests
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with viewer info)
+        - Bucket and item generation with partial materialization
+        - Thrift serialization (response with buckets and paging info)
+        """
+        viewer_id = request.viewer_id
+        num_buckets = request.num_buckets_requested
+        include_live = request.include_live
+        include_self = request.include_self_story
+        items_per_bucket = request.num_items_per_bucket or self.MAX_ITEMS_PER_BUCKET
+
+        # Generate tray buckets with partial materialization
+        buckets = []
+        unseen_count = 0
+
+        for i in range(num_buckets):
+            # Only first N buckets are fully materialized
+            is_materialized = i < self.NUM_FILLED_BUCKETS
+
+            bucket = self._create_tray_bucket(
+                index=i,
+                viewer_id=viewer_id,
+                is_materialized=is_materialized,
+                items_per_bucket=items_per_bucket if is_materialized else 0,
+            )
+            buckets.append(bucket)
+
+            if bucket.user_metadata.has_unseen_stories:
+                unseen_count += 1
+
+        # Create self bucket if requested
+        self_bucket = None
+        if include_self:
+            self_bucket = self._create_tray_bucket(
+                index=-1,
+                viewer_id=viewer_id,
+                is_materialized=True,
+                items_per_bucket=items_per_bucket,
+                is_self=True,
+            )
+
+        # Create paging info
+        paging_info = TrayPagingInfo(
+            max_id=f"tray_max_{random.randint(1000, 9999)}",
+            more_available=True,
+            prefetch_count=self.NUM_FILLED_BUCKETS,
+            next_cursor=f"cursor_{random.randint(1000, 9999)}",
+        )
+
+        response = ReelsTrayResponse(
+            buckets=buckets,
+            paging_info=paging_info,
+            total_buckets=len(buckets),
+            num_materialized=min(self.NUM_FILLED_BUCKETS, len(buckets)),
+            request_id=f"tray_req_{random.randint(1000, 9999)}",
+            has_self_story=include_self,
+            unseen_count=unseen_count,
+            self_bucket=self_bucket,
+        )
+
+        return response
+
+    def rankTrayUsers(self, request) -> TrayRankingResponse:
+        """
+        Ranks users for tray positioning via IGML pipelines.
+
+        Models the Shots/Brewery/Barkeep ML ranking system that determines
+        which users appear first in the tray based on:
+        - User affinity scores
+        - Engagement history
+        - Content freshness
+        - Live status
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with candidate users)
+        - Ranking score computation
+        - Thrift serialization (response with ranked users and scores)
+        """
+        viewer_id = request.viewer_id
+        candidate_ids = request.candidate_user_ids
+        num_results = min(request.num_results, len(candidate_ids))
+
+        # Generate ranking scores for candidates
+        scored_users = [(user_id, random.random() * 100) for user_id in candidate_ids]
+        scored_users.sort(key=lambda x: x[1], reverse=True)
+
+        ranked_users = scored_users[:num_results]
+
+        response = TrayRankingResponse(
+            ranked_user_ids=[user[0] for user in ranked_users],
+            ranking_scores=[user[1] for user in ranked_users],
+            request_id=f"tray_rank_req_{random.randint(1000, 9999)}",
+            model_version="shots_v3.2",
+        )
+
+        return response
+
+    def getUserMetadataBatch(self, request) -> UserMetadataBatchResponse:
+        """
+        Fetches user metadata in batch via NodeAPI/LazyUserDict pattern.
+
+        Models the production pattern where user metadata is fetched
+        lazily and in batches to minimize database round-trips. Includes:
+        - Profile information (username, pic, verified status)
+        - Story/Reel counts and freshness
+        - Live status
+        - Relationship info (close friends, favorites)
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with user IDs)
+        - Metadata generation for each user
+        - Thrift serialization (response with metadata map)
+        """
+        viewer_id = request.viewer_id
+        user_ids = request.user_ids
+        include_story_info = request.include_story_info
+        include_live_info = request.include_live_info
+
+        # Generate metadata for each user
+        metadata_map = {}
+        for user_id in user_ids:
+            metadata = self._create_user_metadata(
+                user_id=user_id,
+                include_story_info=include_story_info,
+                include_live_info=include_live_info,
+            )
+            metadata_map[user_id] = metadata
+
+        response = UserMetadataBatchResponse(
+            user_metadata=metadata_map,
+            request_id=f"meta_batch_req_{random.randint(1000, 9999)}",
+            total_fetched=len(metadata_map),
+        )
+
+        return response
+
+    def getTrayBucketClips(self, request) -> TrayBucketClipsResponse:
+        """
+        Gets clips for a specific tray bucket (lazy loading).
+
+        Models the partial materialization pattern where skeleton buckets
+        can be filled on-demand when the user scrolls to them. This reduces
+        initial load time while maintaining smooth scrolling experience.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with bucket info)
+        - Item generation for the bucket
+        - Thrift serialization (response with items)
+        """
+        viewer_id = request.viewer_id
+        bucket_user_id = request.bucket_user_id
+        num_items = request.num_items
+
+        # Generate items for this bucket
+        items = []
+        for i in range(num_items):
+            item = self._create_reel_item(
+                index=i,
+                owner_id=bucket_user_id,
+            )
+            items.append(item)
+
+        response = TrayBucketClipsResponse(
+            items=items,
+            total_items=len(items),
+            more_available=random.choice([True, False]),
+            request_id=f"bucket_clips_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def _create_tray_bucket(
+        self,
+        index: int,
+        viewer_id: int,
+        is_materialized: bool,
+        items_per_bucket: int,
+        is_self: bool = False,
+    ) -> TrayBucket:
+        """Creates a mock TrayBucket with optional full materialization."""
+        bucket_id = random.randint(1000000, 9999999)
+        user_id = viewer_id if is_self else random.randint(1000, 99999)
+
+        # Create user metadata
+        user_metadata = self._create_user_metadata(
+            user_id=user_id,
+            include_story_info=True,
+            include_live_info=True,
+        )
+
+        # Create items only if materialized
+        items = []
+        if is_materialized and items_per_bucket > 0:
+            for i in range(items_per_bucket):
+                item = self._create_reel_item(index=i, owner_id=user_id)
+                items.append(item)
+
+        return TrayBucket(
+            bucket_id=bucket_id,
+            user_id=user_id,
+            user_metadata=user_metadata,
+            items=items,
+            item_count=len(items) if is_materialized else random.randint(1, 10),
+            is_materialized=is_materialized,
+            seen_at=random.randint(0, 86400000) if random.random() > 0.5 else 0,
+            ranking_score=random.random() * 100,
+            position=index,
+            bucket_type="self" if is_self else random.choice(["story", "reel", "live"]),
+        )
+
+    def _create_user_metadata(
+        self,
+        user_id: int,
+        include_story_info: bool = True,
+        include_live_info: bool = True,
+    ) -> TrayUserMetadata:
+        """Creates mock user metadata for tray display."""
+        return TrayUserMetadata(
+            user_id=user_id,
+            username=f"user_{user_id}",
+            full_name=f"User {user_id}",
+            profile_pic_url=f"https://cdn.example.com/profiles/{user_id}.jpg",
+            is_verified=random.random() > 0.9,
+            has_unseen_stories=random.random() > 0.3 if include_story_info else False,
+            story_count=random.randint(1, 15) if include_story_info else 0,
+            reel_count=random.randint(0, 50) if include_story_info else 0,
+            is_live=random.random() > 0.95 if include_live_info else False,
+            latest_reel_timestamp=random.randint(1700000000, 1702000000),
+            is_close_friend=random.random() > 0.8,
+            is_favorite=random.random() > 0.85,
+            affinity_score=random.random(),
+            has_besties_media=random.random() > 0.9,
+            ring_color=random.choice(["gradient", "green", "rainbow", ""]),
+        )
+
+    def _create_reel_item(self, index: int, owner_id: int) -> TrayReelItem:
+        """Creates a mock reel/story item."""
+        item_id = random.randint(1000000, 9999999)
+
+        hashtag_options = [
+            "story",
+            "reel",
+            "viral",
+            "trending",
+            "fyp",
+            "daily",
+            "life",
+            "fun",
+        ]
+
+        return TrayReelItem(
+            item_id=item_id,
+            owner_id=owner_id,
+            media_type=random.choice(["story", "reel", "highlight"]),
+            duration_ms=random.randint(3000, 60000),
+            thumbnail_url=f"https://cdn.example.com/stories/{item_id}/thumb.jpg",
+            video_url=f"https://cdn.example.com/stories/{item_id}/video.mp4",
+            taken_at=random.randint(1700000000, 1702000000),
+            expiring_at=random.randint(1702000000, 1702100000),
+            is_seen=random.random() > 0.5,
+            seen_at=random.randint(1700000000, 1702000000)
+            if random.random() > 0.5
+            else 0,
+            view_count=random.randint(10, 100000),
+            reply_count=random.randint(0, 1000),
+            has_audio=random.random() > 0.2,
+            audio_track_id=f"audio_{random.randint(1000, 9999)}",
+            hashtags=random.sample(hashtag_options, k=random.randint(0, 3)),
+        )
+
+
 def main():
     """Start the Thrift RPC server with all mock services."""
     # Server configuration
@@ -530,6 +846,7 @@ def main():
     filter_handler = MockContentFilterServiceHandler()
     pref_handler = MockUserPreferenceServiceHandler()
     clips_handler = MockClipsDiscoverServiceHandler()
+    reels_tray_handler = MockReelsTrayServiceHandler()
 
     print("[ThriftServer] Created handlers for all services")
 
@@ -542,8 +859,8 @@ def main():
     print(f"[ThriftServer] Starting Thrift server on {HOST}:{PORT}")
     print(f"[ThriftServer] Thread pool size: {MAX_WORKERS} concurrent connections")
     print(
-        "[ThriftServer] Supporting 5 services: Ads, Ranking, ContentFilter, "
-        "UserPreference, ClipsDiscover"
+        "[ThriftServer] Supporting 6 services: Ads, Ranking, ContentFilter, "
+        "UserPreference, ClipsDiscover, ReelsTray"
     )
     print("[ThriftServer] Each RPC creates Python↔Thrift boundary crossings")
     print("[ThriftServer] Server accepts connections from any network interface")
@@ -578,6 +895,7 @@ def main():
                     filter_handler,
                     pref_handler,
                     clips_handler,
+                    reels_tray_handler,
                 )
 
     except KeyboardInterrupt:
@@ -604,6 +922,7 @@ def handle_client(
     filter_handler,
     pref_handler,
     clips_handler,
+    reels_tray_handler,
 ):
     """Handle a single client connection with all services."""
     try:
@@ -618,6 +937,7 @@ def handle_client(
         filter_processor = MockContentFilterService.Processor(filter_handler)
         pref_processor = MockUserPreferenceService.Processor(pref_handler)
         clips_processor = MockClipsDiscoverService.Processor(clips_handler)
+        reels_tray_processor = MockReelsTrayService.Processor(reels_tray_handler)
 
         try:
             while True:
@@ -654,6 +974,25 @@ def handle_client(
                 elif method_name in ["getClipsChunks"]:
                     iprot.readMessageEnd()
                     clips_processor.process_getClipsChunks(rseqid, iprot, oprot, None)
+                # Reels Tray service methods
+                elif method_name in ["getTray"]:
+                    iprot.readMessageEnd()
+                    reels_tray_processor.process_getTray(rseqid, iprot, oprot, None)
+                elif method_name in ["rankTrayUsers"]:
+                    iprot.readMessageEnd()
+                    reels_tray_processor.process_rankTrayUsers(
+                        rseqid, iprot, oprot, None
+                    )
+                elif method_name in ["getUserMetadataBatch"]:
+                    iprot.readMessageEnd()
+                    reels_tray_processor.process_getUserMetadataBatch(
+                        rseqid, iprot, oprot, None
+                    )
+                elif method_name in ["getTrayBucketClips"]:
+                    iprot.readMessageEnd()
+                    reels_tray_processor.process_getTrayBucketClips(
+                        rseqid, iprot, oprot, None
+                    )
                 else:
                     print(f"[ThriftServer] WARNING: Unknown method '{method_name}'")
                     iprot.skip(TBinaryProtocol.TType.STRUCT)

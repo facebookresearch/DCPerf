@@ -1,0 +1,534 @@
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""
+Story Tray Service for DjangoBench V2.
+
+This module implements the StoryTrayService that models the workload of
+feed.api.views.reels_tray from production IG Django server.
+
+Key components:
+- StoryTrayService: Main service for tray construction
+- ReelsTrayContext: Context object for request processing
+- ReelBucket: Represents a user's stories/reels in the tray
+- MaterialTray: Final response object with tray data
+
+Based on the production architecture:
+- StoryTrayServiceBase: Core tray logic, pagination, context
+- StoryTrayService: Post-processing and final tray construction
+"""
+
+import logging
+import random
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from django.core.cache import cache
+
+from django_workload.models import BundleEntryModel, ClipVideoModel, UserModel
+
+from .thrift_client import (
+    get_tray_ranking_client,
+    get_user_metadata_client,
+    TrayRankingData,
+    UserMetadata,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _uuid_to_int(uuid_obj: UUID) -> int:
+    """Convert UUID to integer for Thrift RPC calls that expect i64."""
+    return uuid_obj.int & 0x7FFFFFFFFFFFFFFF
+
+
+@dataclass
+class ReelsTrayRequest:
+    """
+    Request schema for reels tray.
+    Models ReelsTrayRequestData from production IG.
+    """
+
+    reason: str = "cold_start"
+    supported_capabilities_new: Optional[List[str]] = None
+    max_id: Optional[str] = None
+    page_size: int = 20
+    tray_session_id: Optional[str] = None
+    request_id: Optional[str] = None
+    latest_preloaded_timestamp: Optional[float] = None
+    timezone_offset: int = 0
+
+    @classmethod
+    def from_request(cls, request) -> "ReelsTrayRequest":
+        """Create ReelsTrayRequest from Django request."""
+        params = {}
+        if hasattr(request, "GET"):
+            params = dict(request.GET.items())
+        elif hasattr(request, "POST"):
+            params = dict(request.POST.items())
+
+        return cls(
+            reason=params.get("reason", "cold_start"),
+            max_id=params.get("max_id"),
+            page_size=int(params.get("page_size", "20")),
+            tray_session_id=params.get("tray_session_id"),
+            request_id=params.get("request_id"),
+            timezone_offset=int(params.get("timezone_offset", "0")),
+        )
+
+
+@dataclass
+class ReelBucket:
+    """
+    Represents a user's stories/reels bucket in the tray.
+    Models the bucket structure in production IG tray.
+    """
+
+    user_id: str
+    user_info: Optional[Dict[str, Any]] = None
+    reel_items: List[Dict[str, Any]] = field(default_factory=list)
+    has_besties_media: bool = False
+    is_live: bool = False
+    seen_state: Optional[Dict[str, Any]] = None
+    ranking_score: float = 0.0
+    is_filled: bool = False  # Whether fully materialized
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "id": self.user_id,
+            "user": self.user_info,
+            "items": self.reel_items,
+            "has_besties_media": self.has_besties_media,
+            "is_live": self.is_live,
+            "seen_state": self.seen_state,
+            "ranking_score": self.ranking_score,
+            "is_filled": self.is_filled,
+        }
+
+
+@dataclass
+class ReelsTrayContext:
+    """
+    Context object for reels tray request.
+    Carries state between processing steps.
+    """
+
+    request: ReelsTrayRequest
+    user: Any
+    user_id: int
+
+    # Processing state
+    candidate_user_ids: List[str] = field(default_factory=list)
+    ranked_users: List[TrayRankingData] = field(default_factory=list)
+    user_metadata: Dict[str, UserMetadata] = field(default_factory=dict)
+    buckets: List[ReelBucket] = field(default_factory=list)
+
+    # Special insertions
+    self_bucket: Optional[ReelBucket] = None
+    live_buckets: List[ReelBucket] = field(default_factory=list)
+    suggested_users: List[Dict[str, Any]] = field(default_factory=list)
+
+    # Pagination
+    next_max_id: Optional[str] = None
+    more_available: bool = True
+
+    # Metrics
+    metrics: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MaterialTray:
+    """
+    Final response object for reels tray.
+    Models MaterialTray from production IG.
+    """
+
+    tray: List[Dict[str, Any]]
+    paging_info: Dict[str, Any]
+    has_new_nux_story: bool = False
+    story_ranking_token: Optional[str] = None
+    client_hints: Optional[Dict[str, Any]] = None
+    sticker_version: int = 0
+    face_filter_nux_version: int = 0
+    has_viewer_storage_story: bool = False
+    nux_eligible: bool = False
+    status: str = "ok"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "tray": self.tray,
+            "paging_info": self.paging_info,
+            "has_new_nux_story": self.has_new_nux_story,
+            "story_ranking_token": self.story_ranking_token,
+            "client_hints": self.client_hints,
+            "sticker_version": self.sticker_version,
+            "face_filter_nux_version": self.face_filter_nux_version,
+            "has_viewer_storage_story": self.has_viewer_storage_story,
+            "nux_eligible": self.nux_eligible,
+            "status": self.status,
+        }
+
+
+class StoryTrayService:
+    """
+    Main service class for story/reels tray construction.
+
+    Models StoryTrayServiceBase and StoryTrayService from production IG Django.
+    Handles:
+    - Sourcing and ranking stories for the tray
+    - User metadata fetching
+    - Partial materialization (first N filled, rest skeletons)
+    - Special insertions (self, live, suggested users)
+    - Caching with ranked tray cache
+    """
+
+    # Cache configuration
+    CACHE_TTL = 300  # 5 minutes
+    CACHE_KEY_PREFIX = "ranked_tray"
+
+    # Materialization constants
+    NUM_FILLED_BUCKETS = 4  # First N buckets are fully materialized
+    MAX_ITEMS_PER_BUCKET = 10  # Max stories/reels per user
+
+    def __init__(self, request, user):
+        """
+        Initialize story tray service.
+
+        Args:
+            request: Django request object
+            user: Authenticated user
+        """
+        self.django_request = request
+        self.user = user
+        self.tray_request = ReelsTrayRequest.from_request(request)
+
+        self.context = ReelsTrayContext(
+            request=self.tray_request,
+            user=user,
+            user_id=_uuid_to_int(user.id),
+        )
+
+        # Thrift clients
+        self.ranking_client = get_tray_ranking_client()
+        self.metadata_client = get_user_metadata_client()
+
+    def get_tray(self) -> MaterialTray:
+        """
+        Main entry point for tray construction.
+
+        Returns:
+            MaterialTray with constructed tray data
+        """
+        start_time = time.time()
+
+        # Step 1: Check cache for prefetched results
+        cached_result = self._get_cached_results()
+        if cached_result:
+            logger.debug("Serving tray from cache")
+            return cached_result
+
+        # Step 2: Source candidate users with active stories
+        self._source_candidate_users()
+
+        # Step 3: Rank candidates via ML ranking pipelines
+        self._rank_candidates()
+
+        # Step 4: Fetch user metadata via data access framework
+        self._fetch_user_metadata()
+
+        # Step 5: Build buckets with partial materialization
+        self._build_buckets()
+
+        # Step 6: Insert self story
+        self._insert_self_story()
+
+        # Step 7: Insert live stories at fixed positions
+        self._insert_live_stories()
+
+        # Step 8: Build final response
+        response = self._build_response()
+
+        # Record metrics
+        self.context.metrics["total_duration_ms"] = (time.time() - start_time) * 1000
+        self.context.metrics["num_buckets"] = len(self.context.buckets)
+        self.context.metrics["num_filled"] = sum(
+            1 for b in self.context.buckets if b.is_filled
+        )
+
+        # Cache results
+        self._cache_results(response)
+
+        return response
+
+    def _get_cached_results(self) -> Optional[MaterialTray]:
+        """Check ranked tray cache for prefetched tray results."""
+        cache_key = (
+            f"{self.CACHE_KEY_PREFIX}:{self.context.user_id}:"
+            f"{self.tray_request.max_id or 'head'}"
+        )
+        cached = cache.get(cache_key)
+        if cached:
+            logger.debug(f"Cache hit for tray: {cache_key}")
+            return cached
+        return None
+
+    def _cache_results(self, response: MaterialTray) -> None:
+        """Cache tray results in ranked tray cache."""
+        cache_key = (
+            f"{self.CACHE_KEY_PREFIX}:{self.context.user_id}:"
+            f"{self.tray_request.max_id or 'head'}"
+        )
+        cache.set(cache_key, response, self.CACHE_TTL)
+        logger.debug(f"Cached tray results: {cache_key}")
+
+    def _source_candidate_users(self) -> None:
+        """
+        Source candidate users who have active stories/reels.
+
+        In production, this queries the stories inventory service.
+        Here we simulate by querying BundleEntryModel.
+        """
+        following_ids = self.user.following or []
+
+        # Query bundle entries to find users with active content
+        try:
+            bundles = list(
+                BundleEntryModel.objects.filter(userid__in=following_ids).limit(
+                    self.tray_request.page_size * 2
+                )
+            )
+
+            # Deduplicate by user
+            seen_users = set()
+            candidate_ids = []
+            for bundle in bundles:
+                user_id = str(bundle.userid)
+                if user_id not in seen_users:
+                    seen_users.add(user_id)
+                    candidate_ids.append(user_id)
+
+            self.context.candidate_user_ids = candidate_ids
+            logger.debug(f"Sourced {len(candidate_ids)} candidate users")
+
+        except Exception as e:
+            logger.error(f"Error sourcing candidates: {e}")
+            # Fallback to following list
+            self.context.candidate_user_ids = [str(uid) for uid in following_ids[:20]]
+
+    def _rank_candidates(self) -> None:
+        """
+        Rank candidate users via Thrift RPC.
+
+        Models ML ranking pipelines.
+        """
+        candidates = self.context.candidate_user_ids
+        if not candidates:
+            self.context.ranked_users = []
+            return
+
+        try:
+            ranked = self.ranking_client.rank_tray_users(
+                viewer_id=self.context.user_id,
+                user_ids=candidates,
+                num_results=self.tray_request.page_size,
+                include_live=True,
+            )
+            self.context.ranked_users = ranked
+            logger.debug(f"Ranked {len(ranked)} users for tray")
+
+        except Exception as e:
+            logger.error(f"Error ranking candidates: {e}")
+            # Fallback to random ordering
+            self.context.ranked_users = [
+                TrayRankingData(
+                    user_id=uid,
+                    rank=i,
+                    score=random.random(),
+                    is_live=(i < 2),
+                )
+                for i, uid in enumerate(candidates[: self.tray_request.page_size])
+            ]
+
+    def _fetch_user_metadata(self) -> None:
+        """
+        Fetch user metadata via Thrift RPC.
+
+        Models data access framework user lookup pattern.
+        """
+        user_ids = [r.user_id for r in self.context.ranked_users]
+        if not user_ids:
+            self.context.user_metadata = {}
+            return
+
+        try:
+            metadata = self.metadata_client.get_user_metadata_batch(user_ids)
+            self.context.user_metadata = metadata
+            logger.debug(f"Fetched metadata for {len(metadata)} users")
+
+        except Exception as e:
+            logger.error(f"Error fetching user metadata: {e}")
+            self.context.user_metadata = {}
+
+    def _build_buckets(self) -> None:
+        """
+        Build tray buckets with partial materialization.
+
+        First N buckets are fully filled with media data.
+        Remaining buckets are skeletons (minimal info, no media).
+        """
+        buckets = []
+
+        for i, ranked_user in enumerate(self.context.ranked_users):
+            user_id = ranked_user.user_id
+            is_filled = i < self.NUM_FILLED_BUCKETS
+
+            # Get user info
+            user_metadata = self.context.user_metadata.get(user_id)
+            user_info = (
+                user_metadata.to_dict()
+                if user_metadata
+                else {"pk": user_id, "username": f"user_{user_id}"}
+            )
+
+            # Build bucket
+            bucket = ReelBucket(
+                user_id=user_id,
+                user_info=user_info,
+                ranking_score=ranked_user.score,
+                is_live=ranked_user.is_live,
+                is_filled=is_filled,
+            )
+
+            # Fill with media items if this is a filled bucket
+            if is_filled:
+                bucket.reel_items = self._fetch_reel_items(user_id)
+
+            # Check for live status
+            if ranked_user.is_live:
+                self.context.live_buckets.append(bucket)
+
+            buckets.append(bucket)
+
+        self.context.buckets = buckets
+        logger.debug(f"Built {len(buckets)} buckets, {self.NUM_FILLED_BUCKETS} filled")
+
+    def _fetch_reel_items(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetch reel/story items for a user.
+
+        In production, this fetches from stories inventory.
+        Here we simulate by querying ClipVideoModel.
+        """
+        items = []
+        try:
+            # Try to get clips for this user
+            clips = list(
+                ClipVideoModel.objects.filter(owner_id=user_id).limit(
+                    self.MAX_ITEMS_PER_BUCKET
+                )
+            )
+
+            for clip in clips:
+                items.append(
+                    {
+                        "pk": str(clip.id),
+                        "media_type": "VIDEO",
+                        "duration_ms": clip.duration_ms,
+                        "thumbnail_url": clip.thumbnail_url,
+                        "title": clip.title,
+                        "created_at": str(clip.published),
+                    }
+                )
+
+        except Exception as e:
+            logger.debug(f"No clips found for user {user_id}: {e}")
+            # Generate mock items
+            for i in range(random.randint(1, 5)):
+                items.append(
+                    {
+                        "pk": f"mock_item_{user_id}_{i}",
+                        "media_type": "VIDEO",
+                        "duration_ms": random.randint(5000, 60000),
+                        "thumbnail_url": f"https://cdn.example.com/stories/{user_id}/{i}.jpg",
+                    }
+                )
+
+        return items
+
+    def _insert_self_story(self) -> None:
+        """
+        Insert viewer's own story at position 0.
+
+        The self story is always shown first if the viewer has active stories.
+        """
+        user_id = str(self.context.user_id)
+
+        # Check if viewer has active stories
+        try:
+            has_stories = (
+                BundleEntryModel.objects.filter(userid=self.user.id).limit(1).count()
+                > 0
+            )
+        except Exception:
+            has_stories = False
+
+        if has_stories:
+            self_bucket = ReelBucket(
+                user_id=user_id,
+                user_info={
+                    "pk": user_id,
+                    "username": self.user.name,
+                    "is_self": True,
+                },
+                reel_items=self._fetch_reel_items(user_id),
+                is_filled=True,
+            )
+            self.context.self_bucket = self_bucket
+
+    def _insert_live_stories(self) -> None:
+        """
+        Insert live stories at fixed positions.
+
+        Live stories are typically shown at positions 1, 2, etc. after self.
+        """
+        # Live stories are already marked in context.live_buckets
+        # In production, these would be moved to fixed positions
+        pass
+
+    def _build_response(self) -> MaterialTray:
+        """Build the final MaterialTray response."""
+        tray_items = []
+
+        # Insert self bucket first
+        if self.context.self_bucket:
+            tray_items.append(self.context.self_bucket.to_dict())
+
+        # Insert remaining buckets
+        for bucket in self.context.buckets:
+            tray_items.append(bucket.to_dict())
+
+        # Set pagination
+        if self.context.buckets:
+            last_bucket = self.context.buckets[-1]
+            self.context.next_max_id = last_bucket.user_id
+            self.context.more_available = (
+                len(self.context.buckets) >= self.tray_request.page_size
+            )
+
+        return MaterialTray(
+            tray=tray_items,
+            paging_info={
+                "max_id": self.context.next_max_id,
+                "more_available": self.context.more_available,
+            },
+            story_ranking_token=f"token_{self.context.user_id}_{time.time()}",
+            client_hints={"metrics": self.context.metrics},
+            status="ok",
+        )
