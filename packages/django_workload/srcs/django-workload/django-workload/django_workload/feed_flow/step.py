@@ -28,8 +28,8 @@ class FeedFlowStep(ABC):
     - run(): Main execution (context mutation, write-heavy)
     """
 
-    def __init__(self, context: FeedFlowContext) -> None:
-        self.context = context
+    def __init__(self, context: Optional[FeedFlowContext] = None) -> None:
+        self.context = context  # type: ignore[assignment]
         self._prepare_result: Optional[Any] = None
         self._is_enabled = False
 

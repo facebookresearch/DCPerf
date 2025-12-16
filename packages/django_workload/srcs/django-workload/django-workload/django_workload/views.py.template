@@ -28,6 +28,13 @@ from .models import BundleSeenModel
 
 from .users import require_user
 
+{% if variant_step_imports %}
+# Auto-generated step variant imports
+{% for import_stmt in variant_step_imports %}
+{{ import_stmt }}
+{% endfor %}
+{% endif %}
+
 
 # Used for sample-based profiling
 SAMPLE_COUNT = 0
@@ -150,3 +157,11 @@ def seen(request):
 
     return HttpResponse(json.dumps({}), content_type="text/json")
 
+
+{% if variant_view_functions %}
+# Auto-generated feed_timeline variant view functions
+{% for variant_func in variant_view_functions %}
+{{ variant_func }}
+
+{% endfor %}
+{% endif %}
