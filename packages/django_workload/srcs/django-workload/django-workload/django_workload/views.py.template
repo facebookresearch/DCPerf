@@ -35,6 +35,7 @@ from .inbox_handler import Inbox
 {{ import_line }}
 {% endfor %}
 from .models import BundleSeenModel
+from .seen_handler import SeenHandler
 
 from .users import require_user
 
@@ -121,47 +122,27 @@ def inbox(request):
     return HttpResponse(json.dumps(result), content_type="text/json")
 
 
-@require_http_methods(["POST"])
+@require_http_methods(["GET", "POST"])
 @require_user
 def seen(request):
-    # Record stats for items marked as seen on a mobile device
-    # For workload purposes we ignore the posted data, and instead generate
-    # some random data of our own, cached in memcached
-    global SAMPLE_COUNT
-    should_profile = False
-    # libib.ibrun(random.randint(IB_MIN, IB_MAX))
+    """
+    Mark entities as seen.
 
-    if settings.PROFILING:
-        SAMPLE_COUNT += 1
-        if SAMPLE_COUNT >= settings.SAMPLE_RATE:
-            SAMPLE_COUNT = 0
-            should_profile = True
+    Accepts both GET and POST methods.
+    Optional parameters:
+    - type: Entity type (bundle, inbox, clip, feed_timeline)
+    - id: Entity UUID
 
-    bundleids = cache.get("bundleids")
-    if bundleids is None:
-        bundleids = [uuid.uuid4() for _ in range(1000)]
-        cache.set("bundleids", bundleids, 24 * 60 * 60)
-    entryids = cache.get("entryids")
-    if entryids is None:
-        entryids = [uuid.uuid4() for _ in range(10000)]
-        cache.set("entryids", entryids, 24 * 60 * 60)
-
-    with statsd.pipeline() as pipe, BatchQuery():
-        for bundleid in random.sample(bundleids, random.randrange(3)):
-            if should_profile:
-                pipe.incr("workloadoutput.bundle.{}.seen".format(bundleid.hex))
-            for entryid in random.sample(entryids, random.randrange(5)):
-                if should_profile:
-                    pipe.incr(
-                        "workloadoutput.bundle.{}.{}.seen".format(
-                            bundleid.hex, entryid.hex
-                        )
-                    )
-                BundleSeenModel(
-                    userid=request.user.id, bundleid=bundleid, entryid=entryid
-                ).save()
-
-    return HttpResponse(json.dumps({}), content_type="text/json")
+    If no parameters provided, executes original random-sample logic.
+    If parameters provided, marks the specific entity as seen.
+    """
+    handler = SeenHandler(request)
+    result, status_code = handler.handle()
+    return HttpResponse(
+        json.dumps(result),
+        content_type="text/json",
+        status=status_code,
+    )
 
 
 @require_user
