@@ -180,9 +180,9 @@ For `django_workload_default` and `django_workload_arm` jobs:
   * `duration` \- Duration of each iteration of test, default `5M` (5 minutes)
   * `iterations` \- Number of iterations to run, default 7
   * `reps`: Number of requests (per client worker) that the load generator will send in each iteration.
-    This will override `duration` and is useful to workaround the hanging problem of Siege (the load generator).
-    Note the total number of requests that Siege will send will be `reps * client_workers`, where
-    `client_workers = 1.2 * NPROC`.
+    This is useful when you want to run the benchmark with a fixed number of requests rather than
+    a fixed duration.  Unlike the behavior of Siege, now the total number of requests that wrk will send
+    will be `reps`, _not_ `reps * iterations`.
   * `interpreter` \- Which python interpreter to use: choose between `cpython` or `cinder`.
     Defaults to `cpython`.
   * `use_async` \- If this is set to 1, DjangoBench will use this new asynchronous server stack;
@@ -276,9 +276,9 @@ in these paths (based on the DCPerf repo's root folder):
   * `benchmarks/django_workload/django-workload/django-workload/log_load_balancer/*.log`
 - Traditional uWSGI synchronous server log:
   * `benchmarks/django_workload/django-workload/django-workload/django-uwsgi.log`
-- Siege log:
+- Wrk log:
   * `benchmarks/django_workload/django-workload/client/*.log`
-  * `/tmp/siege_out_*`
+  * `/tmp/wrk_out_*`
 - Cassandra and memcached log:
   * `benchmarks/django_workload/cassandra.log`
   * `benchmarks/django_workload/memcached.log`
@@ -326,17 +326,14 @@ In this case, please start Cassandra DB by running the following command:
 Where `<host-ip>` is the IP address that Cassandra is supposed to bind and the
 benchmarking machine can connect to.
 
-### Siege hanging
+### Load generator options
 
-Django benchmark should finish in around 35 minutes. If you see it not finishing
-for long time and the CPU utilization is very low, it's probably because the
-load tester Siege run into deadlock and hang. This a known issue being discussed
-in [Siege's repo](https://github.com/JoeDog/siege/issues/4) and it may happen more
-frequently on newer platforms.
+DjangoBench uses [wrk](https://github.com/wg/wrk) as the load generator, which is a modern
+HTTP benchmarking tool capable of generating significant load with a single multi-threaded
+process.
 
-As a workaround, we provide an option to run the benchmark with fixed number of
-requests instead of fixed amount of time. The benchmarking command will be the
-following:
+By default, the benchmark runs for a fixed duration (5 minutes per iteration). However,
+you can also run the benchmark with a fixed number of requests instead:
 
 ```
 ./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>", "reps": <REPS>, "iterations": <ITER>}'
@@ -350,14 +347,6 @@ If you do not wish to change the number of iterations, then run the following:
 ```
 ./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>", "reps": <REPS>}'
 ```
-
-#### How to choose the number of reps?
-
-We recommend the REPS to be somewhere between 3000 and 8000. The runtime will
-depend on the computation power of your CPU.
-If you have already run the default time-based Django benchmark once, you can
-make REPS to be `wc -l /tmp/siege_out_1` divided by the number of your logical
-CPU cores. That way the runtime of each iteration will be close to 5 minutes.
 
 ### Cinder-specific issues
 

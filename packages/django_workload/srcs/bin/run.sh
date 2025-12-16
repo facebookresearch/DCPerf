@@ -156,9 +156,9 @@ cleanup() {
     rm -f cassandra.pid
   fi
 
-  # Kill Siege
-  SIEGE_PID="$(pgrep siege)"
-  [ -n "$SIEGE_PID" ] && { echo "Killing siege"; kill -9 "$SIEGE_PID" 2>/dev/null || true; }
+  # Kill wrk
+  WRK_PID="$(pgrep wrk)"
+  [ -n "$WRK_PID" ] && { echo "Killing wrk"; kill -9 "$WRK_PID" 2>/dev/null || true; }
 
   echo "Done"
   if [ "$CLEANUP_REQS" -gt 0 ]; then
@@ -308,7 +308,8 @@ run_benchmark() {
   DURATION="$_duration" \
   LOG="$_siege_logs_path" \
   SOURCE="$_urls_path" \
-  python3 ./run-siege -i "${iterations}" -r "${reps}" -R "${BENCHPRESS_ROOT}/packages/django_workload/templates/siege.conf"
+  BASE_URL="http://localhost:8000" \
+  python3 ./run-wrk -i "${iterations}" -r "${reps}"
 }
 
 load_snapshot(){

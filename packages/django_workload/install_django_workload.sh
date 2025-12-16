@@ -174,5 +174,15 @@ pip install -e . --no-index --find-links file://"$OUT/django-workload/django-wor
 
 deactivate
 
-cd "${BENCHPRESS_ROOT}/packages/django_workload" || exit 1
-bash -x install_siege.sh
+# 6. Install wrk
+WRK_VERSION="4.2.0"
+pushd "${DJANGO_WORKLOAD_ROOT}" || exit 1
+if ! [ -d wrk ]; then
+  git clone --branch "${WRK_VERSION}" https://github.com/wg/wrk
+  pushd wrk || exit 1
+  git apply --check "${DJANGO_PKG_ROOT}/templates/wrk.diff" && \
+    git apply "${DJANGO_PKG_ROOT}/templates/wrk.diff"
+  make
+  popd # wrk
+fi
+popd # "${DJANGO_WORKLOAD_ROOT}"
