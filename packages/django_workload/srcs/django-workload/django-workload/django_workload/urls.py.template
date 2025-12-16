@@ -25,6 +25,10 @@ urlpatterns = [
 {% for url_pattern in bundle_tray_url_patterns %}
     {{ url_pattern }}
 {% endfor %}
+    # Inbox endpoint variants for I-cache pressure
+{% for url_pattern in inbox_url_patterns %}
+    {{ url_pattern }}
+{% endfor %}
     # Feed timeline endpoint variants for I-cache pressure
 {% for url_pattern in variant_urls %}
     {{ url_pattern }}
