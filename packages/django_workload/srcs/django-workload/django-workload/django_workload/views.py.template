@@ -21,6 +21,9 @@ from django.views.decorators.http import require_http_methods
 from django_statsd.clients import statsd
 
 from .bundle_tray import BundleTray
+{% for import_line in bundle_tray_variant_imports %}
+{{ import_line }}
+{% endfor %}
 from .clips import Clips
 {% for import_line in clips_variant_imports %}
 {{ import_line }}
@@ -179,6 +182,15 @@ def clips(request):
 # =============================================================================
 
 {% for func_code in clips_view_variants %}
+{{ func_code }}
+{% endfor %}
+
+# =============================================================================
+# Bundle Tray View Variants (for I-cache pressure)
+# Each variant uses a different BundleTray handler variant
+# =============================================================================
+
+{% for func_code in bundle_tray_view_variants %}
 {{ func_code }}
 {% endfor %}
 
