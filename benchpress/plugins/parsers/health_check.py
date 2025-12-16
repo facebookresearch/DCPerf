@@ -147,8 +147,8 @@ class HealthCheckParser(Parser):
         if os.path.exists("/tmp/latency.txt"):
             with open("/tmp/latency.txt", "r") as f:
                 for line in f:
-                    # Search for "avg_latency = 179.559148 ns"
-                    match = re.search(r"avg_latency = (\d+\.\d+) ns", line)
+                    # Search for "Average Latency = 179.559148 ns"
+                    match = re.search(r"Average Latency = (\d+\.\d+) ns", line)
                     if match:
                         self.metrics["memory"]["idle_latency"]["avg_latency"] = float(
                             match.group(1)

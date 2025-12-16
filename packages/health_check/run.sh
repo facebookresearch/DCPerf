@@ -60,13 +60,8 @@ if [ "$role" = "server" ]; then
   workers=$(echo "scale=0; $cpus * 2.5" | bc)
   python3 "$HEALTH_ROOT"/sleepbench/collect-cpu-util.py "$HEALTH_ROOT"/sleepbench/sleepbench "$workers" 30
   if [ "$(uname -p)" = "aarch64" ]; then
-    NPROC="$(nproc)"
-    BW_CORES=""
-    for ((i=0; i<NPROC-1; i+=2)); do
-      BW_CORES="${BW_CORES}-B${i} "
-    done
     pushd "${HEALTH_ROOT}/infra-microbenchmarks/loaded-latency" || exit 1
-    ./sweep.finedelay.sh ${BW_CORES} > /tmp/bw-lat.txt
+    ./sweep.finedelay.sh $(seq -f "-B%.0f" 0 $(($(nproc)-1))) > /tmp/bw-lat.txt
     ./summarize.sh /tmp/bw-lat.txt > /tmp/bw-lat.tsv
     ./run-200mb.latency-only.sh > /tmp/latency.txt
   else
