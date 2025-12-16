@@ -1,0 +1,540 @@
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""
+Clips Discovery Service for DjangoBench V2.
+
+This module implements the ClipsDiscoverService and ClipsDiscoverStreamingService
+that model the workload of clips.api.views.async_stream_clips_discover from
+production IG Django server.
+
+Key components:
+- ClipsDiscoverService: Main service for clips discovery (non-streaming)
+- ClipsDiscoverStreamingService: Streaming variant for chunked delivery
+- ClipsDiscoverContext: Context object for clips discovery request
+"""
+
+import logging
+import random
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, Generator, List, Optional
+from uuid import UUID
+
+from django.core.cache import cache
+
+from django_workload.models import ClipChunkModel, ClipVideoModel
+
+from .thrift_client import get_clips_ads_client, get_clips_ranking_client
+
+logger = logging.getLogger(__name__)
+
+
+def _uuid_to_int(uuid_obj: UUID) -> int:
+    """Convert UUID to integer for Thrift RPC calls that expect i64."""
+    return uuid_obj.int & 0x7FFFFFFFFFFFFFFF
+
+
+@dataclass
+class ClipsDiscoverRequest:
+    """
+    Request schema for clips discovery.
+    Models GetClipsDiscoverRequest from production IG.
+    """
+
+    max_id: Optional[str] = None
+    chaining_media_id: Optional[str] = None
+    should_refetch_chaining_media: bool = False
+    container_module: str = "clips_viewer_clips_tab"
+    seen_reels: Optional[List[str]] = None
+    session_info: Optional[Dict[str, Any]] = None
+    is_sync_flow_enabled_for_streaming: bool = True
+    blend_options: Optional[Dict[str, Any]] = None
+    interest_id: Optional[str] = None
+    prefetch_trigger_type: Optional[str] = None
+    num_clips_requested: int = 20
+    include_ads: bool = True
+
+    @classmethod
+    def from_request(cls, request) -> "ClipsDiscoverRequest":
+        """Create ClipsDiscoverRequest from Django request."""
+        params = {}
+        if hasattr(request, "GET"):
+            params = dict(request.GET.items())
+        elif hasattr(request, "POST"):
+            params = dict(request.POST.items())
+
+        return cls(
+            max_id=params.get("max_id"),
+            chaining_media_id=params.get("chaining_media_id"),
+            should_refetch_chaining_media=params.get(
+                "should_refetch_chaining_media", "false"
+            ).lower()
+            == "true",
+            container_module=params.get("container_module", "clips_viewer_clips_tab"),
+            seen_reels=params.get("seen_reels", "").split(",")
+            if params.get("seen_reels")
+            else None,
+            num_clips_requested=int(params.get("num_clips_requested", "20")),
+            include_ads=params.get("include_ads", "true").lower() == "true",
+        )
+
+
+@dataclass
+class ClipsDiscoverContext:
+    """
+    Context object for clips discovery request.
+    Carries state between processing steps.
+    """
+
+    request: ClipsDiscoverRequest
+    user: Any
+    user_id: int
+
+    # Processing state
+    organic_clips: List[Dict[str, Any]] = field(default_factory=list)
+    ads_clips: List[Dict[str, Any]] = field(default_factory=list)
+    ranked_clips: List[Dict[str, Any]] = field(default_factory=list)
+    blended_clips: List[Dict[str, Any]] = field(default_factory=list)
+    final_items: List[Dict[str, Any]] = field(default_factory=list)
+
+    # Pagination
+    next_max_id: Optional[str] = None
+    more_available: bool = True
+
+    # Metrics
+    metrics: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ClipsDiscoverResponse:
+    """
+    Response schema for clips discovery.
+    Models GetClipsDiscoverResponse from production IG.
+    """
+
+    items_with_ads: List[Dict[str, Any]]
+    paging_info: Dict[str, Any]
+    container_module: str
+    is_shell_response: bool = False
+    client_hints: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "items_with_ads": self.items_with_ads,
+            "paging_info": self.paging_info,
+            "container_module": self.container_module,
+            "is_shell_response": self.is_shell_response,
+            "client_hints": self.client_hints,
+        }
+
+
+class ClipsDiscoverService:
+    """
+    Main service class for clips discovery.
+
+    Models ClipsDiscoverService from production IG Django.
+    Handles fetching, ranking, and blending of clips with ads.
+    """
+
+    # Cache configuration
+    CACHE_TTL = 300  # 5 minutes
+    CACHE_KEY_PREFIX = "clips_discover"
+
+    def __init__(self, request, user):
+        """
+        Initialize clips discover service.
+
+        Args:
+            request: Django request object
+            user: Authenticated user
+        """
+        self.django_request = request
+        self.user = user
+        self.clips_request = ClipsDiscoverRequest.from_request(request)
+
+        self.context = ClipsDiscoverContext(
+            request=self.clips_request,
+            user=user,
+            user_id=_uuid_to_int(user.id),
+        )
+
+        # Thrift clients
+        self.ads_client = get_clips_ads_client()
+        self.ranking_client = get_clips_ranking_client()
+
+    def discover(self) -> ClipsDiscoverResponse:
+        """
+        Main entry point for clips discovery.
+
+        Returns:
+            ClipsDiscoverResponse with discovered clips
+        """
+        start_time = time.time()
+
+        # Step 1: Check cache for prefetched results
+        cached_result = self._get_cached_results()
+        if cached_result:
+            logger.debug("Serving clips from cache")
+            return cached_result
+
+        # Step 2: Fetch organic clips from database
+        self._fetch_organic_clips()
+
+        # Step 3: Fetch ads via Thrift RPC
+        if self.clips_request.include_ads:
+            self._fetch_ads()
+
+        # Step 4: Rank clips
+        self._rank_clips()
+
+        # Step 5: Blend organic and ads
+        self._blend_clips()
+
+        # Step 6: Apply post-processing
+        self._post_process()
+
+        # Step 7: Build response
+        response = self._build_response()
+
+        # Record metrics
+        self.context.metrics["total_duration_ms"] = (time.time() - start_time) * 1000
+        self.context.metrics["num_organic"] = len(self.context.organic_clips)
+        self.context.metrics["num_ads"] = len(self.context.ads_clips)
+        self.context.metrics["num_final"] = len(self.context.final_items)
+
+        # Cache results for future requests
+        self._cache_results(response)
+
+        return response
+
+    def _get_cached_results(self) -> Optional[ClipsDiscoverResponse]:
+        """Check cache for prefetched clips results."""
+        cache_key = (
+            f"{self.CACHE_KEY_PREFIX}:{self.context.user_id}:"
+            f"{self.clips_request.max_id or 'head'}"
+        )
+        cached = cache.get(cache_key)
+        if cached:
+            logger.debug(f"Cache hit for clips: {cache_key}")
+            return cached
+        return None
+
+    def _cache_results(self, response: ClipsDiscoverResponse) -> None:
+        """Cache clips results for future requests."""
+        cache_key = (
+            f"{self.CACHE_KEY_PREFIX}:{self.context.user_id}:"
+            f"{self.clips_request.max_id or 'head'}"
+        )
+        cache.set(cache_key, response, self.CACHE_TTL)
+        logger.debug(f"Cached clips results: {cache_key}")
+
+    def _fetch_organic_clips(self) -> None:
+        """
+        Fetch organic clips from Cassandra database.
+
+        Models the ML ranking service query in production IG.
+        """
+        num_requested = self.clips_request.num_clips_requested
+        seen_reels = set(self.clips_request.seen_reels or [])
+
+        # Fetch clips from database
+        try:
+            # Query ClipVideoModel for available clips
+            all_clips = list(ClipVideoModel.objects.all().limit(num_requested * 3))
+
+            organic_clips = []
+            for clip in all_clips:
+                if str(clip.id) in seen_reels:
+                    continue
+
+                # Get chunks for this clip
+                chunks = list(ClipChunkModel.objects.filter(video_id=clip.id).limit(10))
+
+                clip_item = self._build_clip_item(clip, chunks)
+                organic_clips.append(clip_item)
+
+                if len(organic_clips) >= num_requested:
+                    break
+
+            self.context.organic_clips = organic_clips
+            logger.debug(f"Fetched {len(organic_clips)} organic clips from database")
+
+        except Exception as e:
+            logger.error(f"Error fetching organic clips: {e}")
+            self.context.organic_clips = self._generate_mock_clips(num_requested)
+
+    def _build_clip_item(
+        self, clip: ClipVideoModel, chunks: List[ClipChunkModel]
+    ) -> Dict[str, Any]:
+        """Build clip item dict from model and chunks."""
+        video_versions = []
+        for chunk in chunks:
+            video_versions.append(
+                {
+                    "url": chunk.chunk_url,
+                    "type": 101,
+                    "width": 1080,
+                    "height": 1920,
+                    "chunk_index": chunk.chunk_index,
+                    "duration_ms": chunk.duration_ms,
+                }
+            )
+
+        return {
+            "pk": str(clip.id),
+            "media": {
+                "pk": str(clip.id),
+                "media_type": "VIDEO",
+                "video_versions": video_versions,
+                "thumbnail_url": clip.thumbnail_url,
+                "duration_ms": clip.duration_ms,
+                "title": clip.title,
+                "description": clip.description,
+            },
+            "user": {
+                "pk": str(clip.owner_id),
+                "name": f"user_{clip.owner_id}",
+            },
+            "ad_media": None,
+            "netego_media": None,
+            "is_ad": False,
+            "view_count": clip.view_count,
+            "like_count": clip.like_count,
+            "comment_count": clip.comment_count,
+            "quality_score": clip.quality_score,
+            "engagement_score": clip.engagement_score,
+            "published": str(clip.published),
+        }
+
+    def _generate_mock_clips(self, num_clips: int) -> List[Dict[str, Any]]:
+        """Generate mock clips when database is empty."""
+        clips = []
+        for i in range(num_clips):
+            clips.append(
+                {
+                    "pk": f"mock_clip_{i}",
+                    "media": {
+                        "pk": f"mock_clip_{i}",
+                        "media_type": "VIDEO",
+                        "video_versions": [
+                            {
+                                "url": f"https://cdn.example.com/clips/{i}/chunk_0.mp4",
+                                "type": 101,
+                                "width": 1080,
+                                "height": 1920,
+                            }
+                        ],
+                        "duration_ms": random.randint(5000, 60000),
+                    },
+                    "user": {
+                        "pk": f"mock_user_{i % 100}",
+                        "name": f"User {i % 100}",
+                    },
+                    "ad_media": None,
+                    "netego_media": None,
+                    "is_ad": False,
+                    "view_count": random.randint(100, 1000000),
+                    "like_count": random.randint(10, 100000),
+                    "comment_count": random.randint(0, 10000),
+                    "quality_score": random.random(),
+                    "engagement_score": random.random(),
+                }
+            )
+        return clips
+
+    def _fetch_ads(self) -> None:
+        """
+        Fetch ads via Thrift RPC call.
+
+        Models AsyncAdsFetcherV2 from production IG.
+        """
+        try:
+            num_ads = max(3, len(self.context.organic_clips) // 5)
+
+            ads = self.ads_client.fetch_clips_ads(
+                user_id=self.context.user_id,
+                num_ads=num_ads,
+                surface_type="CLIPS",
+            )
+
+            ads_clips = []
+            for ad in ads:
+                ads_clips.append(ad.to_clips_item_dict())
+
+            self.context.ads_clips = ads_clips
+            logger.debug(f"Fetched {len(ads_clips)} ads via Thrift RPC")
+
+        except Exception as e:
+            logger.error(f"Error fetching ads: {e}")
+            self.context.ads_clips = []
+
+    def _rank_clips(self) -> None:
+        """
+        Rank clips using Thrift ranking service.
+
+        Models the ML ranking pipeline in production IG.
+        """
+        clips = self.context.organic_clips
+        if not clips:
+            self.context.ranked_clips = []
+            return
+
+        try:
+            clip_ids = [clip["pk"] for clip in clips]
+            scores = self.ranking_client.rank_clips(
+                user_id=self.context.user_id,
+                clip_ids=clip_ids,
+                num_results=len(clips),
+            )
+
+            # Apply scores and sort
+            for clip in clips:
+                clip["ranking_score"] = scores.get(clip["pk"], random.random())
+
+            ranked = sorted(
+                clips, key=lambda x: x.get("ranking_score", 0), reverse=True
+            )
+            self.context.ranked_clips = ranked
+            logger.debug(f"Ranked {len(ranked)} clips")
+
+        except Exception as e:
+            logger.error(f"Error ranking clips: {e}")
+            # Fallback to random ranking
+            random.shuffle(clips)
+            self.context.ranked_clips = clips
+
+    def _blend_clips(self) -> None:
+        """
+        Blend organic clips with ads.
+
+        Models the ads blending logic in production IG clips discovery.
+        """
+        organic = self.context.ranked_clips
+        ads = self.context.ads_clips
+
+        if not organic:
+            self.context.blended_clips = []
+            return
+
+        blended = []
+        ads_index = 0
+        ads_positions = []
+
+        # Insert ads at positions 4, 10, 16, etc.
+        AD_POSITIONS = [4, 10, 16, 22, 28]
+
+        for clip in organic:
+            blended.append(clip)
+
+            # Check if we should insert an ad at this position
+            if ads_index < len(ads) and len(blended) in AD_POSITIONS:
+                blended.append(ads[ads_index])
+                ads_positions.append(len(blended) - 1)
+                ads_index += 1
+
+        self.context.blended_clips = blended
+        self.context.metrics["ad_positions"] = ads_positions
+        logger.debug(
+            f"Blended {len(organic)} organic + {ads_index} ads = {len(blended)} items"
+        )
+
+    def _post_process(self) -> None:
+        """
+        Apply post-processing to blended clips.
+
+        Models post-ranking filters and transformations.
+        """
+        blended = self.context.blended_clips
+
+        # Apply deduplication
+        seen_pks = set()
+        deduped = []
+        for clip in blended:
+            pk = clip["pk"]
+            if pk not in seen_pks:
+                seen_pks.add(pk)
+                deduped.append(clip)
+
+        # Set pagination info
+        if deduped:
+            self.context.next_max_id = deduped[-1]["pk"]
+            self.context.more_available = (
+                len(deduped) >= self.clips_request.num_clips_requested
+            )
+
+        self.context.final_items = deduped
+
+    def _build_response(self) -> ClipsDiscoverResponse:
+        """Build the final response object."""
+        return ClipsDiscoverResponse(
+            items_with_ads=self.context.final_items,
+            paging_info={
+                "max_id": self.context.next_max_id,
+                "more_available": self.context.more_available,
+            },
+            container_module=self.clips_request.container_module,
+            is_shell_response=False,
+            client_hints={"metrics": self.context.metrics},
+        )
+
+
+class ClipsDiscoverStreamingService(ClipsDiscoverService):
+    """
+    Streaming variant of clips discover service.
+
+    Returns results in chunks for progressive loading.
+    Models ClipsDiscoverStreamingService from production IG.
+    """
+
+    CHUNK_SIZE = 5
+
+    def stream_discover(self) -> Generator[ClipsDiscoverResponse, None, None]:
+        """
+        Stream clips discovery results in chunks.
+
+        Yields:
+            ClipsDiscoverResponse for each chunk
+        """
+        start_time = time.time()
+
+        # Fetch all data first
+        self._fetch_organic_clips()
+
+        if self.clips_request.include_ads:
+            self._fetch_ads()
+
+        self._rank_clips()
+        self._blend_clips()
+        self._post_process()
+
+        # Stream in chunks
+        items = self.context.final_items
+        num_chunks = (len(items) + self.CHUNK_SIZE - 1) // self.CHUNK_SIZE
+
+        for chunk_idx in range(num_chunks):
+            start_idx = chunk_idx * self.CHUNK_SIZE
+            end_idx = min(start_idx + self.CHUNK_SIZE, len(items))
+            chunk_items = items[start_idx:end_idx]
+
+            is_last_chunk = chunk_idx == num_chunks - 1
+
+            yield ClipsDiscoverResponse(
+                items_with_ads=chunk_items,
+                paging_info={
+                    "max_id": chunk_items[-1]["pk"] if chunk_items else None,
+                    "more_available": not is_last_chunk or self.context.more_available,
+                    "chunk_index": chunk_idx,
+                    "total_chunks": num_chunks,
+                },
+                container_module=self.clips_request.container_module,
+                is_shell_response=chunk_idx == 0,  # First chunk is shell
+            )
+
+        # Record total metrics
+        self.context.metrics["total_duration_ms"] = (time.time() - start_time) * 1000
+        self.context.metrics["num_chunks"] = num_chunks
