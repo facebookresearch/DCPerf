@@ -43,7 +43,7 @@ declare -A DATASETS=(
 
 ##################### SYS CONFIG AND DEPS #########################
 
-BPKGS_WDL_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
+BPKGS_WDL_ROOT="$(dirname "$(readlink -f -- "$0")")" # Path to dir with this file.
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_WDL_ROOT/../..")"
 WDL_ROOT="${BENCHPRESS_ROOT}/benchmarks/wdl_bench"
 WDL_SOURCE="${WDL_ROOT}/wdl_sources"
@@ -62,7 +62,9 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch glibc-static libstdc++-static \
-    git tar unzip perl openssl-devel python3-devel gawk python3-numpy
+    git tar unzip perl openssl-devel python3-devel gawk python3-numpy \
+    dnf-plugins-core rpm-build audit-libs-devel gd-devel gdb \
+    libcap-devel libpng-devel libselinux-devel texinfo valgrind
 fi
 
 
@@ -118,7 +120,7 @@ build_folly()
     clone "$lib" || echo "Failed to clone $lib"
     cd "$lib" || exit
 
-    ./build/fbcode_builder/getdeps.py install-system-deps --recursive
+    python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
 
     python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}"
 
@@ -179,7 +181,6 @@ build_openssl()
     make install
     cp "${WDL_BUILD}/openssl/bin/openssl" "${WDL_ROOT}/" || exit
 
-
     popd || exit
 }
 
@@ -239,6 +240,33 @@ build_glibc()
         # glibc source code from the glibc-source package under /usr/src/glibc/
         mkdir "$lib"
         tar -xJf /usr/src/glibc/glibc-"${GLIBC_VERSION}".tar.xz -C "$lib" --strip-components=1
+    elif [ "$LINUX_DIST_ID" = "centos" ]; then
+        # Same as Ubuntu, centos may have private patches for glibc, so we rely
+        # on the source rpm instead of the official glibc source code.
+        # Extract Version and Release from installed glibc
+        GLIBC_SPKG=$(rpm -qi glibc 2>/dev/null | awk -F': ' '
+            /^Source RPM/ {
+                sub(/\.rpm$/, "", $2)
+                print $2
+            }
+            ')
+        CENTOS_MAJOR="$(awk -F "=" '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '"')"
+        BASE_URL="https://mirror.stream.centos.org/${CENTOS_MAJOR}-stream/BaseOS/source/tree/"
+        if dnf download --source "$GLIBC_SPKG" --setopt=timeout=60 >/dev/null 2>&1; then
+            echo "${GLIBC_SPKG}.rpm downloaded from the default repo"
+        elif dnf download --source "$GLIBC_SPKG" --repofrompath=src,"${BASE_URL}" --enablerepo=src --setopt=timeout=60 >/dev/null 2>&1; then
+            echo "${GLIBC_SPKG}.rpm downloaded from the official CentOS repo"
+        elif curl -fLO "${BASE_URL}/Packages/${GLIBC_SPKG}.rpm" --connect-timeout 60 >/dev/null 2>&1 && rpm -K "${GLIBC_SPKG}.rpm" >/dev/null 2>&1; then
+            echo "${GLIBC_SPKG}.rpm downloaded from the official CentOS rpm package URL"
+        else
+            echo "Failed to download ${GLIBC_SPKG}.rpm"
+            exit 1
+        fi
+
+        rpm -ivh "$lib"-*.src.rpm --define "_topdir ${WDL_SOURCE}/$lib-rpm"
+        # N.B.: Do not change to rpmbuild because it might point to a different (private) binary that does not work.
+        /usr/bin/rpmbuild -bp "./$lib-rpm/SPECS/glibc.spec" --define "_topdir ${WDL_SOURCE}/$lib-rpm"
+        mv "${WDL_SOURCE}/$lib-rpm/BUILD/$lib-${GLIBC_VERSION}" "${WDL_SOURCE}/$lib"
     else
         clone $lib || echo "Failed to clone $lib"
     fi
@@ -275,6 +303,7 @@ build_sleef()
     cd "$lib" || exit
     # Please do not change tabs in the following patch to spaces because git apply
     # is very sensitive to tabs and spaces.
+    # @lint-ignore-section TXT2 on
     git apply - << 'EOF'
 diff --git a/src/libm-benchmarks/CMakeLists.txt b/src/libm-benchmarks/CMakeLists.txt
 index 379e541..7e8895d 100644
@@ -297,6 +326,7 @@ index 379e541..7e8895d 100644
 +endif()
 --
 EOF
+    # @lint-ignore-section TXT2 off
     mkdir build && cd build
     cmake -DCMAKE_BUILD_TYPE=Release -DSLEEF_BUILD_BENCH=on ../
     make -j "$(nproc)"

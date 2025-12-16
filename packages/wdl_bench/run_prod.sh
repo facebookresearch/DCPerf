@@ -128,6 +128,9 @@ main() {
         if [ -f "./$bin" ]; then
             valid_prod_benchmarks+=("$bin")
             # echo "Adding $bin to run list"
+        elif [ "$bin" = "bench-memcmp" ] && [ -f "${WDL_BUILD}/glibc-build/benchtests/$bin" ]; then
+            valid_prod_benchmarks+=("$bin")
+            # echo "Adding $bin to run list"
         else
             echo "Skipping $bin (does not exist)"
         fi
