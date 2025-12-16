@@ -1,0 +1,486 @@
+#!/usr/bin/env python3
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""
+Thrift RPC Server for MockAdsService.
+
+This server provides real Thrift RPC endpoints that create Python↔Thrift
+boundary crossings to generate I-cache misses matching production patterns.
+
+Supports both IPv4 and IPv6 connections via dual-stack socket.
+"""
+
+import os
+import random
+import socket
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+# Disable stdout/stderr buffering for immediate log output
+sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
+sys.stderr = os.fdopen(sys.stderr.fileno(), "w", buffering=1)
+
+
+def log(msg):
+    """Print message with immediate flush"""
+    print(msg, flush=True)
+
+
+# Add OSS fbthrift Python library to path
+FBTHRIFT_PREFIX = Path(
+    os.getenv("FBTHRIFT_PREFIX", "/home/wsu/proxygen/proxygen/_build/deps")
+)
+THRIFT_PY_PATH = FBTHRIFT_PREFIX / "lib" / "fb-py-libs" / "thrift_py"
+if THRIFT_PY_PATH.exists():
+    sys.path.insert(0, str(THRIFT_PY_PATH))
+
+# Add generated Thrift bindings to path
+GEN_PY_PATH = Path(__file__).parent / "build" / "gen-py3"
+sys.path.insert(0, str(GEN_PY_PATH))
+
+from mock_services import (
+    MockAdsService,
+    MockContentFilterService,
+    MockRankingService,
+    MockUserPreferenceService,
+)
+from mock_services.ttypes import (
+    AdInsertion,
+    FetchAdsRequest,
+    FetchAdsResponse,
+    FilterContentRequest,
+    FilterContentResponse,
+    RankItemsRequest,
+    RankItemsResponse,
+    UserPreferencesRequest,
+    UserPreferencesResponse,
+)
+from thrift.protocol import TBinaryProtocol
+from thrift.transport import TSocket, TTransport
+
+
+class DualStackTServerSocket(TSocket.TServerSocket):
+    """
+    Custom TServerSocket that supports both IPv4 and IPv6 connections.
+
+    Binds to IPv6 wildcard address (::) with IPV6_V6ONLY=0 to accept
+    both IPv4-mapped IPv6 addresses and native IPv6 addresses.
+    """
+
+    def __init__(self, port: int):
+        """Initialize dual-stack server socket on specified port."""
+        self.port = port
+        self.handle = None
+
+    def listen(self):
+        """Create and bind dual-stack socket."""
+        # Create IPv6 socket
+        self.handle = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+
+        # Enable address reuse
+        self.handle.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        # Enable dual-stack (accept both IPv4 and IPv6)
+        # IPV6_V6ONLY=0 allows IPv4-mapped IPv6 addresses
+        self.handle.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+
+        # Bind to IPv6 wildcard address (::) which accepts all interfaces
+        # IPv4 clients will connect as IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
+        self.handle.bind(("::", self.port))
+
+        # Start listening with large backlog for high concurrency
+        # Backlog of 1024 allows many queued connections before rejecting
+        self.handle.listen(1024)
+
+        print(
+            f"[DualStackSocket] Listening on [::]:{self.port} (IPv4 + IPv6, backlog=1024)"
+        )
+
+    def accept(self):
+        """Accept connection from either IPv4 or IPv6 client."""
+        if self.handle:
+            client, addr = self.handle.accept()
+            # Create TSocket from accepted client socket
+            tsocket = TSocket.TSocket()
+            tsocket.setHandle(client)
+            return tsocket
+        return None
+
+    def close(self):
+        """Close server socket."""
+        if self.handle:
+            self.handle.close()
+            self.handle = None
+
+
+class MockContentFilterServiceHandler:
+    """
+    Handler implementation for MockContentFilterService.
+
+    Each RPC call creates Python↔Thrift boundary crossings for content filtering.
+    """
+
+    def filterContent(self, request: FilterContentRequest) -> FilterContentResponse:
+        """
+        Filters content based on safety rules.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with item list)
+        - Content filtering logic
+        - Thrift serialization (response with filtered items)
+        """
+        item_ids = request.item_ids
+        # user_id and filter_level from request are available for filtering logic
+        # Currently using random filtering for benchmarking purposes
+
+        # Randomly filter out ~10% of items
+        safe_items = []
+        blocked_items = []
+
+        for item_id in item_ids:
+            if random.random() > 0.1:  # 90% pass filter
+                safe_items.append(item_id)
+            else:
+                blocked_items.append(item_id)
+
+        response = FilterContentResponse(
+            safe_item_ids=safe_items,
+            blocked_item_ids=blocked_items,
+            total_filtered=len(blocked_items),
+            request_id=f"filter_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+
+class MockUserPreferenceServiceHandler:
+    """
+    Handler implementation for MockUserPreferenceService.
+
+    Each RPC call creates Python↔Thrift boundary crossings for user preferences.
+    """
+
+    def getUserPreferences(
+        self, request: UserPreferencesRequest
+    ) -> UserPreferencesResponse:
+        """
+        Fetches user preferences for personalization.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request)
+        - Preference generation
+        - Thrift serialization (response with preferences map)
+        """
+        # user_id from request is available for preference lookup
+        # Currently using random preferences for benchmarking purposes
+
+        # Generate random preferences
+        preferences = {
+            "video_affinity": random.random(),
+            "photo_affinity": random.random(),
+            "text_affinity": random.random(),
+            "reels_affinity": random.random(),
+            "explore_affinity": random.random(),
+        }
+
+        favorite_topics = random.sample(
+            ["sports", "food", "travel", "fashion", "tech", "music", "art"], k=3
+        )
+
+        response = UserPreferencesResponse(
+            preferences=preferences,
+            favorite_topics=favorite_topics,
+            request_id=f"pref_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+
+class MockRankingServiceHandler:
+    """
+    Handler implementation for MockRankingService.
+
+    Each RPC call creates Python↔Thrift boundary crossings for ranking operations.
+    """
+
+    def rankItems(self, request: RankItemsRequest) -> RankItemsResponse:
+        """
+        Ranks items based on user preferences.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with item list)
+        - Random ranking computation
+        - Thrift serialization (response with scores)
+        """
+        # user_id from request is available for personalized ranking
+        # Currently using random ranking for benchmarking purposes
+        item_ids = request.item_ids
+        num_results = min(request.num_results, len(item_ids))
+
+        # Generate random ranking scores and shuffle items
+        scored_items = [(item_id, random.random() * 100) for item_id in item_ids]
+        scored_items.sort(key=lambda x: x[1], reverse=True)
+
+        # Return top N ranked items
+        ranked_items = scored_items[:num_results]
+
+        response = RankItemsResponse(
+            item_ids=[item[0] for item in ranked_items],
+            scores=[item[1] for item in ranked_items],
+            request_id=f"rank_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+
+class MockAdsServiceHandler:
+    """
+    Handler implementation for MockAdsService.
+
+    Each RPC call triggers:
+    1. Thrift deserialization (request)
+    2. Python object creation (80 fields × N ads)
+    3. Thrift serialization (response)
+
+    This creates Python↔Thrift boundary crossings!
+    """
+
+    def fetchAds(self, request: FetchAdsRequest) -> FetchAdsResponse:
+        """
+        Fetches mock ads with 80 fields each.
+
+        Creates significant serialization overhead:
+        - 80 fields per ad × num_ads_requested
+        - Thrift type inspection and encoding
+        - Memory allocation and copying
+        """
+        num_ads = request.num_ads_requested
+
+        # Generate ads with production-scale data
+        ads = []
+        for _ in range(num_ads):
+            ad = self._create_ad()
+            ads.append(ad)
+
+        response = FetchAdsResponse(
+            ads=ads,
+            total_fetched=len(ads),
+            request_id=f"req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def _create_ad(self) -> AdInsertion:
+        """
+        Creates a simplified AdInsertion with 30 fields.
+
+        Much faster generation - no nested objects, no large arrays, no binary data!
+        """
+        ad_id = random.randint(1000000, 9999999)
+
+        return AdInsertion(
+            # Core identifiers (10 fields)
+            ad_id=ad_id,
+            campaign_id=random.randint(100000, 999999),
+            creative_id=random.randint(10000, 99999),
+            advertiser_id=random.randint(1000, 9999),
+            tracking_token=f"tk_{ad_id}",
+            impression_id=f"imp_{ad_id}",
+            ad_title=f"Ad {ad_id}",
+            ad_subtitle="Limited Time Offer",
+            call_to_action="SHOP_NOW",
+            destination_url=f"https://example.com/ad/{ad_id}",
+            # Engagement metrics (5 fields)
+            view_count=random.randint(0, 100000),
+            like_count=random.randint(0, 10000),
+            comment_count=random.randint(0, 1000),
+            share_count=random.randint(0, 500),
+            is_video=random.choice([True, False]),
+            # Ranking scores (10 fields)
+            quality_score=random.random(),
+            predicted_ctr=random.random() * 0.1,
+            predicted_cvr=random.random() * 0.05,
+            relevance_score=random.random(),
+            engagement_score=random.random(),
+            brand_safety_score=random.random(),
+            user_affinity_score=random.random(),
+            content_quality_score=random.random(),
+            viewability_score=random.random(),
+            completion_rate=random.random(),
+            # Media info (5 fields)
+            image_url=f"https://cdn.example.com/img_{ad_id}.jpg",
+            media_type="PHOTO",
+            video_duration=random.randint(5, 60),
+            surface_type="FEED",
+            placement_type="IN_STREAM",
+        )
+
+
+def main():
+    """Start the Thrift RPC server with all mock services."""
+    # Server configuration
+    # Bind to 0.0.0.0 to accept connections from any network interface (including remote hosts)
+    HOST = "0.0.0.0"
+    PORT = int(os.getenv("THRIFT_PORT", "9090"))  # Allow port override via env var
+    MAX_WORKERS = 200  # Increased from 50 to 200 for higher concurrency
+
+    print("[ThriftServer] Initializing server components...")
+
+    # Create handlers for all services
+    ads_handler = MockAdsServiceHandler()
+    ranking_handler = MockRankingServiceHandler()
+    filter_handler = MockContentFilterServiceHandler()
+    pref_handler = MockUserPreferenceServiceHandler()
+
+    print("[ThriftServer] Created handlers for all services")
+
+    # Create server transport using dual-stack socket (IPv4 + IPv6)
+    transport = DualStackTServerSocket(port=PORT)
+    tfactory = TTransport.TBufferedTransportFactory()
+    pfactory = TBinaryProtocol.TBinaryProtocolFactory()
+    print("[ThriftServer] Created dual-stack transport and factories")
+
+    print(f"[ThriftServer] Starting Thrift server on {HOST}:{PORT}")
+    print(f"[ThriftServer] Thread pool size: {MAX_WORKERS} concurrent connections")
+    print(
+        "[ThriftServer] Supporting 4 services: Ads, Ranking, ContentFilter, UserPreference"
+    )
+    print("[ThriftServer] Each RPC creates Python↔Thrift boundary crossings")
+    print("[ThriftServer] Server accepts connections from any network interface")
+    print("[ThriftServer] Press Ctrl+C to stop")
+
+    # Create thread pool executor for handling concurrent connections
+    executor = ThreadPoolExecutor(
+        max_workers=MAX_WORKERS, thread_name_prefix="ThriftWorker"
+    )
+
+    try:
+        # Open/listen on the transport
+        print("[ThriftServer] Calling transport.listen()...")
+        transport.listen()
+        print("[ThriftServer] Transport is listening")
+
+        # Serve connections in a loop with thread pool
+        print(
+            f"[ThriftServer] Starting multi-threaded server loop (thread pool size: {MAX_WORKERS})..."
+        )
+        while True:
+            client = transport.accept()
+            if client:
+                # Submit client handling to thread pool
+                executor.submit(
+                    handle_client,
+                    client,
+                    tfactory,
+                    pfactory,
+                    ads_handler,
+                    ranking_handler,
+                    filter_handler,
+                    pref_handler,
+                )
+
+    except KeyboardInterrupt:
+        print("\n[ThriftServer] Server shutting down...")
+    except Exception as e:
+        print(f"[ThriftServer] ERROR: {e}")
+        import traceback
+
+        traceback.print_exc()
+        raise
+    finally:
+        print("[ThriftServer] Shutting down thread pool...")
+        executor.shutdown(wait=True, cancel_futures=False)
+        print("[ThriftServer] Thread pool shut down")
+        transport.close()
+
+
+def handle_client(
+    client,
+    tfactory,
+    pfactory,
+    ads_handler,
+    ranking_handler,
+    filter_handler,
+    pref_handler,
+):
+    """Handle a single client connection with all services."""
+    try:
+        itrans = tfactory.getTransport(client)
+        otrans = tfactory.getTransport(client)
+        iprot = pfactory.getProtocol(itrans)
+        oprot = pfactory.getProtocol(otrans)
+
+        # Create processors for all services
+        ads_processor = MockAdsService.Processor(ads_handler)
+        ranking_processor = MockRankingService.Processor(ranking_handler)
+        filter_processor = MockContentFilterService.Processor(filter_handler)
+        pref_processor = MockUserPreferenceService.Processor(pref_handler)
+
+        try:
+            while True:
+                # Read the message name to determine which service to use
+                (fname, mtype, rseqid) = iprot.readMessageBegin()
+
+                # Decode bytes to string if necessary (OSS fbthrift returns bytes)
+                method_name = (
+                    fname.decode("utf-8") if isinstance(fname, bytes) else fname
+                )
+
+                # Route to appropriate processor based on method name
+                # OSS fbthrift requires server_ctx parameter (pass None)
+                if method_name in ["fetchAds"]:
+                    iprot.readMessageEnd()
+                    ads_processor.process_fetchAds(rseqid, iprot, oprot, None)
+                elif method_name in ["rankItems"]:
+                    iprot.readMessageEnd()
+                    ranking_processor.process_rankItems(rseqid, iprot, oprot, None)
+                elif method_name in ["filterContent"]:
+                    iprot.readMessageEnd()
+                    filter_processor.process_filterContent(rseqid, iprot, oprot, None)
+                elif method_name in ["getUserPreferences"]:
+                    iprot.readMessageEnd()
+                    pref_processor.process_getUserPreferences(
+                        rseqid, iprot, oprot, None
+                    )
+                else:
+                    print(f"[ThriftServer] WARNING: Unknown method '{method_name}'")
+                    iprot.skip(TBinaryProtocol.TType.STRUCT)
+                    iprot.readMessageEnd()
+                    x = TBinaryProtocol.TApplicationException(
+                        TBinaryProtocol.TApplicationException.UNKNOWN_METHOD,
+                        f"Unknown method {method_name}",
+                    )
+                    oprot.writeMessageBegin(
+                        fname, TBinaryProtocol.TMessageType.EXCEPTION, rseqid
+                    )
+                    x.write(oprot)
+                    oprot.writeMessageEnd()
+                    oprot.trans.flush()
+
+        except TTransport.TTransportException:
+            pass  # Normal client disconnect
+        except Exception as e:
+            print(f"[ThriftServer] Error in message processing loop: {e}")
+            import traceback
+
+            traceback.print_exc()
+    except Exception as e:
+        print(f"[ThriftServer] Error setting up client handler: {e}")
+        import traceback
+
+        traceback.print_exc()
+    finally:
+        try:
+            itrans.close()
+            otrans.close()
+        except Exception:
+            pass  # Ignore errors during cleanup
+
+
+if __name__ == "__main__":
+    main()
