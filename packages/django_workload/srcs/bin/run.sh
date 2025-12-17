@@ -515,6 +515,9 @@ start_django_server() {
     export PYTHONJITALLSTATICFUNCTIONS=1
   fi
 
+  # Export FBTHRIFT_PREFIX for thrift Python bindings
+  export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
+
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
   ./django-workload/services/memcached/run-memcached > memcached.log 2>&1 &

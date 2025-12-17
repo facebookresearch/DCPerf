@@ -220,6 +220,7 @@ if ! [ -d Python-3.10.2 ]; then
     tar -xzf Python-3.10.2.tgz
     cd Python-3.10.2
     ./configure --enable-optimizations --prefix="$(pwd)/python-build" --enable-shared LN="ln -s"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 fi
