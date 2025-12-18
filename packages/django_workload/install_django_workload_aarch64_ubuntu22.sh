@@ -272,26 +272,6 @@ pip3 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 
 echo "Dependencies installed in CPython venv"
 
-# Build oldisim icache buster library
-set +u
-if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
-    if [ -z "${IBCC}" ]; then
-        IBCC="/bin/c++"
-    fi
-    cd "${TEMPLATES_DIR}" || exit 1
-    rm -rf build
-    mkdir -p build
-    cd build || exit 1
-    python3 ../gen_icache_buster.py --num_methods=100000 --num_splits=24 --output_dir ./
-    # shellcheck disable=SC2086
-    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -c ./ICacheBuster*.cc
-    # shellcheck disable=SC2086
-    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -Wl,-soname,libicachebuster.so -o libicachebuster.so ./*.o
-    cp libicachebuster.so "${OUT}/django-workload/django-workload/libicachebuster.so" || exit 1
-    cd ../ || exit 1
-    rm -rfv build/
-fi
-
 # Configure Java options directly
 # shellcheck disable=SC2016
 echo 'JVM_OPTS="$JVM_OPTS -Xss512k"' >> "${DJANGO_WORKLOAD_ROOT}/apache-cassandra/conf/cassandra-env.sh"
