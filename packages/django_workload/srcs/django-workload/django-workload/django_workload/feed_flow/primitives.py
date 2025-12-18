@@ -486,11 +486,12 @@ class CPUPrimitives:
     @staticmethod
     def primitive_nested_loops(size: int = 20) -> List[tuple]:
         """Nested loop operations"""
+        dim = int(math.pow(size, 1 / 3)) + 1
         results = []
-        for i in range(size):
-            for j in range(size):
+        for i in range(dim):
+            for j in range(dim):
                 if (i + j) % 3 == 0:
-                    for k in range(5):
+                    for k in range(dim):
                         results.append((i, j, k, i * j + k))
         return results
 
@@ -511,7 +512,7 @@ class CPUPrimitives:
         results = []
         for i in range(iterations):
             results.append(f"f-string: {i}, {i**2}, {i*3}")
-            results.append("%-format: %d, %s, %f" % (i, f"val_{i}", i * 1.5))
+            results.append("%%-format: %d, %s, %f" % (i, f"val_{i}", i * 1.5))
             results.append("{} {} {}".format(i, i + 1, i + 2))
             results.append("{key}_{value}".format(key=i, value=i**2))
         return results
