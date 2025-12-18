@@ -154,26 +154,6 @@ pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-
 pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 
-# Build oldisim icache buster library
-# Will only build once, the outcome library can be used in both CPython and Cinder
-set +u
-if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
-    if [ -z "${IBCC}" ]; then
-        IBCC="/bin/c++"
-    fi
-    cd "${TEMPLATES_DIR}" || exit 1
-    mkdir -p build
-    cd build || exit 1
-    python3 ../gen_icache_buster.py --num_methods=100000 --num_splits=24 --output_dir ./
-    # shellcheck disable=SC2086
-    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -c ./ICacheBuster*.cc
-    # shellcheck disable=SC2086
-    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -Wl,-soname,libicachebuster.so -o libicachebuster.so ./*.o
-    cp libicachebuster.so "${OUT}/django-workload/django-workload/libicachebuster.so" || exit 1
-    cd ../ || exit 1
-    rm -rfv build/
-fi
-
 # No need to copy template files as they are already in the srcs directory
 
 deactivate

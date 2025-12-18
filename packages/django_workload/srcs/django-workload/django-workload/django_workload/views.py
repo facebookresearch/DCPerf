@@ -32,11 +32,6 @@ from .users import require_user
 # Used for sample-based profiling
 SAMPLE_COUNT = 0
 
-libib = CDLL("libicachebuster.so")
-
-IB_MIN = int(os.environ.get("IB_MIN", 100000))
-IB_MAX = int(os.environ.get("IB_MAX", 200000))
-
 
 @cache_page(30)
 def index(request):
@@ -71,7 +66,6 @@ def index(request):
 @require_user
 def feed_timeline(request):
     # Produce a JSON response containing the 'timeline' for a given user
-    libib.ibrun(random.randint(IB_MIN, IB_MAX))
     feed_timeline = FeedTimeline(request)
     result = feed_timeline.get_timeline()
     # sort by timestamp and do some more "meaningful" work
@@ -82,7 +76,6 @@ def feed_timeline(request):
 @require_user
 def timeline(request):
     # Produce a JSON response containing the feed of entries for a user
-    libib.ibrun(random.randint(IB_MIN, IB_MAX))
     feed = Feed(request)
     result = feed.feed_page()
     return HttpResponse(json.dumps(result), content_type="text/json")
@@ -91,7 +84,6 @@ def timeline(request):
 @require_user
 def bundle_tray(request):
     # Fetch bundles of content from followers to show
-    libib.ibrun(random.randint(IB_MIN, IB_MAX))
     bundle = BundleTray(request)
     result = bundle.get_bundle()
     result = bundle.post_process(result)
@@ -101,7 +93,6 @@ def bundle_tray(request):
 @require_user
 def inbox(request):
     # produce an inbox from different sources of information
-    libib.ibrun(random.randint(IB_MIN, IB_MAX))
     inbox = Inbox(request)
     result = inbox.results()
     result = inbox.post_process(result)
@@ -116,7 +107,6 @@ def seen(request):
     # some random data of our own, cached in memcached
     global SAMPLE_COUNT
     should_profile = False
-    libib.ibrun(random.randint(IB_MIN, IB_MAX))
 
     if settings.PROFILING:
         SAMPLE_COUNT += 1
