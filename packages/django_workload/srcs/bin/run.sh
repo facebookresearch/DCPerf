@@ -68,6 +68,69 @@ cleanup() {
       kill -9 "$LOADBALANCER_PID" || true
     fi
   fi
+
+  # Stop Thrift servers and HAProxy using port-based process discovery
+  THRIFT_DIR="${SCRIPT_ROOT}/../django-workload/django-workload/django_workload/thrift"
+  HAPROXY_FRONTEND_PORT=9090
+
+  # Helper function to find and kill process using a specific port
+  kill_process_on_port() {
+    local port=$1
+    local service_name=$2
+
+    # Use lsof to find PID listening on the port
+    local pid=$(lsof -ti :${port} -sTCP:LISTEN 2>/dev/null || echo "")
+
+    if [ -n "$pid" ]; then
+      echo "Stopping ${service_name} on port ${port} (PID: ${pid})..."
+      kill "$pid" 2>/dev/null || true
+      sleep 0.5
+
+      # Force kill if still running
+      if kill -0 "$pid" 2>/dev/null; then
+        echo "Force killing ${service_name} (PID: ${pid})..."
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    fi
+  }
+
+  # Stop HAProxy load balancer (listening on port 9090)
+  echo "Stopping HAProxy Thrift load balancer..."
+  kill_process_on_port "$HAPROXY_FRONTEND_PORT" "HAProxy"
+  rm -f "${THRIFT_DIR}/haproxy_thrift.pid" 2>/dev/null || true
+
+  # Stop Thrift backend servers (use ports from PID file)
+  if [ -f "${THRIFT_DIR}/thrift_servers.pids" ]; then
+    echo "Stopping Thrift backend servers..."
+
+    # Extract unique ports from PID file
+    while IFS=: read -r pid port; do
+      if [ -n "$port" ]; then
+        kill_process_on_port "$port" "Thrift server"
+      fi
+    done < "${THRIFT_DIR}/thrift_servers.pids"
+
+    rm -f "${THRIFT_DIR}/thrift_servers.pids" 2>/dev/null || true
+  fi
+
+  # Fallback: Use pgrep to find any remaining thrift_server.py or haproxy processes
+  # in case they're not bound to ports yet or lsof failed
+  # THRIFT_PIDS=$(pgrep -f "thrift_server.py" 2>/dev/null || echo "")
+  # if [ -n "$THRIFT_PIDS" ]; then
+  #   echo "Cleaning up remaining Thrift server processes via pgrep: $THRIFT_PIDS"
+  #   echo "$THRIFT_PIDS" | xargs -r kill 2>/dev/null || true
+  #   sleep 0.5
+  #   echo "$THRIFT_PIDS" | xargs -r kill -9 2>/dev/null || true
+  # fi
+
+  # HAPROXY_PIDS=$(pgrep -f "haproxy.*haproxy_thrift.cfg" 2>/dev/null || echo "")
+  # if [ -n "$HAPROXY_PIDS" ]; then
+  #   echo "Cleaning up remaining HAProxy processes via pgrep: $HAPROXY_PIDS"
+  #   echo "$HAPROXY_PIDS" | xargs -r kill 2>/dev/null || true
+  #   sleep 0.5
+  #   echo "$HAPROXY_PIDS" | xargs -r kill -9 2>/dev/null || true
+  # fi
+
   # Stop memcached
   [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" 2>/dev/null || true; }
 
@@ -113,7 +176,7 @@ check_port_available() {
 
   # Check for LISTENING sockets only (TIME_WAIT won't appear here)
   # With SO_REUSEADDR enabled, TIME_WAIT sockets won't prevent binding
-  if ss -tln | grep -q ":${port} "; then
+  if ss -tan | grep -q ":${port} "; then
     echo "ERROR: Port ${port} (${port_name}) has an active LISTENING socket!"
 
     # Check if there's a process associated with this port
@@ -179,7 +242,7 @@ cat <<EOF
 Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] \
 [-d duration of workload] [-p number of repetitions] [-l siege logfile path] \
 [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] \
-[-t snapshot taking] [-I interpreter] [-P base port] [-T stats port]
+[-t snapshot taking] [-I interpreter] [-P base port] [-T stats port] [-W thrift_servers]
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
@@ -207,6 +270,7 @@ For role "client":
 For role "db":
     -y          number of cassandra concurrent writes (default 128)
     -b          ip address that cassandra will bind to (default to the first IP from "hostname -i": $(hostname -i))
+    -W          number of thrift server workers (default: min(nproc, 32)
 
 
 EOF
@@ -297,9 +361,15 @@ load_snapshot(){
 wait_for_cassandra_to_start() {
    # Wait for cassandra to start
   retries=60
-  if ! nc -z "${cassandra_addr}" 9042; then
-    echo "Waiting for Cassandra to start..."
-    while ! nc -z "${cassandra_addr}" 9042; do
+  if [ -n "$1" ]; then
+    check_addr="$1"
+  else
+    check_addr="${cassandra_addr}"
+  fi
+
+  if ! nc -z "${check_addr}" 9042; then
+    echo "Waiting for Cassandra to start by checking ${check_addr}:9042..."
+    while ! nc -z "${check_addr}" 9042; do
       sleep 1
       retries=$((retries-1))
       if [[ "$retries" -le 0 ]]; then
@@ -308,6 +378,23 @@ wait_for_cassandra_to_start() {
       fi
     done
     echo "Cassandra is ready."
+  fi
+}
+
+wait_for_thrift_servers_to_start() {
+   # Wait for Thrift servers to start (check load balancer on port 9090)
+  retries=30
+  if ! nc -z localhost 9090; then
+    echo "Waiting for Thrift load balancer to start..."
+    while ! nc -z localhost 9090; do
+      sleep 1
+      retries=$((retries-1))
+      if [[ "$retries" -le 0 ]]; then
+        echo "Thrift load balancer could not start."
+        exit 1
+      fi
+    done
+    echo "Thrift load balancer is ready."
   fi
 }
 
@@ -344,6 +431,23 @@ take_snapshot(){
     cp -rf "${table_dir}snapshots/${snapshot_name}"/* "${snapshot_dir}/${table_dir_name}/" || exit 1
   done
   echo "The snapshot is stored in ${snapshot_dir} "
+}
+
+start_thrift_servers() {
+  num_thrift_servers="$1"
+  # Start Thrift RPC server with load balancer
+  echo "Starting Thrift RPC server with load balancer..."
+  export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
+  if [ "$num_thrift_servers" -gt 0 ]; then
+    export NUM_SERVERS="$num_thrift_servers"
+  else
+    export NUM_SERVERS=16
+  fi
+  cd "${SCRIPT_ROOT}/../django-workload/django-workload/django_workload/thrift" || exit 1
+  bash manage_servers.sh start --with-haproxy
+
+  # Wait for Thrift servers to start
+  wait_for_thrift_servers_to_start
 }
 
 start_cassandra() {
@@ -383,6 +487,9 @@ start_django_server() {
   local num_server_workers=$2
   local interpreter=${3:-cpython}
   local use_async=${4:-0}
+
+  # Export FBTHRIFT_PREFIX for thrift Python bindings
+  export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
 
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -630,7 +737,13 @@ main() {
   local stats_port
   stats_port=16667
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:L:t:SI:A:P:T:' OPTION "${@}"; do
+  local thrift_server_workers
+  thrift_server_workers=32
+  if [ "$(nproc)" -lt "${thrift_server_workers}" ]; then
+    thrift_server_workers="$(nproc)"
+  fi
+
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:L:t:SI:A:P:T:W:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -713,6 +826,9 @@ main() {
       T)
         stats_port="${OPTARG}"
         ;;
+      W)
+        thrift_server_workers="${OPTARG}"
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -748,6 +864,7 @@ main() {
 
 
   if [ "$role" = "db" ]; then
+    start_thrift_servers "$thrift_server_workers"
     start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
   elif [ "$role" = "clientserver" ]; then
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
@@ -760,6 +877,7 @@ main() {
     # Report interpreter type
     echo "Interpreter: ${interpreter}"
   elif [ "$role" = "standalone" ]; then
+    start_thrift_servers "$thrift_server_workers"
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
       "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter" \

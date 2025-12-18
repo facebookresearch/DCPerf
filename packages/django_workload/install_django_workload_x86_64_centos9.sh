@@ -14,6 +14,9 @@ DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 DJANGO_SERVER_ROOT="${DJANGO_REPO_ROOT}/django-workload"
 DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
 
+# Number of parallel build jobs (defaults to nproc if not set)
+NUM_BUILD_JOBS="${NUM_BUILD_JOBS:-$(nproc)}"
+
 # =====================================================================
 # Step 1: Install System Dependencies
 # =====================================================================
@@ -24,7 +27,7 @@ echo "====================================================================="
 
 dnf groupinstall "Development Tools" -y --exclude="texlive*"
 dnf install -y memcached libmemcached-awesome-devel zlib-devel screen \
-    openssl-devel bzip2-devel libffi-devel wget make haproxy
+    openssl-devel bzip2-devel libffi-devel wget make haproxy xxhash-devel
 
 echo "System dependencies installed successfully"
 
@@ -240,7 +243,7 @@ if ! [ -d "cinder" ]; then
     pushd cinder
     mkdir -p cinder-build
     ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations --enable-shared LN="ln -s"
-    make -j
+    make -j"${NUM_BUILD_JOBS}"
     make install
     popd
 fi
@@ -344,10 +347,128 @@ chmod +x "${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen/build_proxygen.sh"
 # Build Proxygen
 echo "Building Proxygen (this may take 10-20 minutes)..."
 cd "${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen"
-bash -x ./build_proxygen.sh --prefix "${DJANGO_WORKLOAD_ROOT}/proxygen/staging" -j "$(nproc)"
+bash -x ./build_proxygen.sh --prefix "${DJANGO_WORKLOAD_ROOT}/proxygen/staging" -j "${NUM_BUILD_JOBS}"
 bash -x ./install.sh
 
 echo "Proxygen built and installed at ${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
+
+# =====================================================================
+# Step 7.5: Build and Install fbthrift (for Thrift RPC Services)
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 7.5: Building and Installing fbthrift"
+echo "====================================================================="
+
+FBTHRIFT_VERSION="v2025.09.22.00"
+FBTHRIFT_PREFIX="${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen/_build/deps"
+
+# Clone fbthrift if not already present
+if [ ! -d "${DJANGO_WORKLOAD_ROOT}/fbthrift" ]; then
+    echo "Cloning fbthrift from GitHub..."
+    cd "${DJANGO_WORKLOAD_ROOT}"
+    git clone https://github.com/facebook/fbthrift.git
+    cd fbthrift
+    git checkout "${FBTHRIFT_VERSION}"
+    echo "fbthrift cloned successfully"
+else
+    echo "fbthrift directory already exists at ${DJANGO_WORKLOAD_ROOT}/fbthrift"
+    cd "${DJANGO_WORKLOAD_ROOT}/fbthrift"
+fi
+
+# Build fbthrift
+if [ ! -f "${FBTHRIFT_PREFIX}/bin/thrift1" ]; then
+    echo "Building fbthrift (this may take 15-25 minutes)..."
+    cd "${DJANGO_WORKLOAD_ROOT}/fbthrift"
+    mkdir -p _build
+    cd _build
+
+    cmake -G Ninja \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_C_COMPILER=gcc \
+        -DCMAKE_CXX_COMPILER=g++ \
+        -DCMAKE_PREFIX_PATH="${FBTHRIFT_PREFIX}" \
+        -DCMAKE_INSTALL_PREFIX="${FBTHRIFT_PREFIX}" \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=True \
+        -DCXX_STD=gnu++20 \
+        -DCMAKE_CXX_STANDARD=20 \
+        ..
+
+    ninja -v -j "${NUM_BUILD_JOBS}" install
+    echo "fbthrift built and installed at ${FBTHRIFT_PREFIX}"
+else
+    echo "fbthrift already built and installed"
+fi
+
+# =====================================================================
+# Step 7.6: Download and Extract Silesia Corpus Dataset
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 7.6: Downloading and Extracting Silesia Corpus Dataset"
+echo "====================================================================="
+
+DATASET_DIR="${DJANGO_SERVER_ROOT}/django_workload/feed_flow/dataset"
+mkdir -p "${DATASET_DIR}/text"
+mkdir -p "${DATASET_DIR}/binary"
+
+# Download Silesia Corpus if not already present
+if [ ! -f "${DJANGO_WORKLOAD_ROOT}/silesia.zip" ]; then
+    echo "Downloading Silesia Corpus dataset..."
+    cd "${DJANGO_WORKLOAD_ROOT}"
+    wget "https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip"
+    echo "Silesia Corpus downloaded successfully"
+else
+    echo "Silesia Corpus already downloaded"
+fi
+
+# Extract dataset files
+if [ ! -f "${DATASET_DIR}/text/dickens" ]; then
+    echo "Extracting Silesia Corpus dataset..."
+    cd "${DJANGO_WORKLOAD_ROOT}"
+    unzip -o silesia.zip -d silesia_extracted
+
+    # Copy text files
+    echo "Copying text files to ${DATASET_DIR}/text..."
+    cp silesia_extracted/dickens "${DATASET_DIR}/text/"
+    cp silesia_extracted/webster "${DATASET_DIR}/text/"
+
+    # Extract and copy XML files
+    echo "Extracting XML files to ${DATASET_DIR}/text..."
+    tar -xf silesia_extracted/xml -C "${DATASET_DIR}/text/"
+
+    # Copy binary files
+    echo "Copying binary files to ${DATASET_DIR}/binary..."
+    cp silesia_extracted/mozilla "${DATASET_DIR}/binary/"
+    cp silesia_extracted/mr "${DATASET_DIR}/binary/"
+    cp silesia_extracted/nci "${DATASET_DIR}/binary/"
+    cp silesia_extracted/ooffice "${DATASET_DIR}/binary/"
+    cp silesia_extracted/osdb "${DATASET_DIR}/binary/"
+    cp silesia_extracted/reymont "${DATASET_DIR}/binary/"
+    cp silesia_extracted/sao "${DATASET_DIR}/binary/"
+    cp silesia_extracted/x-ray "${DATASET_DIR}/binary/"
+
+    echo "Dataset files extracted and organized successfully"
+else
+    echo "Dataset files already extracted"
+fi
+
+# =====================================================================
+# Step 7.7: Build Mock Thrift Server
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 7.7: Building Mock Thrift Server"
+echo "====================================================================="
+
+THRIFT_SERVER_DIR="${DJANGO_SERVER_ROOT}/django_workload/thrift"
+export FBTHRIFT_PREFIX="${FBTHRIFT_PREFIX}"
+
+# Build thrift server
+echo "Building mock thrift server..."
+cd "${THRIFT_SERVER_DIR}"
+./build.sh
+echo "Mock thrift server built"
 
 # =====================================================================
 # Step 8: Build and Install proxygen_binding (for DjangoBench V2)
@@ -386,6 +507,25 @@ cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
 "${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install pybind11
 "${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install -e .
 echo "proxygen_binding installed in venv_cinder"
+
+# =====================================================================
+# Step 9: Generate Code Variants for FeedFlow
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 9: Generating Code Variants for FeedFlow"
+echo "====================================================================="
+
+# Install jinja2 in venv_cpython
+echo "Installing jinja2 for code generation..."
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install jinja2
+
+# Generate code variants
+echo "Generating FeedFlow code variants..."
+cd "${DJANGO_SERVER_ROOT}"
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" generate_code_variants.py
+
+echo "Code variants generated successfully"
 
 echo ""
 echo "====================================================================="

@@ -40,7 +40,7 @@ log_error() {
 check_port_available() {
     local port=$1
     # Use lsof to check if port is in use
-    if lsof -i ":$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+    if ss -tan | grep -q ":${port}" >/dev/null 2>&1; then
         return 1  # Port is in use
     else
         return 0  # Port is available
@@ -122,7 +122,7 @@ start_servers() {
         log_info "  → Server #$i started (PID: $SERVER_PID, Port: $PORT, Log: $LOG_FILE)"
 
         # Small delay to avoid race conditions
-        sleep 0.2
+        # sleep 0.2
     done
 
     log_info "Waiting for servers to initialize..."
@@ -181,7 +181,7 @@ verify_servers() {
                 if kill -0 "$pid" 2>/dev/null; then
                     RUNNING=$((RUNNING + 1))
                     # Check if port is listening
-                    if lsof -i ":$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+                    if ss -tln | grep -q ":${port}" >/dev/null 2>&1; then
                         log_info "  ✓ Server on port $port (PID: $pid) - RUNNING"
                     else
                         log_warn "  ⚠ Server PID $pid running but port $port not listening yet"
