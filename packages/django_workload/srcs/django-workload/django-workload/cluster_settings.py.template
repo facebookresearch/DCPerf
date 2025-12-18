@@ -17,6 +17,11 @@ ALLOWED_HOSTS = ["localhost", "ip6-localhost", "127.0.0.1", "::1", "*"]
 # Cassandra database
 DATABASES["default"]["HOST"] = "__CASSANDRA_DB_ADDR__"
 
+# Thrift RPC services (for FeedFlow architecture)
+# Use the same host as Cassandra for remote RPC services
+THRIFT_SERVER_HOST = DATABASES["default"]["HOST"]
+THRIFT_SERVER_PORT = 9090  # Default Thrift server port
+
 # Monitoring server
 STATSD_HOST = "localhost"
 STATSD_PORT = 8125

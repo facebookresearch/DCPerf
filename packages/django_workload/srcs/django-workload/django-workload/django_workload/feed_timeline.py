@@ -1,46 +1,55 @@
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+from .feed_flow.flow import FeedFlow
+
+
 class FeedTimeline:
+    """
+    FeedTimeline using FeedFlow multi-step architecture.
+    Now mimics IG Django's feed.api.views.timeline with FeedFlow orchestration.
+    """
+
     def __init__(self, request):
         self.request = request
+        self.feed_flow = FeedFlow(request)
 
     def get_timeline(self):
-        user = self.request.user
-        feed = user.feed_entries().limit(20)
-        user_info = user.json_data
-        result = {
-            "num_results": len(feed),
-            "items": [
-                {
-                    "pk": str(e.id),
-                    "comment_count": e.comment_count,
-                    "published": e.published.timestamp(),
-                    "user": user_info,
-                }
-                for e in feed
-            ],
-        }
+        """
+        Main entry point - executes FeedFlow and returns timeline.
+        Mimics IG's timeline() view which calls FeedFlow.next_page()
+        """
+        result = self.feed_flow.next_page()
         return result
 
     def post_process(self, result):
-        item_list = result["items"]
+        """
+        Legacy post-processing for compatibility.
+        Adds additional CPU work to match original workload.
+        """
+        item_list = result.get("items", [])
         conf = FeedTimelineConfig()
 
-        # duplicate the data
         for _ in range(conf.mult_factor):
             conf.list_extend(item_list)
 
         sorted_list = sorted(
-            conf.get_list(), key=lambda x: x["published"], reverse=True
+            conf.get_list(), key=lambda x: x.get("timestamp", 0), reverse=True
         )
         final_items = []
 
         for item in sorted_list:
-            conf.user = item["user"]["name"]
-            conf.comments_total = conf.comments_total + item["comment_count"]
-            conf.comments_per_user[conf.user] = item["comment_count"]
-            # un-duplicate the data
+            author = item.get("author", "unknown")
+            conf.user = author
+            conf.comments_total = conf.comments_total + item.get("comment_count", 0)
+            conf.comments_per_user[conf.user] = item.get("comment_count", 0)
+
             exists = False
             for final_item in final_items:
-                if final_item["pk"] == item["pk"]:
+                if final_item["id"] == item["id"]:
                     exists = True
                     break
             if not exists:
@@ -53,8 +62,6 @@ class FeedTimeline:
 
 class FeedTimelineConfig(object):
     def __init__(self):
-        # Number of times the original items list is duplicated in order
-        # to make the view more Python intensive
         self.mult_factor = 5
         self.work_list = []
         self.user = ""
