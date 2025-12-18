@@ -38,6 +38,15 @@ class FeedFlow:
     def __init__(self, request):
         self.request = request
         self.context = FeedFlowContext(request, request.user)
+        self.custom_steps: List[FeedFlowStep] = []  # For variant view functions
+
+    def add_step(self, step: FeedFlowStep) -> None:
+        """
+        Add a custom step to the flow.
+        Used by variant view functions to inject specific step combinations.
+        """
+        step.context = self.context
+        self.custom_steps.append(step)
 
     def _get_flow_steps(self) -> List[FeedFlowStep]:
         """
@@ -90,7 +99,11 @@ class FeedFlow:
         Main run phase - executes all flow steps in sequence.
         Mimics IG's _async_run() with step registry and execution.
         """
-        steps = self._get_flow_steps()
+        # Use custom steps if they were added, otherwise use default flow
+        if self.custom_steps:
+            steps = self.custom_steps
+        else:
+            steps = self._get_flow_steps()
 
         for step in steps:
             step.execute()
