@@ -186,8 +186,6 @@ Proxy shell script to executes django-workload benchmark
 For role "server", "clientserver":
     -w          number of server workers (default NPROC)
     -c          ip address of the cassandra server (required)
-    -m          minimum icachebuster calling rounds (default 100000)
-    -M          maximum icachebuster calling rounds (default 200000)
     -I          python interpreter to use (cpython or cinder, default is cpython)
     -P          base port for Proxygen workers (default 8001)
     -T          HAProxy stats port (default 16667)
@@ -608,20 +606,6 @@ main() {
   local cassandra_bind_addr
   cassandra_bind_addr=''
 
-  local django_ib_min
-  if [ -n "${IB_MIN}" ]; then
-    django_ib_min="${IB_MIN}"
-  else
-    django_ib_min="100000"
-  fi
-
-  local django_ib_max
-  if [ -n "${IB_MAX}" ]; then
-    django_ib_max="${IB_MAX}"
-  else
-    django_ib_max="200000"
-  fi
-
   local take_a_snapshot
   take_a_snapshot=false
 
@@ -646,7 +630,7 @@ main() {
   local stats_port
   stats_port=16667
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:SI:A:P:T:' OPTION "${@}"; do
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:L:t:SI:A:P:T:' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -690,12 +674,6 @@ main() {
         ;;
       b)
         cassandra_bind_addr="${OPTARG}"
-        ;;
-      m)
-        django_ib_min="${OPTARG}"
-        ;;
-      M)
-        django_ib_max="${OPTARG}"
         ;;
       t)
         take_a_snapshot=true
@@ -764,8 +742,6 @@ main() {
   readonly cassandra_addr
   readonly server_addr
   readonly cassandra_bind_addr
-  readonly django_ib_min
-  readonly django_ib_max
   readonly take_a_snapshot
   readonly load_a_snapshot
   readonly use_async
@@ -774,22 +750,16 @@ main() {
   if [ "$role" = "db" ]; then
     start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
   elif [ "$role" = "clientserver" ]; then
-    export IB_MIN="${django_ib_min}"
-    export IB_MAX="${django_ib_max}"
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
       "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}" "${use_async}";
   elif [ "$role" = "client" ]; then
     start_client "$num_client_workers" "$duration" "$siege_logs_path" \
       "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
-    export IB_MIN="${django_ib_min}"
-    export IB_MAX="${django_ib_max}"
     start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter" "${use_async}";
     # Report interpreter type
     echo "Interpreter: ${interpreter}"
   elif [ "$role" = "standalone" ]; then
-    export IB_MIN="${django_ib_min}"
-    export IB_MAX="${django_ib_max}"
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
       "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter" \
