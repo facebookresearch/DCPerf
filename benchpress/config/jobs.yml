@@ -251,7 +251,7 @@
           - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
-          - '/tmp/siege_out_*'
+          - '/tmp/wrk_out_*'
           - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
@@ -332,7 +332,7 @@
           - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
-          - '/tmp/siege_out_*'
+          - '/tmp/wrk_out_*'
           - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
@@ -372,7 +372,7 @@
           - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
-          - '/tmp/siege_out_*'
+          - '/tmp/wrk_out_*'
           - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
@@ -412,7 +412,7 @@
           - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
-          - '/tmp/siege_out_*'
+          - '/tmp/wrk_out_*'
           - 'benchmarks/django_workload/breakdown.csv'
 
 
@@ -497,7 +497,7 @@
           - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
           - 'benchmarks/django_workload/django-workload/client/*.log'
           - 'benchmarks/django_workload/*.log'
-          - '/tmp/siege_out_*'
+          - '/tmp/wrk_out_*'
           - 'benchmarks/django_workload/breakdown.csv'
 
 - name: feedsim_default
