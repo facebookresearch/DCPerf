@@ -293,3 +293,167 @@ class BundleReelClipModel(DjangoCassandraModel):
             "media_type": self.media_type,
             "is_seen": self.is_seen,
         }
+
+
+# ============================================================================
+# Inbox Models for activity.api.views.inbox
+# ============================================================================
+
+
+class InboxThreadModel(DjangoCassandraModel):
+    """
+    Represents a Direct inbox thread.
+    Models the thread structure in Instagram Direct.
+
+    In production inbox:
+    - Threads represent conversations between users
+    - Threads have participants, messages, and read states
+    - Thread metadata is cached in Direct cache for fast access
+    """
+
+    class Meta:
+        get_pk_field = "thread_id"
+
+    thread_id = columns.UUID(primary_key=True, default=uuid.uuid4)
+    owner_id = columns.UUID(index=True)
+    thread_type = columns.Text(default="private")  # private, group
+    title = columns.Text()
+    participant_ids = columns.List(columns.UUID)
+    created_at = columns.TimeUUID(default=timeuuid_now)
+    last_activity_at = columns.TimeUUID(default=timeuuid_now)
+    is_muted = columns.Boolean(default=False)
+    is_spam = columns.Boolean(default=False)
+    unread_count = columns.Integer(default=0)
+    last_seen_at = columns.TimeUUID()
+    sequence_id = columns.BigInt(default=0)
+
+    @property
+    def published(self):
+        return datetime_from_uuid1(self.created_at)
+
+    @property
+    def last_activity(self):
+        return datetime_from_uuid1(self.last_activity_at)
+
+    @property
+    def json_data(self):
+        return {
+            "thread_id": str(self.thread_id),
+            "owner_id": str(self.owner_id),
+            "thread_type": self.thread_type,
+            "title": self.title,
+            "participant_ids": [str(pid) for pid in self.participant_ids]
+            if self.participant_ids
+            else [],
+            "created_at": str(self.published),
+            "last_activity_at": str(self.last_activity),
+            "is_muted": self.is_muted,
+            "is_spam": self.is_spam,
+            "unread_count": self.unread_count,
+        }
+
+
+class InboxMessageModel(DjangoCassandraModel):
+    """
+    Represents a message in an inbox thread.
+    Models the message structure in Instagram Direct.
+
+    In production inbox:
+    - Messages belong to threads
+    - Messages have sender, content, and metadata
+    - Message previews are shown in inbox view
+    """
+
+    class Meta:
+        get_pk_field = "message_id"
+
+    message_id = columns.UUID(primary_key=True, default=uuid.uuid4)
+    thread_id = columns.UUID(index=True)
+    sender_id = columns.UUID(index=True)
+    message_type = columns.Text(default="text")  # text, media, link, voice, video_call
+    text_content = columns.Text()
+    media_id = columns.UUID()
+    created_at = columns.TimeUUID(default=timeuuid_now)
+    is_unsent = columns.Boolean(default=False)
+    is_seen = columns.Boolean(default=False)
+    reactions = columns.Map(columns.UUID, columns.Text)  # user_id -> reaction_type
+
+    @property
+    def timestamp(self):
+        return datetime_from_uuid1(self.created_at)
+
+    @property
+    def json_data(self):
+        return {
+            "message_id": str(self.message_id),
+            "thread_id": str(self.thread_id),
+            "sender_id": str(self.sender_id),
+            "message_type": self.message_type,
+            "text_content": self.text_content,
+            "created_at": str(self.timestamp),
+            "is_unsent": self.is_unsent,
+            "is_seen": self.is_seen,
+        }
+
+
+class InboxReadStateModel(DjangoCassandraModel):
+    """
+    Tracks read state for inbox threads.
+    Models the read state management in Instagram Direct.
+
+    In production inbox:
+    - Read states track which messages have been seen
+    - Used for badge count calculation
+    - Cached for fast access
+    """
+
+    class Meta:
+        get_pk_field = "user_id"
+
+    user_id = columns.UUID(primary_key=True)
+    thread_id = columns.UUID(primary_key=True)
+    last_read_message_id = columns.UUID()
+    last_read_at = columns.TimeUUID(default=timeuuid_now)
+    unread_count = columns.Integer(default=0)
+
+    @property
+    def json_data(self):
+        return {
+            "user_id": str(self.user_id),
+            "thread_id": str(self.thread_id),
+            "last_read_message_id": str(self.last_read_message_id)
+            if self.last_read_message_id
+            else None,
+            "unread_count": self.unread_count,
+        }
+
+
+class InboxPendingRequestModel(DjangoCassandraModel):
+    """
+    Tracks pending friend/message requests.
+    Models the pending requests section in Instagram Direct inbox.
+
+    In production inbox:
+    - Pending requests appear as pinned items
+    - Users can accept or decline requests
+    """
+
+    class Meta:
+        get_pk_field = "user_id"
+
+    user_id = columns.UUID(primary_key=True)
+    requester_id = columns.UUID(primary_key=True)
+    request_type = columns.Text(default="message")  # message, follow
+    created_at = columns.TimeUUID(default=timeuuid_now)
+    message_preview = columns.Text()
+    is_spam = columns.Boolean(default=False)
+
+    @property
+    def json_data(self):
+        return {
+            "user_id": str(self.user_id),
+            "requester_id": str(self.requester_id),
+            "request_type": self.request_type,
+            "message_preview": self.message_preview,
+            "is_spam": self.is_spam,
+        }

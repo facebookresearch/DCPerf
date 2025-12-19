@@ -1719,6 +1719,9 @@ def generate_client_urls_template(feed_timeline_variants: List[Dict]):
     for i in range(NUM_BUNDLE_TRAY_VARIANTS):
         urls.append(f"http://localhost:8000/bundle_tray_v{i} 1")
 
+    # Add inbox endpoint (placeholder for future variant generation)
+    urls.append("http://localhost:8000/inbox 10")
+
     output_path = CLIENT_DIR / "urls_template.txt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
