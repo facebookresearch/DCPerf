@@ -8,12 +8,11 @@ This script generates:
 2. Clips Discovery variants - Each variant uses different ClipsDiscoverService variants with CPU primitives
 """
 
-import os
 import random
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 
 # Add Jinja2
 try:
@@ -32,12 +31,15 @@ random.seed(RANDOM_SEED)
 # Configuration
 NUM_FEED_TIMELINE_VARIANTS = 100
 NUM_STEP_VARIANTS_PER_TYPE = 50
-NUM_CLIPS_VARIANTS = 50
+NUM_CLIPS_VARIANTS = 60
+NUM_REELS_TRAY_VARIANTS = 50
+NUM_BUNDLE_TRAY_VARIANTS = 20
 
 SCRIPT_DIR = Path(__file__).parent
 DJANGO_WORKLOAD_DIR = SCRIPT_DIR / "django_workload"
 FEEDFLOW_DIR = DJANGO_WORKLOAD_DIR / "feed_flow"
 CLIPS_DISCOVERY_DIR = DJANGO_WORKLOAD_DIR / "clips_discovery"
+REELS_TRAY_DIR = DJANGO_WORKLOAD_DIR / "reels_tray"
 CLIENT_DIR = SCRIPT_DIR.parent / "client"
 
 # FeedFlow step classes
@@ -367,6 +369,106 @@ CLIPS_PRIMITIVE_WEIGHTS = {
     # View State  - Profile 30
     "model_score_extraction": 6,
     "view_state_serialization": 3,
+}
+
+# Reels Tray CPU Primitives (weighted by CPU profile)
+# Based on actual production profile data from reels_tray endpoints
+REELS_TRAY_PRIMITIVE_WEIGHTS = {
+    # Profile 1: ML Pipeline Response Building
+    "response_value_conversion": 45,
+    "additional_variables_merge": 35,
+    "slo_metrics_aggregation": 30,
+    "response_struct_conversion": 35,
+    # Profile 2: Experiment Evaluation
+    "user_bucketing": 25,
+    "experiment_parameter_resolution": 20,
+    "unit_id_hashing": 15,
+    "exposure_logging_decision": 15,
+    # Profile 4 & 5: Feature Flag Evaluation
+    "group_evaluation": 30,
+    "percent_value_calculation": 25,
+    "early_bail_optimization": 15,
+    "cached_evaluation_lookup": 30,
+    # Profile 6: Config Resolution
+    "function_introspection": 10,
+    "parameter_validation": 10,
+    "override_layering": 10,
+    # Profile 8: Metrics Collection
+    "counter_increment": 8,
+    "timer_recording": 6,
+    "key_sanitization": 6,
+    # Profile 9: Cache Operations
+    "cache_key_generation": 8,
+    "get_or_compute_pattern": 8,
+    "cache_invalidation": 6,
+    # Profile 12: Privacy Zone Flow
+    "nested_context_flow_check": 17,
+    "xsu_carveout_zone_check": 10,
+    "zone_policy_chain_evaluation": 7,
+    # Profile 13: Call Stack Operations
+    "call_stack_traversal": 8,
+    "qualname_generation": 5,
+    "frame_fullname_extraction": 5,
+    # Profile 14: Caching Service
+    "cache_multiget_batch": 10,
+    "cache_client_lookup": 5,
+    "cache_async_get_chain": 5,
+    # Profile 16: URL Generation
+    "light_url_generation": 7,
+    "url_template_preparation": 5,
+    "url_generation_impl": 5,
+    # Profile 17: Policy Memoization
+    "policied_memoization": 15,
+    "memoize_wrapper_overhead": 3,
+    "policy_cache_key_generation": 3,
+    # Profile 18: Privacy Zone Environment
+    "xsu_carveout_flow_check": 5,
+    "ambient_zone_info_handling": 3,
+    "zone_context_exit": 2,
+    # Profile 19: GraphQL Execution
+    "graphql_rest_execution": 6,
+    "graphql_result_extraction": 2,
+    "field_resolution_for_object": 2,
+    # Profile 20: Experiment Resolver
+    "experiment_override_generation": 5,
+    "experiment_default_params": 2,
+    "experiment_param_generation": 2,
+    # Profile 21: Experiment Gating Utils
+    "experiment_feature_flag_check": 5,
+    "experiment_restraint_validation": 2,
+    "experiment_async_check": 2,
+    # Profile 22: User Property Access
+    "user_property_access": 5,
+    "is_private_impl": 2,
+    "generated_base_property_lookup": 2,
+    # Profile 23: Feature Flag Util
+    "feature_flag_restraint_context_conversion": 5,
+    "feature_flag_percent_value_calculation": 2,
+    "feature_flag_context_caching": 2,
+    # Profile 24: Feature Flag Restraint Context
+    "feature_flag_restraint_context_init": 5,
+    "feature_flag_request_default_context_init": 2,
+    "feature_flag_async_check": 2,
+    # Profile 25: Zone Info
+    "zone_info_creation": 4,
+    "policy_set_pair_creation": 2,
+    "zone_info_caching": 2,
+    # Profile 26: Zone Evaluators
+    "policied_zone_decorator": 4,
+    "zone_eval_impl": 2,
+    "zone_decorator_overhead": 2,
+    # Profile 28: Shared Cache
+    "shared_cache_async_get": 4,
+    "shared_cache_key_lookup": 2,
+    "shared_cache_miss_handling": 2,
+    # Profile 29: Latency Collector
+    "latency_collector_exit": 4,
+    "timer_context_exit": 2,
+    "latency_recording": 2,
+    # Profile 30: Asyncio Helper
+    "gather_dict_operation": 4,
+    "wait_with_timeout": 2,
+    "async_result_aggregation": 2,
 }
 
 
@@ -1020,6 +1122,481 @@ def generate_clips_url_patterns() -> List[str]:
     return url_patterns
 
 
+# =============================================================================
+# Reels Tray Service Variant Generation
+# =============================================================================
+
+
+def get_reels_tray_primitive_method_name(primitive_name: str) -> str:
+    """Convert primitive name to method call for reels_tray primitives."""
+    return f"ReelsTrayPrimitives.{primitive_name}.primitive_{primitive_name}"
+
+
+def generate_reels_tray_weighted_primitives(
+    num_primitives: int,
+    rng: random.Random,
+) -> List[str]:
+    """Generate weighted list of reels_tray primitives to call."""
+    # Build weighted selection list
+    weighted_choices = []
+    for name, weight in REELS_TRAY_PRIMITIVE_WEIGHTS.items():
+        weighted_choices.extend([name] * weight)
+
+    selected = []
+    for _ in range(num_primitives):
+        primitive_name = rng.choice(weighted_choices)
+        selected.append(primitive_name)
+
+    return selected
+
+
+def format_reels_tray_primitive_calls(
+    primitives: List[str], indent: str = "        "
+) -> str:
+    """Format reels_tray primitive calls as Python code with proper indentation.
+
+    Args:
+        primitives: List of primitive names to call
+        indent: Indentation string (default 8 spaces for method body)
+
+    Returns:
+        Formatted Python code with proper indentation for each line
+    """
+    if not primitives:
+        return "pass"
+
+    # Map primitive names to their class methods
+    # All primitives must be mapped to their respective class
+    primitive_class_map = {
+        # Profile 1: ML Pipeline primitives
+        "response_value_conversion": "MLPipelineResponsePrimitives.primitive_response_value_conversion",
+        "additional_variables_merge": "MLPipelineResponsePrimitives.primitive_additional_variables_merge",
+        "slo_metrics_aggregation": "MLPipelineResponsePrimitives.primitive_slo_metrics_aggregation",
+        "response_struct_conversion": "MLPipelineResponsePrimitives.primitive_response_struct_conversion",
+        # Profile 2: Experiment primitives
+        "user_bucketing": "ExperimentEvaluationPrimitives.primitive_user_bucketing",
+        "experiment_parameter_resolution": "ExperimentEvaluationPrimitives.primitive_experiment_parameter_resolution",
+        "unit_id_hashing": "ExperimentEvaluationPrimitives.primitive_unit_id_hashing",
+        "exposure_logging_decision": "ExperimentEvaluationPrimitives.primitive_exposure_logging_decision",
+        # Profile 4 & 5: Feature flag primitives
+        "group_evaluation": "FeatureFlagEvaluationPrimitives.primitive_group_evaluation",
+        "percent_value_calculation": "FeatureFlagEvaluationPrimitives.primitive_percent_value_calculation",
+        "early_bail_optimization": "FeatureFlagEvaluationPrimitives.primitive_early_bail_optimization",
+        "cached_evaluation_lookup": "FeatureFlagEvaluationPrimitives.primitive_cached_evaluation_lookup",
+        # Profile 6: Config primitives
+        "function_introspection": "ConfigResolutionPrimitives.primitive_function_introspection",
+        "parameter_validation": "ConfigResolutionPrimitives.primitive_parameter_validation",
+        "override_layering": "ConfigResolutionPrimitives.primitive_override_layering",
+        # Profile 8: Metrics primitives
+        "counter_increment": "MetricsCollectionPrimitives.primitive_counter_increment",
+        "timer_recording": "MetricsCollectionPrimitives.primitive_timer_recording",
+        "key_sanitization": "MetricsCollectionPrimitives.primitive_key_sanitization",
+        # Profile 9: Cache primitives
+        "cache_key_generation": "CacheOperationPrimitives.primitive_cache_key_generation",
+        "get_or_compute_pattern": "CacheOperationPrimitives.primitive_get_or_compute_pattern",
+        "cache_invalidation": "CacheOperationPrimitives.primitive_cache_invalidation",
+        # Profile 12: Privacy Zone Flow primitives
+        "nested_context_flow_check": "PrivacyZoneFlowPrimitives.primitive_nested_context_flow_check",
+        "xsu_carveout_zone_check": "PrivacyZoneFlowPrimitives.primitive_xsu_carveout_zone_check",
+        "zone_policy_chain_evaluation": "PrivacyZoneFlowPrimitives.primitive_zone_policy_chain_evaluation",
+        # Profile 13: Call Stack primitives
+        "call_stack_traversal": "CallStackOperationsPrimitives.primitive_call_stack_traversal",
+        "qualname_generation": "CallStackOperationsPrimitives.primitive_qualname_generation",
+        "frame_fullname_extraction": "CallStackOperationsPrimitives.primitive_frame_fullname_extraction",
+        # Profile 14: Caching Service primitives
+        "cache_multiget_batch": "CachingServiceOperationsPrimitives.primitive_cache_multiget_batch",
+        "cache_client_lookup": "CachingServiceOperationsPrimitives.primitive_cache_client_lookup",
+        "cache_async_get_chain": "CachingServiceOperationsPrimitives.primitive_cache_async_get_chain",
+        # Profile 16: URL Generation primitives
+        "light_url_generation": "URLGenerationPrimitives.primitive_light_url_generation",
+        "url_template_preparation": "URLGenerationPrimitives.primitive_url_template_preparation",
+        "url_generation_impl": "URLGenerationPrimitives.primitive_url_generation_impl",
+        # Profile 17: Policy Memoization primitives
+        "policied_memoization": "PolicyMemoizationPrimitives.primitive_policied_memoization",
+        "memoize_wrapper_overhead": "PolicyMemoizationPrimitives.primitive_memoize_wrapper_overhead",
+        "policy_cache_key_generation": "PolicyMemoizationPrimitives.primitive_policy_cache_key_generation",
+        # Profile 18: Privacy Zone Environment primitives
+        "xsu_carveout_flow_check": "PrivacyZoneEnvironmentPrimitives.primitive_xsu_carveout_flow_check",
+        "ambient_zone_info_handling": "PrivacyZoneEnvironmentPrimitives.primitive_ambient_zone_info_handling",
+        "zone_context_exit": "PrivacyZoneEnvironmentPrimitives.primitive_zone_context_exit",
+        # Profile 19: GraphQL Execution primitives
+        "graphql_rest_execution": "GraphQLExecutionPrimitives.primitive_graphql_rest_execution",
+        "graphql_result_extraction": "GraphQLExecutionPrimitives.primitive_graphql_result_extraction",
+        "field_resolution_for_object": "GraphQLExecutionPrimitives.primitive_field_resolution_for_object",
+        # Profile 20: Experiment Resolver primitives
+        "experiment_override_generation": "ExperimentResolverPrimitives.primitive_experiment_override_generation",
+        "experiment_default_params": "ExperimentResolverPrimitives.primitive_experiment_default_params",
+        "experiment_param_generation": "ExperimentResolverPrimitives.primitive_experiment_param_generation",
+        # Profile 21: Experiment Gating Utils primitives
+        "experiment_feature_flag_check": "ExperimentGatingUtilsPrimitives.primitive_experiment_feature_flag_check",
+        "experiment_restraint_validation": "ExperimentGatingUtilsPrimitives.primitive_experiment_restraint_validation",
+        "experiment_async_check": "ExperimentGatingUtilsPrimitives.primitive_experiment_async_check",
+        # Profile 22: User Property primitives
+        "user_property_access": "UserPropertyPrimitives.primitive_user_property_access",
+        "is_private_impl": "UserPropertyPrimitives.primitive_is_private_impl",
+        "generated_base_property_lookup": "UserPropertyPrimitives.primitive_generated_base_property_lookup",
+        # Profile 23: Feature Flag Util primitives
+        "feature_flag_restraint_context_conversion": "FeatureFlagUtilPrimitives.primitive_feature_flag_restraint_context_conversion",
+        "feature_flag_percent_value_calculation": "FeatureFlagUtilPrimitives.primitive_feature_flag_percent_value_calculation",
+        "feature_flag_context_caching": "FeatureFlagUtilPrimitives.primitive_feature_flag_context_caching",
+        # Profile 24: Feature Flag Restraint Context primitives
+        "feature_flag_restraint_context_init": "FeatureFlagRestraintContextPrimitives.primitive_feature_flag_restraint_context_init",
+        "feature_flag_request_default_context_init": "FeatureFlagRestraintContextPrimitives.primitive_feature_flag_request_default_context_init",
+        "feature_flag_async_check": "FeatureFlagRestraintContextPrimitives.primitive_feature_flag_async_check",
+        # Profile 25: Zone Info primitives
+        "zone_info_creation": "ZoneInfoPrimitives.primitive_zone_info_creation",
+        "policy_set_pair_creation": "ZoneInfoPrimitives.primitive_policy_set_pair_creation",
+        "zone_info_caching": "ZoneInfoPrimitives.primitive_zone_info_caching",
+        # Profile 26: Zone Evaluators primitives
+        "policied_zone_decorator": "ZoneEvaluatorsPrimitives.primitive_policied_zone_decorator",
+        "zone_eval_impl": "ZoneEvaluatorsPrimitives.primitive_zone_eval_impl",
+        "zone_decorator_overhead": "ZoneEvaluatorsPrimitives.primitive_zone_decorator_overhead",
+        # Profile 28: Shared Cache primitives
+        "shared_cache_async_get": "SharedCachePrimitives.primitive_shared_cache_async_get",
+        "shared_cache_key_lookup": "SharedCachePrimitives.primitive_shared_cache_key_lookup",
+        "shared_cache_miss_handling": "SharedCachePrimitives.primitive_shared_cache_miss_handling",
+        # Profile 29: Latency Collector primitives
+        "latency_collector_exit": "LatencyCollectorPrimitives.primitive_latency_collector_exit",
+        "timer_context_exit": "LatencyCollectorPrimitives.primitive_timer_context_exit",
+        "latency_recording": "LatencyCollectorPrimitives.primitive_latency_recording",
+        # Profile 30: Asyncio Helper primitives
+        "gather_dict_operation": "AsyncioHelperPrimitives.primitive_gather_dict_operation",
+        "wait_with_timeout": "AsyncioHelperPrimitives.primitive_wait_with_timeout",
+        "async_result_aggregation": "AsyncioHelperPrimitives.primitive_async_result_aggregation",
+    }
+
+    lines = []
+    for primitive_name in primitives:
+        method_name = primitive_class_map.get(primitive_name)
+        if method_name is None:
+            raise ValueError(
+                f"Unknown primitive '{primitive_name}' - must be added to primitive_class_map"
+            )
+        lines.append(f"{method_name}()")
+
+    # Join with newline + indent so each subsequent line is properly indented
+    return f"\n{indent}".join(lines)
+
+
+def generate_reels_tray_service_variant(
+    template_content: str,
+    variant_num: int,
+    seed: int,
+) -> str:
+    """Generate a single reels_tray service variant using Jinja2 template rendering."""
+    rng = random.Random(seed + variant_num)
+
+    # Number of primitives per phase (varies by phase importance)
+    cache_check_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    source_candidates_primitives = generate_reels_tray_weighted_primitives(2, rng)
+    rank_candidates_primitives = generate_reels_tray_weighted_primitives(2, rng)
+    fetch_metadata_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    build_buckets_primitives = generate_reels_tray_weighted_primitives(2, rng)
+    fetch_items_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    insert_self_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    insert_live_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    build_response_primitives = generate_reels_tray_weighted_primitives(2, rng)
+
+    # Prepare template variables
+    variant_header = f"""# AUTO-GENERATED SERVICE VARIANT - Variant {variant_num}
+# Generated with seed: {seed + variant_num}
+# DO NOT EDIT MANUALLY
+"""
+
+    template_vars = {
+        "variant_header": variant_header,
+        "variant_suffix": f" Variant {variant_num}",
+        "cache_check_primitives": format_reels_tray_primitive_calls(
+            cache_check_primitives
+        ),
+        "source_candidates_primitives": format_reels_tray_primitive_calls(
+            source_candidates_primitives
+        ),
+        "rank_candidates_primitives": format_reels_tray_primitive_calls(
+            rank_candidates_primitives
+        ),
+        "fetch_metadata_primitives": format_reels_tray_primitive_calls(
+            fetch_metadata_primitives
+        ),
+        "build_buckets_primitives": format_reels_tray_primitive_calls(
+            build_buckets_primitives
+        ),
+        "fetch_items_primitives": format_reels_tray_primitive_calls(
+            fetch_items_primitives
+        ),
+        "insert_self_primitives": format_reels_tray_primitive_calls(
+            insert_self_primitives
+        ),
+        "insert_live_primitives": format_reels_tray_primitive_calls(
+            insert_live_primitives
+        ),
+        "build_response_primitives": format_reels_tray_primitive_calls(
+            build_response_primitives
+        ),
+    }
+
+    # Render template using Jinja2
+    jinja_template = Template(template_content)
+    content = jinja_template.render(**template_vars)
+
+    # Rename classes to include variant suffix
+    content = content.replace(
+        "class StoryTrayService:",
+        f"class StoryTrayServiceV{variant_num}:",
+    )
+
+    return content
+
+
+def generate_reels_tray_init_file(num_variants: int) -> str:
+    """Generate reels_tray/__init__.py with all variant imports."""
+    lines = [
+        "# Copyright 2017-present, Facebook, Inc.",
+        "# All rights reserved.",
+        "#",
+        "# This source code is licensed under the license found in the",
+        "# LICENSE file in the root directory of this source tree.",
+        "",
+        '"""',
+        "Reels Tray module for DjangoBench V2.",
+        "",
+        "Provides StoryTrayService variants for reels/stories tray",
+        "with weighted CPU primitives for realistic workload simulation.",
+        '"""',
+        "",
+        "# Base service classes",
+        "from .service import (",
+        "    MaterialTray,",
+        "    ReelBucket,",
+        "    ReelsTrayContext,",
+        "    ReelsTrayRequest,",
+        "    StoryTrayService,",
+        ")",
+        "",
+        "# Primitives",
+        "from .primitives import (",
+        "    CacheOperationPrimitives,",
+        "    ConfigResolutionPrimitives,",
+        "    ExperimentEvaluationPrimitives,",
+        "    FeatureFlagEvaluationPrimitives,",
+        "    MetricsCollectionPrimitives,",
+        "    MLPipelineResponsePrimitives,",
+        "    PRIMITIVE_WEIGHTS,",
+        "    ReelsTrayPrimitives,",
+        "    execute_random_primitives,",
+        "    get_primitive_methods,",
+        ")",
+        "",
+        "# Thrift clients",
+        "from .thrift_client import (",
+        "    get_tray_ranking_client,",
+        "    get_user_metadata_client,",
+        ")",
+        "",
+        "# Service variants (for I-cache pressure)",
+    ]
+
+    # Add variant imports
+    for i in range(num_variants):
+        lines.append(f"from .service_v{i} import StoryTrayServiceV{i}")
+
+    lines.append("")
+    lines.append("# All exports")
+    lines.append("__all__ = [")
+    lines.append('    "MaterialTray",')
+    lines.append('    "ReelBucket",')
+    lines.append('    "ReelsTrayContext",')
+    lines.append('    "ReelsTrayRequest",')
+    lines.append('    "StoryTrayService",')
+    lines.append('    "CacheOperationPrimitives",')
+    lines.append('    "ConfigResolutionPrimitives",')
+    lines.append('    "ExperimentEvaluationPrimitives",')
+    lines.append('    "FeatureFlagEvaluationPrimitives",')
+    lines.append('    "MetricsCollectionPrimitives",')
+    lines.append('    "MLPipelineResponsePrimitives",')
+    lines.append('    "PRIMITIVE_WEIGHTS",')
+    lines.append('    "ReelsTrayPrimitives",')
+    lines.append('    "execute_random_primitives",')
+    lines.append('    "get_primitive_methods",')
+    lines.append('    "get_tray_ranking_client",')
+    lines.append('    "get_user_metadata_client",')
+
+    for i in range(num_variants):
+        lines.append(f'    "StoryTrayServiceV{i}",')
+
+    lines.append("]")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_reels_tray_service_variants():
+    """Generate all reels_tray service variants."""
+    print("\n[3.5/8] Generating reels_tray service variants...")
+
+    template_path = REELS_TRAY_DIR / "service.py.template"
+
+    if not template_path.exists():
+        print(f"  Warning: Template file not found: {template_path}")
+        print("  Skipping reels_tray service variant generation.")
+        return
+
+    with open(template_path, "r") as f:
+        template_content = f.read()
+
+    # Generate service variant files
+    for i in range(NUM_REELS_TRAY_VARIANTS):
+        variant_content = generate_reels_tray_service_variant(
+            template_content, i, RANDOM_SEED
+        )
+        output_path = REELS_TRAY_DIR / f"service_v{i}.py"
+
+        with open(output_path, "w") as f:
+            f.write(variant_content)
+
+        print(f"  Generated: service_v{i}.py")
+
+    # Generate __init__.py imports
+    init_path = REELS_TRAY_DIR / "__init__.py"
+    init_content = generate_reels_tray_init_file(NUM_REELS_TRAY_VARIANTS)
+    with open(init_path, "w") as f:
+        f.write(init_content)
+    print("  Updated: reels_tray/__init__.py")
+
+
+# =============================================================================
+# Bundle Tray Handler Variant Generation
+# =============================================================================
+
+
+def generate_bundle_tray_variant(
+    template_content: str,
+    variant_num: int,
+    seed: int,
+) -> str:
+    """Generate a single bundle_tray handler variant using Jinja2 template rendering."""
+    rng = random.Random(seed + variant_num)
+
+    # Number of primitives per phase (varies by phase importance)
+    cache_miss_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    service_path_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    source_candidates_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    dedupe_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    fetch_user_info_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    fetch_feed_entry_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    fetch_reel_clips_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    build_buckets_primitives = generate_reels_tray_weighted_primitives(1, rng)
+    post_process_primitives = generate_reels_tray_weighted_primitives(1, rng)
+
+    # Prepare template variables
+    variant_header = f"""# AUTO-GENERATED HANDLER VARIANT - Variant {variant_num}
+# Generated with seed: {seed + variant_num}
+# DO NOT EDIT MANUALLY
+"""
+
+    template_vars = {
+        "variant_header": variant_header,
+        "variant_suffix": f" Variant {variant_num}",
+        "cache_miss_primitives": format_reels_tray_primitive_calls(
+            cache_miss_primitives
+        ),
+        "service_path_primitives": format_reels_tray_primitive_calls(
+            service_path_primitives
+        ),
+        "source_candidates_primitives": format_reels_tray_primitive_calls(
+            source_candidates_primitives
+        ),
+        "dedupe_primitives": format_reels_tray_primitive_calls(dedupe_primitives),
+        "fetch_user_info_primitives": format_reels_tray_primitive_calls(
+            fetch_user_info_primitives
+        ),
+        "fetch_feed_entry_primitives": format_reels_tray_primitive_calls(
+            fetch_feed_entry_primitives
+        ),
+        "fetch_reel_clips_primitives": format_reels_tray_primitive_calls(
+            fetch_reel_clips_primitives
+        ),
+        "build_buckets_primitives": format_reels_tray_primitive_calls(
+            build_buckets_primitives
+        ),
+        "post_process_primitives": format_reels_tray_primitive_calls(
+            post_process_primitives
+        ),
+        "service_variant_num": variant_num,  # Use matching service variant
+    }
+
+    # Render template using Jinja2
+    jinja_template = Template(template_content)
+    content = jinja_template.render(**template_vars)
+
+    # Rename classes to include variant suffix
+    content = content.replace(
+        "class BundleTray:",
+        f"class BundleTrayV{variant_num}:",
+    )
+
+    return content
+
+
+def generate_bundle_tray_variants():
+    """Generate all bundle_tray handler variants."""
+    print("\n[4.5/8] Generating bundle_tray handler variants...")
+
+    template_path = DJANGO_WORKLOAD_DIR / "bundle_tray.py.template"
+
+    if not template_path.exists():
+        print(f"  Warning: Template file not found: {template_path}")
+        print("  Skipping bundle_tray handler variant generation.")
+        return
+
+    with open(template_path, "r") as f:
+        template_content = f.read()
+
+    # Generate handler variant files
+    for i in range(NUM_BUNDLE_TRAY_VARIANTS):
+        variant_content = generate_bundle_tray_variant(template_content, i, RANDOM_SEED)
+        output_path = DJANGO_WORKLOAD_DIR / f"bundle_tray_v{i}.py"
+
+        with open(output_path, "w") as f:
+            f.write(variant_content)
+
+        print(f"  Generated: bundle_tray_v{i}.py")
+
+
+def generate_bundle_tray_view_variants() -> tuple:
+    """Generate bundle_tray view variants for views.py."""
+    # Generate BundleTray variant imports
+    import_lines = []
+    for i in range(NUM_BUNDLE_TRAY_VARIANTS):
+        import_lines.append(f"from .bundle_tray_v{i} import BundleTrayV{i}")
+
+    # Generate view function variants
+    view_codes = []
+    for i in range(NUM_BUNDLE_TRAY_VARIANTS):
+        view_code = f'''
+@require_user
+def bundle_tray_v{i}(request):
+    """Bundle tray variant {i} - uses BundleTrayV{i} and StoryTrayServiceV{i}."""
+    bundle_tray_handler = BundleTrayV{i}(request)
+    result = bundle_tray_handler.get_bundle()
+    result = bundle_tray_handler.post_process(result)
+    return HttpResponse(json.dumps(result), content_type="text/json")
+'''
+        view_codes.append(view_code)
+
+    return import_lines, view_codes
+
+
+def generate_bundle_tray_url_patterns() -> List[str]:
+    """Generate URL patterns for bundle_tray variants."""
+    url_patterns = []
+    for i in range(NUM_BUNDLE_TRAY_VARIANTS):
+        url_patterns.append(
+            f'url(r"^bundle_tray_v{i}$", views.bundle_tray_v{i}, name="bundle_tray_v{i}"),'
+        )
+    return url_patterns
+
+
 def generate_clips_py():
     """Generate clips.py using Jinja2 template."""
     print("\n[5/6] Generating clips.py with handler variants...")
@@ -1049,13 +1626,18 @@ def generate_views_py(
     step_imports: List[str],
 ):
     """Generate views.py using Jinja2 template."""
-    print("\n[5/6] Generating views.py with all variant functions...")
+    print("\n[5/8] Generating views.py with all variant functions...")
 
     # Prepare feed timeline variant function codes
     ft_variant_functions = [v["func_code"] for v in feed_timeline_variants]
 
     # Prepare clips variant data
     clips_import_lines, clips_view_codes = generate_clips_view_variants()
+
+    # Prepare bundle_tray variant data
+    bundle_tray_import_lines, bundle_tray_view_codes = (
+        generate_bundle_tray_view_variants()
+    )
 
     # Load and render template
     env = Environment(loader=FileSystemLoader(DJANGO_WORKLOAD_DIR))
@@ -1066,6 +1648,8 @@ def generate_views_py(
         variant_view_functions=ft_variant_functions,
         clips_variant_imports=clips_import_lines,
         clips_view_variants=clips_view_codes,
+        bundle_tray_variant_imports=bundle_tray_import_lines,
+        bundle_tray_view_variants=bundle_tray_view_codes,
     )
 
     # Write views.py
@@ -1074,14 +1658,14 @@ def generate_views_py(
         f.write(rendered)
 
     print(
-        f"  Generated views.py with {len(ft_variant_functions)} feed_timeline + {NUM_CLIPS_VARIANTS} clips variants"
+        f"  Generated views.py with {len(ft_variant_functions)} feed_timeline + {NUM_CLIPS_VARIANTS} clips + {NUM_BUNDLE_TRAY_VARIANTS} bundle_tray variants"
     )
     return output_path
 
 
 def generate_urls_py(feed_timeline_variants: List[Dict]):
     """Generate urls.py using Jinja2 template."""
-    print("\n[6/6] Generating urls.py with all variant URL patterns...")
+    print("\n[6/8] Generating urls.py with all variant URL patterns...")
 
     # Prepare feed timeline URL patterns
     ft_variant_urls = []
@@ -1093,6 +1677,9 @@ def generate_urls_py(feed_timeline_variants: List[Dict]):
     # Prepare clips URL patterns
     clips_url_patterns = generate_clips_url_patterns()
 
+    # Prepare bundle_tray URL patterns
+    bundle_tray_url_patterns = generate_bundle_tray_url_patterns()
+
     # Load and render template
     env = Environment(loader=FileSystemLoader(DJANGO_WORKLOAD_DIR))
     template = env.get_template("urls.py.template")
@@ -1100,6 +1687,7 @@ def generate_urls_py(feed_timeline_variants: List[Dict]):
     rendered = template.render(
         variant_urls=ft_variant_urls,
         clips_url_patterns=clips_url_patterns,
+        bundle_tray_url_patterns=bundle_tray_url_patterns,
     )
 
     # Write urls.py
@@ -1108,7 +1696,7 @@ def generate_urls_py(feed_timeline_variants: List[Dict]):
         f.write(rendered)
 
     print(
-        f"  Generated urls.py with {len(ft_variant_urls)} feed_timeline + {len(clips_url_patterns)} clips URL patterns"
+        f"  Generated urls.py with {len(ft_variant_urls)} feed_timeline + {len(clips_url_patterns)} clips + {len(bundle_tray_url_patterns)} bundle_tray URL patterns"
     )
     return output_path
 
@@ -1125,6 +1713,11 @@ def generate_client_urls_template(feed_timeline_variants: List[Dict]):
     urls.append("http://localhost:8000/clips 1")  # Original clips
     for i in range(NUM_CLIPS_VARIANTS):
         urls.append(f"http://localhost:8000/clips_v{i} 1")
+
+    # Add bundle_tray variants
+    urls.append("http://localhost:8000/bundle_tray 1")  # Original bundle_tray
+    for i in range(NUM_BUNDLE_TRAY_VARIANTS):
+        urls.append(f"http://localhost:8000/bundle_tray_v{i} 1")
 
     output_path = CLIENT_DIR / "urls_template.txt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1151,12 +1744,14 @@ def main():
     """Main code generation workflow."""
     print("=" * 70)
     print("DjangoBench V2 Code Variant Generator")
-    print("Generates Feed Timeline + Clips Discovery variants")
+    print("Generates Feed Timeline + Clips Discovery + Reels Tray variants")
     print("=" * 70)
     print(f"Random seed: {RANDOM_SEED}")
     print(f"Feed timeline variants: {NUM_FEED_TIMELINE_VARIANTS}")
     print(f"Step variants per type: {NUM_STEP_VARIANTS_PER_TYPE}")
     print(f"Clips variants: {NUM_CLIPS_VARIANTS}")
+    print(f"Reels tray variants: {NUM_REELS_TRAY_VARIANTS}")
+    print(f"Bundle tray variants: {NUM_BUNDLE_TRAY_VARIANTS}")
     print()
 
     # Check template files exist
@@ -1170,6 +1765,8 @@ def main():
     # Optional templates (warn but don't fail)
     optional_templates = [
         CLIPS_DISCOVERY_DIR / "service.py.template",
+        REELS_TRAY_DIR / "service.py.template",
+        DJANGO_WORKLOAD_DIR / "bundle_tray.py.template",
     ]
 
     for template_path in required_templates:
@@ -1182,9 +1779,11 @@ def main():
             print(f"WARNING: Optional template not found: {template_path}")
 
     # Generate all variants
-    step_variants = generate_step_variants()
+    generate_step_variants()
     feed_timeline_variants, step_imports = generate_feed_timeline_variants()
     generate_clips_service_variants()
+    generate_reels_tray_service_variants()
+    generate_bundle_tray_variants()
     generate_clips_py()
     generate_views_py(feed_timeline_variants, step_imports)
     generate_urls_py(feed_timeline_variants)
@@ -1196,26 +1795,32 @@ def main():
     print("\n" + "=" * 70)
     print("✓ Code generation complete!")
     print("=" * 70)
-    print(f"\nGenerated files:")
-    print(f"  Feed Timeline:")
+    print("\nGenerated files:")
+    print("  Feed Timeline:")
     print(f"    - {NUM_STEP_VARIANTS_PER_TYPE} step variant files (steps_v*.py)")
     print(f"    - {NUM_FEED_TIMELINE_VARIANTS} variant view functions")
-    print(f"  Clips Discovery:")
+    print("  Clips Discovery:")
     print(f"    - {NUM_CLIPS_VARIANTS} service variant files (service_v*.py)")
     print(f"    - {NUM_CLIPS_VARIANTS} handler variants in clips.py")
     print(f"    - {NUM_CLIPS_VARIANTS} view functions")
-    print(f"  Combined:")
-    print(f"    - Updated views.py with all variant functions")
-    print(f"    - Updated urls.py with all variant URL patterns")
+    print("  Reels Tray:")
+    print(f"    - {NUM_REELS_TRAY_VARIANTS} service variant files (service_v*.py)")
+    print("  Bundle Tray:")
+    print(f"    - {NUM_BUNDLE_TRAY_VARIANTS} handler variant files (bundle_tray_v*.py)")
+    print(f"    - {NUM_BUNDLE_TRAY_VARIANTS} view functions")
+    print("  Combined:")
+    print("    - Updated views.py with all variant functions")
+    print("    - Updated urls.py with all variant URL patterns")
     print(
-        f"    - Client URLs template ({NUM_FEED_TIMELINE_VARIANTS + NUM_CLIPS_VARIANTS + 2} endpoints)"
+        f"    - Client URLs template ({NUM_FEED_TIMELINE_VARIANTS + NUM_CLIPS_VARIANTS + NUM_BUNDLE_TRAY_VARIANTS + 3} endpoints)"
     )
-    print(f"\nNext steps:")
-    print(f"  1. Run 'arc lint -a' to format generated files")
-    print(f"  2. Restart Django workers")
-    print(f"  3. Test: curl http://localhost:8000/feed_timeline_v0")
-    print(f"  4. Test: curl http://localhost:8000/clips_v0")
-    print(f"  5. Load test: wrk -s {CLIENT_DIR / 'urls_template.txt'}")
+    print("\nNext steps:")
+    print("  1. Run 'arc lint -a' to format generated files")
+    print("  2. Restart Django workers")
+    print("  3. Test: curl http://localhost:8000/feed_timeline_v0")
+    print("  4. Test: curl http://localhost:8000/clips_v0")
+    print("  5. Test: curl http://localhost:8000/bundle_tray_v0")
+    print(f"  6. Load test: wrk -s {CLIENT_DIR / 'urls_template.txt'}")
     print()
 
 
