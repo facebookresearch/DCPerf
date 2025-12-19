@@ -102,6 +102,10 @@ For a complete list of folly microbenchmarks, see [Benchmarks in Folly](#benchma
 ./benchpress_cli.py -b wdl run vdso_bench -i '{"type": "multi_thread"}'
 ```
 
+There is a utility script that you can run separately to compare the results of the same benchmark from different machines/runs:
+```
+python3 compare_result.py <run1_benchmark_name.json> <run2_benchmark_name.json>
+```
 
 ## 4. More references of WDL at Meta
 We encourage you to check out the following publications for more information on WDL at Meta, such as CPU cycles breakdown, data size distribution, and so on:
