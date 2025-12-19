@@ -34,12 +34,14 @@ NUM_STEP_VARIANTS_PER_TYPE = 50
 NUM_CLIPS_VARIANTS = 60
 NUM_REELS_TRAY_VARIANTS = 50
 NUM_BUNDLE_TRAY_VARIANTS = 20
+NUM_INBOX_VARIANTS = 10
 
 SCRIPT_DIR = Path(__file__).parent
 DJANGO_WORKLOAD_DIR = SCRIPT_DIR / "django_workload"
 FEEDFLOW_DIR = DJANGO_WORKLOAD_DIR / "feed_flow"
 CLIPS_DISCOVERY_DIR = DJANGO_WORKLOAD_DIR / "clips_discovery"
 REELS_TRAY_DIR = DJANGO_WORKLOAD_DIR / "reels_tray"
+INBOX_DIR = DJANGO_WORKLOAD_DIR / "inbox"
 CLIENT_DIR = SCRIPT_DIR.parent / "client"
 
 # FeedFlow step classes
@@ -1597,6 +1599,437 @@ def generate_bundle_tray_url_patterns() -> List[str]:
     return url_patterns
 
 
+# =============================================================================
+# Inbox Service Variant Generation
+# =============================================================================
+
+
+# Inbox CPU Primitives (weighted by CPU profile)
+# Based on actual production profile data from inbox endpoints
+INBOX_PRIMITIVE_WEIGHTS = {
+    # Profile 3: Experimentation
+    "experiment_parameter_resolution": 4,
+    "experiment_group_hash_computation": 5,
+    "experiment_exposure_logging": 3,
+    "experiment_condition_evaluation": 4,
+    # Profile 5: Memoization
+    "cache_key_generation_from_args": 3,
+    "zone_scoped_cache_lookup": 3,
+    "request_context_cache_management": 2,
+    # Profile 8: Feature Gating
+    "percent_value_computation": 3,
+    "gate_cache_key_generation": 2,
+    "targeting_rule_evaluation": 2,
+    # Profile 9: Schema Validation
+    "allowed_types_construction": 2,
+    "schema_type_checking": 2,
+    "notification_schema_validation": 2,
+    # Profile 10: Metrics Collection
+    "metric_key_sanitization": 2,
+    "counter_batch_increment": 2,
+    "timer_context_management": 2,
+    "metric_aggregation": 2,
+    # Profile 11: Config Construction
+    "param_struct_conversion": 2,
+    "config_param_update": 2,
+    "param_validation": 2,
+    # Profile 12: Property Access
+    "lazy_property_evaluation": 2,
+    "attribute_chain_lookup": 2,
+    "property_descriptor_access": 1,
+    # Profile 14: Type Caching
+    "generic_alias_hashing": 2,
+    "type_parameter_caching": 2,
+    "type_tuple_construction": 1,
+    # Profile 15: Viewer Context
+    "access_token_validation": 2,
+    "context_extension": 2,
+    "context_memoization_lookup": 1,
+    # Profile 21: Experiment Resolution
+    "experiment_name_generation": 1,
+    "override_resolution": 2,
+    "unit_id_override_computation": 1,
+    # Profile 25: Feature Flags
+    "feature_set_construction": 1,
+    "feature_flag_lookup": 1,
+    "default_value_resolution": 1,
+    # Profile 27: Notification Rendering
+    "notification_text_formatting": 1,
+    "response_dict_construction": 1,
+    "inline_action_construction": 1,
+}
+
+
+def generate_inbox_weighted_primitives(
+    num_primitives: int,
+    rng: random.Random,
+) -> List[str]:
+    """Generate weighted list of inbox primitives to call."""
+    # Build weighted selection list
+    weighted_choices = []
+    for name, weight in INBOX_PRIMITIVE_WEIGHTS.items():
+        weighted_choices.extend([name] * weight)
+
+    selected = []
+    for _ in range(num_primitives):
+        primitive_name = rng.choice(weighted_choices)
+        selected.append(primitive_name)
+
+    return selected
+
+
+def format_inbox_primitive_calls(
+    primitives: List[str], indent: str = "        "
+) -> str:
+    """Format inbox primitive calls as Python code with proper indentation.
+
+    Args:
+        primitives: List of primitive names to call
+        indent: Indentation string (default 8 spaces for method body)
+
+    Returns:
+        Formatted Python code with proper indentation for each line
+    """
+    if not primitives:
+        return "pass"
+
+    # Map primitive names to their class methods
+    primitive_class_map = {
+        # Profile 3: Experimentation primitives
+        "experiment_parameter_resolution": "ExperimentationPrimitives.primitive_experiment_parameter_resolution",
+        "experiment_group_hash_computation": "ExperimentationPrimitives.primitive_experiment_group_hash_computation",
+        "experiment_exposure_logging": "ExperimentationPrimitives.primitive_experiment_exposure_logging",
+        "experiment_condition_evaluation": "ExperimentationPrimitives.primitive_experiment_condition_evaluation",
+        # Profile 5: Memoization primitives
+        "cache_key_generation_from_args": "MemoizationPrimitives.primitive_cache_key_generation_from_args",
+        "zone_scoped_cache_lookup": "MemoizationPrimitives.primitive_zone_scoped_cache_lookup",
+        "request_context_cache_management": "MemoizationPrimitives.primitive_request_context_cache_management",
+        # Profile 8: Feature Gating primitives
+        "percent_value_computation": "FeatureGatingPrimitives.primitive_percent_value_computation",
+        "gate_cache_key_generation": "FeatureGatingPrimitives.primitive_gate_cache_key_generation",
+        "targeting_rule_evaluation": "FeatureGatingPrimitives.primitive_targeting_rule_evaluation",
+        # Profile 9: Schema Validation primitives
+        "allowed_types_construction": "SchemaValidationPrimitives.primitive_allowed_types_construction",
+        "schema_type_checking": "SchemaValidationPrimitives.primitive_schema_type_checking",
+        "notification_schema_validation": "SchemaValidationPrimitives.primitive_notification_schema_validation",
+        # Profile 10: Metrics Collection primitives
+        "metric_key_sanitization": "MetricsCollectionPrimitives.primitive_metric_key_sanitization",
+        "counter_batch_increment": "MetricsCollectionPrimitives.primitive_counter_batch_increment",
+        "timer_context_management": "MetricsCollectionPrimitives.primitive_timer_context_management",
+        "metric_aggregation": "MetricsCollectionPrimitives.primitive_metric_aggregation",
+        # Profile 11: Config Construction primitives
+        "param_struct_conversion": "ConfigConstructionPrimitives.primitive_param_struct_conversion",
+        "config_param_update": "ConfigConstructionPrimitives.primitive_config_param_update",
+        "param_validation": "ConfigConstructionPrimitives.primitive_param_validation",
+        # Profile 12: Property Access primitives
+        "lazy_property_evaluation": "PropertyAccessPrimitives.primitive_lazy_property_evaluation",
+        "attribute_chain_lookup": "PropertyAccessPrimitives.primitive_attribute_chain_lookup",
+        "property_descriptor_access": "PropertyAccessPrimitives.primitive_property_descriptor_access",
+        # Profile 14: Type Caching primitives
+        "generic_alias_hashing": "TypeCachingPrimitives.primitive_generic_alias_hashing",
+        "type_parameter_caching": "TypeCachingPrimitives.primitive_type_parameter_caching",
+        "type_tuple_construction": "TypeCachingPrimitives.primitive_type_tuple_construction",
+        # Profile 15: Viewer Context primitives
+        "access_token_validation": "ViewerContextPrimitives.primitive_access_token_validation",
+        "context_extension": "ViewerContextPrimitives.primitive_context_extension",
+        "context_memoization_lookup": "ViewerContextPrimitives.primitive_context_memoization_lookup",
+        # Profile 21: Experiment Resolution primitives
+        "experiment_name_generation": "ExperimentResolverPrimitives.primitive_experiment_name_generation",
+        "override_resolution": "ExperimentResolverPrimitives.primitive_override_resolution",
+        "unit_id_override_computation": "ExperimentResolverPrimitives.primitive_unit_id_override_computation",
+        # Profile 25: Feature Flags primitives
+        "feature_set_construction": "FeatureFlagPrimitives.primitive_feature_set_construction",
+        "feature_flag_lookup": "FeatureFlagPrimitives.primitive_feature_flag_lookup",
+        "default_value_resolution": "FeatureFlagPrimitives.primitive_default_value_resolution",
+        # Profile 27: Notification Rendering primitives
+        "notification_text_formatting": "NotificationRenderPrimitives.primitive_notification_text_formatting",
+        "response_dict_construction": "NotificationRenderPrimitives.primitive_response_dict_construction",
+        "inline_action_construction": "NotificationRenderPrimitives.primitive_inline_action_construction",
+    }
+
+    lines = []
+    for primitive_name in primitives:
+        method_name = primitive_class_map.get(primitive_name)
+        if method_name is None:
+            raise ValueError(
+                f"Unknown inbox primitive '{primitive_name}' - must be added to primitive_class_map"
+            )
+        lines.append(f"{method_name}()")
+
+    # Join with newline + indent so each subsequent line is properly indented
+    return f"\n{indent}".join(lines)
+
+
+def generate_inbox_service_variant(
+    template_content: str,
+    variant_num: int,
+    seed: int,
+) -> str:
+    """Generate a single inbox service variant using Jinja2 template rendering."""
+    rng = random.Random(seed + variant_num)
+
+    # Number of primitives per phase (varies by phase importance)
+    cache_check_primitives = generate_inbox_weighted_primitives(1, rng)
+    pubsub_state_primitives = generate_inbox_weighted_primitives(1, rng)
+    experimentation_primitives = generate_inbox_weighted_primitives(1, rng)
+    fetch_threads_primitives = generate_inbox_weighted_primitives(1, rng)
+    spam_filtering_primitives = generate_inbox_weighted_primitives(1, rng)
+    message_preview_primitives = generate_inbox_weighted_primitives(1, rng)
+    metadata_fetch_primitives = generate_inbox_weighted_primitives(1, rng)
+    thread_building_primitives = generate_inbox_weighted_primitives(2, rng)
+    read_state_primitives = generate_inbox_weighted_primitives(1, rng)
+    pinned_items_primitives = generate_inbox_weighted_primitives(1, rng)
+    build_response_primitives = generate_inbox_weighted_primitives(1, rng)
+
+    # Prepare template variables
+    variant_header = f"""# AUTO-GENERATED SERVICE VARIANT - Variant {variant_num}
+# Generated with seed: {seed + variant_num}
+# DO NOT EDIT MANUALLY
+"""
+
+    template_vars = {
+        "variant_header": variant_header,
+        "variant_suffix": f" Variant {variant_num}",
+        "cache_check_primitives": format_inbox_primitive_calls(cache_check_primitives),
+        "pubsub_state_primitives": format_inbox_primitive_calls(
+            pubsub_state_primitives
+        ),
+        "experimentation_primitives": format_inbox_primitive_calls(
+            experimentation_primitives
+        ),
+        "fetch_threads_primitives": format_inbox_primitive_calls(
+            fetch_threads_primitives
+        ),
+        "spam_filtering_primitives": format_inbox_primitive_calls(
+            spam_filtering_primitives
+        ),
+        "message_preview_primitives": format_inbox_primitive_calls(
+            message_preview_primitives
+        ),
+        "metadata_fetch_primitives": format_inbox_primitive_calls(
+            metadata_fetch_primitives
+        ),
+        "thread_building_primitives": format_inbox_primitive_calls(
+            thread_building_primitives
+        ),
+        "read_state_primitives": format_inbox_primitive_calls(read_state_primitives),
+        "pinned_items_primitives": format_inbox_primitive_calls(
+            pinned_items_primitives
+        ),
+        "build_response_primitives": format_inbox_primitive_calls(
+            build_response_primitives
+        ),
+    }
+
+    # Render template using Jinja2
+    jinja_template = Template(template_content)
+    content = jinja_template.render(**template_vars)
+
+    # Rename classes to include variant suffix
+    content = content.replace(
+        "class InboxService:",
+        f"class InboxServiceV{variant_num}:",
+    )
+
+    return content
+
+
+def generate_inbox_init_file(num_variants: int) -> str:
+    """Generate inbox/__init__.py with all variant imports."""
+    lines = [
+        "# Copyright 2017-present, Facebook, Inc.",
+        "# All rights reserved.",
+        "#",
+        "# This source code is licensed under the license found in the",
+        "# LICENSE file in the root directory of this source tree.",
+        "",
+        '"""',
+        "Inbox module for DjangoBench V2.",
+        "",
+        "Provides InboxService variants for inbox data aggregation",
+        "with weighted CPU primitives for realistic workload simulation.",
+        '"""',
+        "",
+        "# Base service classes",
+        "from .service import (",
+        "    InboxContext,",
+        "    InboxRequest,",
+        "    InboxResponse,",
+        "    InboxService,",
+        "    InboxThread,",
+        ")",
+        "",
+        "# Primitives",
+        "from .primitives import (",
+        "    ConfigConstructionPrimitives,",
+        "    ExperimentationPrimitives,",
+        "    ExperimentResolverPrimitives,",
+        "    FeatureFlagPrimitives,",
+        "    FeatureGatingPrimitives,",
+        "    INBOX_PRIMITIVE_WEIGHTS,",
+        "    InboxPrimitives,",
+        "    MemoizationPrimitives,",
+        "    MetricsCollectionPrimitives,",
+        "    NotificationRenderPrimitives,",
+        "    PropertyAccessPrimitives,",
+        "    SchemaValidationPrimitives,",
+        "    TypeCachingPrimitives,",
+        "    ViewerContextPrimitives,",
+        "    execute_inbox_random_primitives,",
+        "    get_inbox_primitive_methods,",
+        ")",
+        "",
+        "# Thrift clients",
+        "from .thrift_client import (",
+        "    get_inbox_thread_client,",
+        "    get_inbox_user_metadata_client,",
+        "    get_pubsub_subscription_client,",
+        "    get_spam_filtering_client,",
+        ")",
+        "",
+        "# Service variants (for I-cache pressure)",
+    ]
+
+    # Add variant imports
+    for i in range(num_variants):
+        lines.append(f"from .service_v{i} import InboxServiceV{i}")
+
+    lines.append("")
+    lines.append("# All exports")
+    lines.append("__all__ = [")
+    lines.append('    "InboxContext",')
+    lines.append('    "InboxRequest",')
+    lines.append('    "InboxResponse",')
+    lines.append('    "InboxService",')
+    lines.append('    "InboxThread",')
+    lines.append('    "ConfigConstructionPrimitives",')
+    lines.append('    "ExperimentationPrimitives",')
+    lines.append('    "ExperimentResolverPrimitives",')
+    lines.append('    "FeatureFlagPrimitives",')
+    lines.append('    "FeatureGatingPrimitives",')
+    lines.append('    "INBOX_PRIMITIVE_WEIGHTS",')
+    lines.append('    "InboxPrimitives",')
+    lines.append('    "MemoizationPrimitives",')
+    lines.append('    "MetricsCollectionPrimitives",')
+    lines.append('    "NotificationRenderPrimitives",')
+    lines.append('    "PropertyAccessPrimitives",')
+    lines.append('    "SchemaValidationPrimitives",')
+    lines.append('    "TypeCachingPrimitives",')
+    lines.append('    "ViewerContextPrimitives",')
+    lines.append('    "execute_inbox_random_primitives",')
+    lines.append('    "get_inbox_primitive_methods",')
+    lines.append('    "get_inbox_thread_client",')
+    lines.append('    "get_inbox_user_metadata_client",')
+    lines.append('    "get_pubsub_subscription_client",')
+    lines.append('    "get_spam_filtering_client",')
+
+    for i in range(num_variants):
+        lines.append(f'    "InboxServiceV{i}",')
+
+    lines.append("]")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_inbox_service_variants():
+    """Generate all inbox service variants."""
+    print("\n[4.6/8] Generating inbox service variants...")
+
+    template_path = INBOX_DIR / "service.py.template"
+
+    if not template_path.exists():
+        print(f"  Warning: Template file not found: {template_path}")
+        print("  Skipping inbox service variant generation.")
+        return
+
+    with open(template_path, "r") as f:
+        template_content = f.read()
+
+    # Generate service variant files
+    for i in range(NUM_INBOX_VARIANTS):
+        variant_content = generate_inbox_service_variant(
+            template_content, i, RANDOM_SEED
+        )
+        output_path = INBOX_DIR / f"service_v{i}.py"
+
+        with open(output_path, "w") as f:
+            f.write(variant_content)
+
+        print(f"  Generated: service_v{i}.py")
+
+    # Generate __init__.py imports
+    init_path = INBOX_DIR / "__init__.py"
+    init_content = generate_inbox_init_file(NUM_INBOX_VARIANTS)
+    with open(init_path, "w") as f:
+        f.write(init_content)
+    print("  Updated: inbox/__init__.py")
+
+
+def generate_inbox_handler_variants() -> tuple:
+    """Generate inbox handler variants for inbox_handler.py."""
+    # Generate InboxService variant imports
+    import_lines = []
+    for i in range(NUM_INBOX_VARIANTS):
+        import_lines.append(f"from .inbox import InboxServiceV{i}")
+
+    # Generate handler variants
+    handler_codes = []
+    for i in range(NUM_INBOX_VARIANTS):
+        handler_code = f'''
+class InboxV{i}(Inbox):
+    """Inbox handler variant {i} - uses InboxServiceV{i}."""
+
+    def get_inbox(self):
+        service = InboxServiceV{i}(self.request, self.user)
+        response = service.get_inbox()
+        return response.to_dict()
+'''
+        handler_codes.append(handler_code)
+        print(f"  Generated: InboxV{i}")
+
+    return import_lines, handler_codes
+
+
+def generate_inbox_view_variants() -> tuple:
+    """Generate inbox view variants for views.py."""
+    # Generate InboxServiceV* imports from .inbox module
+    import_lines = []
+    for i in range(NUM_INBOX_VARIANTS):
+        import_lines.append(f"from .inbox import InboxServiceV{i}")
+
+    # Generate view function variants
+    view_codes = []
+    for i in range(NUM_INBOX_VARIANTS):
+        view_code = f'''
+@require_user
+def inbox_v{i}(request):
+    """Inbox variant {i} - uses InboxServiceV{i}."""
+    from .inbox_handler import Inbox, InboxV2Config
+
+    inbox_handler = Inbox(request)
+    # Use service variant directly
+    service = InboxServiceV{i}(request, request.user)
+    response = service.get_inbox()
+    result = response.to_dict()
+    result = inbox_handler.post_process(result)
+    return HttpResponse(json.dumps(result), content_type="text/json")
+'''
+        view_codes.append(view_code)
+
+    return import_lines, view_codes
+
+
+def generate_inbox_url_patterns() -> List[str]:
+    """Generate URL patterns for inbox variants."""
+    url_patterns = []
+    for i in range(NUM_INBOX_VARIANTS):
+        url_patterns.append(
+            f'url(r"^inbox_v{i}$", views.inbox_v{i}, name="inbox_v{i}"),'
+        )
+    return url_patterns
+
+
 def generate_clips_py():
     """Generate clips.py using Jinja2 template."""
     print("\n[5/6] Generating clips.py with handler variants...")
@@ -1639,6 +2072,9 @@ def generate_views_py(
         generate_bundle_tray_view_variants()
     )
 
+    # Prepare inbox variant data
+    inbox_import_lines, inbox_view_codes = generate_inbox_view_variants()
+
     # Load and render template
     env = Environment(loader=FileSystemLoader(DJANGO_WORKLOAD_DIR))
     template = env.get_template("views.py.template")
@@ -1650,6 +2086,8 @@ def generate_views_py(
         clips_view_variants=clips_view_codes,
         bundle_tray_variant_imports=bundle_tray_import_lines,
         bundle_tray_view_variants=bundle_tray_view_codes,
+        inbox_variant_imports=inbox_import_lines,
+        inbox_view_variants=inbox_view_codes,
     )
 
     # Write views.py
@@ -1658,7 +2096,7 @@ def generate_views_py(
         f.write(rendered)
 
     print(
-        f"  Generated views.py with {len(ft_variant_functions)} feed_timeline + {NUM_CLIPS_VARIANTS} clips + {NUM_BUNDLE_TRAY_VARIANTS} bundle_tray variants"
+        f"  Generated views.py with {len(ft_variant_functions)} feed_timeline + {NUM_CLIPS_VARIANTS} clips + {NUM_BUNDLE_TRAY_VARIANTS} bundle_tray + {NUM_INBOX_VARIANTS} inbox variants"
     )
     return output_path
 
@@ -1680,6 +2118,9 @@ def generate_urls_py(feed_timeline_variants: List[Dict]):
     # Prepare bundle_tray URL patterns
     bundle_tray_url_patterns = generate_bundle_tray_url_patterns()
 
+    # Prepare inbox URL patterns
+    inbox_url_patterns = generate_inbox_url_patterns()
+
     # Load and render template
     env = Environment(loader=FileSystemLoader(DJANGO_WORKLOAD_DIR))
     template = env.get_template("urls.py.template")
@@ -1688,6 +2129,7 @@ def generate_urls_py(feed_timeline_variants: List[Dict]):
         variant_urls=ft_variant_urls,
         clips_url_patterns=clips_url_patterns,
         bundle_tray_url_patterns=bundle_tray_url_patterns,
+        inbox_url_patterns=inbox_url_patterns,
     )
 
     # Write urls.py
@@ -1696,7 +2138,7 @@ def generate_urls_py(feed_timeline_variants: List[Dict]):
         f.write(rendered)
 
     print(
-        f"  Generated urls.py with {len(ft_variant_urls)} feed_timeline + {len(clips_url_patterns)} clips + {len(bundle_tray_url_patterns)} bundle_tray URL patterns"
+        f"  Generated urls.py with {len(ft_variant_urls)} feed_timeline + {len(clips_url_patterns)} clips + {len(bundle_tray_url_patterns)} bundle_tray + {len(inbox_url_patterns)} inbox URL patterns"
     )
     return output_path
 
@@ -1719,8 +2161,10 @@ def generate_client_urls_template(feed_timeline_variants: List[Dict]):
     for i in range(NUM_BUNDLE_TRAY_VARIANTS):
         urls.append(f"http://localhost:8000/bundle_tray_v{i} 1")
 
-    # Add inbox endpoint (placeholder for future variant generation)
-    urls.append("http://localhost:8000/inbox 10")
+    # Add inbox variants
+    urls.append("http://localhost:8000/inbox 1")  # Original inbox
+    for i in range(NUM_INBOX_VARIANTS):
+        urls.append(f"http://localhost:8000/inbox_v{i} 1")
 
     output_path = CLIENT_DIR / "urls_template.txt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1747,7 +2191,7 @@ def main():
     """Main code generation workflow."""
     print("=" * 70)
     print("DjangoBench V2 Code Variant Generator")
-    print("Generates Feed Timeline + Clips Discovery + Reels Tray variants")
+    print("Generates Feed Timeline + Clips Discovery + Reels Tray + Inbox variants")
     print("=" * 70)
     print(f"Random seed: {RANDOM_SEED}")
     print(f"Feed timeline variants: {NUM_FEED_TIMELINE_VARIANTS}")
@@ -1755,6 +2199,7 @@ def main():
     print(f"Clips variants: {NUM_CLIPS_VARIANTS}")
     print(f"Reels tray variants: {NUM_REELS_TRAY_VARIANTS}")
     print(f"Bundle tray variants: {NUM_BUNDLE_TRAY_VARIANTS}")
+    print(f"Inbox variants: {NUM_INBOX_VARIANTS}")
     print()
 
     # Check template files exist
@@ -1770,6 +2215,7 @@ def main():
         CLIPS_DISCOVERY_DIR / "service.py.template",
         REELS_TRAY_DIR / "service.py.template",
         DJANGO_WORKLOAD_DIR / "bundle_tray.py.template",
+        INBOX_DIR / "service.py.template",
     ]
 
     for template_path in required_templates:
@@ -1787,6 +2233,7 @@ def main():
     generate_clips_service_variants()
     generate_reels_tray_service_variants()
     generate_bundle_tray_variants()
+    generate_inbox_service_variants()
     generate_clips_py()
     generate_views_py(feed_timeline_variants, step_imports)
     generate_urls_py(feed_timeline_variants)
@@ -1811,11 +2258,14 @@ def main():
     print("  Bundle Tray:")
     print(f"    - {NUM_BUNDLE_TRAY_VARIANTS} handler variant files (bundle_tray_v*.py)")
     print(f"    - {NUM_BUNDLE_TRAY_VARIANTS} view functions")
+    print("  Inbox:")
+    print(f"    - {NUM_INBOX_VARIANTS} service variant files (service_v*.py)")
+    print(f"    - {NUM_INBOX_VARIANTS} view functions")
     print("  Combined:")
     print("    - Updated views.py with all variant functions")
     print("    - Updated urls.py with all variant URL patterns")
     print(
-        f"    - Client URLs template ({NUM_FEED_TIMELINE_VARIANTS + NUM_CLIPS_VARIANTS + NUM_BUNDLE_TRAY_VARIANTS + 3} endpoints)"
+        f"    - Client URLs template ({NUM_FEED_TIMELINE_VARIANTS + NUM_CLIPS_VARIANTS + NUM_BUNDLE_TRAY_VARIANTS + NUM_INBOX_VARIANTS + 4} endpoints)"
     )
     print("\nNext steps:")
     print("  1. Run 'arc lint -a' to format generated files")
@@ -1823,7 +2273,8 @@ def main():
     print("  3. Test: curl http://localhost:8000/feed_timeline_v0")
     print("  4. Test: curl http://localhost:8000/clips_v0")
     print("  5. Test: curl http://localhost:8000/bundle_tray_v0")
-    print(f"  6. Load test: wrk -s {CLIENT_DIR / 'urls_template.txt'}")
+    print("  6. Test: curl http://localhost:8000/inbox_v0")
+    print(f"  7. Load test: wrk -s {CLIENT_DIR / 'urls_template.txt'}")
     print()
 
 
