@@ -17,6 +17,7 @@ from django_cassandra_engine.management.commands import sync_cassandra
 
 from django_workload.models import (
     BundleEntryModel,
+    BundleReelClipModel,
     ClipChunkModel,
     ClipVideoModel,
     CommentedInboxEntryModel,
@@ -129,6 +130,7 @@ class Command(BaseCommand):
         print("Creating 1000 random bundles")
         random_dates = islice(random_datetime_generator(), 1000)
         bundleids = map(uuid_from_time, random_dates)
+        bundle_ids_list = []  # Track bundle IDs for later association with clips
         for i, bundleid in enumerate(bundleids):
             print("\r{} {}".format(next(spinner), i), end="")
             entrycount = random.randrange(2, 10)
@@ -141,6 +143,7 @@ class Command(BaseCommand):
                 entry_ids=feedentries,
             )
             entry.save()
+            bundle_ids_list.append(bundleid)
         print("\r       ", end="\r")
 
         # =============================================================
@@ -265,4 +268,41 @@ class Command(BaseCommand):
         print("\r       ", end="\r")
         print(
             f"Created {len(clip_video_ids)} clip videos with {chunk_count} total chunks"
+        )
+
+        # =============================================================
+        # Bundle-Reel-Clip associations for feed.api.views.reels_tray
+        # Models the relationship between tray buckets and video clips
+        # =============================================================
+
+        print("Creating bundle-reel-clip associations (3-10 clips per bundle)")
+        association_count = 0
+        for bundle_idx, bundle_id in enumerate(bundle_ids_list):
+            print(
+                "\r{} Bundle {}/{}".format(
+                    next(spinner), bundle_idx, len(bundle_ids_list)
+                ),
+                end="",
+            )
+
+            # Each bundle gets 3-10 random clips (stories/reels per user)
+            num_clips = random.randint(3, 10)
+            selected_clips = random.sample(
+                clip_video_ids, min(num_clips, len(clip_video_ids))
+            )
+
+            for position, clip_id in enumerate(selected_clips):
+                association = BundleReelClipModel(
+                    bundle_id=bundle_id,
+                    clip_id=clip_id,
+                    position=position,
+                    is_seen=random.choice([True, False]),
+                    media_type=random.choice(["reel", "story"]),
+                )
+                association.save()
+                association_count += 1
+
+        print("\r       ", end="\r")
+        print(
+            f"Created {association_count} bundle-reel-clip associations for {len(bundle_ids_list)} bundles"
         )
