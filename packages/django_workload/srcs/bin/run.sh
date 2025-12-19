@@ -30,6 +30,34 @@ if [ -z "$JAVA_HOME" ]; then
 fi
 
 
+# Helper function to find and kill process using a specific port
+# Defined outside cleanup() so it can be used globally
+kill_process_on_port() {
+  local port=$1
+  local service_name=$2
+
+  # Use ss (socket statistics) instead of lsof - much faster and doesn't hang
+  local pid
+  pid=$(ss -tlnp 2>/dev/null | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1 || echo "")
+
+  # Fallback to fuser if ss doesn't find it
+  if [ -z "$pid" ]; then
+    pid=$(fuser "${port}/tcp" 2>/dev/null | awk '{print $1}' || echo "")
+  fi
+
+  if [ -n "$pid" ]; then
+    echo "Stopping ${service_name} on port ${port} (PID: ${pid})..."
+    kill "$pid" 2>/dev/null || true
+    sleep 0.5
+
+    # Force kill if still running
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "Force killing ${service_name} (PID: ${pid})..."
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+}
+
 # shellcheck disable=SC2317
 cleanup() {
   echo "Stopping services ..."
@@ -69,30 +97,13 @@ cleanup() {
     fi
   fi
 
+  # Stop Django HAProxy load balancer (listening on port 8000)
+  echo "Stopping Django HAProxy load balancer on port 8000..."
+  kill_process_on_port 8000 "Django HAProxy"
+
   # Stop Thrift servers and HAProxy using port-based process discovery
   THRIFT_DIR="${SCRIPT_ROOT}/../django-workload/django-workload/django_workload/thrift"
   HAPROXY_FRONTEND_PORT=9090
-
-  # Helper function to find and kill process using a specific port
-  kill_process_on_port() {
-    local port=$1
-    local service_name=$2
-
-    # Use lsof to find PID listening on the port
-    local pid=$(lsof -ti :${port} -sTCP:LISTEN 2>/dev/null || echo "")
-
-    if [ -n "$pid" ]; then
-      echo "Stopping ${service_name} on port ${port} (PID: ${pid})..."
-      kill "$pid" 2>/dev/null || true
-      sleep 0.5
-
-      # Force kill if still running
-      if kill -0 "$pid" 2>/dev/null; then
-        echo "Force killing ${service_name} (PID: ${pid})..."
-        kill -9 "$pid" 2>/dev/null || true
-      fi
-    fi
-  }
 
   # Stop HAProxy load balancer (listening on port 9090)
   echo "Stopping HAProxy Thrift load balancer..."
@@ -296,7 +307,7 @@ collect_perf_record() {
 }
 
 run_benchmark() {
-  core_factor=1.2
+  core_factor=1.0
   local _num_workers=$1
   if [ "$_num_workers" -le 0 ] || [ -z "$_num_workers" ]; then
     _num_workers=$(echo "scale=2; $(nproc)*$core_factor" | bc) # this do decimal times
@@ -511,9 +522,12 @@ start_django_server() {
     export PYTHONJITWRITEPROFILE=/tmp/cinder-jit.profile
     export PYTHONJITPROFILEINTERP=1
     export PYTHONJITPROFILEINTERPPERIOD=10
-    export PYTHONJITDUMPSTATS=1
+    #export PYTHONJITDUMPSTATS=1
     export PYTHONJITALLSTATICFUNCTIONS=1
   fi
+
+  # Export FBTHRIFT_PREFIX for thrift Python bindings
+  export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
 
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -637,6 +651,45 @@ start_client() {
     fi
   done
   echo "Server is ready!"
+
+  # Wait for HAProxy to mark all backend workers as healthy
+  # HAProxy health checks run every 2s and need 2 successful checks (rise 2)
+  # So we need at least 4-6 seconds after initial connection for all workers
+  # to be marked as UP. We wait for HAProxy stats to confirm all backends are UP.
+  echo "Waiting for HAProxy to mark all backend workers as healthy..."
+  local haproxy_retries=30
+  while true; do
+    # Query HAProxy stats and check if any backend is DOWN or not ready
+    # HAProxy stats CSV format: backend name,server name,status,...
+    local stats_output
+    stats_output=$(curl -s "http://localhost:${stats_port}/stats;csv" 2>/dev/null || echo "")
+
+    if [ -n "$stats_output" ]; then
+      # Count workers that are UP vs total workers in django_workers backend
+      # Use awk to avoid grep exit code issues (grep -c returns exit 1 when count is 0)
+      local total_workers down_workers
+      total_workers=$(echo "$stats_output" | awk '/django_workers,worker/{count++} END{print count+0}')
+      down_workers=$(echo "$stats_output" | awk '/django_workers,worker/ && !/,UP,/{count++} END{print count+0}')
+
+      if [ "$total_workers" -gt 0 ] && [ "$down_workers" -eq 0 ]; then
+        echo "All $total_workers HAProxy backend workers are UP and healthy!"
+        break
+      else
+        echo "Waiting for backend workers... ($((total_workers - down_workers))/$total_workers UP)"
+      fi
+    fi
+
+    sleep 1
+    haproxy_retries=$((haproxy_retries-1))
+    if [[ "$haproxy_retries" -le 0 ]]; then
+      echo "WARNING: Not all HAProxy backends became healthy within 30 seconds, proceeding anyway"
+      break
+    fi
+  done
+
+  # Additional small delay to ensure workers are fully warmed up
+  echo "Brief warmup delay before starting benchmark..."
+  sleep 2
 
   run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "${iterations}" "${reps}"
 }

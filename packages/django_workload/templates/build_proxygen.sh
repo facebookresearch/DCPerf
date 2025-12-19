@@ -370,6 +370,25 @@ function setup_zstd() {
   cd "$BWD" || exit
 }
 
+function setup_liburing() {
+  LIBURING_DIR="${DEPS_DIR}/liburing"
+  LIBURING_TAG="liburing-2.12"
+  if [ ! -d "$LIBURING_DIR" ] ; then
+    echo -e "${COLOR_GREEN}[ INFO ] Cloning liburing repo ${COLOR_OFF}"
+    git clone "https://github.com/axboe/liburing.git" "$LIBURING_DIR"
+  fi
+  cd "$LIBURING_DIR"
+  git fetch --tags
+  git checkout "$LIBURING_TAG"
+  echo -e "${COLOR_GREEN}Building liburing ${COLOR_OFF}"
+  ./configure --cc=gcc --cxx=g++ --prefix="$DEPS_DIR"
+  make -j "$JOBS"
+  make liburing.pc
+  make install
+  echo -e "${COLOR_GREEN}liburing is installed ${COLOR_OFF}"
+  cd "$BWD" || exit
+}
+
 function setup_folly() {
   FOLLY_DIR=$DEPS_DIR/folly
   FOLLY_BUILD_DIR=$DEPS_DIR/folly/build/
@@ -645,6 +664,9 @@ setup_fast_float
 setup_fmt
 setup_googletest
 setup_zstd
+if [ "$DISTRO" = "ubuntu" ]; then
+  setup_liburing
+fi
 setup_folly
 setup_libaegis
 setup_fizz
@@ -685,6 +707,14 @@ cmake                                     \
   "$MAYBE_LIB_FUZZING_ENGINE"             \
   ../..
 
-make -j "$JOBS"
+# Reduce parallelism for the final proxygen build to mitigate OOM risk
+# Proxygen compilation is memory-intensive; use half the jobs (minimum 1)
+PROXYGEN_JOBS=$(( JOBS / 2 ))
+if [ "$PROXYGEN_JOBS" -lt 1 ]; then
+  PROXYGEN_JOBS=1
+fi
+echo -e "${COLOR_GREEN}Building Proxygen with reduced parallelism: $PROXYGEN_JOBS jobs (was $JOBS) ${COLOR_OFF}"
+
+make -j "$PROXYGEN_JOBS"
 echo -e "${COLOR_GREEN}Proxygen build is complete. To run unit test: \
   cd _build/ && make test ${COLOR_OFF}"

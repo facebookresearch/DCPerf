@@ -14,8 +14,19 @@ DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 DJANGO_SERVER_ROOT="${DJANGO_REPO_ROOT}/django-workload"
 DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
 
-# Number of parallel build jobs (defaults to nproc if not set)
-NUM_BUILD_JOBS="${NUM_BUILD_JOBS:-$(nproc)}"
+# Source the build parallelism utility and calculate optimal job count
+# This considers both CPU cores and memory limits (including cgroup constraints)
+# shellcheck source=../common/get_build_parallelism.sh
+source "${BENCHPRESS_ROOT}/packages/common/get_build_parallelism.sh"
+
+# Number of parallel build jobs - use environment variable if set, otherwise calculate optimal value
+if [ -n "${NUM_BUILD_JOBS:-}" ]; then
+    echo "Using user-specified NUM_BUILD_JOBS=${NUM_BUILD_JOBS}"
+else
+    NUM_BUILD_JOBS=$(get_build_parallelism)
+    echo "Calculated optimal NUM_BUILD_JOBS=${NUM_BUILD_JOBS} based on CPU and memory constraints"
+fi
+print_build_parallelism_info
 
 # =====================================================================
 # Step 1: Install System Dependencies
@@ -27,7 +38,8 @@ echo "====================================================================="
 
 apt install -y memcached libmemcached-dev zlib1g-dev screen \
     python3 python3.10-dev python3.10-venv rpm libffi-dev \
-    libssl-dev libcrypt-dev haproxy libxxhash-dev
+    libssl-dev libcrypt-dev haproxy libxxhash-dev \
+    perl ninja-build
 
 echo "System dependencies installed successfully"
 
@@ -436,22 +448,10 @@ if [ ! -f "${DATASET_DIR}/text/dickens" ]; then
     # Copy text files
     echo "Copying text files to ${DATASET_DIR}/text..."
     cp silesia_extracted/dickens "${DATASET_DIR}/text/"
-    cp silesia_extracted/webster "${DATASET_DIR}/text/"
-
-    # Extract and copy XML files
-    echo "Extracting XML files to ${DATASET_DIR}/text..."
-    tar -xf silesia_extracted/xml -C "${DATASET_DIR}/text/"
 
     # Copy binary files
     echo "Copying binary files to ${DATASET_DIR}/binary..."
-    cp silesia_extracted/mozilla "${DATASET_DIR}/binary/"
-    cp silesia_extracted/mr "${DATASET_DIR}/binary/"
-    cp silesia_extracted/nci "${DATASET_DIR}/binary/"
-    cp silesia_extracted/ooffice "${DATASET_DIR}/binary/"
-    cp silesia_extracted/osdb "${DATASET_DIR}/binary/"
-    cp silesia_extracted/reymont "${DATASET_DIR}/binary/"
     cp silesia_extracted/sao "${DATASET_DIR}/binary/"
-    cp silesia_extracted/x-ray "${DATASET_DIR}/binary/"
 
     echo "Dataset files extracted and organized successfully"
 else

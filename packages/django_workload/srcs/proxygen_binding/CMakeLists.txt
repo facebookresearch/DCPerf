@@ -136,6 +136,7 @@ target_link_libraries(proxygen_binding PRIVATE
     lzma
     cares
     unwind
+    uring
 )
 
 # Install the module

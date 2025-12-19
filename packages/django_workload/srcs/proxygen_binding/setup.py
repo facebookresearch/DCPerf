@@ -210,6 +210,7 @@ ext_modules = [
             "lzma",
             "cares",
             "unwind",
+            "uring",
         ],
         extra_compile_args=compile_args,
         extra_link_args=[
