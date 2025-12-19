@@ -18,11 +18,11 @@ urlpatterns = [
     url(r"^seen$", views.seen, name="seen"),
     url(r"^clips$", views.clips, name="clips"),
     # Clips endpoint variants for I-cache pressure
-    url(r"^clips_v\d+$", views.clips, name="clips_variant"),
-{% if variant_urls %}
-    # Auto-generated variant URLs
+{% for url_pattern in clips_url_patterns %}
+    {{ url_pattern }}
+{% endfor %}
+    # Feed timeline endpoint variants for I-cache pressure
 {% for url_pattern in variant_urls %}
     {{ url_pattern }}
 {% endfor %}
-{% endif %}
 ]

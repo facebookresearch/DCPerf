@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Code Variant Generator for DjangoBench V2 Feed Timeline - Final Version
+Code Variant Generator for DjangoBench V2 - Combined Feed Timeline + Clips
 
-Generates variant view functions directly in views.py using Jinja2 templates.
-Each variant calls different combinations of FeedFlow step variants.
+Generates variant view functions and services using Jinja2 templates.
+This script generates:
+1. Feed Timeline variants - Each variant calls different combinations of FeedFlow step variants
+2. Clips Discovery variants - Each variant uses different ClipsDiscoverService variants with CPU primitives
 """
 
 import os
@@ -30,10 +32,12 @@ random.seed(RANDOM_SEED)
 # Configuration
 NUM_FEED_TIMELINE_VARIANTS = 100
 NUM_STEP_VARIANTS_PER_TYPE = 50
+NUM_CLIPS_VARIANTS = 50
 
 SCRIPT_DIR = Path(__file__).parent
 DJANGO_WORKLOAD_DIR = SCRIPT_DIR / "django_workload"
 FEEDFLOW_DIR = DJANGO_WORKLOAD_DIR / "feed_flow"
+CLIPS_DISCOVERY_DIR = DJANGO_WORKLOAD_DIR / "clips_discovery"
 CLIENT_DIR = SCRIPT_DIR.parent / "client"
 
 # FeedFlow step classes
@@ -302,6 +306,69 @@ CPU_ITER_PRIMITIVES = [
     ),
 ]
 
+# Clips Discovery CPU Primitives (weighted by CPU profile)
+CLIPS_PRIMITIVE_WEIGHTS = {
+    # Query Operations  - Profiles 1
+    "recursive_node_discovery": 30,
+    "type_driven_dispatch": 30,
+    "query_finalization": 30,
+    "name_collision_resolution": 20,
+    # A/B Experiment Evaluation  - Profile 2
+    "experiment_bucketing": 30,
+    "parameter_type_coercion": 20,
+    "user_id_conversion": 20,
+    "group_hash_generation": 20,
+    # RPC Response Building  - Profile 4
+    "response_data_conversion": 30,
+    "struct_conversion": 20,
+    # Feature Flag Evaluation  - Profiles 5 & 8
+    "group_evaluation_loop": 30,
+    "percent_value_hashing": 20,
+    # Configuration Handling  - Profile 6
+    "parameter_merging_pipeline": 20,
+    "parameter_validation": 10,
+    # Video Data Processing  - Profile 10
+    "video_data_transformation": 20,
+    "metric_data_construction": 10,
+    # Memoization and Caching  - Profiles 11 & 16
+    "memoization_key_generation": 18,
+    "cache_get_or_compute": 12,
+    # RPC Client Patterns  - Profile 12
+    "rpc_request_preparation": 17,
+    # Enum Access Patterns  - Profile 13
+    "enum_value_lookup": 12,
+    "property_descriptor_access": 5,
+    # Metrics and Timing  - Profile 15
+    "metrics_counter_operations": 12,
+    "timer_context_manager": 5,
+    # Parameterization Utilities  - Profile 17
+    "mixed_value_type_dispatch": 12,
+    "version_override_extraction": 5,
+    # Cache Fetching  - Profile 19
+    "distributed_cache_batching": 10,
+    # Experiment Resolver  - Profile 20
+    "weighted_segment_assignment": 9,
+    "experiment_override_checking": 5,
+    # Call Stack Operations  - Profile 21
+    "call_stack_traversal": 9,
+    "frame_name_extraction": 4,
+    # Evaluation Tracking  - Profile 23
+    "evaluation_tracking": 8,
+    "sampling_check": 4,
+    # Gating Evaluation  - Profile 25
+    "gating_prefix_dispatch": 8,
+    "unit_type_validation": 4,
+    # Viewer Context  - Profile 26
+    "access_token_operations": 8,
+    "scoped_token_validation": 4,
+    # Privacy Policy Evaluation  - Profile 27
+    "policy_rule_evaluation": 6,
+    "ruling_result_handling": 3,
+    # View State  - Profile 30
+    "model_score_extraction": 6,
+    "view_state_serialization": 3,
+}
+
 
 def extract_class_from_file(content: str, class_name: str) -> str:
     """Extract a complete class definition from Python source."""
@@ -469,7 +536,7 @@ def inject_primitives_into_run(class_code: str, variant_id: int) -> str:
 
 def generate_step_variants():
     """Generate variants for each FeedFlow step class."""
-    print("\n[1/4] Generating FeedFlow step variants...")
+    print("\n[1/6] Generating FeedFlow step variants...")
 
     # Read steps.py.template
     steps_template_path = FEEDFLOW_DIR / "steps.py.template"
@@ -622,7 +689,7 @@ def feed_timeline_v{variant_id}(request):
 
 def generate_feed_timeline_variants():
     """Generate configuration for feed_timeline view variants."""
-    print("\n[2/4] Generating feed_timeline variant configurations...")
+    print("\n[2/6] Generating feed_timeline variant configurations...")
 
     variants = []
     all_step_imports = set()
@@ -668,19 +735,337 @@ def generate_feed_timeline_variants():
     return variants, sorted(all_step_imports)
 
 
-def generate_views_py(feed_timeline_variants: List[Dict], step_imports: List[str]):
-    """Generate views.py using Jinja2 template."""
-    print("\n[3/4] Generating views.py with variant functions...")
+# =============================================================================
+# Clips Discovery Service Variant Generation
+# =============================================================================
 
-    # Prepare variant function codes
-    variant_functions = [v["func_code"] for v in feed_timeline_variants]
+
+def get_clips_primitive_method_name(primitive_name: str) -> str:
+    """Convert primitive name to method call."""
+    return f"ClipsDiscoveryPrimitives.primitive_{primitive_name}"
+
+
+def generate_clips_weighted_primitives(
+    num_primitives: int,
+    rng: random.Random,
+) -> List[str]:
+    """Generate weighted list of clips primitives to call."""
+    # Build weighted selection list
+    weighted_choices = []
+    for name, weight in CLIPS_PRIMITIVE_WEIGHTS.items():
+        weighted_choices.extend([name] * weight)
+
+    selected = []
+    for _ in range(num_primitives):
+        primitive_name = rng.choice(weighted_choices)
+        selected.append(primitive_name)
+
+    return selected
+
+
+def format_clips_primitive_calls(
+    primitives: List[str], indent: str = "        "
+) -> str:
+    """Format primitive calls as Python code with proper indentation.
+
+    Args:
+        primitives: List of primitive names to call
+        indent: Indentation string (default 8 spaces for method body)
+
+    Returns:
+        Formatted Python code with proper indentation for each line
+    """
+    if not primitives:
+        return "pass"
+
+    lines = []
+    for primitive_name in primitives:
+        method_name = get_clips_primitive_method_name(primitive_name)
+        lines.append(f"{method_name}()")
+
+    # Join with newline + indent so each subsequent line is properly indented
+    return f"\n{indent}".join(lines)
+
+
+def generate_clips_service_variant(
+    template_content: str,
+    variant_num: int,
+    seed: int,
+) -> str:
+    """Generate a single clips service variant using Jinja2 template rendering."""
+    rng = random.Random(seed + variant_num)
+
+    # Number of primitives per phase (varies by phase importance)
+    cache_check_primitives = generate_clips_weighted_primitives(1, rng)
+    fetch_organic_primitives = generate_clips_weighted_primitives(2, rng)
+    fetch_ads_primitives = generate_clips_weighted_primitives(1, rng)
+    rank_clips_primitives = generate_clips_weighted_primitives(2, rng)
+    blend_clips_primitives = generate_clips_weighted_primitives(1, rng)
+    post_process_primitives = generate_clips_weighted_primitives(2, rng)
+    build_response_primitives = generate_clips_weighted_primitives(1, rng)
+
+    # Prepare template variables
+    variant_header = f"""# AUTO-GENERATED SERVICE VARIANT - Variant {variant_num}
+# Generated with seed: {seed + variant_num}
+# DO NOT EDIT MANUALLY
+"""
+
+    template_vars = {
+        "variant_header": variant_header,
+        "variant_suffix": f" Variant {variant_num}",
+        "cache_check_primitives": format_clips_primitive_calls(cache_check_primitives),
+        "fetch_organic_primitives": format_clips_primitive_calls(
+            fetch_organic_primitives
+        ),
+        "fetch_ads_primitives": format_clips_primitive_calls(fetch_ads_primitives),
+        "rank_clips_primitives": format_clips_primitive_calls(rank_clips_primitives),
+        "blend_clips_primitives": format_clips_primitive_calls(blend_clips_primitives),
+        "post_process_primitives": format_clips_primitive_calls(
+            post_process_primitives
+        ),
+        "build_response_primitives": format_clips_primitive_calls(
+            build_response_primitives
+        ),
+    }
+
+    # Render template using Jinja2
+    jinja_template = Template(template_content)
+    content = jinja_template.render(**template_vars)
+
+    # Rename classes to include variant suffix
+    content = content.replace(
+        "class ClipsDiscoverService:",
+        f"class ClipsDiscoverServiceV{variant_num}:",
+    )
+    content = content.replace(
+        "class ClipsDiscoverStreamingService(ClipsDiscoverService):",
+        f"class ClipsDiscoverStreamingServiceV{variant_num}(ClipsDiscoverServiceV{variant_num}):",
+    )
+
+    return content
+
+
+def generate_clips_init_file(num_variants: int) -> str:
+    """Generate clips_discovery/__init__.py with all variant imports."""
+    lines = [
+        "# Copyright 2017-present, Facebook, Inc.",
+        "# All rights reserved.",
+        "#",
+        "# This source code is licensed under the license found in the",
+        "# LICENSE file in the root directory of this source tree.",
+        "",
+        '"""',
+        "Clips Discovery module for DjangoBench V2.",
+        "",
+        "Provides ClipsDiscoverService variants for clips/reels discovery",
+        "with weighted CPU primitives for realistic workload simulation.",
+        '"""',
+        "",
+        "# Base service classes",
+        "from .service import (",
+        "    ClipsDiscoverContext,",
+        "    ClipsDiscoverRequest,",
+        "    ClipsDiscoverResponse,",
+        "    ClipsDiscoverService,",
+        "    ClipsDiscoverStreamingService,",
+        ")",
+        "",
+        "# Primitives",
+        "from .primitives import (",
+        "    ClipsDiscoveryPrimitives,",
+        "    PRIMITIVE_WEIGHTS,",
+        "    execute_random_primitives,",
+        "    get_primitive_methods,",
+        ")",
+        "",
+        "# Thrift clients",
+        "from .thrift_client import (",
+        "    get_clips_ads_client,",
+        "    get_clips_ranking_client,",
+        ")",
+        "",
+        "# Service variants (for I-cache pressure)",
+    ]
+
+    # Add variant imports
+    for i in range(num_variants):
+        lines.append(
+            f"from .service_v{i} import ClipsDiscoverServiceV{i}, ClipsDiscoverStreamingServiceV{i}"
+        )
+
+    lines.append("")
+    lines.append("# All exports")
+    lines.append("__all__ = [")
+    lines.append('    "ClipsDiscoverContext",')
+    lines.append('    "ClipsDiscoverRequest",')
+    lines.append('    "ClipsDiscoverResponse",')
+    lines.append('    "ClipsDiscoverService",')
+    lines.append('    "ClipsDiscoverStreamingService",')
+    lines.append('    "ClipsDiscoveryPrimitives",')
+    lines.append('    "PRIMITIVE_WEIGHTS",')
+    lines.append('    "execute_random_primitives",')
+    lines.append('    "get_primitive_methods",')
+    lines.append('    "get_clips_ads_client",')
+    lines.append('    "get_clips_ranking_client",')
+
+    for i in range(num_variants):
+        lines.append(f'    "ClipsDiscoverServiceV{i}",')
+        lines.append(f'    "ClipsDiscoverStreamingServiceV{i}",')
+
+    lines.append("]")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_clips_service_variants():
+    """Generate all clips discovery service variants."""
+    print("\n[3/6] Generating clips discovery service variants...")
+
+    template_path = CLIPS_DISCOVERY_DIR / "service.py.template"
+
+    if not template_path.exists():
+        print(f"  Warning: Template file not found: {template_path}")
+        print("  Skipping clips service variant generation.")
+        return
+
+    with open(template_path, "r") as f:
+        template_content = f.read()
+
+    # Generate service variant files
+    for i in range(NUM_CLIPS_VARIANTS):
+        variant_content = generate_clips_service_variant(
+            template_content, i, RANDOM_SEED
+        )
+        output_path = CLIPS_DISCOVERY_DIR / f"service_v{i}.py"
+
+        with open(output_path, "w") as f:
+            f.write(variant_content)
+
+        print(f"  Generated: service_v{i}.py")
+
+    # Generate __init__.py imports
+    init_path = CLIPS_DISCOVERY_DIR / "__init__.py"
+    init_content = generate_clips_init_file(NUM_CLIPS_VARIANTS)
+    with open(init_path, "w") as f:
+        f.write(init_content)
+    print("  Updated: clips_discovery/__init__.py")
+
+
+def generate_clips_handler_variants() -> tuple:
+    """Generate clips handler variants for clips.py."""
+    print("\n[4/6] Generating clips handler variants...")
+
+    # Generate service variant imports
+    import_lines = []
+    for i in range(NUM_CLIPS_VARIANTS):
+        import_lines.append(
+            f"from .clips_discovery import ClipsDiscoverServiceV{i}, ClipsDiscoverStreamingServiceV{i}"
+        )
+
+    # Generate handler variants
+    handler_codes = []
+    for i in range(NUM_CLIPS_VARIANTS):
+        handler_code = f'''
+class ClipsV{i}(Clips):
+    """Clips handler variant {i} - uses ClipsDiscoverServiceV{i}."""
+
+    def discover(self):
+        service = ClipsDiscoverServiceV{i}(self.request, self.user)
+        response = service.discover()
+        return response.to_dict()
+
+    def stream_discover(self):
+        service = ClipsDiscoverStreamingServiceV{i}(self.request, self.user)
+        for chunk in service.stream_discover():
+            yield chunk.to_dict()
+'''
+        handler_codes.append(handler_code)
+        print(f"  Generated: ClipsV{i}")
+
+    return import_lines, handler_codes
+
+
+def generate_clips_view_variants() -> tuple:
+    """Generate clips view variants for views.py."""
+    # Generate Clips variant imports
+    import_lines = []
+    for i in range(NUM_CLIPS_VARIANTS):
+        import_lines.append(f"from .clips import ClipsV{i}")
+
+    # Generate view function variants
+    view_codes = []
+    for i in range(NUM_CLIPS_VARIANTS):
+        view_code = f'''
+@require_user
+def clips_v{i}(request):
+    """Clips discovery variant {i}."""
+    clips_handler = ClipsV{i}(request)
+    result = clips_handler.discover()
+    result = clips_handler.post_process(result)
+    return HttpResponse(json.dumps(result), content_type="text/json")
+'''
+        view_codes.append(view_code)
+
+    return import_lines, view_codes
+
+
+def generate_clips_url_patterns() -> List[str]:
+    """Generate URL patterns for clips variants."""
+    url_patterns = []
+    for i in range(NUM_CLIPS_VARIANTS):
+        url_patterns.append(
+            f'url(r"^clips_v{i}$", views.clips_v{i}, name="clips_v{i}"),'
+        )
+    return url_patterns
+
+
+def generate_clips_py():
+    """Generate clips.py using Jinja2 template."""
+    print("\n[5/6] Generating clips.py with handler variants...")
+
+    import_lines, handler_codes = generate_clips_handler_variants()
+
+    # Load and render template
+    env = Environment(loader=FileSystemLoader(DJANGO_WORKLOAD_DIR))
+    template = env.get_template("clips.py.template")
+
+    rendered = template.render(
+        service_variant_imports=import_lines,
+        clips_handler_variants=handler_codes,
+    )
+
+    # Write clips.py
+    output_path = DJANGO_WORKLOAD_DIR / "clips.py"
+    with open(output_path, "w") as f:
+        f.write(rendered)
+
+    print(f"  Generated clips.py with {NUM_CLIPS_VARIANTS} handler variants")
+    return output_path
+
+
+def generate_views_py(
+    feed_timeline_variants: List[Dict],
+    step_imports: List[str],
+):
+    """Generate views.py using Jinja2 template."""
+    print("\n[5/6] Generating views.py with all variant functions...")
+
+    # Prepare feed timeline variant function codes
+    ft_variant_functions = [v["func_code"] for v in feed_timeline_variants]
+
+    # Prepare clips variant data
+    clips_import_lines, clips_view_codes = generate_clips_view_variants()
 
     # Load and render template
     env = Environment(loader=FileSystemLoader(DJANGO_WORKLOAD_DIR))
     template = env.get_template("views.py.template")
 
     rendered = template.render(
-        variant_step_imports=step_imports, variant_view_functions=variant_functions
+        variant_step_imports=step_imports,
+        variant_view_functions=ft_variant_functions,
+        clips_variant_imports=clips_import_lines,
+        clips_view_variants=clips_view_codes,
     )
 
     # Write views.py
@@ -688,42 +1073,58 @@ def generate_views_py(feed_timeline_variants: List[Dict], step_imports: List[str
     with open(output_path, "w") as f:
         f.write(rendered)
 
-    print(f"  Generated views.py with {len(variant_functions)} variant functions")
+    print(
+        f"  Generated views.py with {len(ft_variant_functions)} feed_timeline + {NUM_CLIPS_VARIANTS} clips variants"
+    )
     return output_path
 
 
 def generate_urls_py(feed_timeline_variants: List[Dict]):
     """Generate urls.py using Jinja2 template."""
-    print("\n[4/4] Generating urls.py with variant URL patterns...")
+    print("\n[6/6] Generating urls.py with all variant URL patterns...")
 
-    # Prepare URL patterns
-    variant_urls = []
+    # Prepare feed timeline URL patterns
+    ft_variant_urls = []
     for variant in feed_timeline_variants:
-        variant_urls.append(
+        ft_variant_urls.append(
             f'url(r"^feed_timeline_v{variant["variant_id"]}$", views.feed_timeline_v{variant["variant_id"]}, name="feed_timeline_v{variant["variant_id"]}"),'
         )
+
+    # Prepare clips URL patterns
+    clips_url_patterns = generate_clips_url_patterns()
 
     # Load and render template
     env = Environment(loader=FileSystemLoader(DJANGO_WORKLOAD_DIR))
     template = env.get_template("urls.py.template")
 
-    rendered = template.render(variant_urls=variant_urls)
+    rendered = template.render(
+        variant_urls=ft_variant_urls,
+        clips_url_patterns=clips_url_patterns,
+    )
 
     # Write urls.py
     output_path = DJANGO_WORKLOAD_DIR / "urls.py"
     with open(output_path, "w") as f:
         f.write(rendered)
 
-    print(f"  Generated urls.py with {len(variant_urls)} variant URL patterns")
+    print(
+        f"  Generated urls.py with {len(ft_variant_urls)} feed_timeline + {len(clips_url_patterns)} clips URL patterns"
+    )
     return output_path
 
 
 def generate_client_urls_template(feed_timeline_variants: List[Dict]):
     """Generate client URLs template file."""
-    urls = ["http://localhost:8000/feed_timeline 1"]  # Original
+    urls = ["http://localhost:8000/feed_timeline 1"]  # Original feed_timeline
 
+    # Add feed_timeline variants
     for variant in feed_timeline_variants:
         urls.append(f"http://localhost:8000/feed_timeline_v{variant['variant_id']} 1")
+
+    # Add clips variants
+    urls.append("http://localhost:8000/clips 1")  # Original clips
+    for i in range(NUM_CLIPS_VARIANTS):
+        urls.append(f"http://localhost:8000/clips_v{i} 1")
 
     output_path = CLIENT_DIR / "urls_template.txt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -749,12 +1150,13 @@ def delete_old_feed_timeline_variant_files():
 def main():
     """Main code generation workflow."""
     print("=" * 70)
-    print("DjangoBench V2 Code Variant Generator - Final Version")
-    print("Generates view functions with randomized FeedFlow step calls")
+    print("DjangoBench V2 Code Variant Generator")
+    print("Generates Feed Timeline + Clips Discovery variants")
     print("=" * 70)
     print(f"Random seed: {RANDOM_SEED}")
     print(f"Feed timeline variants: {NUM_FEED_TIMELINE_VARIANTS}")
     print(f"Step variants per type: {NUM_STEP_VARIANTS_PER_TYPE}")
+    print(f"Clips variants: {NUM_CLIPS_VARIANTS}")
     print()
 
     # Check template files exist
@@ -762,6 +1164,12 @@ def main():
         FEEDFLOW_DIR / "steps.py.template",
         DJANGO_WORKLOAD_DIR / "views.py.template",
         DJANGO_WORKLOAD_DIR / "urls.py.template",
+        DJANGO_WORKLOAD_DIR / "clips.py.template",
+    ]
+
+    # Optional templates (warn but don't fail)
+    optional_templates = [
+        CLIPS_DISCOVERY_DIR / "service.py.template",
     ]
 
     for template_path in required_templates:
@@ -769,9 +1177,15 @@ def main():
             print(f"ERROR: Template file not found: {template_path}")
             sys.exit(1)
 
+    for template_path in optional_templates:
+        if not template_path.exists():
+            print(f"WARNING: Optional template not found: {template_path}")
+
     # Generate all variants
     step_variants = generate_step_variants()
     feed_timeline_variants, step_imports = generate_feed_timeline_variants()
+    generate_clips_service_variants()
+    generate_clips_py()
     generate_views_py(feed_timeline_variants, step_imports)
     generate_urls_py(feed_timeline_variants)
     generate_client_urls_template(feed_timeline_variants)
@@ -783,15 +1197,25 @@ def main():
     print("✓ Code generation complete!")
     print("=" * 70)
     print(f"\nGenerated files:")
-    print(f"  - {NUM_STEP_VARIANTS_PER_TYPE} step variant files (steps_v*.py)")
-    print(f"  - {NUM_FEED_TIMELINE_VARIANTS} variant view functions in views.py")
-    print(f"  - Updated views.py with step imports and variant functions")
-    print(f"  - Updated urls.py with {NUM_FEED_TIMELINE_VARIANTS} variant URL patterns")
-    print(f"  - Client URLs template ({NUM_FEED_TIMELINE_VARIANTS + 1} endpoints)")
+    print(f"  Feed Timeline:")
+    print(f"    - {NUM_STEP_VARIANTS_PER_TYPE} step variant files (steps_v*.py)")
+    print(f"    - {NUM_FEED_TIMELINE_VARIANTS} variant view functions")
+    print(f"  Clips Discovery:")
+    print(f"    - {NUM_CLIPS_VARIANTS} service variant files (service_v*.py)")
+    print(f"    - {NUM_CLIPS_VARIANTS} handler variants in clips.py")
+    print(f"    - {NUM_CLIPS_VARIANTS} view functions")
+    print(f"  Combined:")
+    print(f"    - Updated views.py with all variant functions")
+    print(f"    - Updated urls.py with all variant URL patterns")
+    print(
+        f"    - Client URLs template ({NUM_FEED_TIMELINE_VARIANTS + NUM_CLIPS_VARIANTS + 2} endpoints)"
+    )
     print(f"\nNext steps:")
-    print(f"  1. Restart Django workers")
-    print(f"  2. Test: curl http://localhost:8000/feed_timeline_v0")
-    print(f"  3. Load test: siege -f {CLIENT_DIR / 'urls_template.txt'}")
+    print(f"  1. Run 'arc lint -a' to format generated files")
+    print(f"  2. Restart Django workers")
+    print(f"  3. Test: curl http://localhost:8000/feed_timeline_v0")
+    print(f"  4. Test: curl http://localhost:8000/clips_v0")
+    print(f"  5. Load test: wrk -s {CLIENT_DIR / 'urls_template.txt'}")
     print()
 
 

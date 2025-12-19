@@ -7,15 +7,41 @@
 """
 Clips Discovery module for DjangoBench V2.
 
-This module models the workload of clips.api.views.async_stream_clips_discover
-from production IG Django server.
-
-The main components are:
-- ClipsDiscoverService: Main service class for clips discovery
-- ClipsDiscoverStreamingService: Streaming variant for chunked delivery
-- thrift_client: Thrift RPC client for fetching clips ads
+Provides ClipsDiscoverService variants for clips/reels discovery
+with weighted CPU primitives for realistic workload simulation.
 """
 
-from .service import ClipsDiscoverService, ClipsDiscoverStreamingService
+# Primitives
+from .primitives import (
+    ClipsDiscoveryPrimitives,
+    execute_random_primitives,
+    get_primitive_methods,
+    PRIMITIVE_WEIGHTS,
+)
 
-__all__ = ["ClipsDiscoverService", "ClipsDiscoverStreamingService"]
+# Base service classes
+from .service import (
+    ClipsDiscoverContext,
+    ClipsDiscoverRequest,
+    ClipsDiscoverResponse,
+    ClipsDiscoverService,
+    ClipsDiscoverStreamingService,
+)
+
+# Thrift clients
+from .thrift_client import get_clips_ads_client, get_clips_ranking_client
+
+# All exports
+__all__ = [
+    "ClipsDiscoverContext",
+    "ClipsDiscoverRequest",
+    "ClipsDiscoverResponse",
+    "ClipsDiscoverService",
+    "ClipsDiscoverStreamingService",
+    "ClipsDiscoveryPrimitives",
+    "PRIMITIVE_WEIGHTS",
+    "execute_random_primitives",
+    "get_primitive_methods",
+    "get_clips_ads_client",
+    "get_clips_ranking_client",
+]

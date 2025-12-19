@@ -164,4 +164,3 @@ def clips(request):
     clips_handler = Clips(request)
     result = clips_handler.discover()
     result = clips_handler.post_process(result)
-    return HttpResponse(json.dumps(result), content_type="text/json")

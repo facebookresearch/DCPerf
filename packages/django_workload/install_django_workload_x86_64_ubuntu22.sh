@@ -405,6 +405,9 @@ DATASET_DIR="${DJANGO_SERVER_ROOT}/django_workload/feed_flow/dataset"
 mkdir -p "${DATASET_DIR}/text"
 mkdir -p "${DATASET_DIR}/binary"
 
+DATASET_DIR2="${DJANGO_SERVER_ROOT}/django_workload/feed_flow/dataset"
+ln -s "${DATASET_DIR}" "${DATASET_DIR2}"
+
 # Download Silesia Corpus if not already present
 if [ ! -f "${DJANGO_WORKLOAD_ROOT}/silesia.zip" ]; then
     echo "Downloading Silesia Corpus dataset..."
