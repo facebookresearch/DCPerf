@@ -1,0 +1,545 @@
+#!/usr/bin/python3
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+import optparse
+import os
+import subprocess
+import re
+import numpy as np
+
+# Concurrent worker count
+WORKERS = 185
+
+# Test duration (units are H, M or S, for hours, minutes or seconds)
+DURATION = "2M"
+
+# Log file (outputs CSV rows)
+LOG = "./wrk.log"
+
+# Source file
+SOURCE = "urls.txt"
+
+# Full output file for wrk
+WRK_OUT_FILE = "/tmp/wrk_out"
+
+# URL template file
+URLS_TEMPLATE_FILE = "urls_template.txt"
+
+# Base URL for the server
+BASE_URL = "http://localhost:8000"
+
+
+def parse_urls(url_file):
+    url_dict = {}
+    url_target = {}
+
+    try:
+        line_count = 0
+
+        for line in open(url_file, 'r'):
+            values = line.strip().split()
+            val_len = len(values)
+            line_count += 1
+
+            # The URL_TEMPLATE file must only have lines that respect the
+            # format "URL [POST [<in_file]] weight"
+            if val_len >= 2:
+                url_components = values[0].split("/")
+                comp_len = len(url_components)
+                short_url = "/" + url_components[comp_len - 1]
+                url_dict[short_url] = []
+                url_target[short_url] = values[val_len - 1]
+            else:
+                print("ERROR: Unable to parse " + URLS_TEMPLATE_FILE)
+                print("The " + URLS_TEMPLATE_FILE + " must only have lines that "
+                      "respect the format \"URL [POST [<in_file]] weight\"\n")
+                exit(1)
+
+        if line_count == 0:
+            print("ERROR: " + URLS_TEMPLATE_FILE + " is empty\n")
+            exit(1)
+    except FileNotFoundError:
+        print("ERROR: Unable to parse " + URLS_TEMPLATE_FILE + ": file not found\n")
+        exit(1)
+
+    return [url_dict, url_target]
+
+
+def delete_file(f):
+    try:
+        os.remove(f)
+    except OSError:
+        pass
+
+
+def setup_variables():
+    global WORKERS
+    global DURATION
+    global LOG
+    global SOURCE
+    global BASE_URL
+
+    if "WORKERS" in os.environ:
+        WORKERS = os.environ["WORKERS"]
+    if "DURATION" in os.environ:
+        DURATION = os.environ["DURATION"]
+    if "LOG" in os.environ:
+        LOG = os.environ["LOG"]
+    if "SOURCE" in os.environ:
+        SOURCE = os.environ["SOURCE"]
+    if "BASE_URL" in os.environ:
+        BASE_URL = os.environ["BASE_URL"]
+
+
+def parse_duration(duration_str):
+    """Convert duration string (e.g., '2M', '30S', '1H') to seconds."""
+    duration_str = duration_str.upper()
+    if duration_str.endswith('S'):
+        return int(duration_str[:-1])
+    elif duration_str.endswith('M'):
+        return int(duration_str[:-1]) * 60
+    elif duration_str.endswith('H'):
+        return int(duration_str[:-1]) * 3600
+    else:
+        # Default to seconds if no unit specified
+        return int(duration_str)
+
+
+def get_base_endpoint(url_str):
+    """Extract base endpoint from URL by removing version suffix.
+    e.g., /feed_timeline_v25 -> /feed_timeline
+    """
+    return re.sub(r'_v\d+$', '', url_str)
+
+
+def validate_output(wrk_file):
+    """Validate wrk output for any errors or warnings."""
+    http_error_codes = 0
+    socket_timeouts = 0
+    conn_refused = 0
+    has_warning = False
+
+    for line in open(wrk_file, 'r'):
+        if re.search("HTTP/1.1", line):
+            values = line.strip().split()
+
+            # Only expecting 200 codes (format: HTTP/1.1 STATUS BYTES bytes ==> METHOD PATH)
+            if len(values) >= 7 and values[1] != "200":
+                http_error_codes += 1
+        elif re.search("Connection timed out", line):
+            socket_timeouts += 1
+        elif re.search("Connection refused", line):
+            conn_refused += 1
+
+    if http_error_codes > 0:
+        print("WARNING: Got " + str(http_error_codes) + " HTTP "
+              "codes different than 200")
+        has_warning = True
+    if socket_timeouts > 0:
+        print("WARNING: Got " + str(socket_timeouts) + " socket timeout "
+              "alerts")
+        has_warning = True
+    if conn_refused > 0:
+        print("WARNING: Got " + str(conn_refused) + " connection refused "
+              "errors")
+        has_warning = True
+    if has_warning:
+        print("Please see full wrk log in " + wrk_file + "\n")
+
+
+def run_wrk(options):
+    # Find the wrk binary
+    wrk_path = find_wrk_binary()
+    if not wrk_path:
+        print("ERROR: wrk binary not found. Please install wrk first.")
+        exit(1)
+
+    # Build wrk command
+    cmd = [wrk_path, '-c', str(WORKERS), '-t', str(WORKERS)]
+
+    if options.reps > 0:
+        cmd.extend(['-r', str(options.reps)])
+    else:
+        # Convert duration to wrk format (expects seconds with 's' suffix or just seconds)
+        duration_secs = parse_duration(DURATION)
+        cmd.extend(['-d', f'{duration_secs}s'])
+
+    # Add Lua script
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'multi-request-txt.lua')
+    cmd.extend(['-s', script_path])
+
+    # Add base URL
+    cmd.append(BASE_URL)
+
+    # Add script arguments (path to urls file)
+    cmd.extend(['--', SOURCE])
+
+    iterations = options.iterations
+    url_dict, url_target = parse_urls(URLS_TEMPLATE_FILE)
+
+    # Perform 7 runs, discard the min and max Transaction rate numbers and
+    # display average of wrk metrics. Perform a single run if "-s" option
+    # is used
+    for i in range(iterations):
+        current_file = WRK_OUT_FILE + "_" + str(i + 1)
+        delete_file(current_file)
+
+        print("Running iteration " + str(i + 1), end="", flush=True)
+
+        # Run wrk and capture output
+        try:
+            with open(current_file, 'w') as out_file:
+                subprocess.run(cmd, stdout=out_file, stderr=subprocess.STDOUT, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"\nERROR: wrk command failed with return code {e.returncode}")
+            exit(1)
+
+        print(" --- DONE")
+
+        # Validate output
+        validate_output(current_file)
+
+        # only do one run if the "single" option is set
+        if options.single:
+            iterations = 1
+            break
+
+    print()
+    parse_results(iterations, url_dict, url_target)
+    print("\nFull wrk output is available in " + WRK_OUT_FILE + "_[N]")
+
+
+def find_wrk_binary():
+    """Find the wrk binary in expected locations."""
+    # Try multiple possible locations
+    possible_paths = [
+        # In DjangoBench installation directory
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../wrk/wrk'),
+        # In PATH
+        'wrk',
+    ]
+
+    for path in possible_paths:
+        # Try to find absolute path
+        if os.path.exists(path):
+            return os.path.abspath(path)
+        # Try using 'which' for PATH lookup
+        try:
+            result = subprocess.run(['which', path], capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+
+    return None
+
+
+def get_percentiles(latencies):
+    percentiles = {}
+    count = len(latencies)
+
+    if count > 0:
+        latencies.sort()
+        percentiles["P50"] = latencies[int(0.5 * count)]
+        percentiles["P90"] = latencies[int(0.9 * count)]
+        percentiles["P95"] = latencies[int(0.95 * count)]
+        percentiles["P99"] = latencies[int(0.99 * count)]
+    else:
+        percentiles["P50"] = -1
+        percentiles["P90"] = -1
+        percentiles["P95"] = -1
+        percentiles["P99"] = -1
+
+    return percentiles
+
+
+def update_percentages(url_dict, local_hits, total_hits):
+    for url in url_dict:
+        current_perc = 0
+
+        if url in local_hits:
+            if total_hits > 0:
+                current_perc = float(local_hits[url]) / total_hits
+        url_dict[url].append(current_perc)
+    return url_dict
+
+
+def match(url_dict, url_str):
+    for key in url_dict:
+        if re.search(key, url_str):
+            return key
+    return ""
+
+
+def parse_wrk_output(wrk_file):
+    """
+    Parse wrk output to extract metrics.
+    wrk outputs metrics in the done() function from the Lua script.
+    """
+    metrics = {}
+
+    with open(wrk_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+
+            # Parse metrics from Lua script output
+            if line.startswith("Transactions:"):
+                match = re.search(r'(\d+)\s+hits', line)
+                if match:
+                    metrics["Transactions"] = int(match.group(1))
+
+            elif line.startswith("Availability:"):
+                match = re.search(r'([\d.]+)\s+%', line)
+                if match:
+                    metrics["Availability"] = float(match.group(1))
+
+            elif line.startswith("Elapsed time:"):
+                match = re.search(r'([\d.]+)\s+secs', line)
+                if match:
+                    metrics["Elapsed time"] = float(match.group(1))
+
+            elif line.startswith("Data transferred:"):
+                match = re.search(r'([\d.]+)\s+MB', line)
+                if match:
+                    metrics["Data transferred"] = float(match.group(1))
+
+            elif line.startswith("Response time:"):
+                match = re.search(r'([\d.]+)\s+secs', line)
+                if match:
+                    metrics["Response time"] = float(match.group(1))
+
+            elif line.startswith("Transaction rate:"):
+                match = re.search(r'([\d.]+)\s+trans/sec', line)
+                if match:
+                    metrics["Transaction rate"] = float(match.group(1))
+
+            elif line.startswith("Throughput:"):
+                match = re.search(r'([\d.]+)\s+MB/sec', line)
+                if match:
+                    metrics["Throughput"] = float(match.group(1))
+
+            elif line.startswith("Concurrency:"):
+                match = re.search(r'(\d+)', line)
+                if match:
+                    metrics["Concurrency"] = int(match.group(1))
+
+            elif line.startswith("Successful transactions:"):
+                match = re.search(r'(\d+)', line)
+                if match:
+                    metrics["Successful transactions"] = int(match.group(1))
+
+            elif line.startswith("Failed transactions:"):
+                match = re.search(r'(\d+)', line)
+                if match:
+                    metrics["Failed transactions"] = int(match.group(1))
+
+            elif line.startswith("Longest transaction:"):
+                match = re.search(r'([\d.]+)', line)
+                if match:
+                    metrics["Longest transaction"] = float(match.group(1))
+
+            elif line.startswith("Shortest transaction:"):
+                match = re.search(r'([\d.]+)', line)
+                if match:
+                    metrics["Shortest transaction"] = float(match.group(1))
+
+            elif line.startswith("P50:"):
+                match = re.search(r'([\d.]+)', line)
+                if match:
+                    metrics["P50"] = float(match.group(1))
+
+            elif line.startswith("P90:"):
+                match = re.search(r'([\d.]+)', line)
+                if match:
+                    metrics["P90"] = float(match.group(1))
+
+            elif line.startswith("P95:"):
+                match = re.search(r'([\d.]+)', line)
+                if match:
+                    metrics["P95"] = float(match.group(1))
+
+            elif line.startswith("P99:"):
+                match = re.search(r'([\d.]+)', line)
+                if match:
+                    metrics["P99"] = float(match.group(1))
+
+    return metrics
+
+
+def parse_results(iterations, url_dict, url_target):
+    results = {}
+    unit_measures = {"P50": "secs", "P90": "secs",
+                     "P95": "secs", "P99": "secs"}
+    wrk_metrics = ["Transactions", "Availability", "Elapsed time",
+                   "Data transferred", "Response time", "Transaction rate",
+                   "Throughput", "Concurrency", "Successful transactions",
+                   "Failed transactions", "Longest transaction",
+                   "Shortest transaction"]
+    p_metrics = ["P50", "P90", "P95", "P99"]
+    all_metrics = wrk_metrics + p_metrics
+
+    # Set up unit measures for all metrics
+    for metric in wrk_metrics:
+        if metric == "Transactions":
+            unit_measures[metric] = "hits"
+        elif metric == "Availability":
+            unit_measures[metric] = "%"
+        elif metric == "Elapsed time":
+            unit_measures[metric] = "secs"
+        elif metric == "Data transferred":
+            unit_measures[metric] = "MB"
+        elif metric == "Response time":
+            unit_measures[metric] = "secs"
+        elif metric == "Transaction rate":
+            unit_measures[metric] = "trans/sec"
+        elif metric == "Throughput":
+            unit_measures[metric] = "MB/sec"
+        elif metric == "Concurrency":
+            unit_measures[metric] = ""
+        elif metric == "Successful transactions":
+            unit_measures[metric] = ""
+        elif metric == "Failed transactions":
+            unit_measures[metric] = ""
+        elif metric == "Longest transaction":
+            unit_measures[metric] = "secs"
+        elif metric == "Shortest transaction":
+            unit_measures[metric] = "secs"
+
+    # populate results with empty lists
+    for metric in all_metrics:
+        results[metric] = []
+
+    # Build base endpoint dict for tracking (group variants together)
+    base_url_dict = {}
+    base_url_target = {}
+    for url in url_dict:
+        base_url = get_base_endpoint(url)
+        if base_url not in base_url_dict:
+            base_url_dict[base_url] = []
+            # Sum up expected weights for variants
+            base_url_target[base_url] = 0
+        base_url_target[base_url] += int(url_target[url])
+
+    # Calculate total expected weight for percentage calculation
+    total_expected_weight = sum(base_url_target.values())
+
+    # Parse each iteration's output
+    for i in range(iterations):
+        out_file = WRK_OUT_FILE + "_" + str(i + 1)
+        local_hits = {}
+        total_200_hits = 0
+
+        # Parse individual HTTP request lines
+        # Format: HTTP/1.1 STATUS BYTES bytes ==> METHOD PATH
+        for line in open(out_file, 'r'):
+            if re.search("HTTP/1.1 200", line):
+                values = line.strip().split()
+                # New format: HTTP/1.1 200 413 bytes ==> GET /feed_timeline_v25
+                # Index:      0        1   2   3     4   5   6
+                if len(values) >= 7:
+                    total_200_hits += 1
+                    # Get URL from the line (last field)
+                    curr_url = values[6]
+                    # Get base endpoint (strip version suffix)
+                    base_url = get_base_endpoint(curr_url)
+                    if base_url in local_hits:
+                        local_hits[base_url] = local_hits[base_url] + 1
+                    else:
+                        local_hits[base_url] = 1
+
+        # Update percentages for this iteration
+        base_url_dict = update_percentages(base_url_dict, local_hits, total_200_hits)
+
+        # Parse summary metrics from Lua script output
+        metrics = parse_wrk_output(out_file)
+
+        for metric in all_metrics:
+            if metric in metrics:
+                results[metric].append(metrics[metric])
+            else:
+                results[metric].append(-1)
+
+    if iterations > 1:
+        # find min and max from result list
+        tr_results = results["Transaction rate"]
+        min_index = tr_results.index(min(tr_results))
+        max_index = tr_results.index(max(tr_results))
+
+        print("Removing results with Transaction rate min=" +
+              str(tr_results[min_index]) + " and max=" +
+              str(tr_results[max_index]) + "\n")
+
+        # remove entry associated with min and max transaction rate. Delete
+        # larger index first so that the other index does not change
+        first_idx, second_idx = sorted([min_index, max_index])
+
+    # Print URL hit percentages first (required by parser)
+    print("URL hit percentages:")
+    for url in base_url_dict:
+        if iterations > 1:
+            del base_url_dict[url][second_idx]
+            del base_url_dict[url][first_idx]
+        arr = np.array(base_url_dict[url])
+        arr_mean = np.mean(arr) * 100
+        expected_perc = (base_url_target[url] / total_expected_weight) * 100
+        print(padding(url, 3), end="")
+        print(str(arr_mean) + "%, expected " + str(expected_perc) + "%")
+    print()
+
+    # Print all metrics
+    for metric in all_metrics:
+        if iterations > 1:
+            del results[metric][second_idx]
+            del results[metric][first_idx]
+
+        print(padding(metric, 5), end="")
+
+        arr = np.array(results[metric])
+        arr_mean = np.mean(arr)
+        if arr_mean >= 0:
+            if arr_mean == 0:
+                arr_rsd = 0
+            else:
+                arr_rsd = np.std(arr) / arr_mean
+            print(str(arr_mean) + " " + unit_measures[metric], end="")
+            print(" ---- RSD " + str(arr_rsd))
+        else:
+            print("N/A, please check wrk output file(s)")
+
+
+def padding(string, tabno):
+    tabs_already = (len(string) + 1) // 8
+    tabs_left = int(tabno - tabs_already)
+    result = string + ":" + ("\t" * tabs_left)
+    return result
+
+
+def main():
+    parser = optparse.OptionParser(
+        usage="%prog [options]",
+        description=("Run the Django Workload using the wrk load " +
+                     "generator multiple times and display an average of " +
+                     "the results"))
+
+    parser.add_option("-s", "--single", action="store_true", dest="single",
+                      default=False, help="Do a single run of the workload")
+    parser.add_option("-i", "--iterations", action="store", type="int",
+                      dest="iterations", default=7, help="Set the number of " +
+                      "iterations to run. Will not work if -s is set")
+    parser.add_option("-r", "--reps", action="store", type="int", dest="reps",
+                      default=0, help="Run wrk for fixed number of " +
+                      "repetitions instead of amount of time. This will " +
+                      "override DURATION env variable if set to a positive " +
+                      "integer.")
+
+    (options, args) = parser.parse_args()
+
+    setup_variables()
+    run_wrk(options)
+
+
+if __name__ == "__main__":
+    main()

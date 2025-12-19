@@ -298,12 +298,17 @@ popd  # ${DJANGO_SERVER_ROOT}
 
 echo "Python dependencies installation completed"
 
-# Install siege
-pushd "${DJANGO_PKG_ROOT}" || exit 1
-bash -x install_siege.sh
-popd
-
-echo "Siege installed successfully"
+WRK_VERSION="4.2.0"
+pushd "${DJANGO_WORKLOAD_ROOT}" || exit 1
+if ! [ -d wrk ]; then
+  git clone --branch "${WRK_VERSION}" https://github.com/wg/wrk
+  pushd wrk || exit 1
+  git apply --check "${DJANGO_PKG_ROOT}/templates/wrk.diff" && \
+    git apply "${DJANGO_PKG_ROOT}/templates/wrk.diff"
+  make && echo "Wrk built successfully"
+  popd # wrk
+fi
+popd # "${DJANGO_WORKLOAD_ROOT}"
 
 # =====================================================================
 # Step 7: Build and Install Proxygen (for DjangoBench V2)
