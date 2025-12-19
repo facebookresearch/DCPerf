@@ -140,3 +140,114 @@ class NewFollowerInboxEntryModel(InboxEntryBase):
 
     followerid = columns.UUID()
     json_fields = {"followerid": "followerid"}
+
+
+# ============================================================================
+# Clips/Reels Models for clips.api.views.async_stream_clips_discover
+# ============================================================================
+
+
+class ClipVideoModel(DjangoCassandraModel):
+    """
+    Represents a video entry (Reel/Clip) in the system.
+    Models the video metadata stored in IG's clips/reels inventory.
+    Each video has multiple chunks for progressive loading.
+    """
+
+    class Meta:
+        get_pk_field = "id"
+
+    id = columns.UUID(primary_key=True, default=uuid.uuid4)
+    owner_id = columns.UUID()
+    title = columns.Text()
+    description = columns.Text()
+    duration_ms = columns.Integer()
+    view_count = columns.BigInt(default=0)
+    like_count = columns.BigInt(default=0)
+    comment_count = columns.Integer(default=0)
+    share_count = columns.Integer(default=0)
+    created_at = columns.TimeUUID(default=timeuuid_now)
+    thumbnail_url = columns.Text()
+    is_published = columns.Boolean(default=True)
+    content_type = columns.Text(default="reel")
+    audio_track_id = columns.UUID()
+    hashtags = columns.List(columns.Text)
+    quality_score = columns.Float(default=0.5)
+    engagement_score = columns.Float(default=0.5)
+
+    @property
+    def published(self):
+        return datetime_from_uuid1(self.created_at)
+
+    @property
+    def json_data(self):
+        return {
+            "pk": str(self.id),
+            "owner_id": str(self.owner_id),
+            "title": self.title,
+            "description": self.description,
+            "duration_ms": self.duration_ms,
+            "view_count": self.view_count,
+            "like_count": self.like_count,
+            "comment_count": self.comment_count,
+            "share_count": self.share_count,
+            "thumbnail_url": self.thumbnail_url,
+            "content_type": self.content_type,
+            "quality_score": self.quality_score,
+            "engagement_score": self.engagement_score,
+            "published": str(self.published),
+        }
+
+
+class ClipChunkModel(DjangoCassandraModel):
+    """
+    Represents a video chunk for progressive streaming.
+    Models how video content is segmented for delivery.
+    Each chunk contains a portion of the video data.
+    """
+
+    class Meta:
+        get_pk_field = "chunk_id"
+
+    chunk_id = columns.UUID(primary_key=True, default=uuid.uuid4)
+    video_id = columns.UUID(index=True)
+    chunk_index = columns.Integer()
+    chunk_url = columns.Text()
+    chunk_size_bytes = columns.Integer()
+    duration_ms = columns.Integer()
+    start_time_ms = columns.Integer()
+    end_time_ms = columns.Integer()
+    resolution = columns.Text(default="1080p")
+    bitrate_kbps = columns.Integer()
+    codec = columns.Text(default="h264")
+
+    @property
+    def json_data(self):
+        return {
+            "chunk_id": str(self.chunk_id),
+            "video_id": str(self.video_id),
+            "chunk_index": self.chunk_index,
+            "chunk_url": self.chunk_url,
+            "chunk_size_bytes": self.chunk_size_bytes,
+            "duration_ms": self.duration_ms,
+            "start_time_ms": self.start_time_ms,
+            "end_time_ms": self.end_time_ms,
+            "resolution": self.resolution,
+            "bitrate_kbps": self.bitrate_kbps,
+        }
+
+
+class ClipSeenModel(DjangoCassandraModel):
+    """
+    Tracks which clips a user has seen.
+    Used for deduplication and pagination in clips discovery.
+    """
+
+    class Meta:
+        get_pk_field = "userid"
+
+    userid = columns.UUID(primary_key=True)
+    video_id = columns.UUID(primary_key=True)
+    seen_at = columns.TimeUUID(default=timeuuid_now)
+    watch_duration_ms = columns.Integer(default=0)
+    completed = columns.Boolean(default=False)
