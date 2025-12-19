@@ -29,6 +29,7 @@ Usage: ${0##*/} [-h] [--name benchmark_name]
 EOF
 }
 
+# @lint-ignore-section SHELLCHECK on
 prod_benchmark_list_mem="memcpy_benchmark bench-memcmp memset_benchmark"
 prod_benchmark_list_hash="hash_hash_benchmark xxhash_benchmark"
 prod_benchmark_compression="lzbench"
@@ -41,8 +42,10 @@ prod_benchmark_f14="container_hash_maps_bench"
 prod_benchmark_lock="synchronization_small_locks_benchmark synchronization_lifo_sem_bench"
 prod_benchmark_vdso="vdso_bench"
 prod_benchmark_math="benchsleef128 benchsleef256 benchsleef512"
+prod_benchmark_stdcpp="stdcpp_bench"
+# @lint-ignore-section SHELLCHECK off
 
-prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench benchsleef128 benchsleef256 benchsleef512"
+prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench benchsleef128 benchsleef256 benchsleef512 stdcpp_bench"
 
 benchmark_non_json_list=("openssl" "libaegis_benchmark" "lzbench" "vdso_bench" "xxhash_benchmark" "concurrency_concurrent_hash_map_bench" "container_hash_maps_bench" "erasure_code_perf")
 
@@ -81,6 +84,7 @@ declare -A prod_benchmark_config=(
     ['benchsleef128']="--benchmark_format=json"
     ['benchsleef256']="--benchmark_format=json"
     ['benchsleef512']="--benchmark_format=json"
+    ['stdcpp_bench']="--benchmark_format=json"
 )
 
 main() {

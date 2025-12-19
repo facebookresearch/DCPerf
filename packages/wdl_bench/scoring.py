@@ -60,14 +60,14 @@ def generate_sleef_benchmark_name(
     return benchmark_name
 
 
-def find_ns_per_el_in_sleef_results(
-    data: dict[str, Any], names: list[str]
+def extract_gbench_metric(
+    data: dict[str, Any], benchmark_names: list[str], metric_key: str
 ) -> list[float]:
     results: list[float] = []
-    for name in names:
+    for name in benchmark_names:
         for b in data["benchmarks"]:
             if b["name"] == name:
-                results.append(float(b["NSperEl"]))
+                results.append(float(b[metric_key]))
     return results
 
 
@@ -83,7 +83,7 @@ def calculate_sleef_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -
         )
 
     baseline_time = weighted_geomean(
-        find_ns_per_el_in_sleef_results(sum_baseline, baseline_names),
+        extract_gbench_metric(sum_baseline, baseline_names, "NSperEl"),
         math_function_weights,
     )
 
@@ -93,7 +93,7 @@ def calculate_sleef_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -
             generate_sleef_benchmark_name(math_function[0], "x", math_function[1], True)
         )
 
-    sve_ns_per_elem = find_ns_per_el_in_sleef_results(sum_c, sve_variant_names)
+    sve_ns_per_elem = extract_gbench_metric(sum_c, sve_variant_names, "NSperEl")
     if len(sve_ns_per_elem) > 0:
         sve_variant_time = weighted_geomean(sve_ns_per_elem, math_function_weights)
     else:
@@ -109,7 +109,7 @@ def calculate_sleef_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -
             )
         )
     fixed_vl_variant_time = weighted_geomean(
-        find_ns_per_el_in_sleef_results(sum_c, fixed_vl_variant_names),
+        extract_gbench_metric(sum_c, fixed_vl_variant_names, "NSperEl"),
         math_function_weights,
     )
 
@@ -233,6 +233,31 @@ def calculate_memcmp_score(
     return baseline_time / min_time
 
 
+def calculate_stdcpp_score(
+    sum_baseline: dict[str, Any], sum_c: dict[str, Any]
+) -> float:
+    """
+    Calculate stdcpp_bench score using weighted geometric mean.
+
+    Args:
+        sum_baseline: Baseline benchmark results
+        sum_c: Current benchmark results
+
+    Returns:
+        Score as ratio of baseline to current performance
+    """
+    benchmark_names = ["BM_SharedPtr_IncDec", "BM_WeakPtr_IncDec"]
+    weights = [0.9, 0.1]
+
+    baseline_times = extract_gbench_metric(sum_baseline, benchmark_names, "cpu_time")
+    current_times = extract_gbench_metric(sum_c, benchmark_names, "cpu_time")
+
+    baseline_geomean = weighted_geomean(baseline_times, weights)
+    current_geomean = weighted_geomean(current_times, weights)
+
+    return baseline_geomean / current_geomean
+
+
 with open(input_file_name) as f:
     with open(baseline_name) as f_baseline:
         sum_c = json.load(f)
@@ -306,6 +331,8 @@ with open(input_file_name) as f:
             score = calculate_sleef_score(sum_baseline, sum_c)
         elif benchmark_name == "bench-memcmp":
             score = calculate_memcmp_score(sum_baseline, sum_c)
+        elif benchmark_name == "stdcpp_bench":
+            score = calculate_stdcpp_score(sum_baseline, sum_c)
         else:
             for key in sum_baseline:
                 if key in sum_c:

@@ -57,14 +57,15 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y cmake autoconf automake flex bison \
     nasm clang patch git libssl-dev libc6-dev\
     tar unzip perl openssl python3-dev gawk libstdc++6 python3-numpy \
-    glibc-source
+    glibc-source libbenchmark-dev
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch glibc-static libstdc++-static \
     git tar unzip perl openssl-devel python3-devel gawk python3-numpy \
     dnf-plugins-core rpm-build audit-libs-devel gd-devel gdb \
-    libcap-devel libpng-devel libselinux-devel texinfo valgrind
+    libcap-devel libpng-devel libselinux-devel texinfo valgrind \
+    google-benchmark-devel
 fi
 
 
@@ -345,6 +346,15 @@ EOF
 }
 
 
+build_stdcpp()
+{
+    lib='stdcpp_bench'
+    pushd "$WDL_BUILD"
+    cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build" -DCMAKE_BUILD_TYPE=Release && cmake --build "$lib-build"
+    cp "$lib-build/$lib" "${WDL_ROOT}/" || exit 1
+    popd || exit
+}
+
 ##################### BUILD AND INSTALL #########################
 
 pushd "${WDL_ROOT}"
@@ -387,6 +397,7 @@ case "$TARGET" in
         build_glibc
         build_isa_l
         build_sleef
+        build_stdcpp
         ;;
     folly)    build_folly ;;
     fbthrift) build_fbthrift ;;
@@ -398,6 +409,7 @@ case "$TARGET" in
     glibc)    build_glibc ;;
     isa_l)    build_isa_l ;;
     sleef)    build_sleef ;;
+    stdcpp)   build_stdcpp ;;
     *)
         echo "Error: Unknown build target '$TARGET'"
         exit 1

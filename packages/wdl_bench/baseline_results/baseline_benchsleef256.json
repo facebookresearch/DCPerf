@@ -1,43 +1,4 @@
 {
-  "context": {
-    "date": "2025-12-11T09:56:55-08:00",
-    "host_name": "rtptest4455.ftw5.facebook.com",
-    "executable": "./benchsleef256",
-    "num_cpus": 52,
-    "mhz_per_cpu": 1401,
-    "cpu_scaling_enabled": false,
-    "aslr_enabled": false,
-    "caches": [
-      {
-        "type": "Data",
-        "level": 1,
-        "size": 32768,
-        "num_sharing": 2
-      },
-      {
-        "type": "Instruction",
-        "level": 1,
-        "size": 32768,
-        "num_sharing": 2
-      },
-      {
-        "type": "Unified",
-        "level": 2,
-        "size": 1048576,
-        "num_sharing": 2
-      },
-      {
-        "type": "Unified",
-        "level": 3,
-        "size": 37486592,
-        "num_sharing": 52
-      }
-    ],
-    "load_avg": [1.33,1.15,0.98],
-    "library_version": "v1.9.4-75-gc3f86578",
-    "library_build_type": "release",
-    "json_schema_version": 1
-  },
   "benchmarks": [
     {
       "name": "MB_Sleef_sinf_u10_scalarf_0_6.28",

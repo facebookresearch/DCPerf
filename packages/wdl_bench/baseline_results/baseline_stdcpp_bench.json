@@ -1,0 +1,32 @@
+{
+  "benchmarks": [
+    {
+      "name": "BM_SharedPtr_IncDec",
+      "family_index": 0,
+      "per_family_instance_index": 0,
+      "run_name": "BM_SharedPtr_IncDec",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 33753074,
+      "real_time": 2.0561665861475671e+01,
+      "cpu_time": 2.0502706746058156e+01,
+      "time_unit": "ns"
+    },
+    {
+      "name": "BM_WeakPtr_IncDec",
+      "family_index": 1,
+      "per_family_instance_index": 0,
+      "run_name": "BM_WeakPtr_IncDec",
+      "run_type": "iteration",
+      "repetitions": 1,
+      "repetition_index": 0,
+      "threads": 1,
+      "iterations": 39678689,
+      "real_time": 2.0800585749515815e+01,
+      "cpu_time": 2.0725731109714840e+01,
+      "time_unit": "ns"
+    }
+  ]
+}

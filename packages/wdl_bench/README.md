@@ -29,6 +29,7 @@ This installs all production benchmarks including:
 - **Data Structures**: F14 maps (folly)
 - **System Calls**: vdso_bench
 - **Math**: SLEEF SIMD math functions
+- **C++ standard library**: std::shared_ptr
 
 ## 2. Run Production Benchmark Suite
 
