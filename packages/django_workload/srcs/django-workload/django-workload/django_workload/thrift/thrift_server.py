@@ -45,12 +45,18 @@ sys.path.insert(0, str(GEN_PY_PATH))
 
 from mock_services import (
     MockAdsService,
+    MockClipsDiscoverService,
     MockContentFilterService,
     MockRankingService,
     MockUserPreferenceService,
 )
 from mock_services.ttypes import (
     AdInsertion,
+    ClipChunk,
+    ClipMedia,
+    ClipsChunksResponse,
+    ClipsDiscoverResponse,
+    ClipsRankingResponse,
     FetchAdsRequest,
     FetchAdsResponse,
     FilterContentRequest,
@@ -321,6 +327,193 @@ class MockAdsServiceHandler:
         )
 
 
+class MockClipsDiscoverServiceHandler:
+    """
+    Handler implementation for MockClipsDiscoverService.
+
+    Models the clips.api.views.async_stream_clips_discover endpoint from
+    production IG Django server. Each RPC call creates Python↔Thrift
+    boundary crossings for clips discovery operations.
+    """
+
+    def discoverClips(self, request) -> ClipsDiscoverResponse:
+        """
+        Discovers clips for the Reels tab.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with parameters)
+        - Clips generation and ranking
+        - Ads fetching and blending
+        - Thrift serialization (response with clips and ads)
+        """
+        user_id = request.user_id
+        num_clips = request.num_clips_requested
+        include_ads = request.include_ads
+
+        # Generate mock clips
+        clips = []
+        for i in range(num_clips):
+            clip = self._create_clip(i, user_id)
+            clips.append(clip)
+
+        # Generate ads if requested
+        ads = []
+        if include_ads:
+            num_ads = max(3, num_clips // 5)
+            for _ in range(num_ads):
+                ad = self._create_ad_for_clips()
+                ads.append(ad)
+
+        response = ClipsDiscoverResponse(
+            clips=clips,
+            ads=ads,
+            total_clips=len(clips),
+            next_max_id=f"max_{random.randint(1000, 9999)}",
+            more_available=True,
+            request_id=f"clips_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def rankClips(self, request) -> ClipsRankingResponse:
+        """
+        Ranks clips based on user preferences.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with clip IDs)
+        - Random ranking computation
+        - Thrift serialization (response with ranked IDs and scores)
+        """
+        clip_ids = request.clip_ids
+        num_results = min(request.num_results, len(clip_ids))
+
+        # Generate random ranking scores
+        scored_clips = [(clip_id, random.random() * 100) for clip_id in clip_ids]
+        scored_clips.sort(key=lambda x: x[1], reverse=True)
+
+        ranked_clips = scored_clips[:num_results]
+
+        response = ClipsRankingResponse(
+            ranked_clip_ids=[clip[0] for clip in ranked_clips],
+            scores=[clip[1] for clip in ranked_clips],
+            request_id=f"rank_clips_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def getClipsChunks(self, request) -> ClipsChunksResponse:
+        """
+        Gets video chunks for progressive streaming.
+
+        Creates RPC overhead through:
+        - Thrift deserialization (request with video ID and chunk range)
+        - Chunk metadata generation
+        - Thrift serialization (response with chunk list)
+        """
+        video_id = request.video_id
+        start_chunk = request.start_chunk
+        num_chunks = request.num_chunks
+        resolution = request.resolution or "1080p"
+
+        # Generate mock chunks
+        chunks = []
+        chunk_duration_ms = 2000  # 2 seconds per chunk
+
+        for i in range(num_chunks):
+            chunk_index = start_chunk + i
+            chunk = ClipChunk(
+                chunk_id=random.randint(1000000, 9999999),
+                video_id=video_id,
+                chunk_index=chunk_index,
+                chunk_url=f"https://cdn.example.com/clips/{video_id}/chunk_{chunk_index}.mp4",
+                chunk_size_bytes=random.randint(100000, 2000000),
+                duration_ms=chunk_duration_ms,
+                start_time_ms=chunk_index * chunk_duration_ms,
+                end_time_ms=(chunk_index + 1) * chunk_duration_ms,
+                resolution=resolution,
+                bitrate_kbps=random.randint(2000, 8000),
+            )
+            chunks.append(chunk)
+
+        response = ClipsChunksResponse(
+            chunks=chunks,
+            total_chunks=40,  # Assume 40 total chunks
+            request_id=f"chunks_req_{random.randint(1000, 9999)}",
+        )
+
+        return response
+
+    def _create_clip(self, index: int, user_id: int) -> ClipMedia:
+        """Creates a mock ClipMedia object."""
+        clip_id = random.randint(1000000, 9999999)
+
+        hashtag_options = [
+            "trending",
+            "viral",
+            "fyp",
+            "reels",
+            "explore",
+            "funny",
+            "dance",
+            "music",
+        ]
+
+        return ClipMedia(
+            clip_id=clip_id,
+            owner_id=random.randint(1000, 99999),
+            title=f"Awesome Clip {index}",
+            description=f"Check out this amazing clip #{clip_id}",
+            duration_ms=random.randint(5000, 90000),
+            view_count=random.randint(100, 10000000),
+            like_count=random.randint(10, 1000000),
+            comment_count=random.randint(0, 50000),
+            share_count=random.randint(0, 10000),
+            thumbnail_url=f"https://cdn.example.com/clips/{clip_id}/thumb.jpg",
+            content_type=random.choice(["reel", "short_video", "clip"]),
+            quality_score=random.random(),
+            engagement_score=random.random(),
+            hashtags=random.sample(hashtag_options, k=random.randint(2, 5)),
+            is_ad=False,
+        )
+
+    def _create_ad_for_clips(self) -> AdInsertion:
+        """Creates a mock AdInsertion for clips blending."""
+        ad_id = random.randint(1000000, 9999999)
+
+        return AdInsertion(
+            ad_id=ad_id,
+            campaign_id=random.randint(100000, 999999),
+            creative_id=random.randint(10000, 99999),
+            advertiser_id=random.randint(1000, 9999),
+            tracking_token=f"clips_tk_{ad_id}",
+            impression_id=f"clips_imp_{ad_id}",
+            ad_title=f"Sponsored Clip {ad_id}",
+            ad_subtitle="Discover more",
+            call_to_action="LEARN_MORE",
+            destination_url=f"https://example.com/clips_ad/{ad_id}",
+            view_count=random.randint(0, 100000),
+            like_count=random.randint(0, 10000),
+            comment_count=random.randint(0, 1000),
+            share_count=random.randint(0, 500),
+            is_video=True,  # Clips ads are typically video
+            quality_score=random.random(),
+            predicted_ctr=random.random() * 0.1,
+            predicted_cvr=random.random() * 0.05,
+            relevance_score=random.random(),
+            engagement_score=random.random(),
+            brand_safety_score=random.random(),
+            user_affinity_score=random.random(),
+            content_quality_score=random.random(),
+            viewability_score=random.random(),
+            completion_rate=random.random(),
+            image_url=f"https://cdn.example.com/clips_ad_{ad_id}.jpg",
+            media_type="VIDEO",
+            video_duration=random.randint(15, 60),
+            surface_type="CLIPS",
+            placement_type="IN_STREAM",
+        )
+
+
 def main():
     """Start the Thrift RPC server with all mock services."""
     # Server configuration
@@ -336,6 +529,7 @@ def main():
     ranking_handler = MockRankingServiceHandler()
     filter_handler = MockContentFilterServiceHandler()
     pref_handler = MockUserPreferenceServiceHandler()
+    clips_handler = MockClipsDiscoverServiceHandler()
 
     print("[ThriftServer] Created handlers for all services")
 
@@ -348,7 +542,8 @@ def main():
     print(f"[ThriftServer] Starting Thrift server on {HOST}:{PORT}")
     print(f"[ThriftServer] Thread pool size: {MAX_WORKERS} concurrent connections")
     print(
-        "[ThriftServer] Supporting 4 services: Ads, Ranking, ContentFilter, UserPreference"
+        "[ThriftServer] Supporting 5 services: Ads, Ranking, ContentFilter, "
+        "UserPreference, ClipsDiscover"
     )
     print("[ThriftServer] Each RPC creates Python↔Thrift boundary crossings")
     print("[ThriftServer] Server accepts connections from any network interface")
@@ -382,6 +577,7 @@ def main():
                     ranking_handler,
                     filter_handler,
                     pref_handler,
+                    clips_handler,
                 )
 
     except KeyboardInterrupt:
@@ -407,6 +603,7 @@ def handle_client(
     ranking_handler,
     filter_handler,
     pref_handler,
+    clips_handler,
 ):
     """Handle a single client connection with all services."""
     try:
@@ -420,6 +617,7 @@ def handle_client(
         ranking_processor = MockRankingService.Processor(ranking_handler)
         filter_processor = MockContentFilterService.Processor(filter_handler)
         pref_processor = MockUserPreferenceService.Processor(pref_handler)
+        clips_processor = MockClipsDiscoverService.Processor(clips_handler)
 
         try:
             while True:
@@ -447,6 +645,15 @@ def handle_client(
                     pref_processor.process_getUserPreferences(
                         rseqid, iprot, oprot, None
                     )
+                elif method_name in ["discoverClips"]:
+                    iprot.readMessageEnd()
+                    clips_processor.process_discoverClips(rseqid, iprot, oprot, None)
+                elif method_name in ["rankClips"]:
+                    iprot.readMessageEnd()
+                    clips_processor.process_rankClips(rseqid, iprot, oprot, None)
+                elif method_name in ["getClipsChunks"]:
+                    iprot.readMessageEnd()
+                    clips_processor.process_getClipsChunks(rseqid, iprot, oprot, None)
                 else:
                     print(f"[ThriftServer] WARNING: Unknown method '{method_name}'")
                     iprot.skip(TBinaryProtocol.TType.STRUCT)

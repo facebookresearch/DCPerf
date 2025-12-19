@@ -21,6 +21,7 @@ from django.views.decorators.http import require_http_methods
 from django_statsd.clients import statsd
 
 from .bundle_tray import BundleTray
+from .clips import Clips
 from .feed import Feed
 from .feed_timeline import FeedTimeline
 from .inbox import Inbox
@@ -156,6 +157,21 @@ def seen(request):
                 ).save()
 
     return HttpResponse(json.dumps({}), content_type="text/json")
+
+
+@require_user
+def clips(request):
+    """
+    Clips discovery endpoint.
+
+    Models clips.api.views.async_stream_clips_discover from production IG Django.
+    Returns a JSON response containing discovered clips/reels with ads blended in.
+    """
+    # libib.ibrun(random.randint(IB_MIN, IB_MAX))
+    clips_handler = Clips(request)
+    result = clips_handler.discover()
+    result = clips_handler.post_process(result)
+    return HttpResponse(json.dumps(result), content_type="text/json")
 
 
 {% if variant_view_functions %}

@@ -4524,6 +4524,7 @@ class CPUPrimitives:
             "total_calls": 0,
             "successful": 0,
             "failed": 0,
+            "timers_started": 0,
             "total_latency_ms": 0,
         }
 
