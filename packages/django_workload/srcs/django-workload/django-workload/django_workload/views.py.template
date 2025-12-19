@@ -22,6 +22,9 @@ from django_statsd.clients import statsd
 
 from .bundle_tray import BundleTray
 from .clips import Clips
+{% for import_line in clips_variant_imports %}
+{{ import_line }}
+{% endfor %}
 from .feed import Feed
 from .feed_timeline import FeedTimeline
 from .inbox import Inbox
@@ -29,13 +32,9 @@ from .models import BundleSeenModel
 
 from .users import require_user
 
-{% if variant_step_imports %}
-# Auto-generated step variant imports
-{% for import_stmt in variant_step_imports %}
-{{ import_stmt }}
+{% for import_line in variant_step_imports %}
+{{ import_line }}
 {% endfor %}
-{% endif %}
-
 
 # Used for sample-based profiling
 SAMPLE_COUNT = 0
@@ -174,10 +173,20 @@ def clips(request):
     return HttpResponse(json.dumps(result), content_type="text/json")
 
 
-{% if variant_view_functions %}
-# Auto-generated feed_timeline variant view functions
-{% for variant_func in variant_view_functions %}
-{{ variant_func }}
+# =============================================================================
+# Clips View Variants (for I-cache pressure)
+# Each variant uses a different Clips handler variant
+# =============================================================================
 
+{% for func_code in clips_view_variants %}
+{{ func_code }}
 {% endfor %}
-{% endif %}
+
+# =============================================================================
+# Feed Timeline View Variants (for I-cache pressure)
+# Each variant uses different combinations of FeedFlow step variants
+# =============================================================================
+
+{% for func_code in variant_view_functions %}
+{{ func_code }}
+{% endfor %}

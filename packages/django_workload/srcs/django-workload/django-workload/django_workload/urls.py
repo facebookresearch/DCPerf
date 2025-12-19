@@ -17,6 +17,4 @@ urlpatterns = [
     url(r"^inbox$", views.inbox, name="inbox"),
     url(r"^seen$", views.seen, name="seen"),
     url(r"^clips$", views.clips, name="clips"),
-    # Clips endpoint variants for I-cache pressure
-    url(r"^clips_v\d+$", views.clips, name="clips_variant"),
 ]
