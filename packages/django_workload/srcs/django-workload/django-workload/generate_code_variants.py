@@ -2166,6 +2166,9 @@ def generate_client_urls_template(feed_timeline_variants: List[Dict]):
     for i in range(NUM_INBOX_VARIANTS):
         urls.append(f"http://localhost:8000/inbox_v{i} 1")
 
+    # Add seen endpoint
+    urls.append("http://localhost:8000/seen 10")
+
     output_path = CLIENT_DIR / "urls_template.txt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -80,6 +80,28 @@ class BundleSeenModel(DjangoCassandraModel):
     entryid = columns.UUID()
 
 
+class FeedSeenModel(DjangoCassandraModel):
+    """
+    Tracks which feed entries a user has seen.
+    Used for deduplication and seen state tracking in feed timeline.
+    """
+
+    class Meta:
+        get_pk_field = "userid"
+
+    userid = columns.UUID(primary_key=True)
+    entryid = columns.UUID(primary_key=True)
+    seen_at = columns.TimeUUID(default=timeuuid_now)
+
+    @property
+    def json_data(self):
+        return {
+            "userid": str(self.userid),
+            "entryid": str(self.entryid),
+            "seen_at": str(datetime_from_uuid1(self.seen_at)),
+        }
+
+
 class InboxTypes(enum.Enum):
     COMMENT = "comment"
     FOLLOWER = "follower"
