@@ -31,6 +31,9 @@ from .clips import Clips
 from .feed import Feed
 from .feed_timeline import FeedTimeline
 from .inbox_handler import Inbox
+{% for import_line in inbox_variant_imports %}
+{{ import_line }}
+{% endfor %}
 from .models import BundleSeenModel
 
 from .users import require_user
@@ -191,6 +194,15 @@ def clips(request):
 # =============================================================================
 
 {% for func_code in bundle_tray_view_variants %}
+{{ func_code }}
+{% endfor %}
+
+# =============================================================================
+# Inbox View Variants (for I-cache pressure)
+# Each variant uses a different InboxService variant
+# =============================================================================
+
+{% for func_code in inbox_view_variants %}
 {{ func_code }}
 {% endfor %}
 
