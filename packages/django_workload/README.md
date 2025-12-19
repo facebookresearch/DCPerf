@@ -4,36 +4,51 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 -->
-# DjangoBench
+# DjangoBench V2
 
-DjangoBench uses Django + Proxygen + CassandraDB to run a synthetic website aiming
-to represent IG Django production workload. This workload will push CPU utilization
-to around 95% and measure the max transaction rate it can achieve.
+DjangoBench V2 uses Django + uWSGI + HAProxy + CassandraDB + Thrift RPC to run a
+synthetic website aiming to represent IG Django production workload. This workload
+will push CPU utilization to  85~95% and measure the max transaction rate it
+can achieve.
 
-For more details about DjangoBench's software architecture, please refer to
+## Key Features in V2
+
+- **Enhanced Endpoints**: `feed_timeline`, `clips`, `bundle_tray`, `inbox`, and `seen`
+  endpoints with more realistic data processing logic, replacing the old pure-synthetic
+  ICacheBuster.
+- **Thrift RPC Backend**: Mock Thrift servers provide realistic backend service calls
+- **Dynamic Load Generation**: wrk-based load generator with entity ID tracking for
+  realistic /seen requests
+- **JIT Support**: Cinder JIT compilation support for x86 platforms
+- **Dual Interpreter Support**: Choose between CPython and Cinder interpreters
+
+For more details about DjangoBench V2's software architecture, please refer to
 the doc [here](srcs/proxygen_binding/README.md)
 
 ## System Requirements
 
 Django workload can have two configurations. The most recommended one requires two machines:
-one for running Cassandra DB server (DB server machine), the other for running the django server
+one for running Cassandra DB and thrift server (DB server machine), the other for running the django server
 and client (benchmarking machine).
-Another configuration is the standalone config which is to run the django server, DB Server and
-client on the same machine.
+Another configuration is the standalone config which is to run all components
+on the same machine.
 
 We recommend placing the DB server machine and the benchmarking machine within the same network
 and maintain the ping latency between them to be in the range of 0.1 and 0.15ms.
 
 In addition, we require a series of ports to be available:
 
-* Cassandra DB node: port 9042
+* Cassandra DB node:
+  * Cassandra CQL port: 9042
+  * Thrift RPC load balancer port: 9090
+  * Thrift backend server ports: 9091-9122 (number of ports required configurable via `--thrift-server-workers`)
 * Clientserver node:
   * Main HTTP server port: 8000
-  * Load balancer stats port: 8001
+  * Load balancer stats port: 8001 (configurable via `-T`)
   * Memcached port: 11811
-  * Server worker ports: The range of \[16667, 16667 \+ `server_workers`)
+  * Server worker ports: The range of \[`base_port`, `base_port` \+ `server_workers`)
     (`server_workers` is equal to the number of CPU logical cores).
-  * Load balancer stats port and server worker starting port are adjustable,
+  * Base port (default 16667) and stats port are adjustable via `--base-port` and `-T`,
     but the continuous range of server worker ports must be available.
 
 ## Install django workload
@@ -46,16 +61,17 @@ On both of the machines:
 
 ## Run django workload
 
-### Start Cassandra DB
+### Start Cassandra DB and Thrift server
 
-On the Cassandra DB server machine:
+On the DB server machine:
 
 ```
 ./benchpress_cli.py run django_workload_default -r db
 ```
 This should run indefinitely. You will see a lot of `java` processes running, and you can check
 if Cassandra has started up successfully by running `lsof -i -P -n | grep 9042`. Cassandra will also
-output log at `benchmarks/django_workload/cassandra.log`.
+output log at `benchmarks/django_workload/cassandra.log`. You can also check the existence of
+thrift server workers by running `pgrep -af thrift_server`.
 
 If you would like Cassandra DB to bind a custom address, please use the following command:
 
@@ -65,6 +81,12 @@ If you would like Cassandra DB to bind a custom address, please use the followin
 
 This is useful when the output of `hostname -i` does not return a reachable IP address or is not the
 address you would like to use. Please see more details in [Troubleshooting](#troubleshooting).
+
+You can also configure the number of Thrift server workers:
+
+```
+./benchpress_cli.py run django_workload_default -r db -i '{"thrift_server_workers": 16}'
+```
 
 ### Start benchmarking
 
@@ -95,32 +117,77 @@ If running on ARM platform, please use the job `django_workload_arm`:
 
 ### Selecting Python Interpreter
 
-DjangoBench supports two Python interpreters:
-- **CPython** (default): The standard Python interpreter
-- **Cinder**: Meta's performance-oriented Python runtime
+DjangoBench V2 supports two Python interpreters:
+- **Cinder** (default for x86): Meta's performance-oriented Python runtime with JIT support
+- **CPython** (default for ARM): The standard Python interpreter
+
+The default interpreter varies by job:
+- `django_workload_default` and `django_workload_mini`: Cinder with JIT enabled
+- `django_workload_arm` and `django_workload_arm_mini`: CPython (no JIT)
 
 To specify which interpreter to use, add the `interpreter` parameter to your command:
 
 ```
-# Run with CPython (default)
+# Run with Cinder (default for x86)
 ./benchpress_cli.py run django_workload_default -r standalone
 
-# Run with Cinder
-./benchpress_cli.py run django_workload_default -r standalone -i '{"interpreter": "cinder"}'
+# Run with CPython
+./benchpress_cli.py run django_workload_default -r standalone -i '{"interpreter": "cpython"}'
+
+# Run with Cinder on ARM (no JIT)
+./benchpress_cli.py run django_workload_arm -r standalone -i '{"interpreter": "cinder", "use_jit": 0}'
 ```
 
 When running with a separate database server:
 
 ```
-# Run with CPython (default)
+# Run with Cinder and JIT (default for x86)
 ./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>"}'
 
-# Run with Cinder
-./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>", "interpreter": "cinder"}'
+# Run with CPython
+./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>", "interpreter": "cpython", "use_jit": 0}'
 ```
 
 The interpreter type will be reported in the benchmark results, allowing for performance comparison
 between CPython and Cinder.
+
+### Enabling/Disabling JIT
+
+Cinder JIT is only supported on x86 platforms. When enabled, the following environment variables
+are set automatically:
+
+- `PYTHONJIT=1`
+- `PYTHONJITWRITEPROFILE=/tmp/cinder-jit.profile`
+- `PYTHONJITPROFILEINTERP=1`
+- `PYTHONJITPROFILEINTERPPERIOD=10`
+- `PYTHONJITDUMPSTATS=1`
+- `PYTHONJITALLSTATICFUNCTIONS=1`
+
+To explicitly control JIT:
+
+```
+# Enable JIT (default for django_workload_default)
+./benchpress_cli.py run django_workload_default -r standalone -i '{"use_jit": 1}'
+
+# Disable JIT
+./benchpress_cli.py run django_workload_default -r standalone -i '{"use_jit": 0}'
+```
+
+**Note**: JIT is automatically disabled when using CPython interpreter regardless of the `use_jit` setting.
+
+### Skipping Data Generation
+
+If you have previously run DjangoBench and want to reuse the existing data in Cassandra,
+you can skip the data generation step to save time:
+
+```
+./benchpress_cli.py run django_workload_default -r standalone -i '{"skip_datagen": 1}'
+```
+
+This is useful for:
+- Repeated benchmark runs on the same dataset
+- Quick iteration during development
+- Testing configuration changes without regenerating data
 
 ### Run DjangoBench Mini
 
@@ -128,7 +195,7 @@ DjangoBench Mini is a shrunken version of DjangoBench that
 aims to reduce execution time to less than 30 seconds
 and can potentially be used for emulations.
 It reuses the dataset generated by the full DjangoBench and has a shorter runtime because
- it runs only one iteration with the number of repetitions set to 100.
+ it runs only one iteration with the number of repetitions set to 1000.
 
 To run DjangoBench Mini, please follow these steps:
 
@@ -184,22 +251,46 @@ For `django_workload_default` and `django_workload_arm` jobs:
     a fixed duration.  Unlike the behavior of Siege, now the total number of requests that wrk will send
     will be `reps`, _not_ `reps * iterations`.
   * `interpreter` \- Which python interpreter to use: choose between `cpython` or `cinder`.
-    Defaults to `cpython`.
-  * `use_async` \- If this is set to 1, DjangoBench will use this new asynchronous server stack;
-    set to 0 means using the traditional stack. Defaults to 1.
+    Defaults to `cinder` for x86 jobs, `cpython` for ARM jobs.
+  * `use_async` \- If this is set to 1, DjangoBench will use the asynchronous server stack with
+    load balancing; set to 0 means using the traditional stack. Defaults to 1.
+  * `use_jit` \- If this is set to a positive number, enables Cinder JIT (x86 only).
+    Defaults to 1 for x86 jobs, 0 for ARM jobs.
   * `base_port` \- Starting port that the HTTP server workers will listen to.
-    The range of `[base_port, base_port + nproc)` must be available.
-  * `stats_port` \- Load balancer stats port, defaults 8001
+    The range of `[base_port, base_port + nproc)` must be available. Defaults to 16667.
+  * `stats_port` \- Load balancer stats port. Defaults to 8001.
+* Role `db`:
+  * `bind_ip` \- IP address that Cassandra will bind to. Defaults to the first IP from `hostname -i`.
+  * `thrift_server_workers` \- Number of Thrift RPC server workers. Defaults to min(nproc, 32).
 * Role `standalone`:
   * Same as role `clientserver` except not having `db_addr`
+  * Also includes `thrift_server_workers` from role `db`
+* Role `server`:
+  * Same as role `clientserver` except not having `duration`, `iterations`, and `reps`
 
 For `django_workload_custom`:
 
 * Role `clientserver`, there are these extra parameters:
   * `server_workers` \- number of server workers, required.
   * `client_workers` \- number of client workers, required
-  * `ib_min` \- ICacheBuster minimum iterations in each request (default `100000`\)
-  * `ib_max` \- ICacheBuster maximum iterations in each request (default `200000`\)
+
+### Command Line Options (run.sh)
+
+When running the benchmark directly via `run.sh`, the following long options are available:
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--interpreter` | Python interpreter (`cpython` or `cinder`) | `cpython` |
+| `--use-async` | Enable async mode with load balancing (0 or 1) | `1` |
+| `--base-port` | Base port for HTTP server workers | `16667` |
+| `--thrift-server-workers` | Number of Thrift server workers | `min(nproc, 32)` |
+| `--use-jit` | Enable Cinder JIT (positive number to enable) | `0` |
+| `--skip-datagen` | Skip data generation (1 to skip) | `0` |
+
+Example:
+```bash
+./run.sh -r standalone --interpreter cinder --use-jit 1 --skip-datagen 0
+```
 
 ## Reporting
 
@@ -237,7 +328,7 @@ is the metric that measures performance.:
     "Data transferred_MB": 474.424,
     "Elapsed time_secs": 299.22400000000005,
     "Failed transactions": 0.0,
-    "Interpreter": "cpython",
+    "Interpreter": "cinder",
     "Longest transaction": 0.244,
     "P50_secs": 0.07,
     "P90_secs": 0.11000000000000001,
@@ -250,8 +341,9 @@ is the metric that measures performance.:
     "Transaction rate_trans/sec": 839.7880000000001,
     "Transactions_hits": 251285.0,
     "URL_hit_percentages_/bundle_tray": 15.013,
+    "URL_hit_percentages_/clips": 10.0,
     "URL_hit_percentages_/feed_timeline": 29.988,
-    "URL_hit_percentages_/inbox": 20.019,
+    "URL_hit_percentages_/inbox": 10.019,
     "URL_hit_percentages_/seen": 4.991,
     "URL_hit_percentages_/timeline": 29.988,
     "score": 0.875782881
@@ -282,6 +374,8 @@ in these paths (based on the DCPerf repo's root folder):
 - Cassandra and memcached log:
   * `benchmarks/django_workload/cassandra.log`
   * `benchmarks/django_workload/memcached.log`
+- Thrift server logs:
+  * `benchmarks/django_workload/django-workload/django-workload/django_workload/thrift/*.log`
 
 After the benchmark finishes, benchpress will move all these logs into the
 `benchmark_metrics_<run_id>` folder. If benchpress did not finish and exited
@@ -348,9 +442,22 @@ If you do not wish to change the number of iterations, then run the following:
 ./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>", "reps": <REPS>}'
 ```
 
+### Thrift server issues
+
+If you encounter issues with the Thrift RPC servers:
+
+1. **Thrift servers not starting**: Check if ports 9090-9122 are available. You can
+   adjust the number of workers with `thrift_server_workers` parameter.
+
+2. **HAProxy load balancer issues**: Check the HAProxy configuration and logs in
+   the thrift directory.
+
+3. **Connection timeouts**: Ensure the Thrift servers are running and accessible
+   from the Django server.
+
 ### Cinder-specific issues
 
-**Note**: Cinder currently does not work on ARM platforms when JIT is enabled
+**Note**: Cinder JIT is only supported on x86 platforms. It will not work on ARM.
 
 If you encounter issues when running with the Cinder interpreter:
 
@@ -362,6 +469,27 @@ install additional development packages.
 environment, you can manually check if it was created correctly by looking for
 the `venv_cinder` directory in the django-workload installation.
 
-3. **Performance differences**: Cinder may show different performance
+3. **JIT not activating**: Ensure `use_jit` is set to a positive number and you're
+using the `cinder` interpreter. Check for JIT-related messages in the server logs.
+
+4. **Performance differences**: Cinder may show different performance
 characteristics compared to CPython. This is expected and can be used to
 evaluate the performance benefits of Cinder for Django workloads.
+
+### Load generator overload
+
+If you notice the wrk load generator becoming overloaded (high CPU usage on the client),
+the benchmark automatically limits ID extraction from responses to reduce overhead.
+IDs are only extracted when the total collected IDs fall below a low watermark (100 by default).
+
+### Port conflicts
+
+If you encounter port conflicts, you can adjust the following ports:
+- `--base-port`: Starting port for HTTP workers (default 8001)
+- `-T`: HAProxy stats port (default 16667)
+- Thrift server ports are automatically allocated starting from 9091
+
+To check for port availability before starting:
+```bash
+lsof -i -P -n | grep -E ':(8000|8001|9042|9090|16667)'
+```
