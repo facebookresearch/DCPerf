@@ -605,7 +605,7 @@ start_client() {
   # Wait for load balancer to be ready (try to connect to the server)
   local retries=60
   echo "Waiting for server to be ready at http://localhost:8000..."
-  while ! curl -s -f http://localhost:8000 > /dev/null 2>&1; do
+  while ! curl -s -f http://localhost:8000/feed_timeline > /dev/null 2>&1; do
     sleep 1
     retries=$((retries-1))
     if [[ "$retries" -le 0 ]]; then
