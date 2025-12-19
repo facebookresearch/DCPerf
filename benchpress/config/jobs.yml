@@ -811,6 +811,31 @@
           - 'benchmarks/spark_standalone/work'
           - 'benchmarks/spark_standalone/breakdown.csv'
 
+- benchmark: spark_standalone
+  name: spark_standalone_remote_3x
+  description: Spark standalone using remote SSDs with 3x query load (2 more joins) and auto-scaled shuffle partitions
+  args:
+    - 'run'
+    - '--dataset-path /flash23/'
+    - '--warehouse-dir /flash23/warehouse'
+    - '--shuffle-dir /flash23/spark_local_dir'
+    - '--ipv4 {ipv4}'
+    - '--real'
+    - '--sanity {sanity}'
+    - '--shuffle-partitions 0'
+    - '--query queries/release_test_93586_3x.sql'
+  vars:
+    - 'ipv4=0'
+    - 'sanity=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
+          - 'benchmarks/spark_standalone/breakdown.csv'
+
+
 - benchmark: tao_bench
   name: tao_bench_64g
   description:

@@ -91,10 +91,15 @@ def write_sql_create_tables(args) -> List[str]:
     filename = joinpath(WORK_PATH, "create_tables.sql")
     with open(filename, "wt") as fp:
         # Set spark.sql.shuffle.partitions if specified
-        if hasattr(args, "shuffle_partitions") and args.shuffle_partitions:
-            fp.write(
-                f"""SET spark.sql.shuffle.partitions = {args.shuffle_partitions};\n"""
-            )
+        if hasattr(args, "shuffle_partitions") and args.shuffle_partitions is not None:
+            shuffle_partitions = args.shuffle_partitions
+            # Auto-scale to 4 * CPU cores if set to 0 or negative
+            if shuffle_partitions <= 0:
+                shuffle_partitions = 4 * os.cpu_count()
+                print(
+                    f"Auto-scaling shuffle partitions to {shuffle_partitions} (4 * {os.cpu_count()} CPU cores)"
+                )
+            fp.write(f"""SET spark.sql.shuffle.partitions = {shuffle_partitions};\n""")
         fp.write(f"""USE {args.database};""")
         for table_info, query_dir in table_list:
             table_name = table_info["name"]
@@ -128,6 +133,20 @@ def list_tests(args) -> None:
 
 def write_sql_tests(args) -> List[str]:
     sql_files = []
+
+    # If custom query is specified, use it instead of dataset's built-in queries
+    if hasattr(args, "query") and args.query:
+        custom_sql_path = args.query
+        if not os.path.isabs(custom_sql_path):
+            custom_sql_path = joinpath(PROJ_ROOT, custom_sql_path)
+        if not os.path.exists(custom_sql_path):
+            raise FileNotFoundError(f"Custom query file not found: {custom_sql_path}")
+        sql_filename = os.path.basename(custom_sql_path)
+        filename = joinpath(WORK_PATH, sql_filename)
+        shutil.copy(custom_sql_path, filename)
+        sql_files.append(filename)
+        return sql_files
+
     dataset_path = joinpath(DATA_PATH, args.database)
     with open(joinpath(dataset_path, "release_info_suite.json"), "rt") as fp:
         query_tests_info = json.load(fp)
@@ -611,7 +630,16 @@ def init_parser():
             "--shuffle-partitions",
             type=int,
             default=None,
-            help="Set the number of partitions for Spark SQL shuffle operations",
+            help="Set the number of partitions for Spark SQL shuffle operations. "
+            "If set to 0 or negative, automatically scales to 4 * number of available CPU cores.",
+        )
+    # custom query option (for run_parser and exp_parser since they run queries)
+    for x in [run_parser, exp_parser]:
+        x.add_argument(
+            "--query",
+            type=str,
+            default=None,
+            help="Path to a custom SQL file to run instead of the dataset's built-in query",
         )
     # numa setting
     for x in [start_parser, run_parser, exp_parser]:

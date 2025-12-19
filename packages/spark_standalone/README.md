@@ -148,7 +148,7 @@ to run your systems exclusively with IPv6. If your systems only support IPv4,
 we now provide a flag to enable support for it.
 
 * `JAVA_HOME`: You may need to manually set the environment variable `JAVA_HOME`
-to be the path of the JDK: /usr/lib/jvm/graalvm-jdk-17.0.12+8.1/ if Spark benchmark fails.
+to be the path of the JDK: /usr/lib/jvm/graalvm-community-openjdk-17.0.9+9.1 if Spark benchmark fails.
 
 ## Also Note
 

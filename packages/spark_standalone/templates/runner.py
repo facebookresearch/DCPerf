@@ -79,7 +79,7 @@ def install_database(args):
         cmd_list.append(args.local_hostname)
     if args.aggressive > 0:
         cmd_list.append(f"--aggressive {args.aggressive}")
-    if hasattr(args, "shuffle_partitions") and args.shuffle_partitions:
+    if hasattr(args, "shuffle_partitions") and args.shuffle_partitions is not None:
         cmd_list.append("--shuffle-partitions")
         cmd_list.append(str(args.shuffle_partitions))
     cmd_list.append("--real")
@@ -179,9 +179,12 @@ def run_test(args):
         cmd_list.append(args.local_hostname)
     if args.aggressive > 0:
         cmd_list.append(f"--aggressive {args.aggressive}")
-    if hasattr(args, "shuffle_partitions") and args.shuffle_partitions:
+    if hasattr(args, "shuffle_partitions") and args.shuffle_partitions is not None:
         cmd_list.append("--shuffle-partitions")
         cmd_list.append(str(args.shuffle_partitions))
+    if hasattr(args, "query") and args.query:
+        cmd_list.append("--query")
+        cmd_list.append(args.query)
     cmd_list.append("--real")
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
@@ -419,7 +422,14 @@ def init_parser():
         "--shuffle-partitions",
         type=int,
         default=None,
-        help="Set the number of partitions for Spark SQL shuffle operations",
+        help="Set the number of partitions for Spark SQL shuffle operations. "
+        "If set to 0 or negative, automatically scales to 4 * number of available CPU cores.",
+    )
+    run_parser.add_argument(
+        "--query",
+        type=str,
+        default=None,
+        help="Path to a custom SQL file to run instead of the dataset's built-in query",
     )
     run_parser.add_argument(
         "--ipv4",

@@ -99,7 +99,7 @@ def read_sys_configs() -> Dict[str, int]:
 
 def find_java_home() -> str:
     # Always use the specific GraalVM JDK 17.0.12 path
-    return "/usr/lib/jvm/graalvm-jdk-17.0.12+8.1"
+    return "/usr/lib/jvm/graalvm-community-openjdk-17.0.9+9.1"
 
 
 def read_environ() -> Dict[str, str]:

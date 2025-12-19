@@ -47,5 +47,9 @@ popd || exit 1
 # create sub directories
 mkdir -p "${OUT}/work"
 mkdir -p "${OUT}/dataset"
+mkdir -p "${OUT}/queries"
+
+# copy custom query files
+cp "${TEMPLATES_DIR}/release_test_93586_3x.sql" "${OUT}/queries/"
 
 echo "SPARK_Standalone installed into ./benchmarks/spark_standalone"
