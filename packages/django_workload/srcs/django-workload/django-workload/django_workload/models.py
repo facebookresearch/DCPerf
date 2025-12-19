@@ -251,3 +251,45 @@ class ClipSeenModel(DjangoCassandraModel):
     seen_at = columns.TimeUUID(default=timeuuid_now)
     watch_duration_ms = columns.Integer(default=0)
     completed = columns.Boolean(default=False)
+
+
+# ============================================================================
+# Bundle Reel Clips Model for feed.api.views.reels_tray
+# ============================================================================
+
+
+class BundleReelClipModel(DjangoCassandraModel):
+    """
+    Associates bundle entries (stories/reels tray items) with video clips.
+    Models the relationship between tray buckets and their media content.
+
+    In production reels_tray:
+    - Each bucket in the tray represents a user with active stories/reels
+    - Buckets can contain multiple video clips (stories/reels)
+    - Only the first N buckets are fully materialized with media data
+    - Remaining buckets are skeletons (minimal info, no media)
+
+    This model supports the partial materialization pattern where
+    _fetch_reel_clips_for_bundles() only fetches clips for the first
+    NUM_FILLED_BUCKETS (typically 4) buckets.
+    """
+
+    class Meta:
+        get_pk_field = "bundle_id"
+
+    bundle_id = columns.UUID(primary_key=True)
+    clip_id = columns.UUID(primary_key=True)
+    position = columns.Integer(default=0)
+    created_at = columns.TimeUUID(default=timeuuid_now)
+    is_seen = columns.Boolean(default=False)
+    media_type = columns.Text(default="reel")
+
+    @property
+    def json_data(self):
+        return {
+            "bundle_id": str(self.bundle_id),
+            "clip_id": str(self.clip_id),
+            "position": self.position,
+            "media_type": self.media_type,
+            "is_seen": self.is_seen,
+        }
