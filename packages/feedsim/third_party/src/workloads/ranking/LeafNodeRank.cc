@@ -45,8 +45,8 @@
 
 #include "if/gen-cpp2/ranking_types.h"
 
-#include "../search/ICacheBuster.h"
-#include "../search/PointerChase.h"
+#include "icachebuster/ICacheBuster.h"
+#include "pointerchase/PointerChase.h"
 
 #include "generators/RankingGenerators.h"
 
@@ -310,7 +310,7 @@ int main(int argc, char** argv) {
   int fake_argc = 1;
   char* fake_argv[2] = {const_cast<char*>("./LeafNodeRank"), nullptr};
   char** sargv = static_cast<char**>(fake_argv);
-  folly::init(&fake_argc, &sargv);
+  folly::Init (&fake_argc, &sargv);
   auto cpuThreadPool =
       std::make_shared<folly::CPUThreadPoolExecutor>(args.cpu_threads_arg);
 
