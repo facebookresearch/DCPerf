@@ -490,9 +490,9 @@ class ChmBenchmark {
     results.workerThreadTime =
         std::chrono::milliseconds(totalWorkerTimeNs.load() / 1000000);
 
-    double workerDurationSeconds = results.workerThreadTime.count() / 1000.0;
+    double benchmarkDurationSeconds = results.benchmarkTime.count() / 1000.0;
     results.operationsPerSecond =
-        results.totalOperations / 1000000 / workerDurationSeconds;
+        results.totalOperations / 1000000 / benchmarkDurationSeconds;
     results.successRate = static_cast<double>(results.successfulOperations) /
         results.totalOperations * 100.0;
 
@@ -507,7 +507,7 @@ class ChmBenchmark {
     std::cout << "Total Benchmark Duration: "
               << results.benchmarkTime.count() / 1000.0 << " seconds"
               << std::endl;
-    std::cout << "Worker Thread Time Only: "
+    std::cout << "Total Worker Threads Time Only: "
               << results.workerThreadTime.count() / 1000.0 << " seconds"
               << std::endl;
     std::cout << "Total Operations: " << results.totalOperations << std::endl;
