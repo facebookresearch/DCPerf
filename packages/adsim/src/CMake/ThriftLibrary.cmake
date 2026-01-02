@@ -238,12 +238,6 @@ macro(thrift_generate
       ${output_path}/gen-${language}/${source_file_name}_layouts.cpp
     )
   endif()
-  if(NOT "${options}" MATCHES "no_metadata")
-    set("${target_file_name}-${language}-SOURCES"
-      ${${target_file_name}-${language}-SOURCES}
-      ${output_path}/gen-${language}/${source_file_name}_metadata.cpp
-    )
-  endif()
   foreach(service ${services})
     set("${target_file_name}-${language}-HEADERS"
       ${${source_file_name}-${language}-HEADERS}
