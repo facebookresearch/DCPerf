@@ -424,7 +424,7 @@ class ARMPerfUtil(Monitor):
         "https://git.gitlab.arm.com/telemetry-solution/telemetry-solution.git"
     )
 
-    def __init__(self, interval, job_uuid, **kwargs):
+    def __init__(self, job_uuid, interval=5, **kwargs):
         super(ARMPerfUtil, self).__init__(interval, "arm-perf-collector", job_uuid)
         self.avail = self.install_if_not_available()
         if not self.avail:
