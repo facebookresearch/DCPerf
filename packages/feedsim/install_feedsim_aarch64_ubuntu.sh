@@ -180,11 +180,11 @@ do
 
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
-# If running on Ubuntu 22.04, apply compatilibity patches to folly, rsocket and wangle
+# If running on Ubuntu 22.04 or 24.04, apply compatilibity patches to folly, rsocket and wangle
 # TODO: This is a temporary fix. In the long term we should seek to have feedsim
 # support the up-to-date version of these dependencies
 REPOS_TO_PATCH=(folly rsocket-cpp)
-if grep -i 'Ubuntu 22.04' /etc/os-release >/dev/null 2>&1; then
+if grep -iE 'Ubuntu (22|24)\.04' /etc/os-release >/dev/null 2>&1; then
     for repo in "${REPOS_TO_PATCH[@]}"; do
         pushd "third_party/$repo" || exit 1
         git apply --check "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff" && \
