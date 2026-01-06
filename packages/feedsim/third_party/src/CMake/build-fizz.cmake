@@ -30,7 +30,7 @@ ExternalProject_Add(fizz
     )
 
 
-ExternalProject_Add_StepDependencies(fizz configure folly)
+ExternalProject_Add_StepDependencies(fizz configure folly libaegis)
 
 ExternalProject_Get_Property(fizz SOURCE_DIR)
 ExternalProject_Get_Property(fizz INSTALL_DIR)

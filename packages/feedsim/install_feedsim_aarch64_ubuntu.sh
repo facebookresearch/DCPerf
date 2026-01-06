@@ -7,17 +7,9 @@
 set -Eeuo pipefail
 # trap cleanup SIGINT SIGTERM ERR EXIT
 
-# Constants
-FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
-BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
-FEEDSIM_ROOT_SRC="${BENCHPRESS_ROOT}/benchmarks/feedsim"
-FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
-echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
-
 cleanup() {
   trap - SIGINT SIGTERM ERR EXIT
 }
-
 
 msg() {
   echo >&2 -e "${1-}"
@@ -30,11 +22,19 @@ die() {
   exit "$code"
 }
 
+# Constants
+FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
+BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
+FEEDSIM_ROOT_SRC="${BENCHPRESS_ROOT}/benchmarks/feedsim"
+FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
+DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-dlrm/dlrm_small.tar.gz"
+echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
+
 apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    libfmt-dev sysstat jq
+    libfmt-dev sysstat jq unzip xxhash libxxhash-dev
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -55,6 +55,15 @@ else
     msg "[SKIPPED] copying feedsim src"
 fi
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
+
+# Installing fast_float
+git clone https://github.com/fastfloat/fast_float.git
+cd fast_float
+mkdir build && cd build
+cmake ..
+make
+make install
+cd ../
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
@@ -155,6 +164,77 @@ fi
 
 msg "Installing third-party dependencies ... DONE"
 
+# Installing LibTorch via Miniconda for aarch64
+# PyTorch does not provide official pre-built LibTorch binaries for ARM64 Linux
+# We use anaconda's main channel which provides CPU-only pre-built C++ libraries
+msg "Installing LibTorch via Miniconda for aarch64..."
+cd "${FEEDSIM_THIRD_PARTY_SRC}"
+
+MINICONDA_VERSION="latest"
+CONDA_DIR="${FEEDSIM_THIRD_PARTY_SRC}/miniconda3"
+
+if ! [ -d "libtorch" ]; then
+    # Install Miniconda if not present
+    if ! [ -d "${CONDA_DIR}" ]; then
+        msg "Installing Miniconda..."
+        ARCH="$(uname -m)"
+        MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-${MINICONDA_VERSION}-Linux-${ARCH}.sh"
+        wget "${MINICONDA_URL}" -O miniconda.sh
+        bash miniconda.sh -b -p "${CONDA_DIR}"
+        rm miniconda.sh
+    fi
+
+    # Initialize conda for this script
+    export PATH="${CONDA_DIR}/bin:${PATH}"
+    eval "$("${CONDA_DIR}/bin/conda" shell.bash hook)"
+
+    # Accept Conda Terms of Service (required for non-interactive usage)
+    msg "Accepting Conda Terms of Service..."
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
+
+    # Install libtorch from anaconda's main channel (CPU-only, no CUDA dependencies)
+    # Note: conda-forge libtorch has CUDA dependencies that cause build issues
+    msg "Installing libtorch from anaconda main channel..."
+    conda install -y libtorch
+
+    # Also install libstdcxx-ng to ensure compatible C++ runtime
+    conda install -y -c conda-forge libstdcxx-ng
+
+    # Create libtorch directory structure with symlinks to conda files
+    mkdir -p "${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+
+    # libtorch installs directly under conda prefix
+    ln -sf "${CONDA_DIR}/include" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/include"
+    ln -sf "${CONDA_DIR}/lib" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/lib"
+    ln -sf "${CONDA_DIR}/share" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share"
+
+    msg "LibTorch installed from anaconda main channel: ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+else
+    msg "[SKIPPED] LibTorch already installed"
+fi
+
+# Set up environment to use conda's libstdc++ for compatibility with libtorch
+# This resolves GLIBCXX version mismatch between system and conda libraries
+export LD_LIBRARY_PATH="${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib:${LD_LIBRARY_PATH:-}"
+export LIBRARY_PATH="${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib:${LIBRARY_PATH:-}"
+
+# Download DLRM model
+msg "Downloading DLRM model..."
+DLRM_MODEL_DIR="${FEEDSIM_ROOT_SRC}/models"
+mkdir -p "${DLRM_MODEL_DIR}"
+
+if ! [ -f "${DLRM_MODEL_DIR}/dlrm_small.pt" ]; then
+    msg "Downloading DLRM model from ${DLRM_MODEL_URL}..."
+    wget "${DLRM_MODEL_URL}" -O "${DLRM_MODEL_DIR}/dlrm_small.tar.gz"
+    msg "Extracting DLRM model..."
+    tar -xzf "${DLRM_MODEL_DIR}/dlrm_small.tar.gz" -C "${DLRM_MODEL_DIR}"
+    rm "${DLRM_MODEL_DIR}/dlrm_small.tar.gz"
+    msg "DLRM model installed to ${DLRM_MODEL_DIR}"
+else
+    msg "[SKIPPED] DLRM model already installed"
+fi
+
 
 # Installing FeedSim
 cd "${FEEDSIM_ROOT_SRC}"
@@ -180,25 +260,18 @@ do
 
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
-# If running on Ubuntu 22.04 or 24.04, apply compatilibity patches to folly, rsocket and wangle
-# TODO: This is a temporary fix. In the long term we should seek to have feedsim
-# support the up-to-date version of these dependencies
-REPOS_TO_PATCH=(folly rsocket-cpp)
-if grep -iE 'Ubuntu (22|24)\.04' /etc/os-release >/dev/null 2>&1; then
-    for repo in "${REPOS_TO_PATCH[@]}"; do
-        pushd "third_party/$repo" || exit 1
-        git apply --check "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff" && \
-            git apply "${FEEDSIM_ROOT}/patches/ubuntu-22-compatibility/${repo}.diff"
-        popd || exit 1
-    done
+# Patch fizz for OpenSSL 3.0 compatibility
+if [ -f "third_party/fizz/fizz/tool/FizzServerCommand.cpp" ]; then
+    # Replace EVP_PKEY_cmp with EVP_PKEY_eq
+    sed -i 's/EVP_PKEY_cmp(pubKey.get(), key.get()) == 1/EVP_PKEY_eq(pubKey.get(), key.get())/g' "third_party/fizz/fizz/tool/FizzServerCommand.cpp"
 fi
 
 mkdir -p build && cd build/
 
-# Build FeedSim
+# Build FeedSim with DLRM support
 FS_CFLAGS="${BP_CFLAGS:--O3 -DNDEBUG}"
 FS_CXXFLAGS="${BP_CXXFLAGS:--O3 -DNDEBUG }"
-FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic"
+FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic -L${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib -Wl,-rpath,${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib"
 
 BP_CC=gcc
 BP_CXX=g++
@@ -211,8 +284,22 @@ cmake -G Ninja \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \
     -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
+    -DFEEDSIM_USE_DLRM=ON \
+    -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
     ../
 
 sed -i 's/lib64/lib/' build.ninja
 
 ninja -v -j1
+
+msg ""
+msg "=== FeedSim Installation Complete ==="
+msg ""
+msg "To run FeedSim with DLRM workload:"
+msg "  cd ${FEEDSIM_ROOT_SRC}"
+msg "  export LD_LIBRARY_PATH=${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib:\$LD_LIBRARY_PATH"
+msg "  ./run.sh --workload=dlrm --dlrm-model=${DLRM_MODEL_DIR}/dlrm_small.pt"
+msg ""
+msg "Or use the standard PageRank workload:"
+msg "  ./run.sh"
+msg ""

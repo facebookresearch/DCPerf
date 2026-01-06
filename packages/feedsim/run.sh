@@ -419,6 +419,12 @@ main() {
         if [ -z "$dlrm_model_path" ]; then
             die "DLRM workload requires --dlrm-model <model_path> to specify the TorchScript model"
         fi
+
+        # Resolve dlrm_model_path: if relative, prepend FEEDSIM_ROOT
+        if [[ "$dlrm_model_path" != /* ]]; then
+            dlrm_model_path="${FEEDSIM_ROOT}/${dlrm_model_path}"
+        fi
+
         dlrm_opts="--workload_type=dlrm --dlrm_model_path=$dlrm_model_path --dlrm_batch_size=$dlrm_batch_size --dlrm_inferences_per_request=$dlrm_inferences_per_request --dlrm_threads=$dlrm_threads"
         echo "Using DLRM workload with model: $dlrm_model_path"
 

@@ -96,6 +96,7 @@ endif()
 
 include(build-config)
 include(build-fmt)
+include(build-libaegis)
 include(build-folly)
 include(build-fizz)
 include(build-wangle)
