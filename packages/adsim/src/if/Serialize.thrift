@@ -4,6 +4,10 @@ cpp_include "list"
 cpp_include "folly/container/F14Map.h"
 
 include "thrift/annotation/cpp.thrift"
+include "thrift/annotation/thrift.thrift"
+
+@thrift.AllowLegacyMissingUris
+package;
 
 struct SerializableInfo {
   1: bool var_bool;

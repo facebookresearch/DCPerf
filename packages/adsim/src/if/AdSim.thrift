@@ -1,4 +1,8 @@
 include "common/fb303/if/fb303.thrift"
+include "thrift/annotation/thrift.thrift"
+
+@thrift.AllowLegacyMissingUris
+package;
 
 namespace cpp2 facebook.cea.chips.adsim
 namespace py3 facebook.cea.chips.adsim

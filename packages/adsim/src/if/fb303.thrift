@@ -19,6 +19,9 @@ include "fb303/thrift/fb303_core.thrift"
 include "thrift/annotation/cpp.thrift"
 include "thrift/annotation/thrift.thrift"
 
+@thrift.AllowLegacyMissingUris
+package;
+
 namespace java com.facebook.fbcode.fb303
 namespace java.swift com.facebook.swift.fb303
 namespace java2 com.facebook.thrift.fb303
