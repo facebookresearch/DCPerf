@@ -98,6 +98,32 @@ target_link_libraries(rankingDwarfs
 )
 target_compile_options(rankingDwarfs PRIVATE -fvisibility=hidden)
 
+# DLRM support (optional, requires LibTorch)
+option(FEEDSIM_USE_DLRM "Enable DLRM workload with LibTorch" OFF)
+
+if(FEEDSIM_USE_DLRM)
+    find_package(Torch REQUIRED)
+    message(STATUS "DLRM enabled with LibTorch: ${TORCH_LIBRARIES}")
+
+    add_library(rankingDLRM STATIC
+        dwarfs/dlrm.cpp
+        dwarfs/dlrm.h
+    )
+    target_compile_definitions(rankingDLRM PUBLIC FEEDSIM_USE_DLRM)
+    target_include_directories(rankingDLRM
+        PUBLIC
+            dwarfs/
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../../
+            ${TORCH_INCLUDE_DIRS}
+    )
+    target_link_libraries(rankingDLRM
+        PUBLIC
+            ${TORCH_LIBRARIES}
+    )
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+endif()
+
 
 # Generate getopts for LeafNodeRank
 add_custom_command(
@@ -139,21 +165,33 @@ target_include_directories(LeafNodeRank
         ${FBTHRIFT_INCLUDE_DIR}
 )
 
+# Base LeafNodeRank libraries
+set(LEAF_NODE_RANK_LIBS
+    OLDISim::OLDISim
+    leafNodeRankcmdline
+    rankingDwarfs
+    icachebuster
+    PointerChaser
+    ${FOLLY_LIBRARIES}
+    ${IBERTY_LIBRARIES}
+    ranking-cpp2
+    rankingThriftDataGen
+    ${CMAKE_DL_LIBS}
+    glog::glog
+    ${DOUBLE_CONVERSION_LIBRARY}
+    ${FBTHRIFT_LIBRARIES}
+)
+
+# Add DLRM library if enabled
+if(FEEDSIM_USE_DLRM)
+    list(APPEND LEAF_NODE_RANK_LIBS rankingDLRM)
+    target_compile_definitions(LeafNodeRank PRIVATE FEEDSIM_USE_DLRM)
+    target_include_directories(LeafNodeRank PRIVATE ${TORCH_INCLUDE_DIRS})
+endif()
+
 target_link_libraries(LeafNodeRank
     PRIVATE
-        OLDISim::OLDISim
-        leafNodeRankcmdline
-        rankingDwarfs
-        icachebuster
-        PointerChaser
-        ${FOLLY_LIBRARIES}
-        ${IBERTY_LIBRARIES}
-        ranking-cpp2
-        rankingThriftDataGen
-        ${CMAKE_DL_LIBS}
-        glog::glog
-        ${DOUBLE_CONVERSION_LIBRARY}
-        ${FBTHRIFT_LIBRARIES}
+        ${LEAF_NODE_RANK_LIBS}
     PUBLIC
         Threads::Threads
         ZLIB::ZLIB

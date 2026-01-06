@@ -51,3 +51,19 @@ option "port" - "Port to run server on." int default="11222"
 option "monitor_port" - "Port to run monitoring server on." int default="8888"
 option "noaffinity" - "Specify to disable thread pinning"
 option "noloadbalance" - "Specify to disable thread load balancing"
+
+# DLRM (FeedSim v2) options
+option "workload_type" - "Type of ranking workload: pagerank or dlrm." string values="pagerank","dlrm" default="pagerank"
+option "dlrm_model_path" - "Path to TorchScript DLRM model file (.pt)." string typestr="filename" optional
+option "dlrm_batch_size" - "Batch size for DLRM inference." int default="256"
+option "dlrm_inferences_per_request" - "Number of DLRM inference calls per request." int default="1"
+option "dlrm_threads" - "Number of LibTorch threads for DLRM inference." int default="8"
+option "dlrm_seed" - "Seed for DLRM feature generation. If not provided, current time will be used." long optional
+
+# Phase 3: Non-blocking I/O options
+option "async_io" - "Enable non-blocking async I/O pattern (eliminates thread starvation)."
+option "io_latency_distribution" - "I/O latency distribution: fixed, exponential, or lognormal." string values="fixed","exponential","lognormal" default="fixed"
+option "io_latency_mean_ms" - "Mean I/O latency in milliseconds. For fixed: exact value; for exponential/lognormal: distribution mean." int default="200"
+option "io_latency_stddev_ms" - "I/O latency standard deviation in ms (only used for lognormal distribution)." int default="50"
+option "io_stages" - "Number of I/O stages to simulate (models multi-hop data fetching like Feature Store -> Memcache -> TAO)." int default="1"
+option "io_stage_latency_ms" - "Latency per I/O stage in ms (when io_stages > 1). Total latency = io_stages * io_stage_latency_ms." int default="50"
