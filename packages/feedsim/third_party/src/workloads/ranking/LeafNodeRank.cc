@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <random>
 #include <string>
@@ -97,19 +98,28 @@ struct ThreadData {
   std::exponential_distribution<double> io_exponential_dist;
   std::lognormal_distribution<double> io_lognormal_dist;
   int io_latency_mean_ms = 200;
+  int io_latency_min_ms = 50;   // Minimum bound to prevent too-fast responses
+  int io_latency_max_ms = 1000; // Maximum bound to prevent extreme outliers (was 5000)
+
+  // Mutex for thread-safe RNG access (RNG state is not thread-safe)
+  std::mutex rng_mutex;
 
   // Get next I/O latency based on distribution type
+  // IMPORTANT: This function MUST be called from the handler thread (before async)
+  // to avoid race conditions on the RNG state.
   int getNextIOLatencyMs() {
+    std::lock_guard<std::mutex> lock(rng_mutex);
     switch (io_latency_dist_type) {
       case IOLatencyDistType::FIXED:
         return io_latency_mean_ms;
       case IOLatencyDistType::EXPONENTIAL:
-        // Exponential distribution with specified mean
-        return std::max(1, static_cast<int>(io_exponential_dist(rng)));
+        // Exponential distribution with specified mean, bounded
+        return std::max(io_latency_min_ms,
+            std::min(io_latency_max_ms, static_cast<int>(io_exponential_dist(rng))));
       case IOLatencyDistType::LOGNORMAL:
-        // Lognormal distribution (bounded to prevent extreme outliers)
-        return std::max(
-            1, std::min(5000, static_cast<int>(io_lognormal_dist(rng))));
+        // Lognormal distribution with tighter bounds to reduce tail latency variance
+        return std::max(io_latency_min_ms,
+            std::min(io_latency_max_ms, static_cast<int>(io_lognormal_dist(rng))));
       default:
         return io_latency_mean_ms;
     }
@@ -707,6 +717,65 @@ int main(int argc, char** argv) {
   auto timekeeperPool =
       std::make_shared<ranking::TimekeeperPool>(args.timekeeper_threads_arg);
 
+  // Warm up all thread pools to ensure threads are spawned and ready
+  // This prevents cold-start latency spikes during actual request processing
+  std::cout << "Warming up thread pools..." << std::endl;
+  {
+    const int warmup_tasks = 100;  // Run multiple tasks to ensure all threads are active
+
+    // Warm up CPU thread pool
+    std::vector<folly::Future<int>> cpuFutures;
+    for (int i = 0; i < warmup_tasks; i++) {
+      cpuFutures.push_back(folly::via(cpuThreadPool.get(), []() {
+        volatile int sum = 0;
+        for (int j = 0; j < 1000; j++) sum += j;
+        return static_cast<int>(sum);
+      }));
+    }
+    folly::collectAll(std::move(cpuFutures)).get();
+
+    // Warm up srvCPU thread pool
+    std::vector<folly::Future<int>> srvCPUFutures;
+    for (int i = 0; i < warmup_tasks; i++) {
+      srvCPUFutures.push_back(folly::via(srvCPUThreadPool.get(), []() {
+        volatile int sum = 0;
+        for (int j = 0; j < 1000; j++) sum += j;
+        return static_cast<int>(sum);
+      }));
+    }
+    folly::collectAll(std::move(srvCPUFutures)).get();
+
+    // Warm up srvIO thread pool
+    std::vector<folly::Future<int>> srvIOFutures;
+    for (int i = 0; i < warmup_tasks; i++) {
+      srvIOFutures.push_back(folly::via(srvIOThreadPool.get(), []() {
+        volatile int sum = 0;
+        for (int j = 0; j < 1000; j++) sum += j;
+        return static_cast<int>(sum);
+      }));
+    }
+    folly::collectAll(std::move(srvIOFutures)).get();
+
+    // Warm up IO thread pool (uses different API)
+    std::vector<folly::Future<int>> ioFutures;
+    for (int i = 0; i < warmup_tasks; i++) {
+      ioFutures.push_back(folly::via(ioThreadPool.get(), []() {
+        return 1;
+      }));
+    }
+    folly::collectAll(std::move(ioFutures)).get();
+
+    // Warm up timekeeper by scheduling a few sleeps
+    auto timekeeper = timekeeperPool->getTimekeeper();
+    std::vector<folly::SemiFuture<folly::Unit>> sleepFutures;
+    for (int i = 0; i < 10; i++) {
+      sleepFutures.push_back(
+          folly::futures::sleep(std::chrono::milliseconds(1), timekeeper.get()));
+    }
+    folly::collectAll(std::move(sleepFutures)).get();
+  }
+  std::cout << "Thread pool warmup complete" << std::endl;
+
   std::vector<ThreadData> thread_data(args.threads_arg);
   ranking::dwarfs::PageRankParams params{
       args.graph_scale_arg, args.graph_degree_arg};
@@ -731,6 +800,15 @@ int main(int argc, char** argv) {
     // Create shared DLRM model (thread-safe for inference)
     shared_dlrm_ranker = std::make_shared<ranking::dwarfs::DLRM>(
         dlrm_params, args.threads_arg, dlrm_seed);
+
+    // Warm up DLRM model to stabilize inference latency
+    // JIT compilation and memory allocation happen on first few inferences
+    std::cout << "Warming up DLRM model..." << std::endl;
+    const int warmup_iterations = 10;  // Run enough iterations to JIT compile all paths
+    for (int i = 0; i < warmup_iterations; i++) {
+      shared_dlrm_ranker->infer(0, 1, args.dlrm_batch_size_arg);
+    }
+    std::cout << "DLRM warmup complete (" << warmup_iterations << " iterations)" << std::endl;
   }
 #endif
 
