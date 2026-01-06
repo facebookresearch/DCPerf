@@ -31,7 +31,7 @@
 static gengetopt_args_info args;
 
 const int kMaxRequestSize = 8192;
-const int kRecomputeQPSPeriod = 5;
+const int kRecomputeQPSPeriod = 1;  // Reduced from 5 to 1 second for faster feedback
 
 struct ThreadData {
   std::string random_string;
@@ -65,12 +65,36 @@ void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
       this_thread->test_driver->GetConnectionStats();
 
   // Get QPS for last stats period
-  double qps = static_cast<double>(
-                   stats.query_counts_.at(ranking::kPageRankRequestType)) /
-               (stats.end_time_ - stats.start_time_) * 1000000000;
+  double elapsed_secs = (stats.end_time_ - stats.start_time_) / 1000000000.0;
+  if (elapsed_secs <= 0) {
+    AddRecomputeDelayTimer(*this_thread);
+    return;
+  }
 
-  // Adjust delay based on QPS
-  this_thread->request_delay = (1000000 / this_thread->qps_per_thread) * (qps / this_thread->qps_per_thread);
+  double measured_qps = static_cast<double>(
+      stats.query_counts_.at(ranking::kPageRankRequestType)) / elapsed_secs;
+
+  // Compute target delay in microseconds
+  double target_delay_us = 1000000.0 / this_thread->qps_per_thread;
+
+  // Adjust delay using proportional feedback control
+  // If measured_qps > target: increase delay to slow down
+  // If measured_qps < target: decrease delay to speed up
+  // Use a damping factor (0.5) to prevent oscillations
+  double qps_ratio = measured_qps / this_thread->qps_per_thread;
+  double damping = 0.5;
+  double adjustment = 1.0 + damping * (qps_ratio - 1.0);
+
+  // Clamp adjustment to prevent extreme values
+  if (adjustment < 0.5) adjustment = 0.5;
+  if (adjustment > 2.0) adjustment = 2.0;
+
+  this_thread->request_delay = static_cast<uint64_t>(target_delay_us * adjustment);
+
+  // Ensure minimum delay to prevent flooding
+  if (this_thread->request_delay < 100) {
+    this_thread->request_delay = 100;  // 100us minimum = 10000 QPS max per thread
+  }
 
   AddRecomputeDelayTimer(*this_thread);
 }

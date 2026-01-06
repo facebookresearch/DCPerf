@@ -471,7 +471,7 @@ if [[ -n "$fixed_qps" ]]; then
       printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps_el $measured_qps $measured_latency
       echo "final requested_qps = $fixed_qps_el, measured_qps = $measured_qps, latency = $measured_latency" >> $BREPS_LFILE
       benchreps_tell_state "after fixed_qps_iter $fixed_qps_el"
-      sleep 7 # wait between iterations
+      sleep 15 # wait between iterations (increased from 7 to allow async requests to drain)
     done
   fi
   exit 0
