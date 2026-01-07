@@ -20,6 +20,9 @@ declare -A REPOS=(
     ['glibc']='https://sourceware.org/git/glibc.git'
     ['isa-l']='https://github.com/intel/isa-l.git'
     ['sleef']='https://github.com/shibatch/sleef.git'
+    ['aocl']='https://github.com/amd/aocl.git'
+    ['acl']='https://github.com/ARM-software/ComputeLibrary.git'
+    ['onednn']='https://github.com/uxlfoundation/oneDNN.git'
 )
 
 declare -A TAGS=(
@@ -33,6 +36,9 @@ declare -A TAGS=(
     ['glibc']="glibc-${GLIBC_VERSION}"
     ['isa-l']='d36de972efc18f2e85ca182a8b6758ecc7da512b'
     ['sleef']='3.8'
+    ['aocl']='AOCL-5.2'
+    ['acl']='v52.7.0'
+    ['onednn']='v3.10.2'
 )
 
 declare -A DATASETS=(
@@ -43,6 +49,7 @@ declare -A DATASETS=(
 
 ##################### SYS CONFIG AND DEPS #########################
 
+ARCH="$(uname -m)"
 BPKGS_WDL_ROOT="$(dirname "$(readlink -f -- "$0")")" # Path to dir with this file.
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_WDL_ROOT/../..")"
 WDL_ROOT="${BENCHPRESS_ROOT}/benchmarks/wdl_bench"
@@ -54,20 +61,21 @@ WDL_DATASETS="${WDL_ROOT}/datasets"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt install -y cmake autoconf automake flex bison \
+  apt install -y cmake autoconf automake flex bison gfortran \
     nasm clang patch git libssl-dev libc6-dev\
     tar unzip perl openssl python3-dev gawk libstdc++6 python3-numpy \
-    glibc-source libbenchmark-dev
+    glibc-source libbenchmark-dev environment-modules libopenblas-dev \
+    pkg-config
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  dnf install -y cmake autoconf automake flex bison \
+  dnf install -y cmake autoconf automake flex bison gfortran \
     meson nasm clang patch glibc-static libstdc++-static \
     git tar unzip perl openssl-devel python3-devel gawk python3-numpy \
     dnf-plugins-core rpm-build audit-libs-devel gd-devel gdb \
     libcap-devel libpng-devel libselinux-devel texinfo valgrind \
-    google-benchmark-devel
-fi
+    google-benchmark-devel environment-modules openblas-devel pkg-config
 
+fi
 
 mkdir -p "${WDL_SOURCE}"
 mkdir -p "${WDL_BUILD}"
@@ -202,7 +210,6 @@ build_libaegis()
     lib='libaegis'
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
-    ARCH="$(uname -p)"
     if [ "$ARCH" = "aarch64" ]; then
         wget https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz
         tar xvf zig-aarch64-linux-0.15.2.tar.xz
@@ -355,6 +362,69 @@ build_stdcpp()
     popd || exit
 }
 
+build_gemm()
+{
+    lib='gemm_bench'
+    pushd "$WDL_BUILD"
+    source /etc/profile.d/modules.sh
+    if [ "$ARCH" = "aarch64" ]; then
+        clone acl || echo "Failed to clone acl"
+        cd acl || exit
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DARM_COMPUTE_BUILD_SHARED_LIB=ON -DARM_COMPUTE_ENABLE_OPENMP=ON -DACL_MULTI_ISA=ON -DACL_BUILD_SVE=ON -DACL_BUILD_SVE2=ON -DACL_BUILD_SME2=ON -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/acl" && cmake --build build --config release --target install -- -j"$(nproc)"
+        cd .. || exit
+        ARMPL_VERSION="25.07.1"
+        if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+            wget -nc "https://developer.arm.com/-/cdn-downloads/permalink/Arm-Performance-Libraries/Version_${ARMPL_VERSION}/arm-performance-libraries_${ARMPL_VERSION}_deb_gcc.tar"
+            tar xvf "arm-performance-libraries_${ARMPL_VERSION}_deb_gcc.tar"
+            bash -c "./arm-performance-libraries_${ARMPL_VERSION}_deb/arm-performance-libraries_${ARMPL_VERSION}_deb.sh --accept --install-to ./apl"
+        elif [ "$LINUX_DIST_ID" = "centos" ]; then
+            wget -nc "https://developer.arm.com/-/cdn-downloads/permalink/Arm-Performance-Libraries/Version_${ARMPL_VERSION}/arm-performance-libraries_${ARMPL_VERSION}_rpm_gcc.tar"
+            tar xvf "arm-performance-libraries_${ARMPL_VERSION}_rpm_gcc.tar"
+            bash -c "./arm-performance-libraries_${ARMPL_VERSION}_rpm/arm-performance-libraries_${ARMPL_VERSION}_rpm.sh --accept --install-to ./apl"
+        fi
+        module use apl/modulefiles
+        module load "armpl/${ARMPL_VERSION}_gcc"
+        lib='gemm_bench' # reset lib to gemm_bench
+        cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH="${ARMPL_LIBRARIES};${WDL_BUILD}/acl/lib64;${WDL_BUILD}/acl/lib" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/acl/include -L ${WDL_BUILD}/acl/lib64 -L ${WDL_BUILD}/acl/lib" && cmake --build "$lib-build"
+        cp "$lib-build/$lib" "${WDL_ROOT}/" || exit 1
+    else
+        cpu_vendor=$(grep -m 1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
+        MKL_VERSION="2025.3.0.462"
+        wget -nc https://registrationcenter-download.intel.com/akdlm/IRC_NAS/2ad98b49-1fb2-4294-ab3d-6889b434ebd3/intel-onemkl-${MKL_VERSION}_offline.sh
+        bash -c "sh ./intel-onemkl-${MKL_VERSION}_offline.sh -a --action install --silent --eula accept --install-dir ./onemkl"
+        bash -c "onemkl/modulefiles-setup.sh --output-dir=onemkl/modulefiles"
+        module use onemkl/modulefiles
+        module load mkl/latest
+        clone aocl || echo "Failed to clone aocl"
+        cd aocl || exit
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_ADDON="aocl_gemm" -DENABLE_MULTITHREADING=ON -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/aocl"
+        cmake --build build --config release --target install -- -j"$(nproc)"
+        cd .. || exit
+        lib='gemm_bench' # reset lib to gemm_bench
+        cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-onemkl" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH="${MKLROOT}/lib" && cmake --build "$lib-build-onemkl"
+        cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-aocl" -DCMAKE_BUILD_TYPE=Release -DCPU_VENDOR=AMD -DCMAKE_INSTALL_RPATH="${WDL_BUILD}/aocl/lib" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/aocl/include -L ${WDL_BUILD}/aocl/lib" && cmake --build "$lib-build-aocl"
+        if [[ "$cpu_vendor" == "GenuineIntel" ]]; then
+            echo "CPU is Intel"
+            cp "$lib-build-onemkl/$lib" "${WDL_ROOT}/" || exit 1
+        elif [[ "$cpu_vendor" == "AuthenticAMD" ]]; then
+            echo "CPU is AMD"
+            cp "$lib-build-aocl/$lib" "${WDL_ROOT}/" || exit 1
+        else
+            echo "Unknown CPU vendor: $cpu_vendor"
+        fi
+    fi
+    cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-openblas" -DCMAKE_BUILD_TYPE=Release -DUSE_OPENBLAS=ON && cmake --build "$lib-build-openblas"
+    clone onednn || echo "Failed to clone onednn"
+    cd onednn || exit
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/onednn" && cmake --build build --config release --target install -- -j"$(nproc)"
+    cd .. || exit
+    lib='gemm_bench' # reset lib to gemm_bench
+    cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-onednn" -DCMAKE_BUILD_TYPE=Release -DUSE_ONEDNN=ON -DCMAKE_INSTALL_RPATH="${WDL_BUILD}/onednn/lib;${WDL_BUILD}/onednn/lib64" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/onednn/include -L ${WDL_BUILD}/onednn/lib -L ${WDL_BUILD}/onednn/lib64" && cmake --build "$lib-build-onednn"
+    module purge
+
+    popd || exit
+}
+
 ##################### BUILD AND INSTALL #########################
 
 pushd "${WDL_ROOT}"
@@ -398,6 +468,7 @@ case "$TARGET" in
         build_isa_l
         build_sleef
         build_stdcpp
+        build_gemm
         ;;
     folly)    build_folly ;;
     fbthrift) build_fbthrift ;;
@@ -410,6 +481,7 @@ case "$TARGET" in
     isa_l)    build_isa_l ;;
     sleef)    build_sleef ;;
     stdcpp)   build_stdcpp ;;
+    gemm)  build_gemm ;;
     *)
         echo "Error: Unknown build target '$TARGET'"
         exit 1

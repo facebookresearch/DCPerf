@@ -26,6 +26,10 @@ def geomean(values: list[float]) -> float:
     return np.exp(np.mean(np.log(np.array(values))))
 
 
+def max(values: list[float]) -> float:
+    return float(np.max(np.array(values)))
+
+
 benchmark_name = sys.argv[1]
 
 input_file_name = "out_" + benchmark_name + ".json"
@@ -61,12 +65,17 @@ def generate_sleef_benchmark_name(
 
 
 def extract_gbench_metric(
-    data: dict[str, Any], benchmark_names: list[str], metric_key: str
+    data: dict[str, Any],
+    benchmark_names: list[str],
+    metric_key: str,
+    match_prefix: bool = False,
 ) -> list[float]:
     results: list[float] = []
     for name in benchmark_names:
         for b in data["benchmarks"]:
             if b["name"] == name:
+                results.append(float(b[metric_key]))
+            elif match_prefix and b["name"].startswith(name):
                 results.append(float(b[metric_key]))
     return results
 
@@ -258,6 +267,45 @@ def calculate_stdcpp_score(
     return baseline_geomean / current_geomean
 
 
+def calculate_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
+    """
+    Calculate gemm_bench score based on peak flops.
+
+    Args:
+        sum_baseline: Baseline benchmark results
+        sum_c: Current benchmark results
+
+    Returns:
+        Score as ratio of current peak to baseline peak flops
+    """
+
+    baseline_peak_ops = [
+        max(extract_gbench_metric(sum_baseline, ["BM_SGEMM"], "FLOPS", True)),
+        max(extract_gbench_metric(sum_baseline, ["BM_BF16GEMM"], "FLOPS", True)),
+        max(extract_gbench_metric(sum_baseline, ["BM_I8GEMM"], "TOPS", True)),
+    ]
+    current_peak_ops = [
+        max(extract_gbench_metric(sum_c, ["BM_SGEMM"], "FLOPS", True)),
+        max(extract_gbench_metric(sum_c, ["BM_BF16GEMM"], "FLOPS", True)),
+        max(extract_gbench_metric(sum_c, ["BM_I8GEMM"], "TOPS", True)),
+    ]
+
+    try:
+        # Special case for AMD CPUs where BM_HGEMM is not supported, in which case
+        # an exception is thrown and we don't add BM_HGEMM to the list of peak
+        # baseline ops.
+        current_peak_ops.append(
+            max(extract_gbench_metric(sum_c, ["BM_HGEMM"], "FLOPS", True))
+        )
+        baseline_peak_ops.append(
+            max(extract_gbench_metric(sum_baseline, ["BM_HGEMM"], "FLOPS", True))
+        )
+    except Exception:
+        pass
+
+    return geomean(current_peak_ops) / geomean(baseline_peak_ops)
+
+
 with open(input_file_name) as f:
     with open(baseline_name) as f_baseline:
         sum_c = json.load(f)
@@ -333,6 +381,8 @@ with open(input_file_name) as f:
             score = calculate_memcmp_score(sum_baseline, sum_c)
         elif benchmark_name == "stdcpp_bench":
             score = calculate_stdcpp_score(sum_baseline, sum_c)
+        elif benchmark_name == "gemm_bench":
+            score = calculate_gemm_score(sum_baseline, sum_c)
         else:
             for key in sum_baseline:
                 if key in sum_c:

@@ -41,7 +41,7 @@ prod_benchmark_thrift="ProtocolBench VarintUtilsBench"
 prod_benchmark_f14="container_hash_maps_bench"
 prod_benchmark_lock="synchronization_small_locks_benchmark synchronization_lifo_sem_bench"
 prod_benchmark_vdso="vdso_bench"
-prod_benchmark_math="benchsleef128 benchsleef256 benchsleef512"
+prod_benchmark_math="benchsleef128 benchsleef256 benchsleef512 gemm_bench"
 prod_benchmark_stdcpp="stdcpp_bench"
 # @lint-ignore-section SHELLCHECK off
 
@@ -85,6 +85,7 @@ declare -A prod_benchmark_config=(
     ['benchsleef256']="--benchmark_format=json"
     ['benchsleef512']="--benchmark_format=json"
     ['stdcpp_bench']="--benchmark_format=json"
+    ['gemm_bench']="--benchmark_format=json"
 )
 
 main() {
@@ -157,7 +158,11 @@ main() {
             bash -c "./testrun.sh ./benchtests/${benchmark} -- ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${WDL_ROOT}/${out_file}"
             popd
         else
-            bash -c "./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
+            ENV_VARS=""
+            if [ "$benchmark" = "gemm_bench" ]; then
+                ENV_VARS="OMP_NUM_THREADS=1"
+            fi
+            bash -c "${ENV_VARS} ./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
         fi
         if [ "$benchmark" = "openssl" ]; then
             unset LD_LIBRARY_PATH

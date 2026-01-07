@@ -35,6 +35,7 @@ target_link_libraries(stdcpp_bench
 # ------------------------------------------------------------
 target_compile_options(stdcpp_bench PRIVATE
   -march=native
+  -g
 )
 
 target_compile_definitions(stdcpp_bench PRIVATE
