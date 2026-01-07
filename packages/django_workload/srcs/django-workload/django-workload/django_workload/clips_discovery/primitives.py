@@ -252,7 +252,7 @@ class ClipsDiscoveryPrimitives:
         results = []
         type_counts = collections.defaultdict(int)
 
-        for idx, value in enumerate(values):
+        for value in values:
             # Type tagging (cached in real code via lru_cache)
             if isinstance(value, dict):
                 type_tag = ValueTypeTag.MAPPING
@@ -1906,7 +1906,7 @@ class ClipsDiscoveryPrimitives:
 
         # Batch execution simulation
         batch_size = 10
-        for tier, keys in requests_by_tier.items():
+        for keys in requests_by_tier.values():
             if not keys:
                 continue
 
