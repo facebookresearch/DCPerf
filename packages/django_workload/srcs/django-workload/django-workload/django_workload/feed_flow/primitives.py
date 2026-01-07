@@ -6190,65 +6190,6 @@ class CPUPrimitives:
         for URLs, codec information, and multi-format validation logic.
 
         """
-        integers = _get_random_integers(num_videos * 8)
-        stats = {
-            "videos_processed": 0,
-            "formats_generated": 0,
-            "dict_constructions": 0,
-            "validation_checks": 0,
-        }
-        video_formats = ["dash", "hls", "progressive"]
-        codec_types = ["h264", "vp9", "av1"]
-        quality_levels = ["240p", "360p", "480p", "720p", "1080p"]
-        for i in range(num_videos):
-            stats["videos_processed"] += 1
-            video_id = abs(integers[i * 8]) % 1000000
-            delivery_info = {"video_id": video_id, "formats": {}}
-            num_formats = (abs(integers[i * 8 + 1]) % 3) + 3
-            for format_idx in range(num_formats):
-                format_name = video_formats[format_idx % len(video_formats)]
-                stats["formats_generated"] += 1
-                format_dict = {
-                    "url": f"https://cdn.example.com/videos/{video_id}/{format_name}",
-                    "codec": codec_types[
-                        abs(integers[i * 8 + 2 + format_idx]) % len(codec_types)
-                    ],
-                    "quality": quality_levels[
-                        abs(integers[i * 8 + 3 + format_idx]) % len(quality_levels)
-                    ],
-                    "bitrate": abs(integers[i * 8 + 4]) % 5000 + 500,
-                }
-                stats["validation_checks"] += 1
-                if "cdn.example.com" in format_dict["url"]:
-                    stats["validation_checks"] += 1
-                if format_dict["codec"] == "av1" and format_name == "progressive":
-                    format_dict["codec"] = "h264"
-                    stats["validation_checks"] += 1
-                if format_dict["bitrate"] > 4000:
-                    if format_dict["quality"] not in ["720p", "1080p"]:
-                        format_dict["bitrate"] = 2000
-                        stats["validation_checks"] += 1
-                delivery_info["formats"][format_name] = format_dict
-                stats["dict_constructions"] += 1
-            delivery_info["metrics"] = {
-                "encoding_time_ms": abs(integers[i * 8 + 5]) % 1000,
-                "cdn_latency_ms": abs(integers[i * 8 + 6]) % 200,
-            }
-            stats["dict_constructions"] += 1
-        return stats
-
-    @staticmethod
-    def primitive_video_delivery_info_construction(
-        num_videos: int = 3,
-    ) -> Dict[str, int]:
-        """
-        Simulates video delivery metadata construction with format validation.
-
-        Models video delivery systems that build comprehensive metadata for
-        various video formats and quality levels. Includes dictionary construction
-        for URLs, codec information, and multi-format validation logic.
-
-        """
         # Use real integers from dataset
         integers = _get_random_integers(num_videos * 8)
 
