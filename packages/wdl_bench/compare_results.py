@@ -297,11 +297,11 @@ def main() -> None:
 
     # Also print summary to stdout
     print("\nTop 10 highest ratios:")
-    for name, val1, val2, ratio in comparisons[:10]:
+    for name, _, _, ratio in comparisons[:10]:
         print(f"  {name}: {ratio:.4f}")
 
     print("\nTop 10 lowest ratios:")
-    for name, val1, val2, ratio in comparisons[-10:]:
+    for name, _, _, ratio in comparisons[-10:]:
         print(f"  {name}: {ratio:.4f}")
 
 
