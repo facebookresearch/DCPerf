@@ -299,6 +299,7 @@ build_isa_l()
     ./configure
     make perfs -j
     cp ./erasure_code/erasure_code_perf "${WDL_ROOT}/" || exit
+    cp -r ./erasure_code/.libs "${WDL_ROOT}/" || exit
 
     popd || exit
 }
