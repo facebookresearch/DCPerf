@@ -267,7 +267,7 @@ def distribute_cores(n_parts):
         remaining_cores = n_cores - portion * n_parts
     # Pin each instance to physical cpu core and corresponding vcpu
     core_start_idx = 0
-    for i in range(n_parts):
+    for _ in range(n_parts):
         extra = 1 if remaining_cores > 0 else 0
         cores_to_alloc = phy_core_list[
             core_start_idx : core_start_idx + portion + extra
