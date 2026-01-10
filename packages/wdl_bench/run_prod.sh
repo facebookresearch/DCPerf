@@ -17,8 +17,8 @@ function benchreps_tell_state () {
 
 # Constants
 WDL_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
-WDL_DATASETS="${WDL_ROOT}/datasets"
-WDL_BUILD="${WDL_ROOT}/wdl_build"
+# shellcheck disable=SC1091
+source "$WDL_ROOT"/common.sh
 
 show_help() {
 cat <<EOF
@@ -29,7 +29,7 @@ Usage: ${0##*/} [-h] [--name benchmark_name]
 EOF
 }
 
-# @lint-ignore-section SHELLCHECK on
+# shellcheck disable=SC2034
 prod_benchmark_list_mem="memcpy_benchmark bench-memcmp memset_benchmark"
 prod_benchmark_list_hash="hash_hash_benchmark xxhash_benchmark"
 prod_benchmark_compression="lzbench"
@@ -43,7 +43,6 @@ prod_benchmark_lock="synchronization_small_locks_benchmark synchronization_lifo_
 prod_benchmark_vdso="vdso_bench"
 prod_benchmark_math="benchsleef128 benchsleef256 benchsleef512 gemm_bench"
 prod_benchmark_stdcpp="stdcpp_bench"
-# @lint-ignore-section SHELLCHECK off
 
 prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench benchsleef128 benchsleef256 benchsleef512 stdcpp_bench"
 
@@ -87,6 +86,7 @@ declare -A prod_benchmark_config=(
     ['stdcpp_bench']="--benchmark_format=json"
     ['gemm_bench']="--benchmark_format=json"
 )
+
 
 main() {
     local result_filename
@@ -178,12 +178,22 @@ main() {
 
     echo "benchmark results:" "$run_list" | tee -a "${result_filename}"
     echo "---------------------------------------------" | tee -a "${result_filename}"
-    for benchmark in $run_list; do
-        if exec_non_json "${benchmark}"; then
-            python3 ./convert.py "$benchmark"
-        fi
-        python3 ./scoring.py "$benchmark" | tee -a "${result_filename}"
-    done
+
+    # Execute scoring in a subshell to guarantee numpy availability
+    (
+        WDL_RUN_ENV="wdl_run_env"
+        source_conda
+        conda create --override-channels -y -c conda-forge --force -n "$WDL_RUN_ENV" python numpy
+        conda activate "$WDL_RUN_ENV"
+        for benchmark in $run_list; do
+            if exec_non_json "${benchmark}"; then
+                python3 ./convert.py "$benchmark"
+            fi
+            python3 ./scoring.py "$benchmark" | tee -a "${result_filename}"
+        done
+        conda deactivate
+        conda env remove -n "$WDL_RUN_ENV" -y
+    )
 
     echo "---------------------------------------------" | tee -a "${result_filename}"
     echo "detailed results in each individual json file." | tee -a "${result_filename}"

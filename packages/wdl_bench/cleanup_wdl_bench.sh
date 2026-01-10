@@ -4,16 +4,16 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-ARCH="$(uname -m)"
-BPKGS_WDL_ROOT="$(dirname "$(readlink -f "$0")")"
+BPKGS_WDL_ROOT="$(dirname "$(readlink -f -- "$0")")" # Path to dir with this file.
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_WDL_ROOT/../..")"
-BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks"
-WDL_DIR="${BENCHMARKS_DIR}/wdl_bench"
+WDL_ROOT="${BENCHPRESS_ROOT}/benchmarks/wdl_bench"
 
-if [ "$ARCH" = "x86_64" ]; then
+# shellcheck disable=SC1091
+source "$BPKGS_WDL_ROOT"/common.sh
+
+if [ "$ARCH" = "x86_64" ] && [ -f "$WDL_ROOT/wdl_build/intel-onemkl-${MKL_VERSION}_offline.sh" ]; then
     echo "Removing Intel OneMKL"
-    MKL_VERSION="2025.3.0.462"
-    bash -c "sh $WDL_DIR/wdl_build/intel-onemkl-${MKL_VERSION}_offline.sh -a --action remove --silent --eula accept"
+    bash -c "sh $WDL_ROOT/wdl_build/intel-onemkl-${MKL_VERSION}_offline.sh -a --action remove --silent --eula accept"
 fi
 
-rm -rf "$WDL_DIR"
+rm -rf "$WDL_ROOT"

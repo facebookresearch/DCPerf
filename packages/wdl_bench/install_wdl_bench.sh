@@ -49,27 +49,23 @@ declare -A DATASETS=(
 
 ##################### SYS CONFIG AND DEPS #########################
 
-ARCH="$(uname -m)"
 BPKGS_WDL_ROOT="$(dirname "$(readlink -f -- "$0")")" # Path to dir with this file.
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_WDL_ROOT/../..")"
 WDL_ROOT="${BENCHPRESS_ROOT}/benchmarks/wdl_bench"
-WDL_SOURCE="${WDL_ROOT}/wdl_sources"
-WDL_BUILD="${WDL_ROOT}/wdl_build"
-WDL_DATASETS="${WDL_ROOT}/datasets"
 
-# Determine OS version
-LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
+# shellcheck disable=SC1091
+source "$BPKGS_WDL_ROOT"/common.sh
 
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt install -y cmake autoconf automake flex bison gfortran \
-    nasm clang patch git libssl-dev libc6-dev\
+  DEBIAN_FRONTEND=noninteractive apt install -y cmake autoconf automake \
+    flex bison gfortran nasm clang gcc g++ patch git libssl-dev libc6-dev \
     tar unzip perl openssl python3-dev gawk libstdc++6 python3-numpy \
     glibc-source libbenchmark-dev environment-modules libopenblas-dev \
     pkg-config
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y cmake autoconf automake flex bison gfortran \
-    meson nasm clang patch glibc-static libstdc++-static \
+    meson nasm clang gcc g++ patch glibc-static libstdc++-static \
     git tar unzip perl openssl-devel python3-devel gawk python3-numpy \
     dnf-plugins-core rpm-build audit-libs-devel gd-devel gdb \
     libcap-devel libpng-devel libselinux-devel texinfo valgrind \
@@ -83,6 +79,24 @@ mkdir -p "${WDL_DATASETS}"
 
 if ! [ -f "/usr/local/bin/cmake" ]; then
     ln -s /usr/bin/cmake /usr/local/bin/cmake
+fi
+
+if ! in_conda_env; then
+    if ! has_real_conda; then
+        if [ ! -f "${WDL_ROOT}/miniconda3/etc/profile.d/conda.sh" ]; then
+            echo "Installing miniconda."
+            mkdir -p "${WDL_ROOT}/miniconda3"
+            if [ "$ARCH" = "aarch64" ]; then
+                wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O "${WDL_ROOT}/miniconda3/miniconda.sh" || exit
+            else
+                wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O "${WDL_ROOT}/miniconda3/miniconda.sh" || exit
+            fi
+            bash -c "sh ${WDL_ROOT}/miniconda3/miniconda.sh -b -u -p ${WDL_ROOT}/miniconda3" || exit
+        fi
+        # shellcheck disable=SC1091
+        source "${WDL_ROOT}"/miniconda3/etc/profile.d/conda.sh
+        conda tos accept
+    fi
 fi
 
 ##################### BUILD AND INSTALL FUNCTIONS #########################
@@ -129,9 +143,17 @@ build_folly()
     clone "$lib" || echo "Failed to clone $lib"
     cd "$lib" || exit
 
-    python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
-
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}"
+    # execute the build in a subshell with a new conda build environment
+    (
+        FBENV="folly_build_env"
+        source_conda
+        conda create --override-channels -y -c conda-forge --force -n "$FBENV" "python=3.12" "numpy<2"
+        conda activate "$FBENV"
+        python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
+        python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}"
+        conda deactivate
+        conda env remove -n "$FBENV" -y
+    )
 
     for benchmark in $folly_benchmark_list; do
       cp "$WDL_BUILD/build/folly/$benchmark" "$WDL_ROOT/$benchmark"
@@ -373,7 +395,6 @@ build_gemm()
         cd acl || exit
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DARM_COMPUTE_BUILD_SHARED_LIB=ON -DARM_COMPUTE_ENABLE_OPENMP=ON -DACL_MULTI_ISA=ON -DACL_BUILD_SVE=ON -DACL_BUILD_SVE2=ON -DACL_BUILD_SME2=ON -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/acl" && cmake --build build --config release --target install -- -j"$(nproc)"
         cd .. || exit
-        ARMPL_VERSION="25.07.1"
         if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
             wget -nc "https://developer.arm.com/-/cdn-downloads/permalink/Arm-Performance-Libraries/Version_${ARMPL_VERSION}/arm-performance-libraries_${ARMPL_VERSION}_deb_gcc.tar"
             tar xvf "arm-performance-libraries_${ARMPL_VERSION}_deb_gcc.tar"
@@ -390,7 +411,6 @@ build_gemm()
         cp "$lib-build/$lib" "${WDL_ROOT}/" || exit 1
     else
         cpu_vendor=$(grep -m 1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
-        MKL_VERSION="2025.3.0.462"
         wget -nc https://registrationcenter-download.intel.com/akdlm/IRC_NAS/2ad98b49-1fb2-4294-ab3d-6889b434ebd3/intel-onemkl-${MKL_VERSION}_offline.sh
         bash -c "sh ./intel-onemkl-${MKL_VERSION}_offline.sh -a --action install --silent --eula accept --install-dir ./onemkl"
         bash -c "onemkl/modulefiles-setup.sh --output-dir=onemkl/modulefiles"
@@ -398,8 +418,17 @@ build_gemm()
         module load mkl/latest
         clone aocl || echo "Failed to clone aocl"
         cd aocl || exit
-        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_ADDON="aocl_gemm" -DENABLE_MULTITHREADING=ON -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/aocl"
-        cmake --build build --config release --target install -- -j"$(nproc)"
+        # execute the build in a subshell with a new conda build environment
+        (
+            AOCL_BUILD_ENV="aocl_build_env"
+            source_conda
+            conda create --override-channels -y -c conda-forge --force -n "$AOCL_BUILD_ENV" "cmake>=3.26"
+            conda activate "$AOCL_BUILD_ENV"
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_ADDON="aocl_gemm" -DENABLE_MULTITHREADING=ON -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/aocl"
+            cmake --build build --config release --target install -- -j"$(nproc)"
+            conda deactivate
+            conda env remove -n "$AOCL_BUILD_ENV" -y
+        )
         cd .. || exit
         lib='gemm_bench' # reset lib to gemm_bench
         cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-onemkl" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH="${MKLROOT}/lib" && cmake --build "$lib-build-onemkl"
@@ -489,6 +518,7 @@ case "$TARGET" in
         ;;
 esac
 
+cp "${BPKGS_WDL_ROOT}/common.sh" ./
 cp "${BPKGS_WDL_ROOT}/run.sh" ./
 cp "${BPKGS_WDL_ROOT}/run_prod.sh" ./
 cp "${BPKGS_WDL_ROOT}/convert.py" ./
