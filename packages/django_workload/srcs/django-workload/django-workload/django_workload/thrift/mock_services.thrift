@@ -3,6 +3,11 @@
 // Mock Thrift service for DjangoBench V2 - SIMPLIFIED VERSION
 // Minimal structures for performance
 
+include "thrift/annotation/thrift.thrift"
+
+@thrift.AllowLegacyMissingUris
+package;
+
 namespace py mock_services
 
 // ============================================================================
