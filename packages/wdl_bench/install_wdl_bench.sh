@@ -92,10 +92,10 @@ if ! in_conda_env; then
                 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O "${WDL_ROOT}/miniconda3/miniconda.sh" || exit
             fi
             bash -c "sh ${WDL_ROOT}/miniconda3/miniconda.sh -b -u -p ${WDL_ROOT}/miniconda3" || exit
+            # shellcheck disable=SC1091
+            source "${WDL_ROOT}"/miniconda3/etc/profile.d/conda.sh
+            conda tos accept
         fi
-        # shellcheck disable=SC1091
-        source "${WDL_ROOT}"/miniconda3/etc/profile.d/conda.sh
-        conda tos accept
     fi
 fi
 
