@@ -16,6 +16,7 @@ and [loaded-latency](https://github.com/ARM-software/infra-microbenchmarks/tree/
 - Network ping latency (ping)
 - Network bandwidth (iperf3)
 - System calls and scheduling overhead (multi-threaded nanosleep microbench)
+- CPU frequency estimation (aarch64 only)
 
 ## Install HealthCheckBench
 
@@ -78,6 +79,23 @@ The reported total CPU utilization should be under 50%, with the IRQ% portion un
 should be higher than 15k.  If you see very low calls per second per thread and
 high CPU utilization, it's likely you'll encounter performance bottleneck in TaoBench
 due to nanosleep() and/or task scheduling.
+
+### CPU frequency estimation (aarch64 only)
+
+Some ARM platforms don't expose CPU frequency via standard kernel interfaces
+(e.g., `/sys/devices/system/cpu/cpu*/cpufreq/`). This benchmark estimates CPU
+frequency by measuring the execution time of a chain of dependent ADD instructions
+with known 1-cycle latency on ARM Neoverse cores, allowing frequency estimation
+as `freq = instructions / time`.
+
+The benchmark:
+- Pins execution to a specific core (default: core 2)
+- Runs a warmup phase to wake the CPU from idle/sleep states
+- Executes 10^9 dependent ADD instructions
+- Reports the estimated frequency in GHz
+
+Use this to verify the CPU is running at the expected frequency, especially when
+standard frequency monitoring interfaces are unavailable.
 
 ### Sleep Benchmark
 

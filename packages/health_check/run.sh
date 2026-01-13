@@ -64,6 +64,11 @@ if [ "$role" = "server" ]; then
     ./sweep.finedelay.sh $(seq -f "-B%.0f" 0 $(($(nproc)-1))) > /tmp/bw-lat.txt
     ./summarize.sh /tmp/bw-lat.txt > /tmp/bw-lat.tsv
     ./run-200mb.latency-only.sh > /tmp/latency.txt
+    popd
+    # Run CPU frequency estimation benchmark (pinned to core 2 by default)
+    if [ -x "${HEALTH_ROOT}/freq_est/freq_est" ]; then
+      "${HEALTH_ROOT}/freq_est/freq_est" 2
+    fi
   else
     python3 "$HEALTH_ROOT"/mm-mem/scripts/run_cpu_micro.py
   fi

@@ -127,6 +127,22 @@ class HealthCheckParser(Parser):
                 100 - float(metrics["sleepbench"]["idle%"]), 2
             )
 
+    def parse_freq_est(self, line, idx):
+        """Parse CPU frequency estimation benchmark output."""
+        metrics = self.metrics
+        # Look for "Estimated Frequency: X.XXXX GHz"
+        match = re.search(r"Estimated Frequency:\s+([\d.]+)\s+GHz", line)
+        if match:
+            metrics["freq_est"]["estimated_frequency_ghz"] = float(match.group(1))
+        # Look for "Time elapsed: X.XXXXXX seconds"
+        match = re.search(r"Time elapsed:\s+([\d.]+)\s+seconds", line)
+        if match:
+            metrics["freq_est"]["time_elapsed_seconds"] = float(match.group(1))
+        # Look for "Successfully pinned to Core X"
+        match = re.search(r"Successfully pinned to Core\s+(\d+)", line)
+        if match:
+            metrics["freq_est"]["pinned_core"] = int(match.group(1))
+
     def parse_loaded_latency(self):
         if os.path.exists("/tmp/bw-lat.tsv"):
             self.metrics["memory"]["delay_bandwidth_latency"]["loaded_latency"] = []
@@ -168,6 +184,7 @@ class HealthCheckParser(Parser):
         metrics["memory"]["peak_bandwidth_mb_s"] = {}
         metrics["memory"]["idle_latency"] = {}
         metrics["memory"]["delay_bandwidth_latency"] = {}
+        metrics["freq_est"] = {}
         hostname_ping = ""
         hostname_bitrate = ""
 
@@ -195,6 +212,7 @@ class HealthCheckParser(Parser):
                 bitrates[hostname_bitrate] = match.group(1)
 
             self.parse_sleepbench(line, i)
+            self.parse_freq_est(line, i)
 
             if platform.machine() != "aarch64":
                 self.parse_mm_mem(line, i)
