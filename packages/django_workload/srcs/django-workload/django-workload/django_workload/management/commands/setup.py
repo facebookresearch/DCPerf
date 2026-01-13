@@ -394,7 +394,7 @@ class Command(BaseCommand):
 
             # Generate 5-15 messages per thread
             num_messages = random.randint(5, 15)
-            for m in range(num_messages):
+            for _m in range(num_messages):
                 sender_id = random.choice(participants)
                 msg_type = random.choice(message_types)
 
