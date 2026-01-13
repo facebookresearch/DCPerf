@@ -19,12 +19,6 @@ BIN="stream"
 # Change to mem_micro directory
 cd "$MEM_MICRO_DIR" || exit 1
 
-# Check if stream.c exists
-if [ ! -f "$SRC" ]; then
-  echo "ERROR: $SRC not found. Please run install_mem_micro.sh first."
-  exit 1
-fi
-
 # Compile the STREAM benchmark
 echo "Compiling $SRC with stream array size = $ARRAY_SIZE and iterations =$NTIMES..."
 gcc -O -mcmodel=large -DSTREAM_ARRAY_SIZE="$ARRAY_SIZE" -DNTIMES="$NTIMES" "$SRC" -o "$BIN"

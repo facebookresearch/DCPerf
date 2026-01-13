@@ -11,12 +11,6 @@ echo "Cleaning up mem_micro directory..."
 
 cd "$MEM_MICRO_DIR" || exit 1
 
-# Remove downloaded STREAM source
-if [ -f stream.c ]; then
-  echo "Removing stream.c..."
-  rm -f stream.c
-fi
-
 # Remove compiled binaries
 if [ -f stream-super-large-array ]; then
   echo "Removing stream-super-large-array binary..."

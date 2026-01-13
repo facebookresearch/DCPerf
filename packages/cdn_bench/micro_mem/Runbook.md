@@ -31,8 +31,6 @@ sudo ./benchpress_cli.py -b ehw install micro_mem
 ```
 
 - This command installs the benchmark and all required dependencies.
-- The installation script will automatically download the latest STREAM source
-  and set up the environment.
 
 ---
 
@@ -63,8 +61,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_mem:100000000 2" run
 sudo ./benchpress_cli.py -b ehw clean micro_mem
 ```
 
-- This command removes the STREAM source, binaries, and log files from your
-  environment.
+- This command removes the binaries, and log files from your environment.
 - It also cleans up any dependencies installed for the micro_mem job.
 
 ---
