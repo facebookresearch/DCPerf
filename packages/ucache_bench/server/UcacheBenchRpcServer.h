@@ -34,6 +34,10 @@ class UcacheBenchRpcServer {
   explicit UcacheBenchRpcServer(const CpuPinningOptions& cpuPinningOpts);
 
   ~UcacheBenchRpcServer();
+  UcacheBenchRpcServer(const UcacheBenchRpcServer&) = delete;
+  UcacheBenchRpcServer& operator=(const UcacheBenchRpcServer&) = delete;
+  UcacheBenchRpcServer(UcacheBenchRpcServer&&) = delete;
+  UcacheBenchRpcServer& operator=(UcacheBenchRpcServer&&) = delete;
 
   /**
    * Returns the number of IO threads we're configured with
