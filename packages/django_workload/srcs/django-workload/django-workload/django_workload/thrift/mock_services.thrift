@@ -3,10 +3,12 @@
 // Mock Thrift service for DjangoBench V2 - SIMPLIFIED VERSION
 // Minimal structures for performance
 
-include "thrift/annotation/thrift.thrift"
-
-@thrift.AllowLegacyMissingUris
-package;
+// Back out the change in https://github.com/facebookresearch/DCPerf/pull/387
+// Only uncomment the following 4 lines when we upgrade the version of fbthrift
+// include "thrift/annotation/thrift.thrift"
+//
+// @thrift.AllowLegacyMissingUris
+// package;
 
 namespace py mock_services
 

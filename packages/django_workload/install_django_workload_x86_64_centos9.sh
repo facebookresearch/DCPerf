@@ -431,13 +431,13 @@ mkdir -p "${DATASET_DIR}/text"
 mkdir -p "${DATASET_DIR}/binary"
 
 DATASET_DIR2="${DJANGO_SERVER_ROOT}/django_workload/feed_flow/dataset"
-ln -s "${DATASET_DIR}" "${DATASET_DIR2}"
+ln -sf "${DATASET_DIR}" "${DATASET_DIR2}"
 
 DATASET_DIR3="${DJANGO_SERVER_ROOT}/django_workload/reels_tray/dataset"
-ln -s "${DATASET_DIR}" "${DATASET_DIR3}"
+ln -sf "${DATASET_DIR}" "${DATASET_DIR3}"
 
 DATASET_DIR4="${DJANGO_SERVER_ROOT}/django_workload/inbox/dataset"
-ln -s "${DATASET_DIR}" "${DATASET_DIR4}"
+ln -sf "${DATASET_DIR}" "${DATASET_DIR4}"
 
 # Download Silesia Corpus if not already present
 if [ ! -f "${DJANGO_WORKLOAD_ROOT}/silesia.zip" ]; then
