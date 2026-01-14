@@ -59,7 +59,7 @@ if [ "$role" = "server" ]; then
   cpus=$(nproc)
   workers=$(echo "scale=0; $cpus * 2.5" | bc)
   python3 "$HEALTH_ROOT"/sleepbench/collect-cpu-util.py "$HEALTH_ROOT"/sleepbench/sleepbench "$workers" 30
-  if [ "$(uname -p)" = "aarch64" ]; then
+  if [ "$(uname -m)" = "aarch64" ]; then
     pushd "${HEALTH_ROOT}/infra-microbenchmarks/loaded-latency" || exit 1
     ./sweep.finedelay.sh $(seq -f "-B%.0f" 0 $(($(nproc)-1))) > /tmp/bw-lat.txt
     ./summarize.sh /tmp/bw-lat.txt > /tmp/bw-lat.tsv

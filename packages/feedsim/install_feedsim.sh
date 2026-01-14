@@ -33,7 +33,7 @@ die() {
   exit "$code"
 }
 
-ARCH="$(uname -p)"
+ARCH="$(uname -m)"
 if [ "$ARCH" = "aarch64" ]; then
   if distro_is_like ubuntu; then
     "${FEEDSIM_ROOT}"/install_feedsim_aarch64_ubuntu.sh
@@ -43,7 +43,7 @@ if [ "$ARCH" = "aarch64" ]; then
     exit $?
   fi
 fi
-if distro_is_like ubuntu && [ "$(uname -p)" = "x86_64" ]; then
+if distro_is_like ubuntu && [ "$(uname -m)" = "x86_64" ]; then
   "${FEEDSIM_ROOT}"/install_feedsim_ubuntu.sh
   exit $?
 fi

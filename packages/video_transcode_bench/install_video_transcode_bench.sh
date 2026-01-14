@@ -28,7 +28,7 @@ declare -A TAGS=(
 ##################### SYS CONFIG AND DEPS #########################
 
 BPKGS_FFMPEG_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
-ARCH="$(uname -p)"
+ARCH="$(uname -m)"
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_FFMPEG_ROOT/../..")"
 FFMPEG_ROOT="${BENCHPRESS_ROOT}/benchmarks/video_transcode_bench"
 FFMPEG_SOURCE="${FFMPEG_ROOT}/ffmpeg_sources"
