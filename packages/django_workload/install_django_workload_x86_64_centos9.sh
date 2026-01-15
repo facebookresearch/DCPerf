@@ -430,7 +430,7 @@ DATASET_DIR="${DJANGO_SERVER_ROOT}/django_workload/feed_flow/dataset"
 mkdir -p "${DATASET_DIR}/text"
 mkdir -p "${DATASET_DIR}/binary"
 
-DATASET_DIR2="${DJANGO_SERVER_ROOT}/django_workload/feed_flow/dataset"
+DATASET_DIR2="${DJANGO_SERVER_ROOT}/django_workload/clips_discovery/dataset"
 ln -sf "${DATASET_DIR}" "${DATASET_DIR2}"
 
 DATASET_DIR3="${DJANGO_SERVER_ROOT}/django_workload/reels_tray/dataset"
