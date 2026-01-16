@@ -69,3 +69,15 @@ source_conda() {
     # shellcheck disable=SC1090
     source "$conda_sh"
 }
+
+get_git_proxy_args() {
+    : # Replace with your proxy args
+}
+
+get_curl_proxy_args() {
+    : # Replace with your proxy args
+}
+
+get_conda_proxy_args() {
+    : # Replace with your proxy args
+}

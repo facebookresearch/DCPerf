@@ -94,6 +94,8 @@ main() {
 
     local name
     name="none"
+    local score_only
+    score_only=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -101,6 +103,10 @@ main() {
                 [[ -n "$2" ]] || { echo "Invalid option: $1 requires an argument" 1>&2; exit 1; }
                 name="$2"
                 shift 2
+                ;;
+            --score_only)
+                score_only=true
+                shift 1
                 ;;
             -h|--help)
                 show_help >&2
@@ -116,10 +122,6 @@ main() {
     set -u  # Enable unbound variables check from here onwards
     benchreps_tell_state "working on config"
     pushd "${WDL_ROOT}"
-    rm -f out_*.txt out_*.json
-
-    #run
-    benchreps_tell_state "start"
 
     prod_benchmark_candidates=""
     if [ "$name" != "none" ]; then
@@ -142,35 +144,44 @@ main() {
     done
     run_list="${valid_prod_benchmarks[*]}"
 
-    for benchmark in $run_list; do
-        if [ "$benchmark" = "openssl" ]; then
-            export LD_LIBRARY_PATH="${WDL_BUILD}/openssl/lib64:${WDL_BUILD}/openssl/lib"
-            ldconfig
-        fi
-        out_file=""
-        if exec_non_json "${benchmark}"; then
-            out_file="out_${benchmark}.txt"
-        else
-            out_file="out_${benchmark}.json"
-        fi
-        if [ "$benchmark" = "bench-memcmp" ]; then
-            pushd "${WDL_BUILD}/glibc-build"
-            bash -c "./testrun.sh ./benchtests/${benchmark} -- ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${WDL_ROOT}/${out_file}"
-            popd
-        else
-            ENV_VARS=""
-            if [ "$benchmark" = "gemm_bench" ]; then
-                ENV_VARS="OMP_NUM_THREADS=1"
-            fi
-            bash -c "${ENV_VARS} ./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
-        fi
-        if [ "$benchmark" = "openssl" ]; then
-            unset LD_LIBRARY_PATH
-            ldconfig
-        fi
-    done
+    if [ "$score_only" = false ]; then
+        #run
+        benchreps_tell_state "start"
 
-    benchreps_tell_state "done"
+        for benchmark in $run_list; do
+            # Remove old results
+            rm -f "out_${benchmark}.txt" "out_${benchmark}.json"
+
+            if [ "$benchmark" = "openssl" ]; then
+                export LD_LIBRARY_PATH="${WDL_BUILD}/openssl/lib64:${WDL_BUILD}/openssl/lib"
+                ldconfig
+            fi
+            out_file=""
+            if exec_non_json "${benchmark}"; then
+                out_file="out_${benchmark}.txt"
+            else
+                out_file="out_${benchmark}.json"
+            fi
+            if [ "$benchmark" = "bench-memcmp" ]; then
+                pushd "${WDL_BUILD}/glibc-build"
+                bash -c "./testrun.sh ./benchtests/${benchmark} -- ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${WDL_ROOT}/${out_file}"
+                popd
+            else
+                ENV_VARS=""
+                if [ "$benchmark" = "gemm_bench" ]; then
+                    ENV_VARS="OMP_NUM_THREADS=1"
+                fi
+                bash -c "${ENV_VARS} ./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
+            fi
+            if [ "$benchmark" = "openssl" ]; then
+                unset LD_LIBRARY_PATH
+                ldconfig
+            fi
+        done
+
+        benchreps_tell_state "done"
+    fi
+
     #generate output
     if [ -f "${result_filename}" ]; then
         rm "${result_filename}"
@@ -179,21 +190,12 @@ main() {
     echo "benchmark results:" "$run_list" | tee -a "${result_filename}"
     echo "---------------------------------------------" | tee -a "${result_filename}"
 
-    # Execute scoring in a subshell to guarantee numpy availability
-    (
-        WDL_RUN_ENV="wdl_run_env"
-        source_conda
-        conda create --override-channels -y -c conda-forge --force -n "$WDL_RUN_ENV" python numpy
-        conda activate "$WDL_RUN_ENV"
-        for benchmark in $run_list; do
-            if exec_non_json "${benchmark}"; then
-                python3 ./convert.py "$benchmark"
-            fi
-            python3 ./scoring.py "$benchmark" | tee -a "${result_filename}"
-        done
-        conda deactivate
-        conda env remove -n "$WDL_RUN_ENV" -y
-    )
+    for benchmark in $run_list; do
+        if exec_non_json "${benchmark}"; then
+            python3 ./convert.py "$benchmark"
+        fi
+        python3 ./scoring.py "$benchmark" | tee -a "${result_filename}"
+    done
 
     echo "---------------------------------------------" | tee -a "${result_filename}"
     echo "detailed results in each individual json file." | tee -a "${result_filename}"

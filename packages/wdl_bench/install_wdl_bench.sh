@@ -61,10 +61,10 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
     flex bison gfortran nasm clang gcc g++ patch git libssl-dev libc6-dev \
     tar unzip perl openssl python3-dev gawk libstdc++6 python3-numpy \
     glibc-source libbenchmark-dev environment-modules libopenblas-dev \
-    pkg-config
+    pkg-config curl
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  dnf install -y cmake autoconf automake flex bison gfortran \
+  dnf install -y cmake autoconf automake flex bison gfortran curl \
     meson nasm clang gcc g++ patch glibc-static libstdc++-static \
     git tar unzip perl openssl-devel python3-devel gawk python3-numpy \
     dnf-plugins-core rpm-build audit-libs-devel gd-devel gdb \
@@ -87,9 +87,11 @@ if ! in_conda_env; then
             echo "Installing miniconda."
             mkdir -p "${WDL_ROOT}/miniconda3"
             if [ "$ARCH" = "aarch64" ]; then
-                wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O "${WDL_ROOT}/miniconda3/miniconda.sh" || exit
+                # shellcheck disable=SC2046
+                curl $(get_curl_proxy_args) -o "${WDL_ROOT}/miniconda3/miniconda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh || exit
             else
-                wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O "${WDL_ROOT}/miniconda3/miniconda.sh" || exit
+                # shellcheck disable=SC2046
+                curl $(get_curl_proxy_args) -o "${WDL_ROOT}/miniconda3/miniconda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh || exit
             fi
             bash -c "sh ${WDL_ROOT}/miniconda3/miniconda.sh -b -u -p ${WDL_ROOT}/miniconda3" || exit
             # shellcheck disable=SC1091
@@ -110,7 +112,8 @@ clone()
 {
     lib=$1
     repo=${REPOS[$lib]}
-    if ! git clone "${repo}" "${lib}" 2>/dev/null && [ -d "${lib}" ]; then
+    # shellcheck disable=SC2046
+    if ! git $(get_git_proxy_args) clone "${repo}" "${lib}" 2>/dev/null && [ -d "${lib}" ]; then
         echo "Clone failed because the folder ${lib} exists"
         return 1
     fi
@@ -129,7 +132,8 @@ download_dataset()
     dataset="$1"
     pushd "${WDL_DATASETS}"
     link=${DATASETS[$dataset]}
-    wget "${link}" || exit 1
+    # shellcheck disable=SC2046
+    curl $(get_curl_proxy_args) -O "${link}" || exit 1
 
     popd || exit
 }
@@ -147,7 +151,8 @@ build_folly()
     (
         FBENV="folly_build_env"
         source_conda
-        conda create --override-channels -y -c conda-forge --force -n "$FBENV" "python=3.12" "numpy<2"
+        # shellcheck disable=SC2046,SC2086
+        env $(get_conda_proxy_args) conda create --override-channels -y -c conda-forge --force -n "$FBENV" "python=3.12" "numpy<2"
         conda activate "$FBENV"
         python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
         python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}"
@@ -233,11 +238,13 @@ build_libaegis()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     if [ "$ARCH" = "aarch64" ]; then
-        wget https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz
+        # shellcheck disable=SC2046
+        curl $(get_curl_proxy_args) -O https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz
         tar xvf zig-aarch64-linux-0.15.2.tar.xz
         mv zig-aarch64-linux-0.15.2 zig
     else
-        wget https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+        # shellcheck disable=SC2046
+        curl $(get_curl_proxy_args) -O https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
         tar xvf zig-x86_64-linux-0.15.2.tar.xz
         mv zig-x86_64-linux-0.15.2 zig
     fi
@@ -396,11 +403,13 @@ build_gemm()
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DARM_COMPUTE_BUILD_SHARED_LIB=ON -DARM_COMPUTE_ENABLE_OPENMP=ON -DACL_MULTI_ISA=ON -DACL_BUILD_SVE=ON -DACL_BUILD_SVE2=ON -DACL_BUILD_SME2=ON -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/acl" && cmake --build build --config release --target install -- -j"$(nproc)"
         cd .. || exit
         if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-            wget -nc "https://developer.arm.com/-/cdn-downloads/permalink/Arm-Performance-Libraries/Version_${ARMPL_VERSION}/arm-performance-libraries_${ARMPL_VERSION}_deb_gcc.tar"
+            # shellcheck disable=SC2046
+            curl $(get_curl_proxy_args) -O "https://developer.arm.com/-/cdn-downloads/permalink/Arm-Performance-Libraries/Version_${ARMPL_VERSION}/arm-performance-libraries_${ARMPL_VERSION}_deb_gcc.tar"
             tar xvf "arm-performance-libraries_${ARMPL_VERSION}_deb_gcc.tar"
             bash -c "./arm-performance-libraries_${ARMPL_VERSION}_deb/arm-performance-libraries_${ARMPL_VERSION}_deb.sh --accept --install-to ./apl"
         elif [ "$LINUX_DIST_ID" = "centos" ]; then
-            wget -nc "https://developer.arm.com/-/cdn-downloads/permalink/Arm-Performance-Libraries/Version_${ARMPL_VERSION}/arm-performance-libraries_${ARMPL_VERSION}_rpm_gcc.tar"
+            # shellcheck disable=SC2046
+            curl $(get_curl_proxy_args) -O "https://developer.arm.com/-/cdn-downloads/permalink/Arm-Performance-Libraries/Version_${ARMPL_VERSION}/arm-performance-libraries_${ARMPL_VERSION}_rpm_gcc.tar"
             tar xvf "arm-performance-libraries_${ARMPL_VERSION}_rpm_gcc.tar"
             bash -c "./arm-performance-libraries_${ARMPL_VERSION}_rpm/arm-performance-libraries_${ARMPL_VERSION}_rpm.sh --accept --install-to ./apl"
         fi
@@ -411,7 +420,8 @@ build_gemm()
         cp "$lib-build/$lib" "${WDL_ROOT}/" || exit 1
     else
         cpu_vendor=$(grep -m 1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
-        wget -nc https://registrationcenter-download.intel.com/akdlm/IRC_NAS/2ad98b49-1fb2-4294-ab3d-6889b434ebd3/intel-onemkl-${MKL_VERSION}_offline.sh
+        # shellcheck disable=SC2046,SC2086
+        curl $(get_curl_proxy_args) -O https://registrationcenter-download.intel.com/akdlm/IRC_NAS/2ad98b49-1fb2-4294-ab3d-6889b434ebd3/intel-onemkl-${MKL_VERSION}_offline.sh
         bash -c "sh ./intel-onemkl-${MKL_VERSION}_offline.sh -a --action install --silent --eula accept --install-dir ./onemkl"
         bash -c "onemkl/modulefiles-setup.sh --output-dir=onemkl/modulefiles"
         module use onemkl/modulefiles
@@ -422,7 +432,8 @@ build_gemm()
         (
             AOCL_BUILD_ENV="aocl_build_env"
             source_conda
-            conda create --override-channels -y -c conda-forge --force -n "$AOCL_BUILD_ENV" "cmake>=3.26"
+            # shellcheck disable=SC2046,SC2086
+            env $(get_conda_proxy_args) conda create --override-channels -y -c conda-forge --force -n "$AOCL_BUILD_ENV" "cmake>=3.26"
             conda activate "$AOCL_BUILD_ENV"
             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_ADDON="aocl_gemm" -DENABLE_MULTITHREADING=ON -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/aocl"
             cmake --build build --config release --target install -- -j"$(nproc)"

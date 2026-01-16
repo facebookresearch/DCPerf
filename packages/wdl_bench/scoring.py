@@ -6,41 +6,64 @@
 
 
 import json
+import math
 import sys
 from typing import Any
 
-import numpy as np
-
-sum_c = {}
-
-if len(sys.argv) != 2:
-    print("scoring.py benchmark_name")
-    sys.exit(-1)
-
 
 def weighted_geomean(values: list[float], weights: list[float]) -> float:
-    return np.exp(np.average(np.log(np.array(values)), weights=weights))
+    """Compute weighted geometric mean without numpy.
+    Requires:
+      - len(values) == len(weights) > 0
+      - all values > 0
+      - all weights >= 0
+      - sum(weights) > 0
+    """
+    if not values:
+        raise ValueError("values must be non-empty")
+    if len(values) != len(weights):
+        raise ValueError("values and weights must have the same length")
+    total_weight = 0.0
+    weighted_log_sum = 0.0
+    for v, w in zip(values, weights):
+        if v <= 0:
+            raise ValueError("all values must be > 0 for geometric mean")
+        if w < 0:
+            raise ValueError("all weights must be >= 0")
+        total_weight += w
+        weighted_log_sum += w * math.log(v)
+    if total_weight <= 0:
+        raise ValueError("sum of weights must be > 0")
+    return math.exp(weighted_log_sum / total_weight)
 
 
 def geomean(values: list[float]) -> float:
-    return np.exp(np.mean(np.log(np.array(values))))
+    """Compute geometric mean without numpy.
+    Requires:
+      - len(values) > 0
+      - all values > 0
+    """
+    if not values:
+        raise ValueError("values must be non-empty")
+    log_sum = 0.0
+    for v in values:
+        if v <= 0:
+            raise ValueError("all values must be > 0 for geometric mean")
+        log_sum += math.log(v)
+    return math.exp(log_sum / len(values))
 
 
-def max(values: list[float]) -> float:
-    return float(np.max(np.array(values)))
+def max_value(values: list[float]) -> float:
+    """Return maximum value from a list."""
+    if not values:
+        raise ValueError("values must be non-empty")
+    return max(values)
 
-
-benchmark_name = sys.argv[1]
-
-input_file_name = "out_" + benchmark_name + ".json"
-
-baseline_name = "baseline_results/baseline_" + benchmark_name + ".json"
 
 # For sleef, we use the benchsleef256 results collected on
 # Intel Cooperlake as the baseline since AVX512 may not be enabled
 # on many prod servers.
-if benchmark_name.startswith("benchsleef"):
-    baseline_name = "baseline_results/baseline_benchsleef256.json"
+baseline_sleef_vec_width = 256
 
 
 def generate_sleef_benchmark_name(
@@ -80,7 +103,9 @@ def extract_gbench_metric(
     return results
 
 
-def calculate_sleef_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
+def compute_sleef_score(
+    benchmark_name: str, sum_baseline: dict[str, Any], sum_c: dict[str, Any]
+) -> float:
     # Function name, value range
     math_functions = [["expf", "-700_700"], ["logf", "0_1e+38"]]
     math_function_weights = [80, 20]
@@ -88,7 +113,9 @@ def calculate_sleef_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -
     baseline_names = []
     for math_function in math_functions:
         baseline_names.append(
-            generate_sleef_benchmark_name(math_function[0], 512, math_function[1])
+            generate_sleef_benchmark_name(
+                math_function[0], baseline_sleef_vec_width, math_function[1]
+            )
         )
 
     baseline_time = weighted_geomean(
@@ -226,9 +253,7 @@ def get_memcmp_variant_names(data: dict[str, Any]) -> list[str]:
     return []
 
 
-def calculate_memcmp_score(
-    sum_baseline: dict[str, Any], sum_c: dict[str, Any]
-) -> float:
+def compute_memcmp_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
     # Use AVX512 memcmp as the baseline since it is the fastest variant
     # in baseline.
     baseline_time = calculate_memcmp_geomean_by_range(
@@ -242,9 +267,7 @@ def calculate_memcmp_score(
     return baseline_time / min_time
 
 
-def calculate_stdcpp_score(
-    sum_baseline: dict[str, Any], sum_c: dict[str, Any]
-) -> float:
+def compute_stdcpp_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
     """
     Calculate stdcpp_bench score using weighted geometric mean.
 
@@ -267,7 +290,7 @@ def calculate_stdcpp_score(
     return baseline_geomean / current_geomean
 
 
-def calculate_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
+def compute_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
     """
     Calculate gemm_bench score based on peak flops.
 
@@ -280,14 +303,14 @@ def calculate_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) ->
     """
 
     baseline_peak_ops = [
-        max(extract_gbench_metric(sum_baseline, ["BM_SGEMM"], "FLOPS", True)),
-        max(extract_gbench_metric(sum_baseline, ["BM_BF16GEMM"], "FLOPS", True)),
-        max(extract_gbench_metric(sum_baseline, ["BM_I8GEMM"], "TOPS", True)),
+        max_value(extract_gbench_metric(sum_baseline, ["BM_SGEMM"], "FLOPS", True)),
+        max_value(extract_gbench_metric(sum_baseline, ["BM_BF16GEMM"], "FLOPS", True)),
+        max_value(extract_gbench_metric(sum_baseline, ["BM_I8GEMM"], "TOPS", True)),
     ]
     current_peak_ops = [
-        max(extract_gbench_metric(sum_c, ["BM_SGEMM"], "FLOPS", True)),
-        max(extract_gbench_metric(sum_c, ["BM_BF16GEMM"], "FLOPS", True)),
-        max(extract_gbench_metric(sum_c, ["BM_I8GEMM"], "TOPS", True)),
+        max_value(extract_gbench_metric(sum_c, ["BM_SGEMM"], "FLOPS", True)),
+        max_value(extract_gbench_metric(sum_c, ["BM_BF16GEMM"], "FLOPS", True)),
+        max_value(extract_gbench_metric(sum_c, ["BM_I8GEMM"], "TOPS", True)),
     ]
 
     try:
@@ -295,10 +318,10 @@ def calculate_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) ->
         # an exception is thrown and we don't add BM_HGEMM to the list of peak
         # baseline ops.
         current_peak_ops.append(
-            max(extract_gbench_metric(sum_c, ["BM_HGEMM"], "FLOPS", True))
+            max_value(extract_gbench_metric(sum_c, ["BM_HGEMM"], "FLOPS", True))
         )
         baseline_peak_ops.append(
-            max(extract_gbench_metric(sum_baseline, ["BM_HGEMM"], "FLOPS", True))
+            max_value(extract_gbench_metric(sum_baseline, ["BM_HGEMM"], "FLOPS", True))
         )
     except Exception:
         pass
@@ -306,87 +329,182 @@ def calculate_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) ->
     return geomean(current_peak_ops) / geomean(baseline_peak_ops)
 
 
-with open(input_file_name) as f:
-    with open(baseline_name) as f_baseline:
-        sum_c = json.load(f)
-        sum_baseline = json.load(f_baseline)
-
-        scores = []
-        score = 0
-
-        if benchmark_name == "memcpy_benchmark":
-            for low, high in [
-                ("0", "7"),
-                ("8", "16"),
-                ("16", "32"),
-                ("32", "256"),
-                ("256", "1024"),
-                ("1024", "8192"),
-                ("8192", "32768"),
-            ]:
-                scores.append(
-                    (
-                        sum_c["%bench(" + low + "_to_" + high + "_COLD_folly)"]
-                        / sum_baseline["%bench(" + low + "_to_" + high + "_COLD_folly)"]
-                        + sum_c["%bench(" + low + "_to_" + high + "_HOT_folly)"]
-                        / sum_baseline["%bench(" + low + "_to_" + high + "_HOT_folly)"]
-                    )
-                    / 2
-                )
-            weights = np.array([1, 1.38, 1.02, 0.61, 0.33, 0.05, 0.01])
-            score = weighted_geomean(scores, weights)
-        elif benchmark_name == "memset_benchmark":
-            size = 1
-            while size <= 32768:
-                scores.append(
-                    sum_c["folly::__folly_memset: size=" + str(size)]
-                    / sum_baseline["folly::__folly_memset: size=" + str(size)]
-                )
-                size *= 2
-            weights = np.array(
-                [
-                    1,
-                    6.38,
-                    13.41,
-                    64.81,
-                    52.82,
-                    12.3,
-                    13.48,
-                    11.8,
-                    4.79,
-                    4.8,
-                    4.72,
-                    2.1,
-                    0.85,
-                    0.45,
-                    0.1,
-                    0.06,
-                ]
+def compute_memcpy_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
+    scores = []
+    for low, high in [
+        ("0", "7"),
+        ("8", "16"),
+        ("16", "32"),
+        ("32", "256"),
+        ("256", "1024"),
+        ("1024", "8192"),
+        ("8192", "32768"),
+    ]:
+        scores.append(
+            (
+                sum_baseline["%bench(" + low + "_to_" + high + "_COLD_folly)"]
+                / sum_c["%bench(" + low + "_to_" + high + "_COLD_folly)"]
+                + sum_baseline["%bench(" + low + "_to_" + high + "_HOT_folly)"]
+                / sum_c["%bench(" + low + "_to_" + high + "_HOT_folly)"]
             )
-            score = weighted_geomean(scores, weights)
-        elif benchmark_name == "xxhash_benchmark":
-            res_large = sum_c["large_inputs"]["xxh3"]
-            res_baseline = sum_baseline["large_inputs"]["xxh3"]
-            for key in res_large:
-                scores.append(res_large[key] / res_baseline[key])
-            score = geomean(np.array(scores))
-        elif benchmark_name == "concurrency_concurrent_hash_map_bench":
-            for key in sum_baseline:
-                if key in sum_c:
-                    scores.append(sum_baseline[key] / sum_c[key])
-            score = geomean(np.array(scores))
-        elif benchmark_name.startswith("benchsleef"):
-            score = calculate_sleef_score(sum_baseline, sum_c)
-        elif benchmark_name == "bench-memcmp":
-            score = calculate_memcmp_score(sum_baseline, sum_c)
-        elif benchmark_name == "stdcpp_bench":
-            score = calculate_stdcpp_score(sum_baseline, sum_c)
-        elif benchmark_name == "gemm_bench":
-            score = calculate_gemm_score(sum_baseline, sum_c)
-        else:
-            for key in sum_baseline:
-                if key in sum_c:
-                    scores.append(sum_c[key] / sum_baseline[key])
-            score = geomean(np.array(scores))
+            / 2
+        )
+    weights = [1, 1.38, 1.02, 0.61, 0.33, 0.05, 0.01]
+    score = weighted_geomean(scores, weights)
+    return score
 
-print(benchmark_name + f" score: {score:.2f}")
+
+def compute_memset_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
+    scores = []
+    size = 1
+    while size <= 32768:
+        scores.append(
+            sum_baseline["folly::__folly_memset: size=" + str(size)]
+            / sum_c["folly::__folly_memset: size=" + str(size)]
+        )
+        size *= 2
+    weights = [
+        1,
+        6.38,
+        13.41,
+        64.81,
+        52.82,
+        12.3,
+        13.48,
+        11.8,
+        4.79,
+        4.8,
+        4.72,
+        2.1,
+        0.85,
+        0.45,
+        0.1,
+        0.06,
+    ]
+    score = weighted_geomean(scores, weights)
+    return score
+
+
+def compute_xxhash_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
+    scores = []
+    res_large = sum_c["large_inputs"]["xxh3"]
+    res_baseline = sum_baseline["large_inputs"]["xxh3"]
+    for key in res_large:
+        scores.append(res_large[key] / res_baseline[key])
+    score = geomean(scores)
+    return score
+
+
+def compute_score_from_time(
+    sum_baseline: dict[str, Any],
+    sum_c: dict[str, Any],
+    skip_set: set[str] | None = None,
+) -> float:
+    if skip_set is None:
+        skip_set = set()
+    scores = []
+    for key in sum_baseline:
+        if key in sum_c and key not in skip_set:
+            scores.append(sum_baseline[key] / sum_c[key])
+    score = geomean(scores)
+    return score
+
+
+def compute_score_from_rate(
+    sum_baseline: dict[str, Any],
+    sum_c: dict[str, Any],
+    skip_set: set[str] | None = None,
+) -> float:
+    if skip_set is None:
+        skip_set = set()
+    scores = []
+    for key in sum_baseline:
+        if key in sum_c and key not in skip_set:
+            scores.append(sum_c[key] / sum_baseline[key])
+    score = geomean(scores)
+    return score
+
+
+def compute_benchmark_score(
+    benchmark_name: str, input_file_name: str, baseline_name: str
+) -> float:
+    with open(input_file_name) as f:
+        with open(baseline_name) as f_baseline:
+            sum_c = json.load(f)
+            sum_baseline = json.load(f_baseline)
+            if benchmark_name == "memcpy_benchmark":
+                score = compute_memcpy_score(sum_baseline, sum_c)
+            elif benchmark_name == "memset_benchmark":
+                score = compute_memset_score(sum_baseline, sum_c)
+            elif benchmark_name == "xxhash_benchmark":
+                score = compute_xxhash_score(sum_baseline, sum_c)
+            elif benchmark_name.startswith("benchsleef"):
+                score = compute_sleef_score(benchmark_name, sum_baseline, sum_c)
+            elif benchmark_name == "bench-memcmp":
+                score = compute_memcmp_score(sum_baseline, sum_c)
+            elif benchmark_name == "stdcpp_bench":
+                score = compute_stdcpp_score(sum_baseline, sum_c)
+            elif benchmark_name == "gemm_bench":
+                score = compute_gemm_score(sum_baseline, sum_c)
+            elif benchmark_name == "vdso_bench":
+                # Some Linux kernels may not support these clocks, so do not
+                # count them in the score.
+                skip_set = {"CLOCK_BOOTTIME_ALARM: M/s", "CLOCK_REALTIME_ALARM: M/s"}
+                score = compute_score_from_rate(sum_baseline, sum_c, skip_set)
+            elif benchmark_name in {
+                "lzbench",
+                "openssl",
+                "erasure_code_perf",
+                "libaegis_benchmark",
+            }:
+                score = compute_score_from_rate(sum_baseline, sum_c)
+            elif benchmark_name in {
+                "hash_hash_benchmark",
+                "hash_checksum_benchmark",
+                "random_benchmark",
+                "concurrency_concurrent_hash_map_bench",
+                "container_hash_maps_bench",
+                "ProtocolBench",
+                "VarintUtilsBench",
+                "synchronization_small_locks_benchmark",
+                "synchronization_lifo_sem_bench",
+                "benchsleef128",
+            }:
+                score = compute_score_from_time(sum_baseline, sum_c)
+            else:
+                # N.B.: if you add a new benchmark, double-check if the results are time
+                #       or rates. Call compute_score_from_time or compute_score_from_rate
+                #       accordingly.
+                print(
+                    f"{benchmark_name} score: error (unclear if results are time or rates)"
+                )
+                sys.exit(0)  # return 0 so run_prod.sh can continue
+
+    return score
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        print("scoring.py benchmark_name")
+        sys.exit(-1)
+
+    benchmark_name = sys.argv[1]
+    input_file_name = "out_" + benchmark_name + ".json"
+    if benchmark_name.startswith("benchsleef"):
+        baseline_name = "baseline_results/baseline_benchsleef{}.json".format(
+            baseline_sleef_vec_width
+        )
+    else:
+        baseline_name = "baseline_results/baseline_" + benchmark_name + ".json"
+
+    try:
+        score = compute_benchmark_score(benchmark_name, input_file_name, baseline_name)
+    except Exception as e:
+        print(f"{benchmark_name} score: error ({e})")
+        sys.exit(0)  # return 0 so run_prod.sh can continue
+
+    print(f"{benchmark_name} score: {score:.2f}")
+
+
+if __name__ == "__main__":
+    main()
