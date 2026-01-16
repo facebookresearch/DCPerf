@@ -9,8 +9,14 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
 endif()
 
 target_compile_definitions(folly_memcpy_obj PRIVATE FOLLY_MEMCPY_IS_MEMCPY)
-target_compile_options(folly_memcpy_obj PRIVATE
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    target_compile_options(folly_memcpy_obj PRIVATE
     -mavx2 -march=haswell)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    target_compile_options(folly_memcpy_obj PRIVATE
+    -march=armv8.5-a+sve2
+    -mcpu=native)
+endif()
 
 # Data objects library
 add_library(data_objects DataObjects.cpp)

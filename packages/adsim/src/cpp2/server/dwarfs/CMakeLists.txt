@@ -20,12 +20,19 @@ add_library(gemm GEMM.cc GEMM.h
     ${FBGEMM_SRC_DIR}/test/QuantizationHelpers.cc
 )
 
-target_compile_options(gemm PRIVATE
-    ${COROUTINES_FLAG}
-    -m64
-    -mavx2
-    -mfma
-    -masm=intel)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    target_compile_options(gemm PRIVATE
+        ${COROUTINES_FLAG}
+        -m64
+        -mavx2
+        -mfma
+        -masm=intel)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    target_compile_options(gemm PRIVATE
+        ${COROUTINES_FLAG}
+        -march=armv8.5-a+sve2
+        -mcpu=native)
+endif()
 target_link_directories(gemm
     PUBLIC
         ${ADSIM_STAGING_DIR}/include
@@ -40,12 +47,19 @@ add_dependencies(gemm fbgemm)
 
 add_library(embedding Embedding.cc Embedding.h)
 
-target_compile_options(embedding PRIVATE
-    ${COROUTINES_FLAG}
-    -m64
-    -mavx2
-    -mfma
-    -masm=intel)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    target_compile_options(gemm PRIVATE
+        ${COROUTINES_FLAG}
+        -m64
+        -mavx2
+        -mfma
+        -masm=intel)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    target_compile_options(gemm PRIVATE
+        ${COROUTINES_FLAG}
+        -march=armv8.5-a+sve2
+        -mcpu=native)
+endif()
 target_link_directories(embedding
     PUBLIC
         ${ADSIM_STAGING_DIR}/include
