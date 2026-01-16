@@ -10,8 +10,6 @@ GLIBC_VERSION=$(getconf GNU_LIBC_VERSION | cut -f 2 -d\  )
 ##################### BENCHMARK CONFIG #########################
 
 declare -A REPOS=(
-    ['folly']='https://github.com/facebook/folly.git'
-    ['fbthrift']='https://github.com/facebook/fbthrift.git'
     ['lzbench']='https://github.com/inikep/lzbench.git'
     ['openssl']='https://github.com/openssl/openssl.git'
     ['vdso']='https://github.com/leitao/debug.git'
@@ -26,8 +24,6 @@ declare -A REPOS=(
 )
 
 declare -A TAGS=(
-    ['folly']='v2026.01.05.00'
-    ['fbthrift']='v2026.01.05.00'
     ['lzbench']='v2.2'
     ['openssl']='openssl-3.6.0'
     ['vdso']='a90085a8e4e1e07a93cc45a68da246fa98a9f831'
@@ -61,7 +57,7 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
     flex bison gfortran nasm clang gcc g++ patch git libssl-dev libc6-dev \
     tar unzip perl openssl python3-dev gawk libstdc++6 python3-numpy \
     glibc-source libbenchmark-dev environment-modules libopenblas-dev \
-    pkg-config
+    pkg-config ninja-build libgtest-dev
 
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y cmake autoconf automake flex bison gfortran \
@@ -69,7 +65,8 @@ elif [ "$LINUX_DIST_ID" = "centos" ]; then
     git tar unzip perl openssl-devel python3-devel gawk python3-numpy \
     dnf-plugins-core rpm-build audit-libs-devel gd-devel gdb \
     libcap-devel libpng-devel libselinux-devel texinfo valgrind \
-    google-benchmark-devel environment-modules openblas-devel pkg-config
+    google-benchmark-devel environment-modules openblas-devel pkg-config \
+    ninja-build gtest-devel
 
 fi
 
@@ -105,6 +102,18 @@ folly_benchmark_list="concurrency_concurrent_hash_map_bench hash_hash_benchmark 
 
 fbthrift_benchmark_list="ProtocolBench VarintUtilsBench"
 
+# Pin Facebook library versions for reproducible builds
+# Note: Facebook OSS libraries are released together with matching version tags
+FOLLY_VERSION=v2026.01.05.00
+FIZZ_VERSION=v2026.01.05.00
+WANGLE_VERSION=v2026.01.05.00
+MVFST_VERSION=v2026.01.05.00
+FBTHRIFT_VERSION=v2026.01.05.00
+
+# Staging directory for installed dependencies
+STAGING_DIR="${WDL_BUILD}/installed"
+DEPS_DIR="${WDL_BUILD}/deps"
+
 
 clone()
 {
@@ -135,50 +144,150 @@ download_dataset()
 }
 
 
+# Generic function to build Facebook C++ dependencies using CMAKE
+# Arguments:
+#   $1: dep_name - Name of the dependency (e.g., "folly", "fbthrift")
+#   $2: repo_url - Git repository URL
+#   $3: version - Git tag/version to checkout (optional, uses default branch if empty)
+#   $4: cmake_source_subdir - (Optional) Subdirectory containing CMakeLists.txt, defaults to "."
+#   $5: extra_cmake_args - (Optional) Additional cmake arguments
+build_dependency()
+{
+    local dep_name="$1"
+    local repo_url="$2"
+    local version="${3:-}"
+    local cmake_source_subdir="${4:-.}"
+    local extra_cmake_args="${5:-}"
+
+    echo ""
+    echo "====================================================================="
+    echo "Building and Installing ${dep_name}"
+    echo "====================================================================="
+
+    local DEP_DIR="${DEPS_DIR}/${dep_name}"
+    local BUILD_DIR="${DEP_DIR}/_build"
+
+    # Clone repository if not already present (use --recursive to get submodules)
+    if [ ! -d "$DEP_DIR" ]; then
+        echo "Cloning ${dep_name} repo..."
+        git clone --recursive "${repo_url}" "$DEP_DIR"
+    fi
+
+    cd "$DEP_DIR" || exit
+
+    # Only checkout specific version if provided
+    if [ -n "${version}" ]; then
+        git fetch --tags
+        git checkout "${version}"
+        # Re-initialize submodules after checkout (needed for folly's build/fbcode_builder)
+        git submodule update --init --recursive
+    fi
+
+    echo "Building ${dep_name}..."
+    rm -rf "$BUILD_DIR"
+    mkdir -p "$BUILD_DIR"
+    cd "$BUILD_DIR" || exit
+
+    # Create conformance directory for fbthrift (workaround for test generation)
+    if [ "${dep_name}" = "fbthrift" ]; then
+        mkdir -p "${BUILD_DIR}/thrift/conformance/if"
+    fi
+
+    # Determine the source directory for cmake
+    local cmake_source_path
+    if [ "${cmake_source_subdir}" = "." ]; then
+        cmake_source_path=".."
+    else
+        cmake_source_path="../${cmake_source_subdir}"
+    fi
+
+    # Configure with CMAKE
+    # shellcheck disable=SC2086
+    cmake \
+        -DCMAKE_PREFIX_PATH="${STAGING_DIR}" \
+        -DCMAKE_INSTALL_PREFIX="${STAGING_DIR}" \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_CXX_STANDARD=20 \
+        -DBUILD_TESTS=OFF \
+        $extra_cmake_args \
+        "${cmake_source_path}"
+
+    local cmake_status="$?"
+    if [ "$cmake_status" -ne 0 ]; then
+        echo "CMAKE configuration for ${dep_name} failed!"
+        exit $cmake_status
+    fi
+
+    # Build with make
+    make -j "$JOBS"
+
+    local build_status="$?"
+    if [ "$build_status" -ne 0 ]; then
+        echo "${dep_name} build failed!"
+        exit $build_status
+    fi
+
+    # Install
+    make install
+
+    local install_status="$?"
+    if [ "$install_status" -eq 0 ]; then
+        echo "${dep_name} is installed"
+    else
+        echo "${dep_name} install failed!"
+        exit $install_status
+    fi
+
+    cd "${WDL_BUILD}" || exit
+}
+
 
 build_folly()
 {
-    lib='folly'
-    pushd "${WDL_SOURCE}"
-    clone "$lib" || echo "Failed to clone $lib"
-    cd "$lib" || exit
+    mkdir -p "${DEPS_DIR}"
 
-    # execute the build in a subshell with a new conda build environment
-    (
-        FBENV="folly_build_env"
-        source_conda
-        conda create --override-channels -y -c conda-forge --force -n "$FBENV" "python=3.12" "numpy<2"
-        conda activate "$FBENV"
-        python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
-        python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}"
-        conda deactivate
-        conda env remove -n "$FBENV" -y
-    )
+    # Build fmt first as prerequisite
+    build_dependency "fmt" "https://github.com/fmtlib/fmt.git" "" "." "-DFMT_DOC=OFF -DFMT_TEST=OFF"
 
+    # Build folly
+    build_dependency "folly" "https://github.com/facebook/folly.git" "${FOLLY_VERSION}"
+
+    # Copy benchmarks
     for benchmark in $folly_benchmark_list; do
-      cp "$WDL_BUILD/build/folly/$benchmark" "$WDL_ROOT/$benchmark"
+      if [ -f "${DEPS_DIR}/folly/_build/$benchmark" ]; then
+        cp "${DEPS_DIR}/folly/_build/$benchmark" "$WDL_ROOT/$benchmark"
+      elif [ -f "${DEPS_DIR}/folly/_build/folly/$benchmark" ]; then
+        cp "${DEPS_DIR}/folly/_build/folly/$benchmark" "$WDL_ROOT/$benchmark"
+      else
+        echo "Warning: Could not find benchmark $benchmark"
+      fi
     done
-
-    popd || exit
 }
 
 
 build_fbthrift()
 {
-    lib='fbthrift'
-    pushd "${WDL_SOURCE}"
-    clone "$lib" || echo "Failed to clone $lib"
-    cd "$lib" || exit
+    mkdir -p "${DEPS_DIR}"
 
-    ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
+    # Build all prerequisites in order
+    build_dependency "fmt" "https://github.com/fmtlib/fmt.git" "" "." "-DFMT_DOC=OFF -DFMT_TEST=OFF"
+    build_dependency "folly" "https://github.com/facebook/folly.git" "${FOLLY_VERSION}"
+    build_dependency "fizz" "https://github.com/facebookincubator/fizz.git" "${FIZZ_VERSION}" "fizz"
+    build_dependency "wangle" "https://github.com/facebook/wangle.git" "${WANGLE_VERSION}" "wangle"
+    build_dependency "mvfst" "https://github.com/facebook/mvfst.git" "${MVFST_VERSION}"
+    build_dependency "fbthrift" "https://github.com/facebook/fbthrift.git" "${FBTHRIFT_VERSION}"
 
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines='{"enable_tests": "1"}'
-
+    # Copy benchmarks
     for benchmark in $fbthrift_benchmark_list; do
-      cp "$WDL_BUILD/build/fbthrift/bin/$benchmark" "$WDL_ROOT/$benchmark"
+      if [ -f "${DEPS_DIR}/fbthrift/_build/bin/$benchmark" ]; then
+        cp "${DEPS_DIR}/fbthrift/_build/bin/$benchmark" "$WDL_ROOT/$benchmark"
+      elif [ -f "${DEPS_DIR}/fbthrift/_build/$benchmark" ]; then
+        cp "${DEPS_DIR}/fbthrift/_build/$benchmark" "$WDL_ROOT/$benchmark"
+      else
+        echo "Warning: Could not find benchmark $benchmark"
+      fi
     done
-
-    popd || exit
 }
 
 
@@ -188,7 +297,7 @@ build_lzbench()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
-    make BUILD_STATIC=1 -j "$(nproc)"
+    make BUILD_STATIC=1 -j "$JOBS"
     cp ./lzbench "${WDL_ROOT}/" || exit
 
     download_dataset 'silesia'
@@ -208,7 +317,7 @@ build_openssl()
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
     ./Configure no-docs --prefix="${WDL_BUILD}/openssl" --openssldir="${WDL_BUILD}/openssl"
-    make -j "$(nproc)"
+    make -j "$JOBS"
     make install
     cp "${WDL_BUILD}/openssl/bin/openssl" "${WDL_ROOT}/" || exit
 
@@ -221,7 +330,7 @@ build_vdso()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     cd "$lib/vdso_bench" || exit
-    make -j "$(nproc)"
+    make -j "$JOBS"
     cp ./vdso_bench "${WDL_ROOT}/" || exit
 
     popd || exit
@@ -254,7 +363,7 @@ build_xxhash()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     cd "$lib" || exit
-    make -C ./tests/bench/ -j "$(nproc)"
+    make -C ./tests/bench/ -j "$JOBS"
     cp ./tests/bench/benchHash "${WDL_ROOT}/xxhash_benchmark" || exit
 
     popd || exit
@@ -304,8 +413,8 @@ build_glibc()
     pushd "${WDL_BUILD}"
     mkdir glibc-build && cd glibc-build
     "${WDL_SOURCE}/$lib"/configure --prefix="${WDL_BUILD}/glibc-build"
-    make -j "$(nproc)"
-    make bench-build -j "$(nproc)"
+    make -j "$JOBS"
+    make bench-build -j "$JOBS"
 
     popd || exit
     popd || exit
@@ -360,7 +469,7 @@ EOF
     # @lint-ignore-section TXT2 off
     mkdir build && cd build
     cmake -DCMAKE_BUILD_TYPE=Release -DSLEEF_BUILD_BENCH=on ../
-    make -j "$(nproc)"
+    make -j "$JOBS"
     # Copy benchsleef128
     cp "${WDL_SOURCE}/sleef/build/bin/benchsleef128" "${WDL_ROOT}/" || exit 1
     # Copy benchsleef256 if it exists
@@ -460,6 +569,9 @@ build_gemm()
 pushd "${WDL_ROOT}"
 
 TARGET=""
+# Default JOBS from env var or nproc
+# Use: NUM_BUILD_JOBS=16 ./benchpress -b wdl install prod_set
+JOBS=${NUM_BUILD_JOBS:-$(nproc)}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -470,6 +582,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             echo "Usage: $0 [--name <component>]"
+            echo "  --name <component>  Build a specific component (default: all)"
+            echo ""
+            echo "Environment variables:"
+            echo "  NUM_BUILD_JOBS      Number of parallel build jobs (default: nproc)"
+            echo ""
+            echo "Example: NUM_BUILD_JOBS=16 $0 --name folly"
             echo "If --name is omitted, ALL components will be built."
             exit 0
             ;;
@@ -518,6 +636,8 @@ case "$TARGET" in
         ;;
 esac
 
+# Ensure we're in WDL_ROOT before copying files
+cd "${WDL_ROOT}" || exit 1
 cp "${BPKGS_WDL_ROOT}/common.sh" ./
 cp "${BPKGS_WDL_ROOT}/run.sh" ./
 cp "${BPKGS_WDL_ROOT}/run_prod.sh" ./

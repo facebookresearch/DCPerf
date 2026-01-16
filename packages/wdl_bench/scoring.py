@@ -19,6 +19,11 @@ if len(sys.argv) != 2:
 
 
 def weighted_geomean(values: list[float], weights: list[float]) -> float:
+    if len(values) == 0:
+        return float("inf")
+    if len(values) != len(weights):
+        # Filter weights to match available values
+        weights = weights[: len(values)]
     return np.exp(np.average(np.log(np.array(values)), weights=weights))
 
 
