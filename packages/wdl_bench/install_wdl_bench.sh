@@ -155,7 +155,10 @@ build_folly()
         env $(get_conda_proxy_args) conda create --override-channels -y -c conda-forge --force -n "$FBENV" "python=3.12" "numpy<2"
         conda activate "$FBENV"
         python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
-        python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}"
+        echo "Building folly with $(get_march_for_host)"
+        MARCH="$(get_march_for_host)"
+        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s"}' "$MARCH" "$MARCH")
+        python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES"
         conda deactivate
         conda env remove -n "$FBENV" -y
     )
@@ -176,9 +179,10 @@ build_fbthrift()
     cd "$lib" || exit
 
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
-
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines='{"enable_tests": "1"}'
-
+    echo "Building fbthrift with $(get_march_for_host)"
+    MARCH="$(get_march_for_host)"
+    EXTRA_DEFINES=$(printf '{"enable_tests": "1", "CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s"}' "$MARCH" "$MARCH")
+    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES"
     for benchmark in $fbthrift_benchmark_list; do
       cp "$WDL_BUILD/build/fbthrift/bin/$benchmark" "$WDL_ROOT/$benchmark"
     done

@@ -81,3 +81,47 @@ get_curl_proxy_args() {
 get_conda_proxy_args() {
     : # Replace with your proxy args
 }
+
+get_march_for_host() {
+    if [ "$ARCH" = "aarch64" ]; then
+        # Compare GCC macro sets (sorted to avoid ordering differences)
+        local base native
+        base="$(echo | gcc -dM -E - | grep -E 'ARM_FEATURE' | sort)"
+        native="$(echo | gcc -dM -E -march=native - | grep -E 'ARM_FEATURE' | sort)"
+
+        if [[ "$base" != "$native" ]]; then
+            # -march=native actually unlocks more features, so use it.
+            echo "-march=native"
+            return 0
+        fi
+
+        # Otherwise, build -march from lscpu Flags
+        local flags march_base ext=""
+        flags="$(lscpu | awk -F': *' 'tolower($1)=="flags"{print $2; exit}')"
+
+        # Choose a conservative base ISA (Neoverse N1).
+        march_base="armv8.2-a"
+
+        # crypto: GCC uses +crypto to cover aes/sha1/sha2/pmull
+        if grep -qwE 'aes|sha1|sha2|pmull' <<<"$flags"; then
+            ext+="+crypto"
+        fi
+
+        grep -qw rng      <<<"$flags" && ext+="+rng"
+        grep -qw asimddp  <<<"$flags" && ext+="+dotprod"
+        grep -qw lrcpc    <<<"$flags" && ext+="+rcpc"
+        grep -qw sha3     <<<"$flags" && ext+="+sha3"
+        grep -qw i8mm     <<<"$flags" && ext+="+i8mm"
+
+        # bf16 and fp16
+        grep -qw fphp    <<<"$flags" && ext+="+fp16"
+        grep -qw asimdhp <<<"$flags" && ext+="+fp16fml"
+        grep -qw bf16    <<<"$flags" && ext+="+bf16"
+
+        # SVE family
+        grep -qw sve      <<<"$flags" && ext+="+sve"
+        grep -qw sve2     <<<"$flags" && ext+="+sve2"
+
+        echo "-march=${march_base}${ext}"
+    fi
+}
