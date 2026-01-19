@@ -8,7 +8,7 @@
 import json
 import math
 import sys
-from typing import Any
+from typing import Any, Optional
 
 
 def weighted_geomean(values: list[float], weights: list[float]) -> float:
@@ -398,7 +398,7 @@ def compute_xxhash_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
 def compute_score_from_time(
     sum_baseline: dict[str, Any],
     sum_c: dict[str, Any],
-    skip_set: set[str] | None = None,
+    skip_set: Optional[set[str]] = None,
 ) -> float:
     if skip_set is None:
         skip_set = set()
@@ -413,7 +413,7 @@ def compute_score_from_time(
 def compute_score_from_rate(
     sum_baseline: dict[str, Any],
     sum_c: dict[str, Any],
-    skip_set: set[str] | None = None,
+    skip_set: Optional[set[str]] = None,
 ) -> float:
     if skip_set is None:
         skip_set = set()

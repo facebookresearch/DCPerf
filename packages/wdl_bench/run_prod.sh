@@ -69,9 +69,9 @@ declare -A prod_benchmark_config=(
     ['hash_checksum_benchmark']="--json"
     ['synchronization_lifo_sem_bench']="--bm_min_iters=1000000 --json"
     ['synchronization_small_locks_benchmark']="--bm_min_iters=1000000 --bm_regex=\"(atomic_cas|atomics_fetch_add|std_mutex_simple).*\" -run_fairness=false -unlocked_work 0 --json"
-    ['container_hash_maps_bench']="--bm_regex=\"f14(vec)|(val)\" --json" # filter find, insert, InsertSqBr, erase, and Iter operations in results parse script
+    ['container_hash_maps_bench']="--bm_max_iters=1073741824 --bm_regex=\"f14(vec)|(val)\" --json" # filter find, insert, InsertSqBr, erase, and Iter operations in results parse script
     ['ProtocolBench']="--bm_regex=\"(^Binary)|(^Compact)Protocol\" --json"
-    ['VarintUtilsBench']=" --json"
+    ['VarintUtilsBench']="--json"
     ['concurrency_concurrent_hash_map_bench']=""
     ['lzbench']="-v -ezstd,1,3 ${WDL_DATASETS}/silesia.tar"
     ['openssl']="speed -seconds 20 -evp aes-256-gcm"
@@ -164,14 +164,14 @@ main() {
             fi
             if [ "$benchmark" = "bench-memcmp" ]; then
                 pushd "${WDL_BUILD}/glibc-build"
-                bash -c "./testrun.sh ./benchtests/${benchmark} -- ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${WDL_ROOT}/${out_file}"
+                bash -c "nice -n -20 ./testrun.sh ./benchtests/${benchmark} -- ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${WDL_ROOT}/${out_file}"
                 popd
             else
                 ENV_VARS=""
                 if [ "$benchmark" = "gemm_bench" ]; then
                     ENV_VARS="OMP_NUM_THREADS=1"
                 fi
-                bash -c "${ENV_VARS} ./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
+                bash -c "nice -n -20 env ${ENV_VARS} ./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
             fi
             if [ "$benchmark" = "openssl" ]; then
                 unset LD_LIBRARY_PATH
