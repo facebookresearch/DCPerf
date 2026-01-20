@@ -152,10 +152,6 @@ main() {
             # Remove old results
             rm -f "out_${benchmark}.txt" "out_${benchmark}.json"
 
-            if [ "$benchmark" = "openssl" ]; then
-                export LD_LIBRARY_PATH="${WDL_BUILD}/openssl/lib64:${WDL_BUILD}/openssl/lib"
-                ldconfig
-            fi
             out_file=""
             if exec_non_json "${benchmark}"; then
                 out_file="out_${benchmark}.txt"
@@ -172,10 +168,6 @@ main() {
                     ENV_VARS="OMP_NUM_THREADS=1"
                 fi
                 bash -c "nice -n -20 env ${ENV_VARS} ./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
-            fi
-            if [ "$benchmark" = "openssl" ]; then
-                unset LD_LIBRARY_PATH
-                ldconfig
             fi
         done
 
