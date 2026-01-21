@@ -265,7 +265,7 @@ For role "server", "clientserver":
     --interpreter
                 python interpreter to use (cpython or cinder, default is cpython)
     --base-port
-                base port for Proxygen workers (default 16667)
+                base port for Proxygen workers (default 16668)
     -T          HAProxy stats port (default 8001)
     --use-async
                 set to 1 to enable async mode with load balancing (default 1)
@@ -810,7 +810,7 @@ main() {
   use_async=1
 
   local base_port
-  base_port=16667
+  base_port=16668
 
   local stats_port
   stats_port=8001

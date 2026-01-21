@@ -48,7 +48,7 @@ In addition, we require a series of ports to be available:
   * Memcached port: 11811
   * Server worker ports: The range of \[`base_port`, `base_port` \+ `server_workers`)
     (`server_workers` is equal to the number of CPU logical cores).
-  * Base port (default 16667) and stats port are adjustable via `--base-port` and `-T`,
+  * Base port (default 16668) and stats port are adjustable via `--base-port` and `-T`,
     but the continuous range of server worker ports must be available.
 
 ## Install django workload
@@ -257,7 +257,7 @@ For `django_workload_default` and `django_workload_arm` jobs:
   * `use_jit` \- If this is set to a positive number, enables Cinder JIT (x86 only).
     Defaults to 1 for x86 jobs, 0 for ARM jobs.
   * `base_port` \- Starting port that the HTTP server workers will listen to.
-    The range of `[base_port, base_port + nproc)` must be available. Defaults to 16667.
+    The range of `[base_port, base_port + nproc)` must be available. Defaults to 16668.
   * `stats_port` \- Load balancer stats port. Defaults to 8001.
 * Role `db`:
   * `bind_ip` \- IP address that Cassandra will bind to. Defaults to the first IP from `hostname -i`.
@@ -282,7 +282,7 @@ When running the benchmark directly via `run.sh`, the following long options are
 |--------|-------------|---------|
 | `--interpreter` | Python interpreter (`cpython` or `cinder`) | `cpython` |
 | `--use-async` | Enable async mode with load balancing (0 or 1) | `1` |
-| `--base-port` | Base port for HTTP server workers | `16667` |
+| `--base-port` | Base port for HTTP server workers | `16668` |
 | `--thrift-server-workers` | Number of Thrift server workers | `min(nproc, 32)` |
 | `--use-jit` | Enable Cinder JIT (positive number to enable) | `0` |
 | `--skip-datagen` | Skip data generation (1 to skip) | `0` |
@@ -486,10 +486,10 @@ IDs are only extracted when the total collected IDs fall below a low watermark (
 
 If you encounter port conflicts, you can adjust the following ports:
 - `--base-port`: Starting port for HTTP workers (default 8001)
-- `-T`: HAProxy stats port (default 16667)
+- `-T`: HAProxy stats port (default 16668)
 - Thrift server ports are automatically allocated starting from 9091
 
 To check for port availability before starting:
 ```bash
-lsof -i -P -n | grep -E ':(8000|8001|9042|9090|16667)'
+lsof -i -P -n | grep -E ':(8000|8001|9042|9090|16668)'
 ```
