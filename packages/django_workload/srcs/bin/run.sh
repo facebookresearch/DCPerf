@@ -714,11 +714,12 @@ start_clientserver() {
   server_pid="$!"
 
   # Wait for the server to start
-  local retries_init=150
+  local retries_init=1200
   local retries=$retries_init
   while ! nc -z localhost 8000; do
       sleep 1
       retries=$((retries-1))
+      echo "Waiting for Django server to start on port 8000, ${retries} retries left..."
       if [[ "$retries" -le 0 ]]; then
           echo "ERROR: Django server could not start within ${retries_init}s"
           cleanup
@@ -732,7 +733,7 @@ start_clientserver() {
           return 1
       fi
   done
-
+  echo "Django server started on port 8000, will start client"
 
   local django_server_pid
   django_server_pid="$server_pid"
