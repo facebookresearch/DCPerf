@@ -529,6 +529,37 @@
         - 'concur_writes'
         - 'bind_ip=default'
         - 'thrift_server_workers=32'
+    standalone:
+      args:
+        - '-r standalone'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c 127.0.0.1'
+        - '-w {server_workers}'
+        - '-x {client_workers}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--thrift-server-workers {thrift_server_workers}'
+        - '--skip-datagen {skip_datagen}'
+      vars:
+        - 'server_workers'
+        - 'client_workers'
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
+        - 'interpreter=cinder'
+        - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
+        - 'use_jit=1'
+        - 'thrift_server_workers=32'
+        - 'skip_datagen=0'
   hooks:
     - hook: copymove
       options:
