@@ -4674,7 +4674,11 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill-src/services/adsim/CMakeLists.txt treadmill/services/adsim/CMakeLists.txt
 --- treadmill-src/services/adsim/CMakeLists.txt	1969-12-31 16:00:00.000000000 -0800
 +++ treadmill/services/adsim/CMakeLists.txt	2025-08-04 15:44:21.765829926 -0700
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,57 @@
++# Define the path to adsim build directory
++# The path goes from treadmill/services/adsim up 3 levels to BUILD_DIR then into adsim/build/if
++set(ADSIM_BUILD_IF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../adsim/build/if")
++
 +# Define the treadmill_adsim executable
 +add_executable(treadmill_adsim
 +    Treadmill.cpp
@@ -4683,8 +4687,9 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +)
 +
 +# Set include directories for treadmill_adsim
++# The gen-cpp2 headers are generated in adsim/build/if/gen-cpp2/ by the thrift compiler
 +target_include_directories(treadmill_adsim PRIVATE
-+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../adsim/if
++    ${ADSIM_BUILD_IF_DIR}
 +    ${CMAKE_SOURCE_DIR}  # Add the root directory to include path
 +)
 +
@@ -4692,9 +4697,9 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +target_link_libraries(treadmill_adsim
 +    PRIVATE
 +    treadmill
-+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../adsim/build/if/libAdSim-cpp2.a
-+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../adsim/build/if/libfb303-cpp2.a
-+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../adsim/build/if/libSerialize-cpp2.a
++    ${ADSIM_BUILD_IF_DIR}/libAdSim-cpp2.a
++    ${ADSIM_BUILD_IF_DIR}/libfb303-cpp2.a
++    ${ADSIM_BUILD_IF_DIR}/libSerialize-cpp2.a
 +    ${FOLLY_LIBRARIES}
 +    ${FBTHRIFT_LIBRARIES}
 +    ${FB303_LIBRARIES}

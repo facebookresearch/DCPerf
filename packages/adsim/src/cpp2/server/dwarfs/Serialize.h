@@ -101,7 +101,6 @@ class SerializeBase : public Kernel {
           unit.list_of_i32()->begin(), unit.list_of_i32()->end(), [&]() {
             return get_rand();
           });
-      unit.map_of_list()->reserve(UNIT_LIST_MAP_SIZE);
       for (int i = 0; UNIT_LIST_MAP_SIZE > i; ++i) {
         id_list_t tmp(UNIT_I32_LIST_LEN);
         std::generate(tmp.begin(), tmp.end(), [&]() { return get_rand(); });

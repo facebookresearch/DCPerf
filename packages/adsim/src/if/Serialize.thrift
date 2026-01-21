@@ -15,11 +15,8 @@ struct SerializableInfo {
   3: double var_double;
 }
 
-@cpp.Type{template = "std::list"}
 typedef list<i32> id_list_t
-@cpp.Type{template = "folly::F14VectorMap"}
 typedef map<i32, id_list_t> id_map_t
-@cpp.Type{template = "std::list"}
 typedef list<SerializableInfo> info_list_t
 
 struct SerializableUnit {
@@ -28,7 +25,6 @@ struct SerializableUnit {
   3: id_list_t list_of_i32;
 }
 
-@cpp.Type{template = "std::list"}
 typedef list<SerializableUnit> unit_list_t
 
 struct SerializableReq {

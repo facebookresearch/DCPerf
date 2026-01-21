@@ -1,5 +1,216 @@
 #!/bin/bash
 # File: adsim/build.sh
+set -e  # Exit on any error
+
+# Generate Thrift C++ code before CMake build
+echo "=========================================="
+echo "Generating Thrift C++ code..."
+echo "Current directory: $(pwd)"
+echo "ADSIM_STAGING_DIR: ${ADSIM_STAGING_DIR}"
+echo "=========================================="
+
+# Create the if/gen-cpp2 output directory
+mkdir -p if/gen-cpp2
+echo "Created directory: $(pwd)/if/gen-cpp2"
+
+# Verify thrift1 exists
+THRIFT1="${ADSIM_STAGING_DIR}/bin/thrift1"
+if [ ! -x "$THRIFT1" ]; then
+    echo "ERROR: thrift1 not found at $THRIFT1"
+    exit 1
+fi
+echo "Using thrift1: $THRIFT1"
+
+# Check that AdSim.thrift exists
+if [ ! -f "../if/AdSim.thrift" ]; then
+    echo "ERROR: ../if/AdSim.thrift not found!"
+    ls -la ../if/
+    exit 1
+fi
+echo "Found AdSim.thrift: $(realpath ../if/AdSim.thrift)"
+
+# Find fb303 thrift include directory
+FB303_THRIFT_DIR=""
+for path in "${ADSIM_STAGING_DIR}/include/thrift-files/fb303/if" \
+    "${ADSIM_STAGING_DIR}/include/fb303/if" \
+    "${ADSIM_DEPS_DIR}/fb303/fb303/thrift"; do
+    if [ -f "$path/fb303.thrift" ]; then
+        FB303_THRIFT_DIR="$path"
+        echo "Found fb303.thrift directory at: $path"
+        break
+    fi
+done
+
+# If fb303.thrift not found in staging, create a compatible version
+if [ -z "$FB303_THRIFT_DIR" ]; then
+    echo "fb303.thrift not found in staging, creating compatible version..."
+
+    # Put fb303.thrift at same level as AdSim.thrift for correct include paths
+    cat > ../if/fb303.thrift << 'EOF'
+/*
+ * fb303.thrift - Compatible fb303 thrift definition for AdSim
+ * Wraps OSS fb303_core.BaseService as FacebookService
+ */
+
+include "fb303/thrift/fb303_core.thrift"
+
+namespace cpp2 facebook.fb303
+
+// Re-export types from fb303_core
+typedef fb303_core.fb303_status fb303_status
+
+// FacebookService is an alias for BaseService in OSS fb303
+service FacebookService extends fb303_core.BaseService {
+}
+EOF
+    FB303_THRIFT_DIR="../if"
+
+    # Update AdSim.thrift to use the local include path (same directory)
+    if grep -q 'include "common/fb303/if/fb303.thrift"' ../if/AdSim.thrift; then
+        sed -i 's|include "common/fb303/if/fb303.thrift"|include "fb303.thrift"|' ../if/AdSim.thrift
+        echo "Updated AdSim.thrift include path"
+    fi
+    if grep -q 'include "fb303/if/fb303.thrift"' ../if/AdSim.thrift; then
+        sed -i 's|include "fb303/if/fb303.thrift"|include "fb303.thrift"|' ../if/AdSim.thrift
+        echo "Updated AdSim.thrift include path"
+    fi
+    echo "Created compatible fb303.thrift at same level as AdSim.thrift"
+fi
+
+# Remove thrift annotations that aren't available in OSS fbthrift
+# @thrift.AllowLegacyMissingUris is a Meta-internal annotation for schema validation
+for thrift_file in ../if/AdSim.thrift ../if/Serialize.thrift; do
+    if [ -f "$thrift_file" ]; then
+        if grep -q '@thrift.AllowLegacyMissingUris' "$thrift_file"; then
+            sed -i '/include "thrift\/annotation\/thrift.thrift"/d' "$thrift_file"
+            sed -i '/@thrift.AllowLegacyMissingUris/d' "$thrift_file"
+            sed -i '/^package;$/d' "$thrift_file"
+            echo "Removed @thrift.AllowLegacyMissingUris from $thrift_file"
+        fi
+        # Remove cpp.thrift annotation include if not using @cpp annotations
+        if grep -q 'include "thrift/annotation/cpp.thrift"' "$thrift_file" && \
+           ! grep -q '@cpp\.' "$thrift_file"; then
+            sed -i '/include "thrift\/annotation\/cpp.thrift"/d' "$thrift_file"
+            echo "Removed unused cpp.thrift annotation include from $thrift_file"
+        fi
+    fi
+done
+
+# Generate AdSim thrift code
+# Use no_metadata to reduce generated code complexity
+# Include paths for:
+# - ../if: local thrift files including our fb303 wrapper
+# - staging thrift-files: fb303 and other thrift includes
+# - thrift annotations from fbthrift build
+echo "Generating AdSim.thrift..."
+
+# Find thrift annotation directory (needed by fb303_core.thrift)
+THRIFT_ANNOTATION_DIR=""
+for path in \
+    "${ADSIM_STAGING_DIR}/include/thrift/annotation" \
+    "${ADSIM_STAGING_DIR}/include/thrift-files/thrift/annotation" \
+    "${ADSIM_DEPS_DIR}/fbthrift/thrift/annotation"; do
+    if [ -f "$path/cpp.thrift" ]; then
+        THRIFT_ANNOTATION_DIR="$(dirname "$(dirname "$path")")"
+        echo "Found thrift annotations at: $path"
+        break
+    fi
+done
+
+if [ -z "$THRIFT_ANNOTATION_DIR" ]; then
+    echo "Searching for thrift annotations..."
+    ANNO_FOUND=$(find "${ADSIM_STAGING_DIR}" "${ADSIM_DEPS_DIR}" \
+        -name "cpp.thrift" -path "*annotation*" 2>/dev/null | head -1)
+    if [ -n "$ANNO_FOUND" ]; then
+        # Go up two directories: annotation/cpp.thrift -> thrift -> parent
+        THRIFT_ANNOTATION_DIR="$(dirname "$(dirname "$ANNO_FOUND")")"
+        echo "Found thrift annotations at: $ANNO_FOUND"
+    fi
+fi
+
+echo "Thrift include paths:"
+echo "  - ../if (local thrift files)"
+echo "  - ${ADSIM_STAGING_DIR}/include/thrift-files"
+echo "  - $(dirname "$FB303_THRIFT_DIR")"
+[ -n "$THRIFT_ANNOTATION_DIR" ] && echo "  - $THRIFT_ANNOTATION_DIR"
+
+# First, generate fb303 thrift code from our wrapper
+# This is needed because thrift doesn't auto-generate included files
+echo "Generating fb303.thrift (wrapper)..."
+"$THRIFT1" \
+    --gen mstch_cpp2:json,include_prefix= \
+    -o if \
+    -I ../if \
+    -I "${ADSIM_STAGING_DIR}/include/thrift-files" \
+    -I "${ADSIM_STAGING_DIR}/include" \
+    ${THRIFT_ANNOTATION_DIR:+-I "$THRIFT_ANNOTATION_DIR"} \
+    ../if/fb303.thrift
+
+echo "fb303 thrift generation complete"
+ls -la if/gen-cpp2/fb303* 2>/dev/null || echo "No fb303 files generated yet"
+
+# Now generate AdSim thrift code
+echo "Generating AdSim.thrift..."
+"$THRIFT1" \
+    --gen mstch_cpp2:json,include_prefix= \
+    -o if \
+    -I ../if \
+    -I "${ADSIM_STAGING_DIR}/include/thrift-files" \
+    -I "${ADSIM_STAGING_DIR}/include" \
+    ${THRIFT_ANNOTATION_DIR:+-I "$THRIFT_ANNOTATION_DIR"} \
+    -I "$(dirname "$FB303_THRIFT_DIR")" \
+    ../if/AdSim.thrift
+
+echo "AdSim thrift generation complete"
+
+# Generate Serialize thrift code
+echo "Generating Serialize.thrift..."
+"$THRIFT1" \
+    --gen mstch_cpp2:json,include_prefix= \
+    -o if \
+    -I ../if \
+    -I "${ADSIM_STAGING_DIR}/include/thrift-files" \
+    -I "${ADSIM_STAGING_DIR}/include" \
+    ${THRIFT_ANNOTATION_DIR:+-I "$THRIFT_ANNOTATION_DIR"} \
+    ../if/Serialize.thrift
+
+echo "Serialize thrift generation complete"
+
+# The generated AdSim code includes fb303_types.h from our fb303.thrift wrapper.
+# We need to keep the generated fb303 files since they provide the proper type mappings.
+# However, we need to ensure fb303_core types are also accessible.
+echo "Setting up fb303 includes..."
+
+# Copy fb303_core headers to gen-cpp2 so they can be found by the generated fb303 code
+FB303_OSS_DIR="${ADSIM_STAGING_DIR}/include/fb303/thrift/gen-cpp2"
+if [ -d "$FB303_OSS_DIR" ]; then
+    echo "Copying fb303_core headers to gen-cpp2 directory..."
+    cp -f "$FB303_OSS_DIR"/*.h if/gen-cpp2/ 2>/dev/null || true
+    cp -f "$FB303_OSS_DIR"/*.tcc if/gen-cpp2/ 2>/dev/null || true
+    echo "fb303_core headers copied"
+else
+    echo "WARNING: fb303 OSS headers not found at $FB303_OSS_DIR"
+fi
+
+echo "Generated files in gen-cpp2:"
+ls -la if/gen-cpp2/ | head -20
+
+echo "=========================================="
+echo "Thrift code generation complete."
+echo "Generated files in $(pwd)/if/gen-cpp2/:"
+ls -la if/gen-cpp2/
+echo "=========================================="
+
+# Create symlink structure for cea/chips/adsim include paths
+# The source files use #include <cea/chips/adsim/...> which requires
+# the include path to contain a directory with cea/chips/adsim as subdirectory
+echo "Setting up include path structure for cea/chips/adsim..."
+mkdir -p cea/chips
+ln -sfn "$(pwd)/.." cea/chips/adsim
+echo "Created symlink: cea/chips/adsim -> $(pwd)/.."
+echo "Verifying symlink:"
+ls -la cea/chips/
+ls -la cea/chips/adsim/cpp2/server/dwarfs/ | head -5
 
 cmake \
      -DCMAKE_BUILD_TYPE=Release \
@@ -11,6 +222,59 @@ cmake \
      -DFBGEMM_SRC_DIR="${FBGEMM_STAGING_DIR}/fbgemm" \
      -DFOLLY_MEMCPY_IS_MEMCPY=1 \
      -DFOLLY_DIR="${ADSIM_DEPS_DIR}/folly/folly" \
+     -DCMAKE_CXX_FLAGS="-I$(pwd)" \
      ..
 
+# After cmake generates ICacheBuster.h, link it into the source tree
+# so includes through cea/chips/adsim path can find it
+# The generated file is in build/cpp2/server/dwarfs/icache_buster/
+echo "Linking generated ICacheBuster.h..."
+ICACHE_GEN_DIR="cpp2/server/dwarfs/icache_buster"
+ICACHE_SRC_DIR="../cpp2/server/dwarfs/icache_buster"
+if [ -f "${ICACHE_GEN_DIR}/ICacheBuster.h" ]; then
+    # Link into the source directory (which the cea/chips/adsim symlink points to)
+    ln -sfn "$(pwd)/${ICACHE_GEN_DIR}/ICacheBuster.h" "${ICACHE_SRC_DIR}/ICacheBuster.h"
+    ln -sfn "$(pwd)/${ICACHE_GEN_DIR}/ICacheBuster.cc" "${ICACHE_SRC_DIR}/ICacheBuster.cc"
+    echo "Linked ICacheBuster.h and ICacheBuster.cc to source directory"
+    ls -la "${ICACHE_SRC_DIR}/"
+fi
+
 make -j "$(nproc)" VERBOSE=1
+
+# Build the Thrift libraries for treadmill to link against
+echo "=========================================="
+echo "Building Thrift libraries..."
+echo "=========================================="
+
+# Compile AdSim thrift generated code
+echo "Compiling AdSim thrift code..."
+(cd if/gen-cpp2 && \
+ "${ADSIM_CXX_COMPILER}" -c -std=c++20 -fPIC \
+     -I .. \
+     -I "${ADSIM_STAGING_DIR}/include" \
+     AdSim.cpp AdSimAsyncClient.cpp AdSim_constants.cpp AdSim_data.cpp \
+     AdSim_metadata.cpp AdSim_types.cpp \
+     AdSim_processmap_binary.cpp AdSim_processmap_compact.cpp && \
+ ar rcs ../libAdSim-cpp2.a *.o && \
+ rm -f *.o)
+echo "libAdSim-cpp2.a created"
+
+# Compile Serialize thrift generated code
+echo "Compiling Serialize thrift code..."
+(cd if/gen-cpp2 && \
+ "${ADSIM_CXX_COMPILER}" -c -std=c++20 -fPIC \
+     -I .. \
+     -I "${ADSIM_STAGING_DIR}/include" \
+     Serialize_constants.cpp Serialize_data.cpp \
+     Serialize_metadata.cpp Serialize_types.cpp && \
+ ar rcs ../libSerialize-cpp2.a Serialize*.o && \
+ rm -f *.o) || echo "Warning: Serialize library build failed (non-fatal)"
+
+# Create a stub fb303-cpp2 library (empty, links to real fb303)
+touch if/libfb303-cpp2.a
+
+echo "=========================================="
+echo "Thrift libraries built:"
+ls -la if/*.a
+echo "Full path: $(pwd)/if/"
+echo "=========================================="

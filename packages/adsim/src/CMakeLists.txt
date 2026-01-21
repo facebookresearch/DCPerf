@@ -16,6 +16,7 @@ set(CMAKE_MODULE_PATH
 
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_BINARY_DIR})
+include_directories(${CMAKE_SOURCE_DIR}/../../..)
 
 
 find_package(GTest REQUIRED)
