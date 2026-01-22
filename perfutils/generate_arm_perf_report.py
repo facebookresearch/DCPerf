@@ -43,6 +43,15 @@ def read_csv(perf_csv_file):
             "1",
             "2",
         ],
+        dtype={
+            "timestamp": "float64",
+            "counter_value": "float64",
+            "counter_unit": "str",
+            "event_name": "str",
+            "counter_runtime": "float64",
+            "mux": "float",
+        },
+        na_values=["<not counted>"],
     )
     return df
 
@@ -132,14 +141,11 @@ def timestamp(grouped_df):
 
 @skip_if_missing
 def duration(grouped_df):
-    duration_series = grouped_df.get_group("duration_time").counter_value
-    mux_series = grouped_df.get_group("instructions").mux / 100.0
-
-    duration_series.index = mux_series.index
+    duration_series = get_duration_series(grouped_df.get_group("duration_time"))
 
     return {
         "name": "Per-Sample Effective Sampling Duration (msecs)",
-        "series": duration_series * mux_series,
+        "series": duration_series,
         "prefix": 10**-6,
     }
 
@@ -303,7 +309,7 @@ def branch_inst_percent(grouped_df):
 def flops(grouped_df):
     fp_scale_series = grouped_df.get_group("r80c0").counter_value  # FP_SCALE_OPS_SPEC
     fp_fixed_series = grouped_df.get_group("r80c1").counter_value  # FP_FIXED_OPS_SPEC
-    duration_series = grouped_df.get_group("duration_time").counter_value
+    duration_series = get_duration_series(grouped_df.get_group("r80c0"))
 
     fp_scale_series.index = duration_series.index
     fp_fixed_series.index = duration_series.index
@@ -319,7 +325,7 @@ def flops(grouped_df):
 @skip_if_missing
 def sve_flops(grouped_df):
     fp_scale_series = grouped_df.get_group("r80c1").counter_value  # FP_FIXED_OPS_SPEC
-    duration_series = grouped_df.get_group("duration_time").counter_value
+    duration_series = get_duration_series(grouped_df.get_group("r80c1"))
 
     fp_scale_series.index = duration_series.index
 
@@ -878,8 +884,6 @@ def main(
     df = read_csv(perf_csv_file)
     grouped_df = df.groupby("event_name")
     metrics = [
-        timestamp(grouped_df),
-        duration(grouped_df),
         mips(grouped_df),
         muopps(grouped_df),
         ipc(grouped_df),
