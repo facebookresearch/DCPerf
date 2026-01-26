@@ -306,7 +306,7 @@ def branch_inst_percent(grouped_df):
 
 
 @skip_if_missing
-def flops(grouped_df):
+def gflops(grouped_df):
     fp_scale_series = grouped_df.get_group("r80c0").counter_value  # FP_SCALE_OPS_SPEC
     fp_fixed_series = grouped_df.get_group("r80c1").counter_value  # FP_FIXED_OPS_SPEC
     duration_series = get_duration_series(grouped_df.get_group("r80c0"))
@@ -315,24 +315,24 @@ def flops(grouped_df):
     fp_fixed_series.index = duration_series.index
 
     flop_sum_series = fp_fixed_series + fp_scale_series
-    flops_series = flop_sum_series.div(duration_series / 10**9) / 10**9
+    gflops_series = flop_sum_series.div(duration_series / 10**9) / 10**9
     return {
         "name": "GFLOPS (any precision, incl SVE)",
-        "series": flops_series,
+        "series": gflops_series,
     }
 
 
 @skip_if_missing
-def sve_flops(grouped_df):
+def sve_gflops(grouped_df):
     fp_scale_series = grouped_df.get_group("r80c1").counter_value  # FP_FIXED_OPS_SPEC
     duration_series = get_duration_series(grouped_df.get_group("r80c1"))
 
     fp_scale_series.index = duration_series.index
 
-    sve_flops_series = fp_scale_series.div(duration_series / 10**9) / 10**9
+    sve_gflops_series = fp_scale_series.div(duration_series / 10**9) / 10**9
     return {
         "name": "SVE GFLOPS (any precision)",
-        "series": sve_flops_series,
+        "series": sve_gflops_series,
     }
 
 
@@ -894,8 +894,8 @@ def main(
         st_inst_percent(grouped_df),
         crypto_inst_percent(grouped_df),
         branch_inst_percent(grouped_df),
-        flops(grouped_df),
-        sve_flops(grouped_df),
+        gflops(grouped_df),
+        sve_gflops(grouped_df),
         branch_mpki(grouped_df),
         branch_miss_rate(grouped_df),
         l1_icache_mpki(grouped_df),
