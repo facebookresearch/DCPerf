@@ -34,16 +34,34 @@ UcacheBench is a comprehensive cache benchmarking tool designed to simulate work
 
 ## Building
 
+UcacheBench uses CMake for building. First, ensure you have the required dependencies installed (see [Dependencies](#dependencies) section).
+
 ```bash
-# Build server
-buck build //cea/chips/benchpress/benchmarks/ucache_bench/server:ucachebench_server
+# Create build directory
+mkdir build && cd build
 
-# Build client
-buck build //cea/chips/benchpress/benchmarks/ucache_bench/client:ucachebench_client
+# Configure with CMake
+# Set STAGING_DIR to where dependencies are installed
+# Set DEPS_DIR to where mcrouter source is located (for headers)
+cmake .. \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSTAGING_DIR=/path/to/staging \
+  -DDEPS_DIR=/path/to/deps
 
-# Build protocol (Carbon classes)
-buck build //cea/chips/benchpress/benchmarks/ucache_bench/protocol:ucachebench_protocol
+# Build all components (server, client, protocol)
+make -j$(nproc)
+
+# Or build specific components
+make ucachebench_server
+make ucachebench_client
 ```
+
+### Build Options
+
+- `BUILD_SERVER`: Build the UCacheBench server (default: ON)
+- `BUILD_CLIENT`: Build the UCacheBench client (default: ON)
+- `STAGING_DIR`: Directory containing installed dependencies
+- `DEPS_DIR`: Directory containing dependency sources (for mcrouter headers)
 
 ## Usage
 
@@ -51,22 +69,27 @@ buck build //cea/chips/benchpress/benchmarks/ucache_bench/protocol:ucachebench_p
 
 #### Server
 ```bash
-./ucachebench_server \
-  --port=11211 \
-  --memory_mb=1024 \
-  --num_threads=8 \
+# After building with CMake, run the server with production-like configuration
+./build/server/ucachebench_server \
+  --port=11212 \
+  --memory_mb=55000 \
   --verbose
 ```
 
 #### Client
 ```bash
-./ucachebench_client \
+# After building with CMake, run the client with production-like configuration
+./build/client/ucachebench_client \
   --server_host=localhost \
-  --server_port=11211 \
-  --duration_seconds=60 \
-  --warmup_seconds=10 \
-  --key_count=100000 \
-  --get_ratio=0.9 \
+  --server_port=11212 \
+  --duration_seconds=20 \
+  --warmup_seconds=100 \
+  --key_count=50000000 \
+  --num_proxies=32 \
+  --num_threads=64 \
+  --additional_fanout=500 \
+  --use_distribution=true \
+  --distribution_config=./traffic_dist.json \
   --verbose
 ```
 
@@ -89,8 +112,10 @@ benchpress ucache_bench_custom \
 ## Configuration Options
 
 ### Server Options
-- `--port`: Server listening port (default: 11211)
-- `--memory_mb`: Memory size in MB for CacheLib (default: 1024)
+- `--port`: Server listening port (default: 11212)
+- `--memory_mb`: Memory size in MB for CacheLib (default: 55000)
+- `--cpu_pinning_enabled`: Enable CPU pinning for better performance (default: true)
+- `--cpu_pinning_avoid_irqs`: Avoid CPUs handling IRQs when pinning (default: true)
 - `--rpc_io_threads`: Number of IO worker threads (default: auto-detect = CPU cores)
 - `--hash_power`: Hash table power for CacheLib (default: 20)
 - `--pool_name`: Pool name for CacheLib (default: "default")
@@ -107,12 +132,15 @@ benchpress ucache_bench_custom \
 
 ### Client Options
 - `--server_host`: Server hostname (default: localhost)
-- `--server_port`: Server port (default: 11211)
-- `--num_threads`: Number of client threads (default: auto-detect)
-- `--num_proxies`: Number of mcrouter proxy threads (default: auto-detect = CPU cores)
-- `--duration_seconds`: Test duration in seconds (default: 60)
-- `--warmup_seconds`: Warmup duration in seconds (default: 10)
-- `--key_count`: Number of unique keys (default: 100000)
+- `--server_port`: Server port (default: 11212)
+- `--num_threads`: Number of client threads (default: 64)
+- `--num_proxies`: Number of mcrouter proxy threads (default: 32)
+- `--duration_seconds`: Test duration in seconds (default: 20)
+- `--warmup_seconds`: Warmup duration in seconds (default: 100)
+- `--key_count`: Number of unique keys (default: 50000000)
+- `--additional_fanout`: Additional fanout for load generation (default: 500)
+- `--use_distribution`: Use traffic distribution from config file (default: true)
+- `--distribution_config`: Path to traffic distribution JSON file (default: ./traffic_dist.json)
 - `--value_size_min/max`: Value size range in bytes (default: 64-1024)
 - `--get_ratio`: Ratio of GET vs SET operations (default: 0.9)
 - `--qps_target`: Target QPS, 0 for unlimited (default: 0)
@@ -126,18 +154,21 @@ Two predefined job configurations are available:
 
 ### ucache_bench_default
 Basic configuration suitable for quick testing:
-- 1GB memory
-- 60s test duration
-- 100K key space
-- 90% GET ratio
+- 55GB memory
+- 20s test duration
+- 50M key space
+- 32 proxy threads
+- 64 client threads
 
 ### ucache_bench_custom
-Extended configuration for thorough benchmarking:
-- 2GB memory
-- 300s test duration
-- 1M key space
-- 95% GET ratio
-- 10K QPS target
+Extended configuration for production-like benchmarking:
+- 55GB memory
+- 100s warmup + 20s test duration
+- 50M key space
+- 32 proxy threads
+- 64 client threads
+- 500 additional fanout
+- Traffic distribution enabled
 
 ## Connection Management
 
