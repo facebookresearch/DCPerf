@@ -27,6 +27,8 @@ class CDNBenchParser(Parser):
             self._parse_mem_metrics(stdout, metrics)
         elif stdout[0].strip() == "NIC":
             self._parse_nic_metrics(stdout, metrics)
+        elif stdout[0].strip() == "FLASH":
+            self._parse_flash_metrics(stdout, metrics)
         return metrics
 
     def _parse_mem_metrics(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
@@ -269,3 +271,267 @@ class CDNBenchParser(Parser):
                     match = re.search(r"TX dropped:\s*(\d+)", line)
                     if match:
                         metrics["post_tx_dropped"] = int(match.group(1))
+
+    def _parse_flash_metrics(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
+        """
+        Parse Flash/FIO benchmark output including JSON results.
+        Args:
+            stdout: stdout lines from fio benchmark execution
+            metrics: dictionary to store metrics
+        """
+        import json
+
+        # Join all lines to find JSON block
+        full_output = "\n".join(stdout)
+
+        # Parse configuration from log output
+        for line in stdout:
+            line_stripped = line.strip()
+
+            # Parse execution info
+            if line_stripped.startswith("Execution Date:"):
+                metrics["execution_date"] = line_stripped.split(":", 1)[-1].strip()
+            elif line_stripped.startswith("FIO Version:"):
+                metrics["fio_version"] = line_stripped.split(":", 1)[-1].strip()
+
+            # Parse configuration
+            elif line_stripped.startswith("- Device:"):
+                metrics["target_device"] = line_stripped.split(":", 1)[-1].strip()
+            elif line_stripped.startswith("- Directory:"):
+                metrics["target_directory"] = line_stripped.split(":", 1)[-1].strip()
+            elif line_stripped.startswith("- Access Pattern:"):
+                metrics["access_pattern"] = line_stripped.split(":", 1)[-1].strip()
+            elif line_stripped.startswith("- Block Size:"):
+                metrics["block_size"] = line_stripped.split(":", 1)[-1].strip()
+            elif line_stripped.startswith("- Number of Jobs:"):
+                try:
+                    metrics["num_jobs"] = int(line_stripped.split(":", 1)[-1].strip())
+                except ValueError:
+                    pass
+            elif line_stripped.startswith("- I/O Depth:"):
+                try:
+                    metrics["io_depth"] = int(line_stripped.split(":", 1)[-1].strip())
+                except ValueError:
+                    pass
+            elif line_stripped.startswith("- I/O Engine:"):
+                metrics["io_engine"] = line_stripped.split(":", 1)[-1].strip()
+            elif line_stripped.startswith("- Runtime:"):
+                match = re.search(r"(\d+)", line_stripped)
+                if match:
+                    metrics["runtime_secs"] = int(match.group(1))
+            elif line_stripped.startswith("- Ramp Time:"):
+                match = re.search(r"(\d+)", line_stripped)
+                if match:
+                    metrics["ramp_time_secs"] = int(match.group(1))
+
+            # Parse NVMe device info
+            elif "SAMSUNG" in line_stripped or "INTEL" in line_stripped:
+                parts = line_stripped.split()
+                if len(parts) >= 4:
+                    metrics["nvme_model"] = (
+                        " ".join(parts[3:5]) if len(parts) > 4 else parts[3]
+                    )
+
+            # Parse NVMe SMART data
+            elif line_stripped.startswith("temperature"):
+                match = re.search(r"(\d+)\s*°F", line_stripped)
+                if match:
+                    metrics["nvme_temp_fahrenheit"] = int(match.group(1))
+            elif line_stripped.startswith("available_spare"):
+                match = re.search(r"(\d+)%", line_stripped)
+                if match:
+                    metrics["nvme_available_spare_pct"] = int(match.group(1))
+            elif line_stripped.startswith("percentage_used"):
+                match = re.search(r"(\d+)%", line_stripped)
+                if match:
+                    metrics["nvme_percentage_used"] = int(match.group(1))
+            elif line_stripped.startswith("power_on_hours"):
+                match = re.search(r":\s*(\d+)", line_stripped)
+                if match:
+                    metrics["nvme_power_on_hours"] = int(match.group(1))
+            elif line_stripped.startswith("media_errors"):
+                match = re.search(r":\s*(\d+)", line_stripped)
+                if match:
+                    metrics["nvme_media_errors"] = int(match.group(1))
+
+            # Parse I/O scheduler
+            elif line_stripped.startswith("[none]") or line_stripped.startswith(
+                "[mq-deadline]"
+            ):
+                metrics["io_scheduler"] = line_stripped
+
+        # Extract and parse FIO JSON output
+        try:
+            json_start = full_output.find('{\n  "fio version"')
+            if json_start == -1:
+                json_start = full_output.find('{"fio version"')
+            if json_start != -1:
+                # Find the end of JSON by counting braces
+                brace_count = 0
+                json_end = json_start
+                for i, char in enumerate(full_output[json_start:]):
+                    if char == "{":
+                        brace_count += 1
+                    elif char == "}":
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_end = json_start + i + 1
+                            break
+
+                json_str = full_output[json_start:json_end]
+                fio_data = json.loads(json_str)
+
+                # Parse FIO version and timestamp
+                if "fio version" in fio_data:
+                    metrics["fio_version"] = fio_data["fio version"]
+                if "timestamp" in fio_data:
+                    metrics["fio_timestamp"] = fio_data["timestamp"]
+
+                # Parse job results
+                if "jobs" in fio_data and len(fio_data["jobs"]) > 0:
+                    job = fio_data["jobs"][0]
+
+                    # Job runtime and CPU
+                    if "job_runtime" in job:
+                        metrics["job_runtime_ms"] = job["job_runtime"]
+                    if "usr_cpu" in job:
+                        metrics["usr_cpu_pct"] = job["usr_cpu"]
+                    if "sys_cpu" in job:
+                        metrics["sys_cpu_pct"] = job["sys_cpu"]
+                    if "ctx" in job:
+                        metrics["context_switches"] = job["ctx"]
+
+                    # Parse READ metrics
+                    if "read" in job:
+                        read_data = job["read"]
+                        if read_data.get("io_bytes", 0) > 0:
+                            metrics["read_io_bytes"] = read_data["io_bytes"]
+                            metrics["read_bw_bytes_sec"] = read_data.get("bw_bytes", 0)
+                            metrics["read_bw_kbps"] = read_data.get("bw", 0)
+                            metrics["read_iops"] = read_data.get("iops", 0)
+                            metrics["read_runtime_ms"] = read_data.get("runtime", 0)
+                            metrics["read_total_ios"] = read_data.get("total_ios", 0)
+
+                            # Latency stats
+                            if "clat_ns" in read_data:
+                                clat = read_data["clat_ns"]
+                                metrics["read_clat_min_ns"] = clat.get("min", 0)
+                                metrics["read_clat_max_ns"] = clat.get("max", 0)
+                                metrics["read_clat_mean_ns"] = clat.get("mean", 0)
+                                metrics["read_clat_stddev_ns"] = clat.get("stddev", 0)
+
+                                # Percentiles
+                                if "percentile" in clat:
+                                    pct = clat["percentile"]
+                                    metrics["read_clat_p50_ns"] = pct.get(
+                                        "50.000000", 0
+                                    )
+                                    metrics["read_clat_p90_ns"] = pct.get(
+                                        "90.000000", 0
+                                    )
+                                    metrics["read_clat_p95_ns"] = pct.get(
+                                        "95.000000", 0
+                                    )
+                                    metrics["read_clat_p99_ns"] = pct.get(
+                                        "99.000000", 0
+                                    )
+                                    metrics["read_clat_p999_ns"] = pct.get(
+                                        "99.900000", 0
+                                    )
+                                    metrics["read_clat_p9999_ns"] = pct.get(
+                                        "99.990000", 0
+                                    )
+
+                            # IOPS stats
+                            metrics["read_iops_min"] = read_data.get("iops_min", 0)
+                            metrics["read_iops_max"] = read_data.get("iops_max", 0)
+                            metrics["read_iops_mean"] = read_data.get("iops_mean", 0)
+                            metrics["read_iops_stddev"] = read_data.get(
+                                "iops_stddev", 0
+                            )
+
+                            # BW stats
+                            metrics["read_bw_min_kbps"] = read_data.get("bw_min", 0)
+                            metrics["read_bw_max_kbps"] = read_data.get("bw_max", 0)
+                            metrics["read_bw_mean_kbps"] = read_data.get("bw_mean", 0)
+
+                    # Parse WRITE metrics
+                    if "write" in job:
+                        write_data = job["write"]
+                        if write_data.get("io_bytes", 0) > 0:
+                            metrics["write_io_bytes"] = write_data["io_bytes"]
+                            metrics["write_bw_bytes_sec"] = write_data.get(
+                                "bw_bytes", 0
+                            )
+                            metrics["write_bw_kbps"] = write_data.get("bw", 0)
+                            metrics["write_iops"] = write_data.get("iops", 0)
+                            metrics["write_runtime_ms"] = write_data.get("runtime", 0)
+                            metrics["write_total_ios"] = write_data.get("total_ios", 0)
+
+                            # Latency stats
+                            if "clat_ns" in write_data:
+                                clat = write_data["clat_ns"]
+                                metrics["write_clat_min_ns"] = clat.get("min", 0)
+                                metrics["write_clat_max_ns"] = clat.get("max", 0)
+                                metrics["write_clat_mean_ns"] = clat.get("mean", 0)
+                                metrics["write_clat_stddev_ns"] = clat.get("stddev", 0)
+
+                                # Percentiles
+                                if "percentile" in clat:
+                                    pct = clat["percentile"]
+                                    metrics["write_clat_p50_ns"] = pct.get(
+                                        "50.000000", 0
+                                    )
+                                    metrics["write_clat_p90_ns"] = pct.get(
+                                        "90.000000", 0
+                                    )
+                                    metrics["write_clat_p95_ns"] = pct.get(
+                                        "95.000000", 0
+                                    )
+                                    metrics["write_clat_p99_ns"] = pct.get(
+                                        "99.000000", 0
+                                    )
+                                    metrics["write_clat_p999_ns"] = pct.get(
+                                        "99.900000", 0
+                                    )
+                                    metrics["write_clat_p9999_ns"] = pct.get(
+                                        "99.990000", 0
+                                    )
+
+                            # IOPS stats
+                            metrics["write_iops_min"] = write_data.get("iops_min", 0)
+                            metrics["write_iops_max"] = write_data.get("iops_max", 0)
+                            metrics["write_iops_mean"] = write_data.get("iops_mean", 0)
+                            metrics["write_iops_stddev"] = write_data.get(
+                                "iops_stddev", 0
+                            )
+
+                            # BW stats
+                            metrics["write_bw_min_kbps"] = write_data.get("bw_min", 0)
+                            metrics["write_bw_max_kbps"] = write_data.get("bw_max", 0)
+                            metrics["write_bw_mean_kbps"] = write_data.get("bw_mean", 0)
+
+                    # Latency distribution buckets
+                    if "latency_ms" in job:
+                        lat_ms = job["latency_ms"]
+                        metrics["lat_pct_under_2ms"] = lat_ms.get("2", 0)
+                        metrics["lat_pct_under_4ms"] = lat_ms.get("4", 0)
+                        metrics["lat_pct_under_10ms"] = lat_ms.get("10", 0)
+                        metrics["lat_pct_under_20ms"] = lat_ms.get("20", 0)
+                        metrics["lat_pct_under_50ms"] = lat_ms.get("50", 0)
+
+                # Parse disk utilization
+                if "disk_util" in fio_data and len(fio_data["disk_util"]) > 0:
+                    disk = fio_data["disk_util"][0]
+                    metrics["disk_name"] = disk.get("name", "")
+                    metrics["disk_read_ios"] = disk.get("read_ios", 0)
+                    metrics["disk_write_ios"] = disk.get("write_ios", 0)
+                    metrics["disk_read_sectors"] = disk.get("read_sectors", 0)
+                    metrics["disk_write_sectors"] = disk.get("write_sectors", 0)
+                    metrics["disk_util_pct"] = disk.get("util", 0)
+                    metrics["disk_in_queue_ms"] = disk.get("in_queue", 0)
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse FIO JSON output: {e}")
+        except Exception as e:
+            logger.warning(f"Error parsing flash metrics: {e}")

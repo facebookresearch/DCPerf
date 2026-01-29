@@ -4,10 +4,18 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 set -Eeuo pipefail
-echo "Running Flash Micro"
 
 FLASH_MICRO_DIR="$(dirname "$(realpath "$0")")"
 LOG_FILE="${FLASH_MICRO_DIR}/fio_run.log"
+
+# Redirect all output to both console and log file
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# Clear log file at start
+true > "$LOG_FILE"
+
+echo "FLASH"
+echo "Running Flash Micro"
 
 # Default values
 FILENAME="/dev/nvme0n1"
@@ -208,8 +216,8 @@ echo "Command: fio ${FIO_ARGS[*]}"
 echo ""
 
 # Execute FIO and capture output
-fio "${FIO_ARGS[@]}" 2>&1 | tee "$LOG_FILE"
-FIO_EXIT_CODE=${PIPESTATUS[0]}
+fio "${FIO_ARGS[@]}"
+FIO_EXIT_CODE=$?
 
 echo ""
 
