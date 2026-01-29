@@ -13,9 +13,9 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 ##########################################
 echo "Installing prerequisite packages..."
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt install -y fio
+  apt install -y fio fio-engine-libaio
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  dnf install -y fio
+  dnf install -y fio fio-engine-libaio
 fi
 
 echo "Installation complete!"
