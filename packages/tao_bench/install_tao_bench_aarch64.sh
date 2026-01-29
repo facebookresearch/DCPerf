@@ -73,7 +73,7 @@ fi
 
 # Install libevent
 if ! [ -d "libevent" ]; then
-    git clone --branch release-2.1.8-stable https://github.com/libevent/libevent
+    git clone --branch release-2.1.10-stable https://github.com/libevent/libevent
     pushd libevent/
     ./autogen.sh
     ./configure --prefix="${TAO_BENCH_DEPS}" PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" \
@@ -82,7 +82,7 @@ if ! [ -d "libevent" ]; then
     make install
     popd
 else
-    echo "[SKIPPED] libevent-2.1.8"
+    echo "[SKIPPED] libevent-2.1.10"
 fi
 
 # Download binutils
