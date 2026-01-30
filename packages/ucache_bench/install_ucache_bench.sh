@@ -441,10 +441,22 @@ cmake_build "$DEPS_DIR/folly" "$DEPS_DIR/folly/build" \
 # 3.8 Build fizz
 echo ""
 echo "[8/13] Building fizz..."
-cmake_build "$DEPS_DIR/fizz/fizz" "$DEPS_DIR/fizz/build" \
-    $COMMON_CMAKE_FLAGS \
-    -DBUILD_TESTS=OFF \
-    -DBUILD_SHARED_LIBS=OFF
+# On aarch64, we have libaegis available; on x86_64, we need to disable the AEGIS backend
+ARCH="$(uname -m)"
+if [ "$ARCH" = "aarch64" ]; then
+    cmake_build "$DEPS_DIR/fizz/fizz" "$DEPS_DIR/fizz/build" \
+        $COMMON_CMAKE_FLAGS \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_SHARED_LIBS=OFF
+else
+    # On x86_64, libaegis is not available. We need to explicitly disable finding aegis to prevent CMake from finding stale
+    #    aegis installations elsewhere on the system
+    cmake_build "$DEPS_DIR/fizz/fizz" "$DEPS_DIR/fizz/build" \
+        $COMMON_CMAKE_FLAGS \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_DISABLE_FIND_PACKAGE_aegis=ON
+fi
 
 # 3.9 Build wangle
 echo ""
