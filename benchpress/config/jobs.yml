@@ -326,9 +326,11 @@
     instance (rounded up).
   args:
     - '-n {num_instances}'
+    - '-i {icache_iterations}'
     - '{extra_args}'
   vars:
     - 'num_instances=-1'
+    - 'icache_iterations=50000'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
