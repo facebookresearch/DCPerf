@@ -29,6 +29,8 @@ class CDNBenchParser(Parser):
             self._parse_nic_metrics(stdout, metrics)
         elif stdout[0].strip() == "FLASH":
             self._parse_flash_metrics(stdout, metrics)
+        elif stdout[0].strip() == "CPU":
+            self._parse_cpu_metrics(stdout, metrics)
         return metrics
 
     def _parse_mem_metrics(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
@@ -535,3 +537,179 @@ class CDNBenchParser(Parser):
             logger.warning(f"Failed to parse FIO JSON output: {e}")
         except Exception as e:
             logger.warning(f"Error parsing flash metrics: {e}")
+
+    def _parse_cpu_metrics(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
+        """
+        Parse CPU/Memory benchmark output from sysbench.
+        Args:
+            stdout: stdout lines from sysbench benchmark execution
+            metrics: dictionary to store metrics
+        """
+        current_section = ""
+
+        for line in stdout:
+            line_stripped = line.strip()
+
+            # Track sections
+            if "CPU Governor Configuration" in line_stripped:
+                current_section = "governor"
+            elif "Running Sysbench Benchmark" in line_stripped:
+                current_section = "benchmark"
+            elif "CPU speed:" in line_stripped:
+                current_section = "cpu_speed"
+            elif "Latency (ms):" in line_stripped:
+                current_section = "latency"
+            elif "Threads fairness:" in line_stripped:
+                current_section = "fairness"
+            elif line_stripped.startswith("General statistics:"):
+                current_section = "general"
+
+            # Parse governor info
+            if current_section == "governor":
+                if "Setting CPU governor to:" in line_stripped:
+                    metrics["cpu_governor"] = line_stripped.split(":")[-1].strip()
+
+            # Parse benchmark configuration
+            if current_section == "benchmark":
+                if line_stripped.startswith("Test:"):
+                    metrics["test_type"] = line_stripped.split(":", 1)[-1].strip()
+                elif line_stripped.startswith("- cpu-max-prime:"):
+                    try:
+                        metrics["cpu_max_prime"] = int(
+                            line_stripped.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line_stripped.startswith("- threads:"):
+                    try:
+                        metrics["threads"] = int(
+                            line_stripped.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line_stripped.startswith("- time:"):
+                    match = re.search(r"(\d+)", line_stripped)
+                    if match:
+                        metrics["time_secs"] = int(match.group(1))
+                elif line_stripped.startswith("- memory-block-size:"):
+                    metrics["memory_block_size"] = line_stripped.split(":", 1)[
+                        -1
+                    ].strip()
+                elif line_stripped.startswith("- memory-total-size:"):
+                    metrics["memory_total_size"] = line_stripped.split(":", 1)[
+                        -1
+                    ].strip()
+                elif line_stripped.startswith("- memory-oper:"):
+                    metrics["memory_oper"] = line_stripped.split(":", 1)[-1].strip()
+                elif line_stripped.startswith("- memory-access-mode:"):
+                    metrics["memory_access_mode"] = line_stripped.split(":", 1)[
+                        -1
+                    ].strip()
+
+            # Parse sysbench version
+            if line_stripped.startswith("Sysbench version:"):
+                metrics["sysbench_version"] = line_stripped.split(":", 1)[-1].strip()
+
+            # Parse number of threads from sysbench output
+            if "Number of threads:" in line_stripped:
+                try:
+                    metrics["num_threads"] = int(line_stripped.split(":")[-1].strip())
+                except ValueError:
+                    pass
+
+            # Parse CPU speed metrics
+            if current_section == "cpu_speed":
+                if "events per second:" in line_stripped:
+                    try:
+                        metrics["cpu_events_per_sec"] = float(
+                            line_stripped.split(":")[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+
+            # Parse latency metrics (for both CPU and memory tests)
+            if current_section == "latency":
+                if line_stripped.startswith("min:"):
+                    try:
+                        metrics["latency_min_ms"] = float(
+                            line_stripped.split(":")[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line_stripped.startswith("avg:"):
+                    try:
+                        metrics["latency_avg_ms"] = float(
+                            line_stripped.split(":")[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line_stripped.startswith("max:"):
+                    try:
+                        metrics["latency_max_ms"] = float(
+                            line_stripped.split(":")[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif "95th percentile:" in line_stripped:
+                    try:
+                        metrics["latency_p95_ms"] = float(
+                            line_stripped.split(":")[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line_stripped.startswith("sum:"):
+                    try:
+                        metrics["latency_sum_ms"] = float(
+                            line_stripped.split(":")[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+
+            # Parse general statistics
+            if current_section == "general":
+                if "total time:" in line_stripped:
+                    match = re.search(r"([\d.]+)s", line_stripped)
+                    if match:
+                        metrics["total_time_secs"] = float(match.group(1))
+                elif "total number of events:" in line_stripped:
+                    try:
+                        metrics["total_events"] = int(
+                            line_stripped.split(":")[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+
+            # Parse threads fairness metrics
+            if current_section == "fairness":
+                if "events (avg/stddev):" in line_stripped:
+                    match = re.search(r"([\d.]+)/([\d.]+)", line_stripped)
+                    if match:
+                        metrics["fairness_events_avg"] = float(match.group(1))
+                        metrics["fairness_events_stddev"] = float(match.group(2))
+                elif "execution time (avg/stddev):" in line_stripped:
+                    match = re.search(r"([\d.]+)/([\d.]+)", line_stripped)
+                    if match:
+                        metrics["fairness_time_avg_secs"] = float(match.group(1))
+                        metrics["fairness_time_stddev_secs"] = float(match.group(2))
+
+            # Parse memory throughput (for memory tests)
+            # Format: "102400.00 MiB transferred (1706.49 MiB/sec)"
+            if "MiB transferred" in line_stripped:
+                match = re.search(
+                    r"([\d.]+)\s+MiB transferred\s+\(([\d.]+)\s+MiB/sec\)",
+                    line_stripped,
+                )
+                if match:
+                    metrics["memory_transferred_mib"] = float(match.group(1))
+                    metrics["memory_throughput_mib_per_sec"] = float(match.group(2))
+
+            # Parse memory operations per second
+            # Format: "Total operations: 26214400 (436889.96 per second)"
+            if "Total operations:" in line_stripped:
+                match = re.search(
+                    r"Total operations:\s*(\d+)\s*\(([\d.]+)\s*per second\)",
+                    line_stripped,
+                )
+                if match:
+                    metrics["memory_total_ops"] = int(match.group(1))
+                    metrics["memory_ops_per_sec"] = float(match.group(2))

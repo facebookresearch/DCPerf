@@ -6,11 +6,17 @@
 
 set -Eeuo pipefail
 
+CPU_MICRO_DIR="$(dirname "$(readlink -f "$0")")"
+LOG_FILE="${CPU_MICRO_DIR}/cpu_run.log"
+
+# Redirect all output to both console and log file
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# Clear log file at start
+true > "$LOG_FILE"
+
 # Output benchmark type identifier for parser
 echo "CPU"
-
-# shellcheck disable=SC2034
-CPU_MICRO_DIR="$(dirname "$(readlink -f "$0")")"
 
 # Default values
 TEST_TYPE="cpu"
@@ -210,4 +216,9 @@ case $TEST_TYPE in
         ;;
 esac
 
+echo ""
+echo "====================================================================="
+echo "Benchmark Execution Complete"
+echo "====================================================================="
+echo "Log File: $LOG_FILE"
 echo ""
