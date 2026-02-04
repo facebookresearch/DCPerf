@@ -2,7 +2,6 @@
 
 #include "UcacheBenchIOThreadContext.h"
 
-#include <fmt/format.h>
 #include <folly/fibers/EventBaseLoopController.h>
 
 #include <folly/portability/GFlags.h>
