@@ -34,7 +34,7 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    libfmt-dev sysstat jq unzip xxhash libxxhash-dev
+    libfmt-dev sysstat jq unzip xxhash libxxhash-dev libboost-all-dev
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -67,9 +67,7 @@ cd ../
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
-    # Source the download retry function
-    source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
-    download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
+    wget "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
     tar -xf "gengetopt-2.23.tar.xz"
     cd "gengetopt-2.23"
     ./configure
@@ -80,19 +78,9 @@ else
     msg "[SKIPPED] gengetopt-2.23"
 fi
 
-# Installing Boost
-if ! [ -d "boost_1_71_0" ]; then
-    wget "https://archives.boost.io/release/1.71.0/source/boost_1_71_0.tar.gz"
-    tar -xzf "boost_1_71_0.tar.gz"
-    cd "boost_1_71_0"
-    ./bootstrap.sh --without-libraries=python
-    sed -i 's/if PTHREAD_STACK_MIN > 0/ifdef PTHREAD_STACK_MIN/g' boost/thread/pthread/thread_data.hpp
-    ./b2
-    ./b2 install
-    cd ../
-else
-    msg "[SKIPPED] boost_1_71_0"
-fi
+# Using system Boost (installed via libboost-all-dev)
+# This avoids ABI mismatch issues that occur when building Boost from source
+msg "[INFO] Using system Boost (libboost-all-dev)"
 
 # Installing gflags
 if ! [ -d "gflags-2.2.2" ]; then
@@ -279,6 +267,11 @@ BP_CXX=g++
 cmake -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/build-deps" \
+    -DBOOST_ROOT="/usr" \
+    -DBoost_INCLUDE_DIR="/usr/include" \
+    -DBoost_LIBRARY_DIR="/usr/lib/aarch64-linux-gnu" \
+    -DBoost_NO_SYSTEM_PATHS=OFF \
+    -DBoost_NO_BOOST_CMAKE=ON \
     -DCMAKE_C_COMPILER="$BP_CC" \
     -DCMAKE_CXX_COMPILER="$BP_CXX" \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \

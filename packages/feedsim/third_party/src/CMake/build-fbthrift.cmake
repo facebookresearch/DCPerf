@@ -23,6 +23,9 @@ ExternalProject_Add(fbthrift
         -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=True
         -DCXX_STD:STRING=gnu++17
         -DCMAKE_CXX_STANDARD:STRING=17
+        -DBOOST_ROOT:PATH=${BOOST_ROOT}
+        -DBoost_INCLUDE_DIR:PATH=${Boost_INCLUDE_DIR}
+        -DBoost_NO_BOOST_CMAKE:BOOL=${Boost_NO_BOOST_CMAKE}
     BINARY_DIR ${oldisim_BINARY_DIR}/third_party/fbthrift
     BUILD_BYPRODUCTS
         <INSTALL_DIR>/lib/libthriftcpp2.a
@@ -51,16 +54,16 @@ set(THRIFT1 ${INSTALL_DIR}/bin/thrift1)
 set(THRIFTCPP2 ${INSTALL_DIR}/lib/libthriftcpp2.a)
 
 set(FBTHRIFT_LIBRARIES
-    ${INSTALL_DIR}/lib/libthriftprotocol.a
     ${INSTALL_DIR}/lib/libthriftcpp2.a
-    ${INSTALL_DIR}/lib/libcompiler_ast.a
-    ${INSTALL_DIR}/lib/libtransport.a
-    ${INSTALL_DIR}/lib/libthriftfrozen2.a
-    ${INSTALL_DIR}/lib/libcompiler_lib.a
-    ${INSTALL_DIR}/lib/libasync.a
+    ${INSTALL_DIR}/lib/libthriftprotocol.a
     ${INSTALL_DIR}/lib/libthrift-core.a
-    ${INSTALL_DIR}/lib/libcompiler_base.a
+    ${INSTALL_DIR}/lib/libtransport.a
+    ${INSTALL_DIR}/lib/libasync.a
     ${INSTALL_DIR}/lib/libconcurrency.a
+    ${INSTALL_DIR}/lib/libthriftfrozen2.a
+    ${INSTALL_DIR}/lib/libcompiler_ast.a
+    ${INSTALL_DIR}/lib/libcompiler_lib.a
+    ${INSTALL_DIR}/lib/libcompiler_base.a
 )
 
 set(FBTHRIFT_INCLUDE_DIR
