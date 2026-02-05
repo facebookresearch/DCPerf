@@ -174,7 +174,7 @@ class FollowedEntries(AsyncStep):
         def fetch_users(userids):
             return {u.id: u for u in UserModel.objects.filter(id__in=list(userids))}
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         entries = await loop.run_in_executor(None, fetch_10_posts, self.context.user)
         userids = {e.userid for e in entries}
         usermap = await loop.run_in_executor(None, fetch_users, userids)
@@ -204,7 +204,7 @@ class SuggestedUsers(AsyncStep):
         if len(self.context.user.following) < 25:
             # only suggest when this user isn't following so many people yet
             userids = suggested_users(self.context.user)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, fetch_users, userids)
 
     def run(self):
