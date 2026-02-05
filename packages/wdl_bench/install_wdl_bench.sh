@@ -4,6 +4,54 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 set -Eeuo pipefail
+export PIP_BREAK_SYSTEM_PACKAGES=1
+# Fix for modern Boost CMake config mode (Boost 1.70+) where Boost_INCLUDE_DIR
+# is not automatically set. The mvfst build requires this variable.
+# We set both the environment variable and determine the path for CMake defines.
+# IMPORTANT: We prioritize /usr/lib paths over /usr/local/lib to avoid version mismatches
+# (e.g., /usr/local/lib may have symlinks or CMake configs for a different version)
+BOOST_INCLUDE_DIR_PATH=""
+BOOST_LIBRARY_DIR_PATH=""
+
+# First check system paths (more reliable on Ubuntu/Debian)
+if [ -d "/usr/include/boost" ]; then
+    export Boost_INCLUDE_DIR="/usr/include"
+    BOOST_INCLUDE_DIR_PATH="/usr/include"
+    if [ -d "/usr/lib/aarch64-linux-gnu" ] && ls /usr/lib/aarch64-linux-gnu/libboost_*.so* >/dev/null 2>&1; then
+        export Boost_LIBRARY_DIR="/usr/lib/aarch64-linux-gnu"
+        BOOST_LIBRARY_DIR_PATH="/usr/lib/aarch64-linux-gnu"
+        export LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    elif [ -d "/usr/lib/x86_64-linux-gnu" ] && ls /usr/lib/x86_64-linux-gnu/libboost_*.so* >/dev/null 2>&1; then
+        export Boost_LIBRARY_DIR="/usr/lib/x86_64-linux-gnu"
+        BOOST_LIBRARY_DIR_PATH="/usr/lib/x86_64-linux-gnu"
+        export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    elif [ -d "/usr/lib" ] && ls /usr/lib/libboost_*.so* >/dev/null 2>&1; then
+        export Boost_LIBRARY_DIR="/usr/lib"
+        BOOST_LIBRARY_DIR_PATH="/usr/lib"
+        export LD_LIBRARY_PATH="/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+# Fallback to /usr/local if system Boost not found
+elif [ -d "/usr/local/include/boost" ]; then
+    export Boost_INCLUDE_DIR="/usr/local/include"
+    BOOST_INCLUDE_DIR_PATH="/usr/local/include"
+    if [ -d "/usr/local/lib" ]; then
+        export Boost_LIBRARY_DIR="/usr/local/lib"
+        BOOST_LIBRARY_DIR_PATH="/usr/local/lib"
+        export LD_LIBRARY_PATH="/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+fi
+
+# Set BOOST_ROOT to help CMake find the correct Boost installation
+if [ -n "$BOOST_INCLUDE_DIR_PATH" ]; then
+    if [[ "$BOOST_INCLUDE_DIR_PATH" == /usr/local/* ]]; then
+        export BOOST_ROOT="/usr/local"
+    else
+        export BOOST_ROOT="/usr"
+    fi
+fi
+
+# Disable searching in /usr/local to avoid finding mismatched CMake config files
+export Boost_NO_BOOST_CMAKE=ON
 
 GLIBC_VERSION=$(getconf GNU_LIBC_VERSION | cut -f 2 -d\  )
 
@@ -360,14 +408,6 @@ index 379e541..7e8895d 100644
               -DBENCHMARK_ENABLE_GTEST_TESTS=OFF
  )
  include_directories(${CMAKE_BINARY_DIR}/googlebench/include)
-@@ -56,4 +57,4 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
- 	target_compile_options(benchsleef512 PRIVATE ${EXTRA_CFLAGS} "-mavx512f" "-DARCH_VECT_LEN=512")
- 	target_link_libraries(benchsleef512 sleef ${GOOGLE_BENCH_LIBS})
- 	add_dependencies(benchsleef512 googlebenchmark)
--endif()
-\ No newline at end of file
-+endif()
---
 EOF
     # @lint-ignore-section TXT2 off
     mkdir build && cd build
