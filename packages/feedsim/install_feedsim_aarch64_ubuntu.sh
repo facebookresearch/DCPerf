@@ -57,13 +57,17 @@ fi
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 # Installing fast_float
-git clone https://github.com/fastfloat/fast_float.git
-cd fast_float
-mkdir build && cd build
-cmake ..
-make
-make install
-cd ../
+if ! [ -d "fast_float" ]; then
+    git clone https://github.com/fastfloat/fast_float.git
+    cd fast_float
+    mkdir build && cd build
+    cmake ..
+    make
+    make install
+    cd ../../
+else
+    msg "[SKIPPED] fast_float"
+fi
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
@@ -88,7 +92,7 @@ if ! [ -d "gflags-2.2.2" ]; then
     tar -xzf "gflags-2.2.2.tar.gz"
     cd "gflags-2.2.2"
     mkdir -p build && cd build
-    cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release ../
+    cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
     make -j8
     make install
     cd ../../
@@ -102,7 +106,7 @@ if ! [ -d "glog-0.4.0" ]; then
     tar -xzf "glog-0.4.0.tar.gz"
     cd "glog-0.4.0"
     mkdir -p build && cd build
-    cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release ../
+    cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
     make -j8
     make install
     cd ../../
@@ -111,43 +115,30 @@ else
 fi
 
 # Installing JEMalloc
-if ! [ -d "jemalloc-5.2.1" ]; then
-    wget "https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2"
-    bunzip2 "jemalloc-5.2.1.tar.bz2"
-    tar -xvf "jemalloc-5.2.1.tar"
-    cd "jemalloc-5.2.1"
+if ! [ -d "jemalloc-5.3.0" ]; then
+    wget "https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2"
+    bunzip2 "jemalloc-5.3.0.tar.bz2"
+    tar -xvf "jemalloc-5.3.0.tar"
+    cd "jemalloc-5.3.0"
     ./configure --enable-prof --enable-prof-libunwind
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] jemalloc-5.2.1"
+    msg "[SKIPPED] jemalloc-5.3.0"
 fi
 
 # Installing libevent
-if ! [ -d "libevent-2.1.11-stable" ]; then
-    wget "https://github.com/libevent/libevent/releases/download/release-2.1.11-stable/libevent-2.1.11-stable.tar.gz"
-    tar -xzf "libevent-2.1.11-stable.tar.gz"
-    cd "libevent-2.1.11-stable"
+if ! [ -d "libevent-2.1.12-stable" ]; then
+    wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
+    tar -xzf "libevent-2.1.12-stable.tar.gz"
+    cd "libevent-2.1.12-stable"
     ./configure
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] libevent-2.1.11-stable"
-fi
-
-# Installing openssl
-if ! [ -d "openssl" ]; then
-    mkdir -p build-deps
-    git clone --branch OpenSSL_1_1_1b --depth 1 https://github.com/openssl/openssl.git
-    cd "openssl"
-    ./config --prefix="${FEEDSIM_THIRD_PARTY_SRC}/build-deps"
-    make -j"$(nproc)"
-    make install
-    cd ../
-else
-    msg "[SKIPPED] openssl"
+    msg "[SKIPPED] libevent-2.1.12-stable"
 fi
 
 msg "Installing third-party dependencies ... DONE"
@@ -275,7 +266,7 @@ cmake -G Ninja \
     -DCMAKE_C_COMPILER="$BP_CC" \
     -DCMAKE_CXX_COMPILER="$BP_CXX" \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \
-    -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS -DFMT_HEADER_ONLY=1" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     -DFEEDSIM_USE_DLRM=ON \
     -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
