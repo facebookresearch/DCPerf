@@ -24,6 +24,8 @@ ExternalProject_Add(mvfst
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
         -DBOOST_ROOT:PATH=${BOOST_ROOT}
         -DBoost_INCLUDE_DIR:PATH=${Boost_INCLUDE_DIR}
+        -DBoost_LIBRARY_DIR:PATH=${Boost_LIBRARY_DIR}
+        -DBoost_NO_SYSTEM_PATHS:BOOL=${Boost_NO_SYSTEM_PATHS}
         -DBoost_NO_BOOST_CMAKE:BOOL=${Boost_NO_BOOST_CMAKE}
     BUILD_COMMAND
         cmake --build .

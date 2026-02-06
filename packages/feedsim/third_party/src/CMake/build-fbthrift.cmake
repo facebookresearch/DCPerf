@@ -25,6 +25,8 @@ ExternalProject_Add(fbthrift
         -DCMAKE_CXX_STANDARD:STRING=17
         -DBOOST_ROOT:PATH=${BOOST_ROOT}
         -DBoost_INCLUDE_DIR:PATH=${Boost_INCLUDE_DIR}
+        -DBoost_LIBRARY_DIR:PATH=${Boost_LIBRARY_DIR}
+        -DBoost_NO_SYSTEM_PATHS:BOOL=${Boost_NO_SYSTEM_PATHS}
         -DBoost_NO_BOOST_CMAKE:BOOL=${Boost_NO_BOOST_CMAKE}
     BINARY_DIR ${oldisim_BINARY_DIR}/third_party/fbthrift
     BUILD_BYPRODUCTS
