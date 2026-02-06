@@ -154,7 +154,7 @@ else
 fi
 
 # Installing libevent
-if ! [ -d "libevent-2.1.11-stable" ]; then
+if ! [ -d "libevent-2.1.12-stable" ]; then
     wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
     tar -xzf "libevent-2.1.12-stable.tar.gz"
     cd "libevent-2.1.12-stable"
