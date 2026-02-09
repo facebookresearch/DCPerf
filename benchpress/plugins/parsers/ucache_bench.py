@@ -4,10 +4,204 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import json
 import re
 from typing import Any, Dict, List
 
 from benchpress.lib.parser import Parser
+
+
+def aggregate_client_results(
+    results: List[Dict[str, Any]],
+    include_individual: bool = True,
+) -> Dict[str, Any]:
+    """Aggregate results from multiple UcacheBench clients.
+
+    This function combines metrics from multiple client instances to produce
+    an overall performance summary. It handles:
+    - Sum metrics: QPS, total operations, GET/SET counts, hits, misses, errors
+    - Average metrics: hit ratio percentage, latency percentiles
+
+    Args:
+        results: List of parsed result dictionaries from individual clients.
+                 Each dict should be the output from UcacheBenchParser.parse().
+        include_individual: If True, include individual client results in output.
+
+    Returns:
+        Aggregated metrics dictionary with the following structure:
+        {
+            "role": "aggregated",
+            "num_clients": <int>,
+            "successful_clients": <int>,
+            "qps": <sum of all client QPS>,
+            "total_operations": <sum>,
+            "get_operations": <sum>,
+            "set_operations": <sum>,
+            "get_hits": <sum>,
+            "get_misses": <sum>,
+            "get_errors": <sum>,
+            "set_successes": <sum>,
+            "set_errors": <sum>,
+            "hit_ratio_percent": <weighted average>,
+            "latency": {
+                "p50": <average>,
+                "p95": <average>,
+                "p99": <average>,
+                "p99_9": <average>,
+            },
+            "clients": {  # Only if include_individual=True
+                "1": {...},
+                "2": {...},
+            }
+        }
+
+    Example:
+        >>> results = [parser.parse(stdout1, stderr1, 0), parser.parse(stdout2, stderr2, 0)]
+        >>> aggregated = aggregate_client_results(results)
+        >>> print(f"Total QPS: {aggregated['qps']}")
+    """
+    if not results:
+        return {
+            "role": "aggregated",
+            "num_clients": 0,
+            "successful_clients": 0,
+            "error": "No client results to aggregate",
+        }
+
+    aggregated: Dict[str, Any] = {
+        "role": "aggregated",
+        "num_clients": len(results),
+        "successful_clients": 0,
+    }
+
+    # Metrics that should be summed across clients
+    sum_metrics = [
+        "qps",
+        "total_operations",
+        "get_operations",
+        "set_operations",
+        "get_hits",
+        "get_misses",
+        "get_errors",
+        "set_successes",
+        "set_errors",
+    ]
+
+    # Initialize sum metrics to 0
+    for metric in sum_metrics:
+        aggregated[metric] = 0
+
+    # Metrics that should be averaged (weighted by operations if possible)
+    # Track values for averaging
+    hit_ratio_values: List[float] = []
+    hit_ratio_weights: List[int] = []  # Weight by get_operations for accurate average
+
+    latency_values: Dict[str, List[float]] = {
+        "p50": [],
+        "p95": [],
+        "p99": [],
+        "p99_9": [],
+    }
+
+    # Track duration for weighted averaging
+    duration_values: List[float] = []
+
+    # Process each client result
+    for result in results:
+        # Check if this is a valid result (has QPS or operations data)
+        is_valid = result.get("qps", 0) > 0 or result.get("total_operations", 0) > 0
+
+        if is_valid:
+            aggregated["successful_clients"] += 1
+
+        # Sum metrics
+        for metric in sum_metrics:
+            if metric in result:
+                aggregated[metric] += result[metric]
+
+        # Collect hit ratio for weighted averaging
+        if "hit_ratio_percent" in result:
+            hit_ratio_values.append(result["hit_ratio_percent"])
+            # Weight by get_operations if available, otherwise equal weight
+            weight = result.get("get_operations", 1)
+            hit_ratio_weights.append(weight if weight > 0 else 1)
+
+        # Collect latency percentiles for averaging
+        if "latency" in result:
+            latency = result["latency"]
+            for key in latency_values:
+                if key in latency:
+                    latency_values[key].append(latency[key])
+
+        # Collect duration
+        if "duration_seconds" in result:
+            duration_values.append(result["duration_seconds"])
+
+    # Calculate weighted average hit ratio
+    if hit_ratio_values and hit_ratio_weights:
+        total_weight = sum(hit_ratio_weights)
+        if total_weight > 0:
+            weighted_sum = sum(
+                v * w for v, w in zip(hit_ratio_values, hit_ratio_weights)
+            )
+            aggregated["hit_ratio_percent"] = round(weighted_sum / total_weight, 2)
+        else:
+            aggregated["hit_ratio_percent"] = round(
+                sum(hit_ratio_values) / len(hit_ratio_values), 2
+            )
+
+    # Calculate average latencies
+    latencies: Dict[str, float] = {}
+    for key, values in latency_values.items():
+        if values:
+            latencies[key] = round(sum(values) / len(values), 3)
+    if latencies:
+        aggregated["latency"] = latencies
+
+    # Calculate average duration
+    if duration_values:
+        aggregated["duration_seconds"] = round(
+            sum(duration_values) / len(duration_values), 2
+        )
+
+    # Include individual client results if requested
+    if include_individual:
+        clients: Dict[str, Dict[str, Any]] = {}
+        for idx, result in enumerate(results):
+            client_key = str(idx + 1)  # 1-indexed for readability
+            clients[client_key] = result
+        aggregated["clients"] = clients
+
+    # Add summary statistics
+    if aggregated["successful_clients"] > 0:
+        aggregated["avg_qps_per_client"] = round(
+            aggregated["qps"] / aggregated["successful_clients"], 2
+        )
+
+    return aggregated
+
+
+def aggregate_client_results_from_json(
+    json_results: List[str],
+    include_individual: bool = True,
+) -> Dict[str, Any]:
+    """Aggregate client results from JSON strings.
+
+    This is a convenience function for aggregating results that have been
+    serialized to JSON (e.g., collected from remote clients).
+
+    Args:
+        json_results: List of JSON strings, each representing a client result.
+        include_individual: If True, include individual client results in output.
+
+    Returns:
+        Aggregated metrics dictionary (same format as aggregate_client_results).
+
+    Raises:
+        json.JSONDecodeError: If any JSON string is invalid.
+    """
+    results = [json.loads(r) for r in json_results]
+    return aggregate_client_results(results, include_individual)
 
 
 class UcacheBenchParser(Parser):
