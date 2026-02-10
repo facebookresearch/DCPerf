@@ -34,7 +34,10 @@ void UcacheBenchServer::setupCacheLib() {
 
   // Configure allocator - similar to production ucache/OCI settings
   // Using default access config with hash_power for hashtable buckets
-  cacheConfig.setAccessConfig({config_.hash_power, 16 /* lock power */});
+  // Lock power should match hash_power for optimal concurrency (production uses
+  // 20)
+  cacheConfig.setAccessConfig(
+      {config_.hash_power, config_.hash_power /* lock power */});
 
   // Generate alloc sizes similar to production (factor 1.25, min 64B)
   // This provides a good distribution of allocation classes for cache items
