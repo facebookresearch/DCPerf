@@ -10,6 +10,7 @@
 #include <cachelib/allocator/CacheAllocator.h>
 #include <folly/futures/Future.h>
 #include <memory>
+#include <string>
 #ifdef OSS_BUILD
 #include "UcacheBenchMessages.h"
 #else
@@ -23,10 +24,26 @@ using CacheAllocator = facebook::cachelib::Lru5B2QAllocator;
 using PoolId = facebook::cachelib::PoolId;
 
 struct UcacheBenchConfig {
+  // Basic cache settings
   uint64_t memory_mb = 1024;
   uint32_t hash_power = 20;
   std::string pool_name = "default";
   bool verbose = false;
+
+  // LRU rebalancing settings (production uses HitsPerSlab strategy)
+  uint32_t lru_rebalance_interval_sec = 0; // 0 = disabled
+  uint32_t lru_rebalancing_hits_min_age_sec = 0; // Min tail age to reduce slabs
+  uint32_t lru_rebalancing_hits_max_age_sec =
+      0; // Max tail age to increase slabs
+  bool lru_hits_victim_by_free_mem = false;
+
+  // Hash table settings for access config
+  uint32_t hashtable_lock_power = 20; // Number of locks = 2^lock_power
+
+  // CacheLib allocator settings
+  uint64_t cachelib_num_shards = 0; // 0 = use default
+  uint32_t min_alloc_size = 64; // Minimum allocation size in bytes
+
   // Navy (NVM/SSD cache) config (if navy_cache_size_mb > 0, hybrid mode is
   // enabled)
   std::string navy_cache_path = "/tmp/ucachebench_ssd";

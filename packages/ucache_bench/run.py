@@ -17,6 +17,91 @@ UCACHE_BENCH_DIR: str = os.path.join(BENCHPRESS_ROOT, "benchmarks", "ucache_benc
 # Constants
 MEM_USAGE_FACTOR = 0.75  # to prevent OOM
 
+# Size thresholds for preset configs (in MB)
+# Small: ~50GB, Medium: ~100GB, Large: ~200GB
+SMALL_MEMORY_THRESHOLD = 75000
+MEDIUM_MEMORY_THRESHOLD = 150000
+
+
+def calculate_hash_power(memory_mb: int) -> int:
+    """Calculate appropriate hash_power based on memory size.
+
+    Hash power determines the hash table size (2^hash_power buckets).
+    We scale it based on memory to balance memory usage and performance.
+
+    Recommended mappings based on preset configs:
+    - Small (~50GB): hash_power=26 (64M buckets)
+    - Medium (~100GB): hash_power=28 (256M buckets)
+    - Large (~200GB): hash_power=32 (4B buckets)
+
+    Args:
+        memory_mb: Memory size in MB
+
+    Returns:
+        Appropriate hash_power value
+    """
+    if memory_mb < SMALL_MEMORY_THRESHOLD:
+        # Small config: ~50GB memory
+        return 26
+    elif memory_mb < MEDIUM_MEMORY_THRESHOLD:
+        # Medium config: ~100GB memory
+        return 28
+    else:
+        # Large config: ~200GB memory
+        return 32
+
+
+def calculate_num_threads(memory_mb: int, provided_threads: int, n_cores: int) -> int:
+    """Calculate appropriate number of threads based on memory size.
+
+    Args:
+        memory_mb: Memory size in MB
+        provided_threads: User-provided thread count (0 = auto)
+        n_cores: Number of available CPU cores
+
+    Returns:
+        Appropriate thread count
+    """
+    if provided_threads > 0:
+        return provided_threads
+
+    # Auto-scale based on memory size
+    if memory_mb < SMALL_MEMORY_THRESHOLD:
+        # Small config: ~64 threads
+        return min(64, max(1, n_cores))
+    elif memory_mb < MEDIUM_MEMORY_THRESHOLD:
+        # Medium config: ~64 threads
+        return min(64, max(1, n_cores))
+    else:
+        # Large config: ~128 threads
+        return min(128, max(1, n_cores))
+
+
+def calculate_num_proxies(memory_mb: int, provided_proxies: int, n_cores: int) -> int:
+    """Calculate appropriate number of proxy threads based on memory size.
+
+    Args:
+        memory_mb: Memory size in MB
+        provided_proxies: User-provided proxy count (0 = auto)
+        n_cores: Number of available CPU cores
+
+    Returns:
+        Appropriate proxy thread count
+    """
+    if provided_proxies > 0:
+        return provided_proxies
+
+    # Auto-scale based on memory size
+    if memory_mb < SMALL_MEMORY_THRESHOLD:
+        # Small config: ~32 proxies
+        return min(32, n_cores)
+    elif memory_mb < MEDIUM_MEMORY_THRESHOLD:
+        # Medium config: ~32 proxies
+        return min(32, n_cores)
+    else:
+        # Large config: ~64 proxies
+        return min(64, n_cores)
+
 
 def run_cmd(
     cmd: List[str], timeout: Optional[int] = None, for_real: bool = True
@@ -43,12 +128,21 @@ def run_cmd(
 
 
 def run_server(args: argparse.Namespace) -> None:
-    # Calculate number of threads
+    # Calculate number of cores available
     n_cores = len(os.sched_getaffinity(0))
-    n_threads = args.num_threads if args.num_threads > 0 else max(1, n_cores // 2)
 
     # Calculate memory size
     memory_mb = int(args.memsize * 1024 * MEM_USAGE_FACTOR)
+
+    # Auto-calculate hash_power if not explicitly set
+    # (default value is 20, which is too small for production workloads)
+    hash_power = args.hash_power
+    if args.hash_power == 20:  # Default value, likely not explicitly set
+        hash_power = calculate_hash_power(memory_mb)
+        print(f"Auto-calculated hash_power={hash_power} for {memory_mb}MB memory")
+
+    # Calculate number of threads
+    n_threads = calculate_num_threads(memory_mb, args.num_threads, n_cores)
 
     print(
         f"Starting UcacheBench server with {n_threads} threads and {memory_mb}MB memory"
@@ -60,10 +154,32 @@ def run_server(args: argparse.Namespace) -> None:
         f"--port={args.port}",
         f"--memory_mb={memory_mb}",
         f"--num_threads={n_threads}",
-        f"--hash_power={args.hash_power}",
+        f"--hash_power={hash_power}",
         f"--pool_name={args.pool_name}",
         f"--cache_mode={args.cache_mode}",
     ]
+
+    # Add DRAM tuning parameters if provided
+    if args.lru_rebalance_interval_sec is not None:
+        server_cmd.append(
+            f"--lru_rebalance_interval_sec={args.lru_rebalance_interval_sec}"
+        )
+    if args.lru_rebalancing_hits_min_age_sec is not None:
+        server_cmd.append(
+            f"--lru_rebalancing_hits_min_age_sec={args.lru_rebalancing_hits_min_age_sec}"
+        )
+    if args.lru_rebalancing_hits_max_age_sec is not None:
+        server_cmd.append(
+            f"--lru_rebalancing_hits_max_age_sec={args.lru_rebalancing_hits_max_age_sec}"
+        )
+    if args.lru_hits_victim_by_free_mem:
+        server_cmd.append("--lru_hits_victim_by_free_mem=true")
+    if args.hashtable_lock_power is not None:
+        server_cmd.append(f"--hashtable_lock_power={args.hashtable_lock_power}")
+    if args.cachelib_num_shards is not None:
+        server_cmd.append(f"--cachelib_num_shards={args.cachelib_num_shards}")
+    if args.min_alloc_size is not None:
+        server_cmd.append(f"--min_alloc_size={args.min_alloc_size}")
 
     # Add Navy-specific options for hybrid mode
     if args.cache_mode == "hybrid":
@@ -93,13 +209,24 @@ def run_server(args: argparse.Namespace) -> None:
 def run_client(args: argparse.Namespace) -> None:
     print("Starting UcacheBench client...")
 
-    # Calculate number of threads
+    # Calculate number of cores available
     n_cores = len(os.sched_getaffinity(0))
-    n_threads = args.num_threads if args.num_threads > 0 else max(1, n_cores - 2)
+
+    # Calculate memory size if available (for auto-scaling parameters)
+    # Note: Client doesn't directly use memory_mb, but we estimate based on server
+    # For simplicity, we use default scaling unless explicit values provided
+    memory_mb = 100000  # Default to medium config size for auto-scaling
+
+    # Calculate number of threads
+    n_threads = calculate_num_threads(memory_mb, args.num_threads, n_cores)
+    if args.num_threads == 0:
+        # Client default: use most cores, leaving a few for system
+        n_threads = max(1, n_cores - 2)
+
+    # Calculate number of proxy threads for connection management
+    n_proxies = calculate_num_proxies(memory_mb, args.num_proxies, n_cores)
 
     client_binary = os.path.join(UCACHE_BENCH_DIR, "client", "ucachebench_client")
-    # Calculate number of proxy threads for connection management
-    n_proxies = args.num_proxies if args.num_proxies > 0 else n_cores
 
     client_cmd = [
         client_binary,
@@ -163,6 +290,50 @@ def init_parser() -> argparse.ArgumentParser:
         type=str,
         default="default",
         help="Pool name for cachelib",
+    )
+
+    # DRAM tuning parameters (production-like settings)
+    server_parser.add_argument(
+        "--lru-rebalance-interval-sec",
+        type=int,
+        default=None,
+        help="LRU rebalance interval in seconds (None = use default/disabled)",
+    )
+    server_parser.add_argument(
+        "--lru-rebalancing-hits-min-age-sec",
+        type=int,
+        default=None,
+        help="Minimum LRU tail age in seconds to reduce slabs",
+    )
+    server_parser.add_argument(
+        "--lru-rebalancing-hits-max-age-sec",
+        type=int,
+        default=None,
+        help="Maximum LRU tail age in seconds to increase slabs",
+    )
+    server_parser.add_argument(
+        "--lru-hits-victim-by-free-mem",
+        action="store_true",
+        default=False,
+        help="Use free memory for LRU rebalancing victim selection",
+    )
+    server_parser.add_argument(
+        "--hashtable-lock-power",
+        type=int,
+        default=None,
+        help="Hash table lock power (number of locks = 2^lock_power)",
+    )
+    server_parser.add_argument(
+        "--cachelib-num-shards",
+        type=int,
+        default=None,
+        help="Number of CacheLib shards (None = use default)",
+    )
+    server_parser.add_argument(
+        "--min-alloc-size",
+        type=int,
+        default=None,
+        help="Minimum allocation size in bytes",
     )
 
     # Cache configuration arguments

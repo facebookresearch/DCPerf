@@ -11,6 +11,7 @@
 #include <folly/portability/GFlags.h>
 
 #include "cachelib/allocator/CacheAllocator.h"
+#include "cachelib/allocator/HitsPerSlabStrategy.h"
 
 using namespace facebook::ucachebench;
 
@@ -32,23 +33,52 @@ void UcacheBenchServer::setupCacheLib() {
   // Set memory size (L1 DRAM cache)
   cacheConfig.setCacheSize(config_.memory_mb * 1024 * 1024);
 
-  // Configure allocator - similar to production ucache/OCI settings
-  // Using default access config with hash_power for hashtable buckets
-  // Lock power should match hash_power for optimal concurrency (production uses
-  // 20)
+  // Configure allocator settings
+  // hash_power: Number of hash buckets = 2^hash_power
+  // lock_power: Number of locks = 2^lock_power
   cacheConfig.setAccessConfig(
-      {config_.hash_power, config_.hash_power /* lock power */});
+      {config_.hash_power, config_.hashtable_lock_power});
 
-  // Generate alloc sizes similar to production (factor 1.25, min 64B)
+  // Generate alloc sizes (factor 1.25, min allocation size)
   // This provides a good distribution of allocation classes for cache items
   // Max alloc size increased to 64KB to support production traffic distribution
   cacheConfig.setDefaultAllocSizes(
       facebook::cachelib::util::generateAllocSizes(
           1.25 /* alloc factor */,
           65536 /* max alloc size (64KB) */,
-          64 /* min alloc size */));
+          config_.min_alloc_size /* min alloc size */));
+
+  // Configure LRU rebalancing if enabled
+  if (config_.lru_rebalance_interval_sec > 0) {
+    // Enable pool rebalancing with HitsPerSlab strategy
+    facebook::cachelib::HitsPerSlabStrategy::Config hitsConfig;
+    hitsConfig.minLruTailAge = config_.lru_rebalancing_hits_min_age_sec;
+    hitsConfig.maxLruTailAge = config_.lru_rebalancing_hits_max_age_sec;
+
+    auto rebalanceStrategy =
+        std::make_shared<facebook::cachelib::HitsPerSlabStrategy>(hitsConfig);
+    cacheConfig.enablePoolRebalancing(
+        rebalanceStrategy,
+        std::chrono::seconds(config_.lru_rebalance_interval_sec));
+  }
 
   if (config_.verbose) {
+    printf("CacheLib configuration:\n");
+    printf(
+        "  hash_power=%u, lock_power=%u\n",
+        config_.hash_power,
+        config_.hashtable_lock_power);
+    if (config_.lru_rebalance_interval_sec > 0) {
+      printf(
+          "  lru_rebalance_interval=%us, hits_min_age=%us, hits_max_age=%us\n",
+          config_.lru_rebalance_interval_sec,
+          config_.lru_rebalancing_hits_min_age_sec,
+          config_.lru_rebalancing_hits_max_age_sec);
+    }
+    if (config_.cachelib_num_shards > 0) {
+      printf("  cachelib_num_shards=%lu\n", config_.cachelib_num_shards);
+    }
+
     if (enableNvm) {
       printf(
           "Initializing CacheLib in HYBRID mode with %luMB RAM + %luMB Navy\n",
@@ -56,9 +86,7 @@ void UcacheBenchServer::setupCacheLib() {
           config_.navy_cache_size_mb);
     } else {
       printf(
-          "Initializing CacheLib with %luMB DRAM memory, hash_power=%u\n",
-          config_.memory_mb,
-          config_.hash_power);
+          "Initializing CacheLib with %luMB DRAM memory\n", config_.memory_mb);
     }
   }
 
