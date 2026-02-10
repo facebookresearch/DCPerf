@@ -12,7 +12,7 @@ FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
 FEEDSIM_ROOT_SRC="${BENCHPRESS_ROOT}/benchmarks/feedsim"
 FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
-LIBTORCH_VERSION="2.1.0"
+LIBTORCH_VERSION="2.8.0"
 DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-dlrm/dlrm_small.tar.gz"
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
 
@@ -185,11 +185,11 @@ cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 ARCH="$(uname -m)"
 if [ "$ARCH" = "x86_64" ]; then
-    LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+    LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
 elif [ "$ARCH" = "aarch64" ]; then
     msg "WARNING: Pre-built LibTorch for ARM64 may not be available."
     msg "Attempting to download CPU version..."
-    LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+    LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
 else
     die "Unsupported architecture: ${ARCH}"
 fi
