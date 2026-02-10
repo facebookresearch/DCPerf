@@ -12,6 +12,7 @@
 
 #include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
+#include "cachelib/allocator/LruTailAgeStrategy.h"
 
 using namespace facebook::ucachebench;
 
@@ -50,13 +51,50 @@ void UcacheBenchServer::setupCacheLib() {
 
   // Configure LRU rebalancing if enabled
   if (config_.lru_rebalance_interval_sec > 0) {
-    // Enable pool rebalancing with HitsPerSlab strategy
-    facebook::cachelib::HitsPerSlabStrategy::Config hitsConfig;
-    hitsConfig.minLruTailAge = config_.lru_rebalancing_hits_min_age_sec;
-    hitsConfig.maxLruTailAge = config_.lru_rebalancing_hits_max_age_sec;
+    std::shared_ptr<facebook::cachelib::RebalanceStrategy> rebalanceStrategy;
 
-    auto rebalanceStrategy =
-        std::make_shared<facebook::cachelib::HitsPerSlabStrategy>(hitsConfig);
+    if (!enableNvm &&
+        config_.lru_rebalance_metric ==
+            UcacheBenchConfig::LruRebalanceMetric::FAIR) {
+      // DRAM-only mode: Use LruTailAgeStrategy (FAIR) to balance large/small
+      // item eviction. This is the production ucache OCI setting for DRAM-only
+      // deployments. The FAIR strategy ensures that allocation classes with
+      // different item sizes have similar tail ages, preventing one size class
+      // from dominating eviction.
+      facebook::cachelib::LruTailAgeStrategy::Config fairConfig;
+      fairConfig.minSlabs = config_.lru_rebalancing_min_slabs;
+      fairConfig.tailAgeDifferenceRatio = config_.lru_rebalancing_fair_ratio;
+      fairConfig.minTailAgeDifference = config_.lru_rebalancing_fair_min_diff;
+      rebalanceStrategy =
+          std::make_shared<facebook::cachelib::LruTailAgeStrategy>(fairConfig);
+
+      if (config_.verbose) {
+        printf(
+            "  LRU rebalancing strategy: FAIR (LruTailAgeStrategy)\n"
+            "    minSlabs=%u, tailAgeDifferenceRatio=%.2f, minTailAgeDifference=%u\n",
+            config_.lru_rebalancing_min_slabs,
+            config_.lru_rebalancing_fair_ratio,
+            config_.lru_rebalancing_fair_min_diff);
+      }
+    } else {
+      // Hybrid mode (NVM enabled) or HITS metric: Use HitsPerSlabStrategy
+      // This is the production ucache setting when NVM is enabled.
+      facebook::cachelib::HitsPerSlabStrategy::Config hitsConfig;
+      hitsConfig.minSlabs = config_.lru_rebalancing_min_slabs;
+      hitsConfig.minLruTailAge = config_.lru_rebalancing_hits_min_age_sec;
+      hitsConfig.maxLruTailAge = config_.lru_rebalancing_hits_max_age_sec;
+      rebalanceStrategy =
+          std::make_shared<facebook::cachelib::HitsPerSlabStrategy>(hitsConfig);
+
+      if (config_.verbose) {
+        printf(
+            "  LRU rebalancing strategy: HITS (HitsPerSlabStrategy)\n"
+            "    minSlabs=%u, minLruTailAge=%u, maxLruTailAge=%u\n",
+            config_.lru_rebalancing_min_slabs,
+            config_.lru_rebalancing_hits_min_age_sec,
+            config_.lru_rebalancing_hits_max_age_sec);
+      }
+    }
     cacheConfig.enablePoolRebalancing(
         rebalanceStrategy,
         std::chrono::seconds(config_.lru_rebalance_interval_sec));
