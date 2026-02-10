@@ -57,6 +57,58 @@ class ZipfianGenerator {
   static double zeta(uint64_t n, double theta);
 };
 
+/**
+ * Admin server connection for multi-client coordination.
+ * Connects to the server's admin port to participate in phase synchronization.
+ */
+class AdminConnection {
+ public:
+  AdminConnection() = default;
+  ~AdminConnection();
+
+  // Connect to the admin server
+  bool connect(const std::string& host, uint16_t port);
+
+  // Disconnect from the admin server
+  void disconnect();
+
+  // Check if connected
+  bool isConnected() const {
+    return socket_ >= 0;
+  }
+
+  // Send REGISTER command and get assigned client ID
+  // Returns the assigned client ID, or -1 on error
+  int32_t sendRegister();
+
+  // Send WARMUP_DONE command
+  bool sendWarmupDone(int32_t clientId);
+
+  // Send BENCHMARK_DONE command
+  bool sendBenchmarkDone(int32_t clientId);
+
+  // Wait for an async notification from the server
+  // Returns the notification message, or empty string on error/timeout
+  std::string waitForNotification(uint32_t timeoutSeconds = 0);
+
+ private:
+  // Send a command and receive response
+  // Filters out broadcast notifications and buffers them for later retrieval
+  std::string sendCommand(const std::string& command);
+
+  // Read a line from the socket
+  std::string readLine();
+
+  // Check if a message is a broadcast notification (vs a command response)
+  static bool isBroadcastNotification(const std::string& message);
+
+  int socket_{-1};
+  std::string readBuffer_;
+  // Buffer for broadcast notifications received while waiting for command
+  // response
+  std::vector<std::string> pendingNotifications_;
+};
+
 class UcacheBenchClient {
  public:
   // Production traffic distribution configuration
@@ -110,6 +162,28 @@ class UcacheBenchClient {
   BenchmarkResults runBenchmark();
   void printResults(const BenchmarkResults& results);
 
+  // Admin server coordination
+  // If admin server is configured, the client will:
+  // 1. Connect and register to get a client ID
+  // 2. Wait for ALL_REGISTERED before starting warmup
+  // 3. Send WARMUP_DONE and wait for ALL_WARMUP_DONE before benchmark
+  // 4. Send BENCHMARK_DONE after completing benchmark
+
+  // Connect to admin server (called from main if --admin_port is set)
+  // Uses server_host since admin server runs on the same machine as cache
+  // server
+  bool connectToAdmin(const std::string& host, uint16_t port);
+
+  // Check if admin connection is active
+  bool hasAdminConnection() const {
+    return adminConnection_ && adminConnection_->isConnected();
+  }
+
+  // Get the client ID assigned by the admin server
+  int32_t getClientId() const {
+    return clientId_;
+  }
+
  private:
   std::string generateKey();
   std::string generateValue();
@@ -141,6 +215,10 @@ class UcacheBenchClient {
       routerInstance_;
   // Note: No longer using a shared client_ member
   // Instead, each thread creates its own client from routerInstance_
+
+  // Admin server connection for multi-client coordination
+  std::unique_ptr<AdminConnection> adminConnection_;
+  int32_t clientId_{-1}; // Assigned by admin server
 };
 
 } // namespace ucachebench

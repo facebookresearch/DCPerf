@@ -9,6 +9,7 @@
 
 #include <cachelib/allocator/CacheAllocator.h>
 #include <folly/futures/Future.h>
+#include <atomic>
 #include <memory>
 #include <string>
 #ifdef OSS_BUILD
@@ -22,6 +23,41 @@ namespace ucachebench {
 
 using CacheAllocator = facebook::cachelib::Lru5B2QAllocator;
 using PoolId = facebook::cachelib::PoolId;
+
+/**
+ * Metrics tracking for a single benchmark phase (warmup or benchmark).
+ * All counters are atomic for thread-safe updates from multiple IO threads.
+ */
+struct PhaseMetrics {
+  std::atomic<uint64_t> getRequests{0};
+  std::atomic<uint64_t> getHits{0};
+  std::atomic<uint64_t> getMisses{0};
+  std::atomic<uint64_t> setRequests{0};
+  std::atomic<uint64_t> deleteRequests{0};
+
+  void reset() {
+    getRequests.store(0);
+    getHits.store(0);
+    getMisses.store(0);
+    setRequests.store(0);
+    deleteRequests.store(0);
+  }
+};
+
+// CPU architecture enum for production-like cache configurations
+// Each profile is tuned for specific CPU characteristics and memory capacity
+enum class CpuArchitecture {
+  DEFAULT, // Basic config without production tuning
+  TURIN, // AMD Turin/Trento - high core count, 256GB+ RAM
+  SKYLAKE, // Intel Skylake - 64GB RAM
+  SAPPHIRE_RAPIDS, // Intel Sapphire Rapids - 128GB RAM
+};
+
+// Convert string to CpuArchitecture
+CpuArchitecture parseCpuArchitecture(const std::string& str);
+
+// Get string representation of CpuArchitecture
+const char* cpuArchitectureToString(CpuArchitecture type);
 
 struct UcacheBenchConfig {
   // Basic cache settings
@@ -99,12 +135,50 @@ class UcacheBenchServer {
 
   void printStats();
 
+  // Phase-based metric tracking for multi-client coordination
+  enum class TrackingPhase {
+    NONE, // Not tracking (before warmup starts)
+    WARMUP, // Tracking warmup phase
+    BENCHMARK // Tracking benchmark phase
+  };
+
+  // Set the current tracking phase and reset corresponding metrics
+  void setTrackingPhase(TrackingPhase phase);
+
+  // Get current tracking phase
+  TrackingPhase getTrackingPhase() const {
+    return currentPhase_.load();
+  }
+
+  // Get metrics for warmup phase
+  const PhaseMetrics& getWarmupMetrics() const {
+    return warmupMetrics_;
+  }
+
+  // Get metrics for benchmark phase
+  const PhaseMetrics& getBenchmarkMetrics() const {
+    return benchmarkMetrics_;
+  }
+
+  // Print final results in parseable format for benchpress
+  void printFinalResults(double benchmarkDurationSec) const;
+
  private:
   void setupCacheLib();
+
+  // Increment metrics based on current phase
+  void recordGet(bool hit);
+  void recordSet();
+  void recordDelete();
 
   UcacheBenchConfig config_;
   std::unique_ptr<CacheAllocator> cache_;
   PoolId poolId_{};
+
+  // Phase-based metric tracking
+  std::atomic<TrackingPhase> currentPhase_{TrackingPhase::NONE};
+  PhaseMetrics warmupMetrics_;
+  PhaseMetrics benchmarkMetrics_;
 };
 
 } // namespace ucachebench

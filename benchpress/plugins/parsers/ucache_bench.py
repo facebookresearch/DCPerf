@@ -13,7 +13,11 @@ from benchpress.lib.parser import Parser
 class UcacheBenchParser(Parser):
     """Parser for UcacheBench output.
 
-    Example output:
+    Parses the text output from either:
+    1. The ucachebench_client binary (single-client mode)
+    2. The ucachebench_server binary (multi-client aggregated results)
+
+    Example client output:
     WARMUP PHASE:
       Status: ✓ SUCCESS
       Duration: 10.00 seconds
@@ -42,6 +46,25 @@ class UcacheBenchParser(Parser):
       P95: 0.12
       P99: 0.25
       P99.9: 0.50
+
+    Example server output (multi-client aggregated):
+    ========================================
+         UCACHEBENCH SERVER RESULTS
+    ========================================
+    Benchmark Duration: 60.000 seconds
+
+    Operations:
+      GET requests:    540000
+      GET hits:        432000
+      GET misses:      108000
+      SET requests:    60000
+      DELETE requests: 0
+      Total ops:       600000
+
+    Performance:
+      QPS:        10000.0
+      Hit Ratio:  80.00%
+    ========================================
     """
 
     def parse(
@@ -53,18 +76,80 @@ class UcacheBenchParser(Parser):
 
         metrics: Dict[str, Any] = {}
 
-        # Parse warmup phase metrics
-        warmup_metrics = self._parse_warmup_phase(output)
-        if warmup_metrics:
-            metrics["warmup"] = warmup_metrics
+        # Detect if this is server-side aggregated output
+        is_server_output = "UCACHEBENCH SERVER RESULTS" in output
 
-        # Parse benchmark phase metrics
-        benchmark_metrics = self._parse_benchmark_phase(output)
-        if benchmark_metrics:
-            metrics.update(benchmark_metrics)
+        if is_server_output:
+            # Parse server-side aggregated results
+            server_metrics = self._parse_server_results(output)
+            if server_metrics:
+                metrics.update(server_metrics)
+        else:
+            # Parse client-side output (original format)
+            # Parse warmup phase metrics
+            warmup_metrics = self._parse_warmup_phase(output)
+            if warmup_metrics:
+                metrics["warmup"] = warmup_metrics
+
+            # Parse benchmark phase metrics
+            benchmark_metrics = self._parse_benchmark_phase(output)
+            if benchmark_metrics:
+                metrics.update(benchmark_metrics)
 
         # Add exit code
         metrics["exit_code"] = returncode
+
+        return metrics
+
+    def _parse_server_results(self, output: str) -> Dict[str, Any]:
+        """Parse server-side aggregated results (multi-client mode)."""
+        metrics: Dict[str, Any] = {}
+
+        # Parse benchmark duration
+        duration_match = re.search(r"Benchmark Duration: ([\d.]+) seconds", output)
+        if duration_match:
+            metrics["duration_seconds"] = float(duration_match.group(1))
+
+        # Parse GET operations
+        get_reqs_match = re.search(r"GET requests:\s+(\d+)", output)
+        if get_reqs_match:
+            metrics["get_operations"] = int(get_reqs_match.group(1))
+
+        get_hits_match = re.search(r"GET hits:\s+(\d+)", output)
+        if get_hits_match:
+            metrics["get_hits"] = int(get_hits_match.group(1))
+
+        get_misses_match = re.search(r"GET misses:\s+(\d+)", output)
+        if get_misses_match:
+            metrics["get_misses"] = int(get_misses_match.group(1))
+
+        # Parse SET operations
+        set_reqs_match = re.search(r"SET requests:\s+(\d+)", output)
+        if set_reqs_match:
+            metrics["set_operations"] = int(set_reqs_match.group(1))
+
+        # Parse DELETE operations
+        delete_reqs_match = re.search(r"DELETE requests:\s+(\d+)", output)
+        if delete_reqs_match:
+            metrics["delete_operations"] = int(delete_reqs_match.group(1))
+
+        # Parse total operations
+        total_ops_match = re.search(r"Total ops:\s+(\d+)", output)
+        if total_ops_match:
+            metrics["total_operations"] = int(total_ops_match.group(1))
+
+        # Parse QPS
+        qps_match = re.search(r"QPS:\s+([\d.]+)", output)
+        if qps_match:
+            metrics["qps"] = float(qps_match.group(1))
+
+        # Parse hit ratio
+        hit_ratio_match = re.search(r"Hit Ratio:\s+([\d.]+)%", output)
+        if hit_ratio_match:
+            metrics["hit_ratio_percent"] = float(hit_ratio_match.group(1))
+
+        # Mark this as server-aggregated results
+        metrics["source"] = "server_aggregated"
 
         return metrics
 

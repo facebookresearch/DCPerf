@@ -252,12 +252,16 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
       reply.flags_ref() =
           req.flags_ref().has_value() ? req.flags_ref().value() : 0;
 
+      recordGet(true /* hit */);
+
       if (config_.verbose) {
         printf("Cache hit for key: %s\n", keyStr.c_str());
       }
     } else {
       // Cache miss
       reply.result_ref() = carbon::Result::NOTFOUND;
+      recordGet(false /* miss */);
+
       if (config_.verbose) {
         printf("Cache miss for key: %s\n", keyStr.c_str());
       }
@@ -298,6 +302,8 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
       reply.flags_ref() =
           req.flags_ref().has_value() ? req.flags_ref().value() : 0;
 
+      recordSet();
+
       if (config_.verbose) {
         printf("Stored key: %s, size: %zu\n", keyStr.c_str(), valueStr.size());
       }
@@ -337,6 +343,8 @@ folly::SemiFuture<UcbDeleteReply> UcacheBenchServer::processUcbDelete(
       reply.flags_ref() =
           req.flags_ref().has_value() ? req.flags_ref().value() : 0;
 
+      recordDelete();
+
       if (config_.verbose) {
         printf("Deleted key: %s\n", keyStr.c_str());
       }
@@ -361,6 +369,110 @@ void UcacheBenchServer::printStats() {
     // version
     printf(
         "Cache stats available - use cache_->getGlobalCacheStats() for detailed metrics\n");
+  }
+}
+
+void UcacheBenchServer::setTrackingPhase(TrackingPhase phase) {
+  auto oldPhase = currentPhase_.exchange(phase);
+
+  // Reset metrics when transitioning to a new tracking phase
+  if (phase == TrackingPhase::WARMUP && oldPhase != TrackingPhase::WARMUP) {
+    warmupMetrics_.reset();
+    printf("[Server] Starting warmup phase metrics tracking\n");
+  } else if (
+      phase == TrackingPhase::BENCHMARK &&
+      oldPhase != TrackingPhase::BENCHMARK) {
+    benchmarkMetrics_.reset();
+    printf("[Server] Starting benchmark phase metrics tracking\n");
+  }
+}
+
+void UcacheBenchServer::recordGet(bool hit) {
+  auto phase = currentPhase_.load();
+  if (phase == TrackingPhase::WARMUP) {
+    warmupMetrics_.getRequests.fetch_add(1, std::memory_order_relaxed);
+    if (hit) {
+      warmupMetrics_.getHits.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      warmupMetrics_.getMisses.fetch_add(1, std::memory_order_relaxed);
+    }
+  } else if (phase == TrackingPhase::BENCHMARK) {
+    benchmarkMetrics_.getRequests.fetch_add(1, std::memory_order_relaxed);
+    if (hit) {
+      benchmarkMetrics_.getHits.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      benchmarkMetrics_.getMisses.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+}
+
+void UcacheBenchServer::recordSet() {
+  auto phase = currentPhase_.load();
+  if (phase == TrackingPhase::WARMUP) {
+    warmupMetrics_.setRequests.fetch_add(1, std::memory_order_relaxed);
+  } else if (phase == TrackingPhase::BENCHMARK) {
+    benchmarkMetrics_.setRequests.fetch_add(1, std::memory_order_relaxed);
+  }
+}
+
+void UcacheBenchServer::recordDelete() {
+  auto phase = currentPhase_.load();
+  if (phase == TrackingPhase::WARMUP) {
+    warmupMetrics_.deleteRequests.fetch_add(1, std::memory_order_relaxed);
+  } else if (phase == TrackingPhase::BENCHMARK) {
+    benchmarkMetrics_.deleteRequests.fetch_add(1, std::memory_order_relaxed);
+  }
+}
+
+void UcacheBenchServer::printFinalResults(double benchmarkDurationSec) const {
+  const auto& metrics = benchmarkMetrics_;
+
+  uint64_t getReqs = metrics.getRequests.load();
+  uint64_t getHits = metrics.getHits.load();
+  uint64_t getMisses = metrics.getMisses.load();
+  uint64_t setReqs = metrics.setRequests.load();
+  uint64_t deleteReqs = metrics.deleteRequests.load();
+  uint64_t totalOps = getReqs + setReqs + deleteReqs;
+
+  double qps =
+      (benchmarkDurationSec > 0) ? totalOps / benchmarkDurationSec : 0.0;
+  double hitRatio = (getReqs > 0) ? (100.0 * getHits / getReqs) : 0.0;
+
+  // Print in format parseable by benchpress
+  printf("\n");
+  printf("========================================\n");
+  printf("     UCACHEBENCH SERVER RESULTS\n");
+  printf("========================================\n");
+  printf("Benchmark Duration: %.3f seconds\n", benchmarkDurationSec);
+  printf("\n");
+  printf("Operations:\n");
+  printf("  GET requests:    %lu\n", getReqs);
+  printf("  GET hits:        %lu\n", getHits);
+  printf("  GET misses:      %lu\n", getMisses);
+  printf("  SET requests:    %lu\n", setReqs);
+  printf("  DELETE requests: %lu\n", deleteReqs);
+  printf("  Total ops:       %lu\n", totalOps);
+  printf("\n");
+  printf("Performance:\n");
+  printf("  QPS:        %.1f\n", qps);
+  printf("  Hit Ratio:  %.2f%%\n", hitRatio);
+  printf("========================================\n");
+  printf("\n");
+
+  // Also print warmup stats for reference
+  const auto& warmup = warmupMetrics_;
+  uint64_t warmupTotalOps = warmup.getRequests.load() +
+      warmup.setRequests.load() + warmup.deleteRequests.load();
+  if (warmupTotalOps > 0) {
+    printf("Warmup Stats (for reference):\n");
+    printf(
+        "  GET requests: %lu (hits: %lu, misses: %lu)\n",
+        warmup.getRequests.load(),
+        warmup.getHits.load(),
+        warmup.getMisses.load());
+    printf("  SET requests: %lu\n", warmup.setRequests.load());
+    printf("  Total ops:    %lu\n", warmupTotalOps);
+    printf("\n");
   }
 }
 
