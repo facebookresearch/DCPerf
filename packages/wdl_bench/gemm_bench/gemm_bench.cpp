@@ -859,7 +859,7 @@ inline void write_to_dnnl_memory(void* handle, dnnl::memory& mem) {
     return;
   }
 
-  assert(!"not expected");
+  assert(false && "not expected");
 }
 
 static void
