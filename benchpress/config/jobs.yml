@@ -682,6 +682,60 @@
           - 'benchmarks/feedsim/src/perf.data'
           - '/tmp/feedsim_log.txt'
 
+- name: feedsim_autoscale_dlrm
+  benchmark: feedsim_autoscale
+  description: >
+    Multi-instance aggregator workload with DLRM (Deep Learning Recommendation Model)
+    inference. Uses async I/O for improved throughput on high-core CPUs.
+    Finds maximum QPS that system can sustain while keeping
+    95th percentile latency <= 500 msecs. Automatically spawns multiple
+    workload instances at 100 cores per instance (rounded up).
+  args:
+    - '-n {num_instances}'
+    - '--async-io'
+    - '--io-dist={io_dist}'
+    - '--io-mean={io_mean}'
+    - '--workload={workload}'
+    - '--dlrm-model={dlrm_model}'
+    - '--dlrm-batch-size={dlrm_batch_size}'
+    - '--dlrm-threads={dlrm_threads}'
+    - '--client-side-features={client_side_features}'
+    - '--client-batch-size={client_batch_size}'
+    - '--client-inferences={client_inferences}'
+    - '--client-feature-seed={client_feature_seed}'
+    - '--client-num-dense={client_num_dense}'
+    - '--client-num-sparse={client_num_sparse}'
+    - '{extra_args}'
+  vars:
+    - 'num_instances=-1'
+    - 'io_dist=fixed'
+    - 'io_mean=200'
+    - 'workload=dlrm'
+    - 'dlrm_model=models/dlrm_small.pt'
+    - 'dlrm_batch_size=256'
+    - 'dlrm_threads=4'
+    - 'client_side_features=0'
+    - 'client_batch_size=256'
+    - 'client_inferences=1'
+    - 'client_feature_seed=42'
+    - 'client_num_dense=13'
+    - 'client_num_sparse=26'
+    - 'extra_args='
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/src/perf.data'
+          - '/tmp/feedsim_log.txt'
+
 - name: feedsim_autoscale_mini
   benchmark: feedsim_autoscale
   description: >
