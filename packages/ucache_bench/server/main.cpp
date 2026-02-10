@@ -30,8 +30,42 @@ DEFINE_uint64(
     memory_mb,
     1024,
     "Memory size in MB for DRAM cache (always used)");
-DEFINE_uint32(hash_power, 20, "Hash table power for cachelib");
+DEFINE_uint32(
+    hash_power,
+    20,
+    "Hash table power for cachelib (number of hash buckets = 2^hash_power)");
 DEFINE_string(pool_name, "default", "Pool name for cachelib");
+
+// LRU rebalancing configuration
+DEFINE_uint32(
+    lru_rebalance_interval_sec,
+    0,
+    "LRU rebalance interval in seconds (0 = disabled)");
+DEFINE_uint32(
+    lru_rebalancing_hits_min_age_sec,
+    0,
+    "Minimum LRU tail age in seconds to reduce slabs");
+DEFINE_uint32(
+    lru_rebalancing_hits_max_age_sec,
+    0,
+    "Maximum LRU tail age in seconds to increase slabs");
+DEFINE_bool(
+    lru_hits_victim_by_free_mem,
+    false,
+    "Use free memory for LRU rebalancing victim selection");
+
+// Hash table lock configuration
+DEFINE_uint32(
+    hashtable_lock_power,
+    20,
+    "Hash table lock power (number of locks = 2^lock_power)");
+
+// CacheLib allocator settings
+DEFINE_uint64(
+    cachelib_num_shards,
+    0,
+    "Number of CacheLib shards (0 = use default)");
+DEFINE_uint32(min_alloc_size, 64, "Minimum allocation size in bytes");
 
 // Navy (NVM/SSD cache) configuration (if navy_cache_size_mb > 0, hybrid mode
 // is enabled)
@@ -124,10 +158,29 @@ void setup_signal_handlers() {
 std::unique_ptr<UcacheBenchRpcServer> makeAndStartUcacheBenchRpcServer() {
   // Create configuration from flags
   UcacheBenchConfig config;
+
+  // Basic settings
   config.memory_mb = FLAGS_memory_mb;
   config.hash_power = FLAGS_hash_power;
   config.pool_name = FLAGS_pool_name;
   config.verbose = FLAGS_verbose;
+
+  // LRU rebalancing settings
+  config.lru_rebalance_interval_sec = FLAGS_lru_rebalance_interval_sec;
+  config.lru_rebalancing_hits_min_age_sec =
+      FLAGS_lru_rebalancing_hits_min_age_sec;
+  config.lru_rebalancing_hits_max_age_sec =
+      FLAGS_lru_rebalancing_hits_max_age_sec;
+  config.lru_hits_victim_by_free_mem = FLAGS_lru_hits_victim_by_free_mem;
+
+  // Hash table settings
+  config.hashtable_lock_power = FLAGS_hashtable_lock_power;
+
+  // CacheLib allocator settings
+  config.cachelib_num_shards = FLAGS_cachelib_num_shards;
+  config.min_alloc_size = FLAGS_min_alloc_size;
+
+  // Navy settings
   config.navy_cache_path = FLAGS_navy_cache_path;
   config.navy_cache_size_mb = FLAGS_navy_cache_size_mb;
   config.navy_block_size = FLAGS_navy_block_size;
