@@ -17,7 +17,12 @@
 
 namespace ranking {
 
+// Request type for PageRank/DLRM with server-side feature generation
 static const int kPageRankRequestType = 0;
+
+// Request type for DLRM with client-side feature generation (Phase 7)
+static const int kDLRMRequestType = 1;
+
 } // namespace ranking
 
 #endif // REQUEST_TYPES_H
