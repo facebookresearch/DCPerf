@@ -12,6 +12,21 @@
 #include "UcacheBenchIOThreadContext.h"
 
 DEFINE_uint32(rpc_io_threads, 0, "Number of IO threads for RPC server");
+DEFINE_double(
+    rpc_io_threads_multiplier,
+    1.0,
+    "Multiplier for IO thread count. Production ucache typically uses 0.75-1.0. "
+    "Final thread count = base_threads * multiplier");
+DEFINE_uint32(
+    rpc_num_acceptor_threads,
+    4,
+    "Number of acceptor threads for handling new connections. "
+    "Production ucache defaults to 4. Set to 0 to use CPU count");
+DEFINE_uint32(
+    rpc_num_cpu_worker_threads,
+    1,
+    "Number of CPU worker threads for ThriftServer. "
+    "Production ucache uses 1. These handle CPU-bound work separate from IO");
 
 // CPU pinning configuration flags
 DEFINE_bool(
@@ -72,43 +87,58 @@ UcacheBenchRpcServer::~UcacheBenchRpcServer() {
 }
 
 size_t UcacheBenchRpcServer::numIoThreads() noexcept {
+  size_t baseThreads = 0;
+
   if (FLAGS_rpc_io_threads > 0) {
-    return FLAGS_rpc_io_threads;
-  }
+    baseThreads = FLAGS_rpc_io_threads;
+  } else {
+    // Use CpuManager to get accurate CPU count (respects cgroups)
+    size_t numCpus = CpuManager::getInstance().getNumCpus();
+    if (numCpus == 0) {
+      baseThreads = kDefaultNumThreads;
+    } else {
+      baseThreads = numCpus;
+    }
 
-  // Use CpuManager to get accurate CPU count (respects cgroups)
-  size_t numCpus = CpuManager::getInstance().getNumCpus();
-  if (numCpus == 0) {
-    return kDefaultNumThreads;
-  }
+    // Reduce thread count when avoiding IRQs to prevent oversubscription.
+    // This matches production ucache behavior where thread count is reduced
+    // by the number of IRQ CPUs being avoided.
+    if (FLAGS_cpu_pinning_enabled && FLAGS_cpu_pinning_avoid_irqs &&
+        FLAGS_cpu_pinning_reduce_threads) {
+      auto irqCpus = CpuManager::getInstance().getIrqCpus(
+          FLAGS_cpu_pinning_network_interface);
+      size_t numIrqCpus = irqCpus.size();
 
-  // Reduce thread count when avoiding IRQs to prevent oversubscription.
-  // This matches production ucache behavior where thread count is reduced
-  // by the number of IRQ CPUs being avoided.
-  if (FLAGS_cpu_pinning_enabled && FLAGS_cpu_pinning_avoid_irqs &&
-      FLAGS_cpu_pinning_reduce_threads) {
-    auto irqCpus = CpuManager::getInstance().getIrqCpus(
-        FLAGS_cpu_pinning_network_interface);
-    size_t numIrqCpus = irqCpus.size();
-
-    if (numIrqCpus > 0 && numCpus > numIrqCpus) {
-      size_t reducedThreads = numCpus - numIrqCpus;
-      // Ensure we still have at least half the CPUs as threads
-      size_t minThreads = numCpus / 2;
-      if (reducedThreads >= minThreads) {
-        XLOG(INFO) << "Reducing IO thread count from " << numCpus << " to "
-                   << reducedThreads << " (excluding " << numIrqCpus
-                   << " IRQ CPUs)";
-        return reducedThreads;
-      } else {
-        XLOG(WARNING)
-            << "Not reducing thread count: would go below minimum threshold ("
-            << minThreads << ")";
+      if (numIrqCpus > 0 && baseThreads > numIrqCpus) {
+        size_t reducedThreads = baseThreads - numIrqCpus;
+        // Ensure we still have at least half the CPUs as threads
+        size_t minThreads = baseThreads / 2;
+        if (reducedThreads >= minThreads) {
+          XLOG(INFO) << "Reducing IO thread count from " << baseThreads
+                     << " to " << reducedThreads << " (excluding " << numIrqCpus
+                     << " IRQ CPUs)";
+          baseThreads = reducedThreads;
+        } else {
+          XLOG(WARNING)
+              << "Not reducing thread count: would go below minimum threshold ("
+              << minThreads << ")";
+        }
       }
     }
   }
 
-  return numCpus;
+  // Apply multiplier (matches production ucache behavior)
+  // Production typically uses 0.75-1.0 multiplier
+  size_t multipliedThreads =
+      static_cast<size_t>(baseThreads * FLAGS_rpc_io_threads_multiplier);
+  if (multipliedThreads > 0) {
+    XLOG(INFO) << "IO thread count: " << multipliedThreads
+               << " (base=" << baseThreads
+               << " * multiplier=" << FLAGS_rpc_io_threads_multiplier << ")";
+    return multipliedThreads;
+  }
+
+  return baseThreads;
 }
 
 apache::thrift::ThriftServer& UcacheBenchRpcServer::addThriftServer() {
@@ -117,6 +147,22 @@ apache::thrift::ThriftServer& UcacheBenchRpcServer::addThriftServer() {
   }
 
   thriftServer_ = std::make_unique<apache::thrift::ThriftServer>();
+
+  // Configure CPU worker threads (matches production ucache which uses 1)
+  thriftServer_->setNumCPUWorkerThreads(FLAGS_rpc_num_cpu_worker_threads);
+
+  // Configure acceptor threads (production ucache defaults to 4)
+  // Acceptor threads handle new connection accepts (TCP handshakes)
+  uint32_t numAcceptorThreads = FLAGS_rpc_num_acceptor_threads;
+  if (numAcceptorThreads == 0) {
+    numAcceptorThreads = CpuManager::getInstance().getNumCpus();
+  }
+  thriftServer_->setNumAcceptThreads(numAcceptorThreads);
+
+  XLOG(INFO) << "ThriftServer configured with "
+             << FLAGS_rpc_num_cpu_worker_threads << " CPU worker threads and "
+             << numAcceptorThreads << " acceptor threads";
+
   return *thriftServer_;
 }
 
