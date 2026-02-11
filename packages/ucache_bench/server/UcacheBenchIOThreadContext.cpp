@@ -19,7 +19,11 @@ DEFINE_uint32(
     1000,
     "Period in ms for resizing the fiber pool");
 
-DEFINE_bool(enable_fibers, true, "Enable fiber-based request processing");
+DEFINE_bool(
+    enable_fibers,
+    false,
+    "Enable fiber-based request processing. "
+    "Disabled by default to match production ucache behavior.");
 
 namespace facebook::ucachebench {
 
