@@ -30,11 +30,32 @@ struct UcacheBenchConfig {
   std::string pool_name = "default";
   bool verbose = false;
 
-  // LRU rebalancing settings (production uses HitsPerSlab strategy)
+  // LRU rebalancing metric type for DRAM-only vs hybrid mode
+  enum class LruRebalanceMetric {
+    FAIR, // LruTailAgeStrategy - balances eviction across allocation classes
+    HITS, // HitsPerSlabStrategy - optimizes for hit rate
+  };
+
+  // LRU rebalancing strategy selection
+  // FAIR (LruTailAgeStrategy): Used in DRAM-only mode to balance large/small
+  // item eviction HITS (HitsPerSlabStrategy): Used when NVM is enabled
+  LruRebalanceMetric lru_rebalance_metric = LruRebalanceMetric::FAIR;
+
+  // LRU rebalancing settings (common)
   uint32_t lru_rebalance_interval_sec = 0; // 0 = disabled
+  uint32_t lru_rebalancing_min_slabs = 1; // Min slabs before rebalancing
+
+  // FAIR strategy settings (LruTailAgeStrategy for DRAM-only mode)
+  // Balances eviction by ensuring similar tail ages across allocation classes
+  uint32_t lru_rebalancing_fair_min_diff =
+      1200; // Min tail age difference threshold (seconds)
+  float lru_rebalancing_fair_ratio =
+      0.0f; // Tail age difference ratio (0 = disabled)
+
+  // HITS strategy settings (HitsPerSlabStrategy for hybrid mode with NVM)
   uint32_t lru_rebalancing_hits_min_age_sec = 0; // Min tail age to reduce slabs
   uint32_t lru_rebalancing_hits_max_age_sec =
-      0; // Max tail age to increase slabs
+      7200; // Max tail age to increase slabs
   bool lru_hits_victim_by_free_mem = false;
 
   // Hash table settings for access config
