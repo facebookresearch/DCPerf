@@ -13,7 +13,16 @@
 #include <folly/dynamic.h>
 #include <folly/json.h>
 
+#include <folly/coro/AsyncScope.h>
+#include <folly/coro/BlockingWait.h>
+#include <folly/coro/Collect.h>
+#include <folly/coro/Promise.h>
+#include <folly/coro/Task.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
+
+#include <folly/executors/IOThreadPoolExecutor.h>
 #include <folly/fibers/Baton.h>
+
 #include <folly/io/IOBuf.h>
 #include <folly/portability/GFlags.h>
 #include <algorithm>
@@ -26,11 +35,14 @@ DEFINE_string(server_host, "localhost", "Server hostname");
 DEFINE_uint32(server_port, 11211, "Server port");
 DEFINE_uint32(duration_seconds, 60, "Test duration in seconds");
 DEFINE_uint32(warmup_seconds, 10, "Warmup duration in seconds");
+DEFINE_uint32(
+    progress_interval_seconds,
+    5,
+    "Progress reporting interval in seconds (0 = disable)");
 DEFINE_uint32(key_count, 100000, "Number of unique keys");
 DEFINE_uint32(value_size_min, 64, "Minimum value size in bytes");
 DEFINE_uint32(value_size_max, 1024, "Maximum value size in bytes");
 DEFINE_double(get_ratio, 0.9, "Ratio of GET operations (vs SET operations)");
-DEFINE_uint32(qps_target, 0, "Target QPS (0 = unlimited)");
 DEFINE_uint32(
     connection_timeout_ms,
     1000,
@@ -92,6 +104,7 @@ UcacheBenchClient::UcacheBenchClient() {
       printf(
           "  SET value size (avg): %.2f bytes\n",
           distribution_.setValueSizeAvg);
+      fflush(stdout);
     }
   }
 
@@ -198,6 +211,7 @@ UcacheBenchClient::UcacheBenchClient() {
       printf(
           "  Random source IP enabled: requests will use random source IPs for additional fanout\n");
     }
+    fflush(stdout);
   }
 }
 
@@ -212,6 +226,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   if (FLAGS_warmup_seconds == 0) {
     if (FLAGS_verbose) {
       printf("Warmup disabled (warmup_seconds=0)\n");
+      fflush(stdout);
     }
     WarmupResults warmupResults;
     warmupResults.startTime = std::chrono::steady_clock::now();
@@ -223,164 +238,213 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   // Determine number of worker threads
   uint32_t numThreads = FLAGS_num_threads;
   if (numThreads == 0) {
-    // Auto-detect: use half of available cores for worker threads
     numThreads = std::max(1u, std::thread::hardware_concurrency() / 2);
+  }
+
+  uint32_t maxInflight = FLAGS_max_inflight;
+  if (maxInflight < 1) {
+    maxInflight = 1;
   }
 
   if (FLAGS_verbose) {
     printf(
-        "Starting warmup for %u seconds with %u worker threads\n",
+        "Starting warmup for %u seconds with %u worker threads, max_inflight=%u per thread\n",
         FLAGS_warmup_seconds,
-        numThreads);
+        numThreads,
+        maxInflight);
+    fflush(stdout);
   }
 
   auto startTime = std::chrono::steady_clock::now();
   auto endTime = startTime + std::chrono::seconds(FLAGS_warmup_seconds);
 
-  // Thread-safe counters using atomics
+  // Thread-safe counters
   std::atomic<uint64_t> totalOps{0};
   std::atomic<uint64_t> setSuccesses{0};
   std::atomic<uint64_t> setErrors{0};
   std::atomic<bool> shouldStop{false};
 
-  // Launch progress monitoring thread
+  // Progress monitoring thread
   std::thread progressThread;
-  if (FLAGS_verbose) {
+  if (FLAGS_verbose && FLAGS_progress_interval_seconds > 0) {
     progressThread = std::thread([&]() {
       while (!shouldStop.load() && std::chrono::steady_clock::now() < endTime) {
-        std::this_thread::sleep_for(std::chrono::seconds(5));
-
+        std::this_thread::sleep_for(
+            std::chrono::seconds(FLAGS_progress_interval_seconds));
         if (shouldStop.load()) {
           break;
         }
 
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration<double>(now - startTime).count();
-
         uint64_t ops = totalOps.load();
         uint64_t successes = setSuccesses.load();
         uint64_t errors = setErrors.load();
-
         double avgQps = elapsed > 0 ? ops / elapsed : 0;
         double successRate = ops > 0 ? (successes * 100.0 / ops) : 0;
 
         printf(
-            "Warmup progress: %lu ops (%.1f QPS avg), Success: %.1f%%, "
-            "Errors: %lu\n",
+            "Warmup progress: %.1fs elapsed, %lu ops (%.1f QPS avg), Success: %.1f%%, Errors: %lu\n",
+            elapsed,
             ops,
             avgQps,
             successRate,
             errors);
+        fflush(stdout);
       }
     });
   }
 
-  // Launch worker threads
-  std::vector<std::thread> threads;
-  threads.reserve(numThreads);
+  // Create IO thread pool for coroutine execution - matches production pattern
+  folly::IOThreadPoolExecutor workerPool(numThreads);
+  auto workerEvbs = workerPool.getAllEventBases();
 
+  // Create clients for each worker with maxInflight - matches production
+  // pattern McRouter's maximumOutstanding will handle backpressure via internal
+  // semaphore
+  std::vector<
+      memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>::Pointer>
+      clients;
+  clients.reserve(numThreads);
   for (uint32_t i = 0; i < numThreads; ++i) {
-    threads.emplace_back([&, threadId = i]() {
-      // Create per-thread client for maximum QPS performance
-      auto threadClient =
-          routerInstance_->createClient(0 /* max_outstanding_requests */);
-      if (!threadClient) {
-        if (FLAGS_verbose) {
-          printf(
-              "[Thread %u] Failed to create client, skipping warmup\n",
-              threadId);
-        }
-        return;
-      }
+    // Use maxInflight as maximumOutstanding - McRouter will block if limit
+    // reached
+    auto client = routerInstance_->createClient(maxInflight);
+    if (client) {
+      clients.push_back(std::move(client));
+    }
+  }
 
-      uint64_t threadOps = 0;
-      uint64_t threadSuccesses = 0;
-      uint64_t threadErrors = 0;
-      uint64_t lastSyncedOps = 0;
-      uint64_t lastSyncedSuccesses = 0;
-      uint64_t lastSyncedErrors = 0;
+  // Worker coroutine - matches production LoadgenWorker::co_run() pattern
+  auto warmupWorker =
+      [&](memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>*
+              clientPtr) -> folly::coro::Task<void> {
+    folly::coro::AsyncScope scope;
+    auto exe = co_await folly::coro::co_current_executor;
 
-      while (std::chrono::steady_clock::now() < endTime) {
-        // Generate random key-value pairs for warmup
-        std::string key = generateKey();
-        std::string value = generateValue();
+    std::atomic<uint64_t> inflight{0};
+    std::atomic<uint64_t> localOps{0};
+    std::atomic<uint64_t> localSuccesses{0};
+    std::atomic<uint64_t> localErrors{0};
 
+    // Track what's been synced to avoid race conditions
+    uint64_t lastSyncedSuccesses = 0;
+    uint64_t lastSyncedErrors = 0;
+
+    // Send one request - matches production McrouterAdapter::coro() pattern
+    auto sendOneRequest = [&]() -> folly::coro::Task<void> {
+      std::string key = generateKey();
+      std::string value = generateValue();
+
+      UcbSetRequest request;
+      request.key_ref() =
+          carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
+      request.value_ref() = *folly::IOBuf::copyBuffer(value);
+      request.exptime_ref() = 3600;
+
+      if (FLAGS_enable_random_source_ip) {
+        uint8_t randomOctet = folly::Random::rand32(1, 255);
+        std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
         try {
-          // Send the UcacheBench set operation and wait for result
-          sendUcbSetRequestSync(threadClient, key, value, [&](UcbSetReply&& reply) {
-            if (*reply.result_ref() == carbon::Result::STORED) {
-              threadSuccesses++;
-            } else {
-              threadErrors++;
-              if (FLAGS_verbose) {
-                std::string msg;
-                if (reply.message_ref().has_value() &&
-                    !reply.message_ref()->empty()) {
-                  msg = folly::to<std::string>(" - ", *reply.message_ref());
-                }
-                printf(
-                    "[Thread %u] Warmup set failed for key: %s, result: %s%s\n",
-                    threadId,
-                    key.c_str(),
-                    carbon::resultToString(*reply.result_ref()),
-                    msg.c_str());
-              }
-            }
+          folly::IPAddress sourceIp(ipStr);
+          request.setSourceIpAddr(sourceIp);
+        } catch (const std::exception&) {
+        }
+      }
+
+      // Same pattern as production McrouterAdapter::coro()
+      auto [promise, future] = folly::coro::makePromiseContract<UcbSetReply>();
+
+      clientPtr->send(
+          request,
+          [p = std::move(promise)](
+              const UcbSetRequest&, UcbSetReply&& reply) mutable {
+            p.setValue(std::move(reply));
           });
-        } catch (const std::exception& ex) {
-          threadErrors++;
-          if (FLAGS_verbose) {
-            printf(
-                "[Thread %u] Warmup set exception for key %s: %s\n",
-                threadId,
-                key.c_str(),
-                ex.what());
-          }
-        }
 
-        threadOps++;
+      UcbSetReply result = co_await std::move(future);
 
-        // Update global atomics every 100 operations for progress monitoring
-        if (threadOps % 100 == 0) {
-          totalOps += (threadOps - lastSyncedOps);
-          setSuccesses += (threadSuccesses - lastSyncedSuccesses);
-          setErrors += (threadErrors - lastSyncedErrors);
-          lastSyncedOps = threadOps;
-          lastSyncedSuccesses = threadSuccesses;
-          lastSyncedErrors = threadErrors;
-        }
+      localOps++;
+      if (*result.result_ref() == carbon::Result::STORED) {
+        localSuccesses++;
+      } else {
+        localErrors++;
+      }
+      co_return;
+    };
 
-        // Brief sleep to avoid overwhelming the server during warmup
-        if (threadOps % 1000 == 0) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    // Main loop - matches production LoadgenWorker::co_run()
+    while (std::chrono::steady_clock::now() < endTime) {
+      // Spawn requests up to max_inflight
+      size_t n = maxInflight - inflight.load();
+      if (n > 0 && std::chrono::steady_clock::now() < endTime) {
+        for (size_t i = 0; i < n && inflight.load() < maxInflight; i++) {
+          inflight++;
+          scope.add(
+              folly::coro::co_withExecutor(
+                  exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
+                    co_await sendOneRequest();
+                    inflight--;
+                    co_return;
+                  })));
         }
       }
 
-      // Final update of remaining counters
-      if (threadOps > lastSyncedOps) {
-        totalOps += (threadOps - lastSyncedOps);
-        setSuccesses += (threadSuccesses - lastSyncedSuccesses);
-        setErrors += (threadErrors - lastSyncedErrors);
+      // Periodically update global counters to avoid excessive atomic
+      // operations
+      uint64_t ops = localOps.load();
+      if (ops % 100 == 0 && ops > 0) {
+        uint64_t successes = localSuccesses.load();
+        uint64_t errors = localErrors.load();
+
+        // Only add the delta since last sync
+        uint64_t successDelta = successes - lastSyncedSuccesses;
+        uint64_t errorDelta = errors - lastSyncedErrors;
+
+        if (successDelta > 0 || errorDelta > 0) {
+          totalOps.fetch_add(successDelta + errorDelta);
+          setSuccesses.fetch_add(successDelta);
+          setErrors.fetch_add(errorDelta);
+
+          lastSyncedSuccesses = successes;
+          lastSyncedErrors = errors;
+        }
       }
 
-      if (FLAGS_verbose) {
-        printf(
-            "[Thread %u] Warmup complete: %lu ops, %lu successes, %lu errors\n",
-            threadId,
-            threadOps,
-            threadSuccesses,
-            threadErrors);
-      }
-    });
+      // Yield - same as production using folly::futures::sleep
+      co_await folly::futures::sleep(std::chrono::milliseconds(1));
+    }
+
+    co_await scope.joinAsync();
+
+    // Final update - add any remaining counts not yet synced
+    uint64_t finalSuccesses = localSuccesses.load();
+    uint64_t finalErrors = localErrors.load();
+    uint64_t remainingSuccesses = finalSuccesses - lastSyncedSuccesses;
+    uint64_t remainingErrors = finalErrors - lastSyncedErrors;
+
+    if (remainingSuccesses > 0 || remainingErrors > 0) {
+      totalOps.fetch_add(remainingSuccesses + remainingErrors);
+      setSuccesses.fetch_add(remainingSuccesses);
+      setErrors.fetch_add(remainingErrors);
+    }
+    co_return;
+  };
+
+  // Start workers - matches production LoadgenCommand::co_run() pattern
+  folly::coro::AsyncScope mainScope;
+  for (size_t i = 0; i < clients.size(); ++i) {
+    mainScope.add(
+        folly::coro::co_withExecutor(
+            workerEvbs.at(i % workerEvbs.size()),
+            warmupWorker(clients[i].get())));
   }
 
-  // Wait for all worker threads to complete
-  for (auto& thread : threads) {
-    thread.join();
-  }
+  // Block until all workers complete
+  folly::coro::blockingWait(
+      mainScope.joinAsync().scheduleOn(workerEvbs.front()));
 
-  // Stop progress thread
-  shouldStop.store(true);
+  shouldStop = true;
   if (progressThread.joinable()) {
     progressThread.join();
   }
@@ -414,6 +478,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     if (!warmupResults.success) {
       printf("  WARNING: Warmup failed - no successful SET operations!\n");
     }
+    fflush(stdout);
   }
 
   return warmupResults;
@@ -427,211 +492,389 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     numThreads = std::max(1u, std::thread::hardware_concurrency() / 2);
   }
 
+  // Use McRouter's maximumOutstanding for backpressure (like production)
+  // This is the per-client limit - McRouter will block if limit is reached
+  uint32_t maxInflight = FLAGS_max_inflight;
+  if (maxInflight < 1) {
+    maxInflight = 1;
+  }
+
   if (FLAGS_verbose) {
     printf(
-        "Starting benchmark for %u seconds with %u worker threads\n",
+        "Starting benchmark for %u seconds with %u worker threads, max_inflight=%u per client\n",
         FLAGS_duration_seconds,
-        numThreads);
+        numThreads,
+        maxInflight);
+    fflush(stdout);
   }
 
   auto startTime = std::chrono::steady_clock::now();
   auto endTime = startTime + std::chrono::seconds(FLAGS_duration_seconds);
 
-  // Thread-safe counters using atomics
-  std::atomic<uint64_t> totalOps{0};
-  std::atomic<uint64_t> getOps{0};
-  std::atomic<uint64_t> setOps{0};
-  std::atomic<uint64_t> getHits{0};
-  std::atomic<uint64_t> getMisses{0};
-  std::atomic<uint64_t> getErrors{0};
-  std::atomic<uint64_t> setSuccesses{0};
-  std::atomic<uint64_t> setErrors{0};
+  std::atomic<bool> shouldStop{false};
 
   // Mutex for latency vector (std::vector is not thread-safe)
   std::mutex latenciesMutex;
   std::vector<double> allLatencies;
   allLatencies.reserve(100000 * numThreads);
 
-  // Launch worker threads
-  std::vector<std::thread> threads;
-  threads.reserve(numThreads);
+  // Create IO thread pool for coroutine execution - matches production pattern
+  folly::IOThreadPoolExecutor workerPool(numThreads);
+  auto workerEvbs = workerPool.getAllEventBases();
 
+  // Create clients for each worker with maxInflight - matches production
+  // pattern McRouter's maximumOutstanding will handle backpressure via internal
+  // semaphore
+  std::vector<
+      memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>::Pointer>
+      clients;
+  clients.reserve(numThreads);
   for (uint32_t i = 0; i < numThreads; ++i) {
-    threads.emplace_back([&, threadId = i]() {
-      // Create per-thread client for maximum QPS performance
-      auto threadClient =
-          routerInstance_->createClient(0 /* max_outstanding_requests */);
-      if (!threadClient) {
-        if (FLAGS_verbose) {
-          printf(
-              "[Thread %u] Failed to create client, skipping benchmark\n",
-              threadId);
-        }
-        return;
-      }
+    // Use maxInflight as maximumOutstanding - McRouter will block if limit
+    // reached
+    auto client = routerInstance_->createClient(maxInflight);
+    if (client) {
+      clients.push_back(std::move(client));
+    }
+  }
 
-      uint64_t threadTotalOps = 0;
-      uint64_t threadGetOps = 0;
-      uint64_t threadSetOps = 0;
-      uint64_t threadGetHits = 0;
-      uint64_t threadGetMisses = 0;
-      uint64_t threadGetErrors = 0;
-      uint64_t threadSetSuccesses = 0;
-      uint64_t threadSetErrors = 0;
+  double getRatio =
+      distribution_.enabled ? distribution_.getRatio : FLAGS_get_ratio;
 
-      std::vector<double> threadLatencies;
-      threadLatencies.reserve(100000);
+  // Per-worker latencies storage
+  std::vector<std::vector<double>> workerLatencies(clients.size());
+  std::vector<std::mutex> workerLatencyMutexes(clients.size());
 
-      while (std::chrono::steady_clock::now() < endTime) {
-        auto opStartTime = std::chrono::steady_clock::now();
+  // Per-worker counters
+  // Use unique_ptr to avoid vector<atomic> which is invalid C++
+  // (atomic is neither copyable nor movable)
+  std::vector<std::unique_ptr<std::atomic<uint64_t>>> workerTotalOps;
+  std::vector<std::unique_ptr<std::atomic<uint64_t>>> workerGetOps;
+  std::vector<std::unique_ptr<std::atomic<uint64_t>>> workerSetOps;
+  std::vector<std::unique_ptr<std::atomic<uint64_t>>> workerGetHits;
+  std::vector<std::unique_ptr<std::atomic<uint64_t>>> workerGetMisses;
+  std::vector<std::unique_ptr<std::atomic<uint64_t>>> workerGetErrors;
+  std::vector<std::unique_ptr<std::atomic<uint64_t>>> workerSetSuccesses;
+  std::vector<std::unique_ptr<std::atomic<uint64_t>>> workerSetErrors;
 
-        // Determine GET ratio based on distribution or flag
-        double getRatio =
-            distribution_.enabled ? distribution_.getRatio : FLAGS_get_ratio;
-        bool isGet = (folly::Random::randDouble01() < getRatio);
+  workerTotalOps.reserve(clients.size());
+  workerGetOps.reserve(clients.size());
+  workerSetOps.reserve(clients.size());
+  workerGetHits.reserve(clients.size());
+  workerGetMisses.reserve(clients.size());
+  workerGetErrors.reserve(clients.size());
+  workerSetSuccesses.reserve(clients.size());
+  workerSetErrors.reserve(clients.size());
 
-        if (isGet) {
-          // GET operation
-          std::string key = generateKey();
+  // Initialize per-worker counters
+  for (size_t i = 0; i < clients.size(); ++i) {
+    workerLatencies[i].reserve(100000);
+    workerTotalOps.push_back(std::make_unique<std::atomic<uint64_t>>(0));
+    workerGetOps.push_back(std::make_unique<std::atomic<uint64_t>>(0));
+    workerSetOps.push_back(std::make_unique<std::atomic<uint64_t>>(0));
+    workerGetHits.push_back(std::make_unique<std::atomic<uint64_t>>(0));
+    workerGetMisses.push_back(std::make_unique<std::atomic<uint64_t>>(0));
+    workerGetErrors.push_back(std::make_unique<std::atomic<uint64_t>>(0));
+    workerSetSuccesses.push_back(std::make_unique<std::atomic<uint64_t>>(0));
+    workerSetErrors.push_back(std::make_unique<std::atomic<uint64_t>>(0));
+  }
 
-          try {
-            sendUcbGetRequestSync(threadClient, key, [&](UcbGetReply&& reply) {
-              auto opEndTime = std::chrono::steady_clock::now();
-              auto latencyMs = std::chrono::duration<double, std::milli>(
-                                   opEndTime - opStartTime)
-                                   .count();
-              threadLatencies.push_back(latencyMs);
-
-              threadGetOps++;
-
-              if (*reply.result_ref() == carbon::Result::FOUND) {
-                threadGetHits++;
-              } else if (*reply.result_ref() == carbon::Result::NOTFOUND) {
-                threadGetMisses++;
-
-                // SET on GET miss to simulate real cache warming behavior
-                std::string value = generateValue();
-                try {
-                  sendUcbSetRequestSync(
-                      threadClient, key, value, [&](UcbSetReply&& setReply) {
-                        if (*setReply.result_ref() == carbon::Result::STORED) {
-                          threadSetSuccesses++;
-                        } else {
-                          threadSetErrors++;
-                        }
-                      });
-                  threadSetOps++;
-                } catch (const std::exception&) {
-                  threadSetErrors++;
-                }
-              } else {
-                threadGetErrors++;
-              }
-            });
-          } catch (const std::exception&) {
-            threadGetErrors++;
-            auto opEndTime = std::chrono::steady_clock::now();
-            auto latencyMs = std::chrono::duration<double, std::milli>(
-                                 opEndTime - opStartTime)
-                                 .count();
-            threadLatencies.push_back(latencyMs);
-          }
-        } else {
-          // SET operation
-          std::string key = generateKey();
-          std::string value = generateValue();
-
-          try {
-            sendUcbSetRequestSync(
-                threadClient, key, value, [&](UcbSetReply&& reply) {
-                  auto opEndTime = std::chrono::steady_clock::now();
-                  auto latencyMs = std::chrono::duration<double, std::milli>(
-                                       opEndTime - opStartTime)
-                                       .count();
-                  threadLatencies.push_back(latencyMs);
-
-                  threadSetOps++;
-
-                  if (*reply.result_ref() == carbon::Result::STORED) {
-                    threadSetSuccesses++;
-                  } else {
-                    threadSetErrors++;
-                  }
-                });
-          } catch (const std::exception&) {
-            threadSetErrors++;
-            auto opEndTime = std::chrono::steady_clock::now();
-            auto latencyMs = std::chrono::duration<double, std::milli>(
-                                 opEndTime - opStartTime)
-                                 .count();
-            threadLatencies.push_back(latencyMs);
-          }
+  // Progress monitoring thread (must be created after clients and counters)
+  std::thread progressThread;
+  if (FLAGS_verbose && FLAGS_progress_interval_seconds > 0) {
+    progressThread = std::thread([&]() {
+      while (!shouldStop.load() && std::chrono::steady_clock::now() < endTime) {
+        std::this_thread::sleep_for(
+            std::chrono::seconds(FLAGS_progress_interval_seconds));
+        if (shouldStop.load()) {
+          break;
         }
 
-        threadTotalOps++;
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration<double>(now - startTime).count();
 
-        // Rate limiting (per-thread)
-        if (FLAGS_qps_target > 0) {
-          double threadQpsTarget =
-              static_cast<double>(FLAGS_qps_target) / numThreads;
-          auto expectedDuration =
-              std::chrono::duration<double>(threadTotalOps / threadQpsTarget);
-          auto actualDuration = std::chrono::steady_clock::now() - startTime;
+        // Sum per-worker counters for progress display
+        uint64_t ops = 0;
+        uint64_t gets = 0;
+        uint64_t sets = 0;
+        uint64_t hits = 0;
+        uint64_t misses = 0;
+        uint64_t gErrs = 0;
+        uint64_t sSucc = 0;
+        uint64_t sErrs = 0;
 
-          if (actualDuration < expectedDuration) {
-            auto sleepDuration = expectedDuration - actualDuration;
-            std::this_thread::sleep_for(sleepDuration);
-          }
+        for (size_t i = 0; i < clients.size(); ++i) {
+          ops += workerTotalOps[i]->load();
+          gets += workerGetOps[i]->load();
+          sets += workerSetOps[i]->load();
+          hits += workerGetHits[i]->load();
+          misses += workerGetMisses[i]->load();
+          gErrs += workerGetErrors[i]->load();
+          sSucc += workerSetSuccesses[i]->load();
+          sErrs += workerSetErrors[i]->load();
         }
-      }
 
-      // Update global counters atomically
-      totalOps += threadTotalOps;
-      getOps += threadGetOps;
-      setOps += threadSetOps;
-      getHits += threadGetHits;
-      getMisses += threadGetMisses;
-      getErrors += threadGetErrors;
-      setSuccesses += threadSetSuccesses;
-      setErrors += threadSetErrors;
+        double avgQps = elapsed > 0 ? ops / elapsed : 0;
 
-      // Merge latencies with mutex
-      {
-        std::lock_guard<std::mutex> lock(latenciesMutex);
-        allLatencies.insert(
-            allLatencies.end(), threadLatencies.begin(), threadLatencies.end());
-      }
-
-      if (FLAGS_verbose) {
         printf(
-            "[Thread %u] Benchmark complete: %lu ops, GET: %lu/%lu/%lu, SET: %lu/%lu\n",
-            threadId,
-            threadTotalOps,
-            threadGetHits,
-            threadGetMisses,
-            threadGetErrors,
-            threadSetSuccesses,
-            threadSetErrors);
+            "Benchmark progress: %.1fs elapsed, %lu ops (%.1f QPS avg), GET: %lu (hits=%lu misses=%lu err=%lu), SET: %lu (succ=%lu err=%lu)\n",
+            elapsed,
+            ops,
+            avgQps,
+            gets,
+            hits,
+            misses,
+            gErrs,
+            sets,
+            sSucc,
+            sErrs);
+        fflush(stdout);
       }
     });
   }
 
-  // Wait for all threads to complete
-  for (auto& thread : threads) {
-    thread.join();
+  // Worker coroutine - matches production LoadgenWorker::co_run() pattern
+  auto benchmarkWorker =
+      [&](size_t workerId,
+          memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>*
+              clientPtr) -> folly::coro::Task<void> {
+    folly::coro::AsyncScope scope;
+    auto exe = co_await folly::coro::co_current_executor;
+
+    // Send one GET request - matches production McrouterAdapter::coro() pattern
+    auto sendGetRequest = [&]() -> folly::coro::Task<void> {
+      auto opStartTime = std::chrono::steady_clock::now();
+      std::string key = generateKey();
+
+      UcbGetRequest request;
+      request.key_ref() =
+          carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
+
+      if (FLAGS_enable_random_source_ip) {
+        uint8_t randomOctet = folly::Random::rand32(1, 255);
+        std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+        try {
+          folly::IPAddress sourceIp(ipStr);
+          request.setSourceIpAddr(sourceIp);
+        } catch (const std::exception&) {
+        }
+      }
+
+      // Same pattern as production McrouterAdapter::coro()
+      auto [promise, future] = folly::coro::makePromiseContract<UcbGetReply>();
+
+      clientPtr->send(
+          request,
+          [p = std::move(promise)](
+              const UcbGetRequest&, UcbGetReply&& reply) mutable {
+            p.setValue(std::move(reply));
+          });
+
+      UcbGetReply result = co_await std::move(future);
+
+      auto opEndTime = std::chrono::steady_clock::now();
+      auto latencyMs =
+          std::chrono::duration<double, std::milli>(opEndTime - opStartTime)
+              .count();
+
+      {
+        std::lock_guard<std::mutex> lock(workerLatencyMutexes[workerId]);
+        workerLatencies[workerId].push_back(latencyMs);
+      }
+
+      workerTotalOps[workerId]->fetch_add(1);
+      workerGetOps[workerId]->fetch_add(1);
+
+      if (*result.result_ref() == carbon::Result::FOUND) {
+        workerGetHits[workerId]->fetch_add(1);
+      } else if (*result.result_ref() == carbon::Result::NOTFOUND) {
+        workerGetMisses[workerId]->fetch_add(1);
+
+        // SET on GET miss to simulate real cache warming behavior
+        // This matches the behavior from the old synchronous version
+        std::string value = generateValue();
+
+        UcbSetRequest setRequest;
+        setRequest.key_ref() = carbon::Keys<folly::IOBuf>(
+            std::move(*folly::IOBuf::copyBuffer(key)));
+        setRequest.value_ref() = *folly::IOBuf::copyBuffer(value);
+        setRequest.exptime_ref() = 3600;
+
+        if (FLAGS_enable_random_source_ip) {
+          uint8_t randomOctet = folly::Random::rand32(1, 255);
+          std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+          try {
+            folly::IPAddress sourceIp(ipStr);
+            setRequest.setSourceIpAddr(sourceIp);
+          } catch (const std::exception&) {
+          }
+        }
+
+        auto [setPromise, setFuture] =
+            folly::coro::makePromiseContract<UcbSetReply>();
+
+        clientPtr->send(
+            setRequest,
+            [p = std::move(setPromise)](
+                const UcbSetRequest&, UcbSetReply&& reply) mutable {
+              p.setValue(std::move(reply));
+            });
+
+        UcbSetReply setResult = co_await std::move(setFuture);
+
+        workerSetOps[workerId]->fetch_add(1);
+        if (*setResult.result_ref() == carbon::Result::STORED) {
+          workerSetSuccesses[workerId]->fetch_add(1);
+        } else {
+          workerSetErrors[workerId]->fetch_add(1);
+        }
+      } else {
+        workerGetErrors[workerId]->fetch_add(1);
+      }
+
+      co_return;
+    };
+
+    // Send one SET request - matches production McrouterAdapter::coro() pattern
+    auto sendSetRequest = [&]() -> folly::coro::Task<void> {
+      auto opStartTime = std::chrono::steady_clock::now();
+      std::string key = generateKey();
+      std::string value = generateValue();
+
+      UcbSetRequest request;
+      request.key_ref() =
+          carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
+      request.value_ref() = *folly::IOBuf::copyBuffer(value);
+      request.exptime_ref() = 3600;
+
+      if (FLAGS_enable_random_source_ip) {
+        uint8_t randomOctet = folly::Random::rand32(1, 255);
+        std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+        try {
+          folly::IPAddress sourceIp(ipStr);
+          request.setSourceIpAddr(sourceIp);
+        } catch (const std::exception&) {
+        }
+      }
+
+      // Same pattern as production McrouterAdapter::coro()
+      auto [promise, future] = folly::coro::makePromiseContract<UcbSetReply>();
+
+      clientPtr->send(
+          request,
+          [p = std::move(promise)](
+              const UcbSetRequest&, UcbSetReply&& reply) mutable {
+            p.setValue(std::move(reply));
+          });
+
+      UcbSetReply result = co_await std::move(future);
+
+      auto opEndTime = std::chrono::steady_clock::now();
+      auto latencyMs =
+          std::chrono::duration<double, std::milli>(opEndTime - opStartTime)
+              .count();
+
+      {
+        std::lock_guard<std::mutex> lock(workerLatencyMutexes[workerId]);
+        workerLatencies[workerId].push_back(latencyMs);
+      }
+
+      workerTotalOps[workerId]->fetch_add(1);
+      workerSetOps[workerId]->fetch_add(1);
+
+      if (*result.result_ref() == carbon::Result::STORED) {
+        workerSetSuccesses[workerId]->fetch_add(1);
+      } else {
+        workerSetErrors[workerId]->fetch_add(1);
+      }
+
+      co_return;
+    };
+
+    // Main loop - continuously spawn requests
+    // McRouter's maximumOutstanding handles backpressure - it will block
+    // when too many requests are in flight
+    while (std::chrono::steady_clock::now() < endTime) {
+      // Decide GET vs SET based on ratio
+      bool isGet = (folly::Random::randDouble01() < getRatio);
+      if (isGet) {
+        scope.add(
+            folly::coro::co_withExecutor(
+                exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
+                  co_await sendGetRequest();
+                  co_return;
+                })));
+      } else {
+        scope.add(
+            folly::coro::co_withExecutor(
+                exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
+                  co_await sendSetRequest();
+                  co_return;
+                })));
+      }
+
+      // Yield to allow other coroutines to run
+      co_await folly::coro::co_reschedule_on_current_executor;
+    }
+
+    co_await scope.joinAsync();
+
+    // No need to sync to global counters - they'll be summed at the end
+    co_return;
+  };
+
+  // Start workers - matches production LoadgenCommand::co_run() pattern
+  folly::coro::AsyncScope mainScope;
+  for (size_t i = 0; i < clients.size(); ++i) {
+    mainScope.add(
+        folly::coro::co_withExecutor(
+            workerEvbs.at(i % workerEvbs.size()),
+            benchmarkWorker(i, clients[i].get())));
+  }
+
+  // Block until all workers complete
+  folly::coro::blockingWait(
+      mainScope.joinAsync().scheduleOn(workerEvbs.front()));
+
+  shouldStop = true;
+  if (progressThread.joinable()) {
+    progressThread.join();
+  }
+
+  // Merge all worker latencies
+  for (size_t i = 0; i < clients.size(); ++i) {
+    std::lock_guard<std::mutex> lock(latenciesMutex);
+    allLatencies.insert(
+        allLatencies.end(),
+        workerLatencies[i].begin(),
+        workerLatencies[i].end());
   }
 
   BenchmarkResults results;
   results.startTime = startTime;
   results.endTime = std::chrono::steady_clock::now();
-  results.totalOps = totalOps.load();
-  results.getOps = getOps.load();
-  results.setOps = setOps.load();
-  results.getHits = getHits.load();
-  results.getMisses = getMisses.load();
-  results.getErrors = getErrors.load();
-  results.setSuccesses = setSuccesses.load();
-  results.setErrors = setErrors.load();
+
+  // Sum per-worker counters to get final totals
+  results.totalOps = 0;
+  results.getOps = 0;
+  results.setOps = 0;
+  results.getHits = 0;
+  results.getMisses = 0;
+  results.getErrors = 0;
+  results.setSuccesses = 0;
+  results.setErrors = 0;
+
+  for (size_t i = 0; i < clients.size(); ++i) {
+    results.totalOps += workerTotalOps[i]->load();
+    results.getOps += workerGetOps[i]->load();
+    results.setOps += workerSetOps[i]->load();
+    results.getHits += workerGetHits[i]->load();
+    results.getMisses += workerGetMisses[i]->load();
+    results.getErrors += workerGetErrors[i]->load();
+    results.setSuccesses += workerSetSuccesses[i]->load();
+    results.setErrors += workerSetErrors[i]->load();
+  }
+
   results.latencies = std::move(allLatencies);
 
   return results;
