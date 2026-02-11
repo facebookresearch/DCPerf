@@ -7,11 +7,13 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <folly/fibers/Semaphore.h>
 #include <folly/io/async/EventBase.h>
 #include <mcrouter/CarbonRouterClient.h>
 #include <mcrouter/CarbonRouterInstance.h>
