@@ -31,6 +31,7 @@ int main(int argc, char** argv) {
         "Warmup: %us, Test: %us\n",
         FLAGS_warmup_seconds,
         FLAGS_duration_seconds);
+    fflush(stdout);
   }
 
   try {
