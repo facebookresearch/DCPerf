@@ -30,6 +30,33 @@
 namespace facebook {
 namespace ucachebench {
 
+// Zipfian distribution generator for realistic hot-key access patterns
+// Based on YCSB's ScrambledZipfianGenerator algorithm
+class ZipfianGenerator {
+ public:
+  ZipfianGenerator(uint64_t numItems, double skew = 0.99);
+
+  // Generate a Zipfian-distributed random number in [0, numItems)
+  uint64_t next();
+
+  // Get the skew parameter
+  double getSkew() const {
+    return skew_;
+  }
+
+ private:
+  uint64_t numItems_;
+  double skew_;
+  double zetan_; // Normalization constant
+  double eta_; // Precomputed value for fast sampling
+  double theta_; // = skew
+  double alpha_; // = 1 / (1 - theta)
+  double zetaTwo_; // zeta(2, theta)
+
+  // Compute zeta(n, theta) = sum_{i=1}^{n} 1/i^theta
+  static double zeta(uint64_t n, double theta);
+};
+
 class UcacheBenchClient {
  public:
   // Production traffic distribution configuration
