@@ -112,23 +112,146 @@ benchpress ucache_bench_custom \
 ## Configuration Options
 
 ### Server Options
+
+#### Cache Size Presets (Automatic Scaling)
+
+By default, UcacheBench **automatically scales** DRAM cache settings based on the `--memory_mb` parameter. This ensures optimal configuration without manual tuning.
+
+**Preset Configurations**: For convenience, three predefined size-based configs are available:
+
+- **Small** (`ucache_bench_small_configs.json`): ~50GB memory
+  - Suitable for systems with 64-128GB RAM
+  - hash_power=26 (64M buckets), 32 proxies, 64 threads
+  - Recommended for: Development testing, smaller production instances
+
+- **Medium** (`ucache_bench_medium_configs.json`): ~100GB memory
+  - Suitable for systems with 128-256GB RAM
+  - hash_power=28 (256M buckets), 32 proxies, 64 threads
+  - Recommended for: Standard production workloads
+
+- **Large** (`ucache_bench_large_configs.json`): ~200GB memory
+  - Suitable for systems with 256GB+ RAM
+  - hash_power=32 (4B buckets), 64 proxies, 128 threads
+  - Recommended for: High-capacity production instances, large-scale benchmarking
+
+**Using Preset Configs**:
+```bash
+# Using automark with small preset
+automark run --config ucache_bench_small_configs.json
+
+# Using automark with medium preset
+automark run --config ucache_bench_medium_configs.json
+
+# Using automark with large preset
+automark run --config ucache_bench_large_configs.json
+```
+
+**Automatic Scaling Behavior**:
+When you specify `--memory_mb` without other parameters, the benchmark automatically calculates:
+- `hash_power`: Scales from 26 (small) → 28 (medium) → 32 (large)
+- `num_threads`: Auto-detected based on CPU cores and memory size
+- `num_proxies`: Auto-detected based on CPU cores and memory size
+
+Example:
+```bash
+# Automatic scaling for 80GB memory (scales to small config settings)
+./run.py server --memsize 80 --real
+
+# Automatic scaling for 150GB memory (scales to medium config settings)
+./run.py server --memsize 150 --real
+
+# Automatic scaling for 250GB memory (scales to large config settings)
+./run.py server --memsize 250 --real
+```
+
+#### Basic Options
 - `--port`: Server listening port (default: 11212)
-- `--memory_mb`: Memory size in MB for CacheLib (default: 55000)
-- `--cpu_pinning_enabled`: Enable CPU pinning for better performance (default: true)
-- `--cpu_pinning_avoid_irqs`: Avoid CPUs handling IRQs when pinning (default: true)
-- `--rpc_io_threads`: Number of IO worker threads (default: auto-detect = CPU cores)
-- `--hash_power`: Hash table power for CacheLib (default: 20)
+- `--memory_mb`: Memory size in MB for CacheLib (default: 1024)
+- `--hash_power`: Hash table power for CacheLib (number of buckets = 2^hash_power) (default: 20)
 - `--pool_name`: Pool name for CacheLib (default: "default")
 - `--verbose`: Enable verbose logging
 
-#### Fiber Configuration (Advanced)
-- `--fiber_max_per_thread`: Max outstanding fibers per IO thread (default: 500)
-- `--fiber_max_per_thread_spike`: Max fibers during spike window (default: 2000)
-- `--fiber_spike_duration_ms`: Spike window duration in ms (default: 100)
-- `--fiber_spike_cooldown_ms`: Cooldown between spikes in ms (default: 1000)
-- `--fiber_max_pool_size`: Maximum preallocated fiber pool size (default: 1000)
-- `--fiber_stack_size`: Fiber stack size in bytes (default: 65536)
-- `--enable_fibers`: Enable fiber-based request processing (default: true)
+#### DRAM Tuning Parameters (Production-Like Settings)
+
+These parameters allow you to fine-tune the CacheLib DRAM cache for production-like behavior. The preset configurations (small/medium/large) already set optimal values based on memory size.
+
+**LRU Rebalancing Settings:**
+- `--lru_rebalance_interval_sec`: LRU rebalancing interval in seconds (default: 0 = disabled)
+  - Controls how frequently CacheLib rebalances memory across pools
+  - Production values: 1-5 seconds depending on workload
+  - Example: `--lru_rebalance_interval_sec=1` for aggressive rebalancing
+
+- `--lru_rebalancing_hits_min_age_sec`: Minimum LRU tail age in seconds to reduce slabs (default: 0)
+  - Minimum age before releasing memory from a pool
+  - Production values: 30-60 seconds
+  - Example: `--lru_rebalancing_hits_min_age_sec=60`
+
+- `--lru_rebalancing_hits_max_age_sec`: Maximum LRU tail age in seconds to increase slabs (default: 0)
+  - Maximum age before allocating more memory to a pool
+  - Production values: 3600-7200 seconds
+  - Example: `--lru_rebalancing_hits_max_age_sec=7200`
+
+- `--lru_hits_victim_by_free_mem`: Use free memory for LRU rebalancing victim selection (default: false)
+  - When enabled, considers free memory when selecting pools to shrink
+  - Production typically uses false for predictable behavior
+
+**Hash Table Settings:**
+- `--hashtable_lock_power`: Hash table lock power (number of locks = 2^lock_power) (default: 20)
+  - Controls lock granularity for concurrent access
+  - Production value: 16 (65,536 locks)
+  - Higher values = more fine-grained locking = better concurrency
+  - Example: `--hashtable_lock_power=16`
+
+**CacheLib Allocator Settings:**
+- `--cachelib_num_shards`: Number of CacheLib shards (default: 0 = use CacheLib default)
+  - Controls internal sharding for parallel operations
+  - Production values:
+    - Small/Medium configs: 8192
+    - Large configs (256GB+): 524288 (512*1024)
+  - Example: `--cachelib_num_shards=8192`
+
+- `--min_alloc_size`: Minimum allocation size in bytes (default: 64)
+  - Smallest object size CacheLib will allocate
+  - Production value: 64 bytes
+  - Larger values reduce metadata overhead but may waste memory
+
+**Example Production-Like Configuration:**
+```bash
+# SKYLAKE-like (64GB RAM, small config)
+./ucachebench_server \
+  --memory_mb=50000 \
+  --hash_power=26 \
+  --lru_rebalance_interval_sec=5 \
+  --lru_rebalancing_hits_min_age_sec=30 \
+  --lru_rebalancing_hits_max_age_sec=3600 \
+  --hashtable_lock_power=16 \
+  --cachelib_num_shards=8192 \
+  --min_alloc_size=64
+
+# SAPPHIRE_RAPIDS-like (128GB RAM, medium config)
+./ucachebench_server \
+  --memory_mb=100000 \
+  --hash_power=28 \
+  --lru_rebalance_interval_sec=1 \
+  --lru_rebalancing_hits_min_age_sec=60 \
+  --lru_rebalancing_hits_max_age_sec=7200 \
+  --hashtable_lock_power=16 \
+  --cachelib_num_shards=8192 \
+  --min_alloc_size=64
+
+# TURIN-like (256GB+ RAM, large config)
+./ucachebench_server \
+  --memory_mb=200000 \
+  --hash_power=32 \
+  --lru_rebalance_interval_sec=1 \
+  --lru_rebalancing_hits_min_age_sec=60 \
+  --lru_rebalancing_hits_max_age_sec=7200 \
+  --hashtable_lock_power=16 \
+  --cachelib_num_shards=524288 \
+  --min_alloc_size=64
+```
+
+**Note:** When using the JSON config files (`ucache_bench_small/medium/large_configs.json`), these parameters are automatically configured. You only need to set them manually when using `run.py` or running the server binary directly.
 
 ### Client Options
 - `--server_host`: Server hostname (default: localhost)
