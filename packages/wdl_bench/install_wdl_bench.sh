@@ -85,7 +85,7 @@ declare -A TAGS=(
     ['isa-l']='d36de972efc18f2e85ca182a8b6758ecc7da512b'
     ['sleef']='3.8'
     ['aocl']='AOCL-5.2'
-    ['acl']='v52.7.0'
+    ['acl']='v52.8.0'
     ['onednn']='v3.10.2'
 )
 
@@ -459,7 +459,7 @@ build_gemm()
             bash -c "./arm-performance-libraries_${ARMPL_VERSION}_rpm/arm-performance-libraries_${ARMPL_VERSION}_rpm.sh --accept --install-to ./apl"
         fi
         module use apl/modulefiles
-        module load "armpl/${ARMPL_VERSION}_gcc"
+        module load "armpl/${ARMPL_VERSION}.0_gcc"
         lib='gemm_bench' # reset lib to gemm_bench
         cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH="${ARMPL_LIBRARIES};${WDL_BUILD}/acl/lib64;${WDL_BUILD}/acl/lib" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/acl/include -L ${WDL_BUILD}/acl/lib64 -L ${WDL_BUILD}/acl/lib" && cmake --build "$lib-build"
         cp "$lib-build/$lib" "${WDL_ROOT}/" || exit 1

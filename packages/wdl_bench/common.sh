@@ -10,7 +10,7 @@ WDL_SOURCE="${WDL_ROOT}/wdl_sources"
 WDL_BUILD="${WDL_ROOT}/wdl_build"
 WDL_DATASETS="${WDL_ROOT}/datasets"
 MKL_VERSION="2025.3.0.462"
-ARMPL_VERSION="25.07.1"
+ARMPL_VERSION="26.01"
 # Determine OS version
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
