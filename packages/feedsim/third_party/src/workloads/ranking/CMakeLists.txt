@@ -293,16 +293,80 @@ add_library(DriverNodeRankcmdline
 add_dependencies(DriverNodeRankcmdline DriverNodeRank_gengetopt)
 
 
+# Build FeatureGenerator library (for client-side feature generation)
+add_library(FeatureGenerator STATIC
+    FeatureGenerator.cc
+    FeatureGenerator.h
+)
+add_dependencies(FeatureGenerator folly fbthrift)
+target_include_directories(FeatureGenerator
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../
+        ${FOLLY_INCLUDE_DIR}
+        ${FBTHRIFT_INCLUDE_DIR}
+)
+target_link_libraries(FeatureGenerator
+    PUBLIC
+        ${FOLLY_LIBRARIES}
+)
+
 # Build DriverNodeRank binary
 add_executable(DriverNodeRank
                DriverNodeRank.cc)
+add_dependencies(DriverNodeRank fbthrift folly)
 target_include_directories(
     DriverNodeRank
-    PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/
-           ${LIBEVENT_INCLUDE_DIR}
-           ${JEMALLOC_INCLUDE_DIR})
+    PUBLIC
+        ${CMAKE_CURRENT_BINARY_DIR}/
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../
+        ${LIBEVENT_INCLUDE_DIR}
+        ${JEMALLOC_INCLUDE_DIR}
+        ${BZIP2_INCLUDE_DIR}
+        ${ZSTD_INCLUDE_DIR}
+        ${LZ4_INCLUDE_DIR}
+        ${SNAPPY_INCLUDE_DIR}
+        ${LIBLZMA_INCLUDE_DIRS}
+        ${FOLLY_INCLUDE_DIR}
+        ${FBTHRIFT_INCLUDE_DIR}
+)
 
 target_link_libraries(
     DriverNodeRank
-    PRIVATE OLDISim::OLDISim DriverNodeRankcmdline
-    PUBLIC Threads::Threads ${LIBEVENT_LIB} ${JEMALLOC_LIB})
+    PRIVATE
+        OLDISim::OLDISim
+        DriverNodeRankcmdline
+        FeatureGenerator
+        ranking-cpp2
+        rankingThriftDataGen
+        ${FOLLY_LIBRARIES}
+        ${CMAKE_DL_LIBS}
+        glog::glog
+        ${DOUBLE_CONVERSION_LIBRARY}
+        ${IBERTY_LIBRARIES}
+        ${FBTHRIFT_LIBRARIES}
+    PUBLIC
+        Threads::Threads
+        ZLIB::ZLIB
+        ${BZIP2_LIBRARIES}
+        ${LZ4_LIBRARY}
+        ${ZSTD_LIBRARY}
+        ${SNAPPY_LIBRARY}
+        ${LIBLZMA_LIBRARIES}
+        ${LIBEVENT_LIB}
+        ${JEMALLOC_LIB}
+        Boost::boost
+        Boost::context
+        Boost::filesystem
+        Boost::program_options
+        Boost::regex
+        ${OPENSSL_LIBRARIES}
+        ${LIBSODIUM_LIBRARIES}
+        ${RSOCKET_LIBRARIES}
+        ${FIZZ_LIBRARIES}
+        ${WANGLE_LIBRARIES}
+        ${FMT_LIBRARIES}
+)

@@ -536,6 +536,103 @@ void AsyncPageRankRequestHandler(
   // NO .get() here! Handler returns immediately, work continues asynchronously
 }
 
+#ifdef FEEDSIM_USE_DLRM
+/**
+ * Phase 7: DLRM Request Handler with client-side features.
+ *
+ * This handler processes RankingRequest messages that contain pre-generated
+ * DLRM features from the client. It deserializes the features and runs
+ * inference using DLRM::inferWithFeatures().
+ */
+void DLRMRequestHandler(
+    oldisim::NodeThread& thread,
+    oldisim::QueryContext& context,
+    std::vector<ThreadData>& thread_data) {
+  auto& this_thread = thread_data[thread.get_thread_num()];
+  int thread_id = thread.get_thread_num();
+
+  // Deserialize RankingRequest from payload
+  ranking::RankingRequest request;
+  try {
+    folly::IOBuf buf(
+        folly::IOBuf::WRAP_BUFFER,
+        context.payload,
+        context.payload_length);
+    apache::thrift::CompactSerializer::deserialize(&buf, request);
+  } catch (const std::exception& e) {
+    std::cerr << "Failed to deserialize RankingRequest: " << e.what() << std::endl;
+    context.SendResponse(nullptr, 0);
+    return;
+  }
+
+  int result = 0;
+
+  // Check if client provided features
+  if (request.dlrm_features().has_value()) {
+    const auto& features = request.dlrm_features().value();
+    int batch_size = *features.batch_size();
+    int num_inferences = *request.num_inferences();
+
+    // Convert from Thrift types to arrays
+    const auto& dense_vec = *features.dense_features();
+    const auto& sparse_vec = *features.sparse_features();
+
+    // Convert double to float for dense features
+    std::vector<float> dense_floats;
+    dense_floats.reserve(dense_vec.size());
+    for (double d : dense_vec) {
+      dense_floats.push_back(static_cast<float>(d));
+    }
+
+    // Run inference with client-provided features
+    std::vector<folly::Future<int>> futures;
+    for (int i = 0; i < args.cpu_threads_arg; i++) {
+      auto f = folly::via(
+          this_thread.cpuThreadPool.get(),
+          [thread_id, num_inferences, batch_size, &dense_floats, &sparse_vec, &this_thread]() {
+            return this_thread.dlrm_ranker->inferWithFeatures(
+                thread_id,
+                dense_floats.data(),
+                sparse_vec.data(),
+                batch_size,
+                num_inferences);
+          });
+      futures.push_back(std::move(f));
+    }
+    auto fs = folly::collect(futures).get();
+    result = std::accumulate(fs.begin(), fs.end(), 0);
+  } else {
+    // Fallback to server-side feature generation
+    int num_inferences = *request.num_inferences();
+    int batch_size = args.dlrm_batch_size_arg;
+
+    std::vector<folly::Future<int>> futures;
+    for (int i = 0; i < args.cpu_threads_arg; i++) {
+      auto f = folly::via(
+          this_thread.cpuThreadPool.get(),
+          [thread_id, num_inferences, batch_size, &this_thread]() {
+            return this_thread.dlrm_ranker->infer(
+                thread_id, num_inferences, batch_size);
+          });
+      futures.push_back(std::move(f));
+    }
+    auto fs = folly::collect(futures).get();
+    result = std::accumulate(fs.begin(), fs.end(), 0);
+  }
+
+  // Generate response (same as PageRankRequestHandler)
+  auto per_thread_num_objects = args.num_objects_arg / args.srv_io_threads_arg;
+  auto r = ranking::generators::generateRandomRankingResponse(per_thread_num_objects);
+  ranking::RankingResponse resp = r;
+
+  folly::IOBufQueue bufq;
+  apache::thrift::CompactSerializer::serialize(resp, &bufq);
+  auto buf = bufq.move();
+
+  context.SendResponse(buf->data(), buf->length());
+}
+#endif // FEEDSIM_USE_DLRM
+
 void PageRankRequestHandler(
     oldisim::NodeThread& thread,
     oldisim::QueryContext& context,
@@ -911,6 +1008,18 @@ int main(int argc, char** argv) {
           return PageRankRequestHandler(thread, context, thread_data);
         });
   }
+
+#ifdef FEEDSIM_USE_DLRM
+  // Phase 7: Register DLRM request handler for client-side feature generation
+  if (g_workload_type == WorkloadType::DLRM) {
+    std::cout << "Registering DLRM request handler for client-side features" << std::endl;
+    server.RegisterQueryCallback(
+        ranking::kDLRMRequestType,
+        [&thread_data](auto&& thread, auto&& context) {
+          return DLRMRequestHandler(thread, context, thread_data);
+        });
+  }
+#endif
   server.SetNumThreads(args.threads_arg);
   server.SetThreadPinning(args.noaffinity_given == 0u);
   server.SetThreadLoadBalancing(args.noloadbalance_given == 0u);
