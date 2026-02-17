@@ -51,12 +51,16 @@ struct DLRM::Impl {
       auto state = std::make_unique<ThreadState>();
 
       // Initialize RNG
-      unsigned actual_seed = seed;
-      if (actual_seed == 0) {
+      // seed == static_cast<unsigned>(-1) means use time-based random seed
+      // Any other seed value (including default 42) is used directly
+      unsigned actual_seed;
+      if (seed == static_cast<unsigned>(-1)) {
+        // Time-based random seed for non-deterministic behavior
         actual_seed =
             std::chrono::system_clock::now().time_since_epoch().count() + i;
       } else {
-        actual_seed += i; // Unique seed per thread
+        // Deterministic seed (default 42 or user-specified)
+        actual_seed = seed + i; // Unique seed per thread
       }
       state->rng.seed(actual_seed);
 

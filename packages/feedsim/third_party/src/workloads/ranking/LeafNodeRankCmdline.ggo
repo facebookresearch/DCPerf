@@ -58,7 +58,7 @@ option "dlrm_model_path" - "Path to TorchScript DLRM model file (.pt)." string t
 option "dlrm_batch_size" - "Batch size for DLRM inference." int default="256"
 option "dlrm_inferences_per_request" - "Number of DLRM inference calls per request." int default="1"
 option "dlrm_threads" - "Number of LibTorch threads for DLRM inference." int default="8"
-option "dlrm_seed" - "Seed for DLRM feature generation. If not provided, current time will be used." long optional
+option "dlrm_seed" - "Seed for DLRM feature generation. Default is 42 for deterministic results. Use -1 for random (time-based) seed." long default="42"
 
 # Phase 3: Non-blocking I/O options
 option "async_io" - "Enable non-blocking async I/O pattern (eliminates thread starvation)."
