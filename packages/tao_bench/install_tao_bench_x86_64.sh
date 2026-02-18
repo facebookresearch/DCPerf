@@ -99,6 +99,7 @@ else
 fi
 pushd folly
 git checkout v2024.06.24.00
+git apply "${BENCHPRESS_ROOT}/packages/tao_bench/folly_zlib_uri.patch"
 sed -i 's/FOLLY_ALWAYS_INLINE//g' "${TAO_BENCH_ROOT}/folly/folly/experimental/symbolizer/StackTrace.cpp"
 OPENSSL_ROOT_DIR="${TAO_BENCH_DEPS}" ./build/fbcode_builder/getdeps.py --allow-system-packages build \
     --scratch-path "${FOLLY_BUILD_ROOT}"
