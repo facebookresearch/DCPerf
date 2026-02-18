@@ -195,7 +195,7 @@ class RunCommand(BenchpressCommand):
                 exit(1)
 
         for job in jobs:
-            if not verify_install(job.install_script):
+            if not verify_install(job):
                 logger.error("Benchmark {} not installed".format(job.name))
                 continue
             click.echo('Running "{}": {}'.format(job.name, job.description), err=True)

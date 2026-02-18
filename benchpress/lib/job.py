@@ -76,6 +76,7 @@ class Job:
         self.description = job_config["description"]
         self.install_script = benchmark_config.get("install_script", "")
         self.cleanup_script = benchmark_config.get("cleanup_script", "")
+        self.install_markers = benchmark_config.get("install_markers", [])
         self.stdout = job_config.get("stdout", "")
         self.uuid = job_config.get("uuid", "")
         self.timestamp = job_config["timestamp"]

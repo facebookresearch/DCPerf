@@ -10,6 +10,10 @@ rebatch:
   parser: rebatch
   install_script: ./packages/ai_wdl/rebatch/install_rebatch.sh
   cleanup_script: ./packages/ai_wdl/rebatch/cleanup_rebatch.sh
+  install_markers:
+    - ./benchmarks/ai_wdl/rebatch/rebatchBench
+    - ./benchmarks/ai_wdl/rebatch/model_a.dist
+    - ./benchmarks/ai_wdl/rebatch/model_b.dist
   path: ./benchmarks/ai_wdl/rebatch/rebatchBench
   metrics:
     - bandwidth
@@ -19,6 +23,10 @@ chm:
   parser: chm
   install_script: ./packages/ai_wdl/chm/install_chm.sh
   cleanup_script: ./packages/ai_wdl/chm/cleanup_chm.sh
+  install_markers:
+    - ./benchmarks/ai_wdl/chm/chm_bench
+    - ./benchmarks/ai_wdl/chm/model_a.dist
+    - ./benchmarks/ai_wdl/chm/model_b.dist
   path: ./benchmarks/ai_wdl/chm/chm_bench
   metrics:
     - Mops/sec
@@ -28,6 +36,10 @@ deser:
   install_script: ./packages/ai_wdl/deser/install_deser.sh
   cleanup_script: ./packages/ai_wdl/deser/cleanup_deser.sh
   path: ./benchmarks/ai_wdl/deser/deser_bench
+  install_markers:
+    - ./benchmarks/ai_wdl/deser/deser_bench
+    - ./benchmarks/ai_wdl/deser/model_a.dist
+    - ./benchmarks/ai_wdl/deser/model_b.dist
   metrics:
     - Mops/sec
 

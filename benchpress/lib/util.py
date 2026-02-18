@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import errno
+import glob
 import multiprocessing
 import os
 import pathlib
@@ -55,16 +56,52 @@ def issue_background_command(cmd, stdout, stderr, env=None):
     return proc
 
 
-def verify_install(install_script):
-    if not install_script:
-        # install_script not set means this "benchmark" does not need installation
+def install_list_contains(installer_name: str) -> bool:
+    if not installer_name:
         return True
-    if os.path.exists("benchmark_installs.txt"):
-        with open("benchmark_installs.txt", "r") as benchmark_installs:
-            for benchmark_install in benchmark_installs:
-                if install_script.strip() == benchmark_install.strip():
+    if os.path.exists("installed.txt"):
+        with open("installed.txt", "r") as installs_file:
+            for installed_script in installs_file:
+                if installer_name.strip() == installed_script.strip():
                     return True
     return False
+
+
+def install_list_append(installer_name: str):
+    if not install_list_contains(installer_name):
+        with open("installed.txt", "a") as installs_file:
+            # Note: we could os.path.expandvars() to match the echo approach
+            installs_file.write(installer_name + "\n")
+
+
+def install_list_remove(installer_name: str):
+    if os.path.exists("installed.txt"):
+        with open("installed.txt", "r") as benchmark_installs_fp:
+            lines = benchmark_installs_fp.readlines()
+        with open("installed.txt", "w") as benchmark_installs_fp:
+            for line in lines:
+                if line.strip() != installer_name.strip():
+                    benchmark_installs_fp.write(line)
+
+
+def verify_install(job) -> bool:
+    """
+    If the yaml file provided install markers, any marker being missing will
+    lead to this function returning False. Assuming no markers are provided,
+    this function checks installed.txt for a record of the install script
+    being run. The actual binary is allways checked for existance.
+
+    Arguments
+        - job is a Benchpress Job. Class is defined in lib/job.py
+    """
+
+    if job.install_markers:
+        return all(glob.glob(marker) for marker in job.install_markers)
+    elif job.install_script:
+        return install_list_contains(job.install_script)
+    else:
+        # No install markers and no install script --> assume installed
+        return True
 
 
 def output_catcher(reader, writer=None):
@@ -108,16 +145,7 @@ def install_benchmark(install_script, args=None, env=None, install_log=None):
     stderr_catcher.join()
 
     if install_benchmark_proc.returncode == 0:
-        verify_install_cmd_1 = ["touch", "benchmark_installs.txt"]
-        verify_install_proc_1 = subprocess.Popen(verify_install_cmd_1, shell=False)
-        verify_install_proc_1.wait()
-        benchmark_installs_fp = open("benchmark_installs.txt", "a+")
-        verify_install_cmd_2 = ["echo", install_script]
-        verify_install_proc_2 = subprocess.Popen(
-            verify_install_cmd_2, stdout=benchmark_installs_fp, shell=False
-        )
-        verify_install_proc_2.wait()
-        benchmark_installs_fp.close()
+        install_list_append(install_script)
     else:
         cmd_str = " ".join(install_benchmark_cmd)
         raise Exception(f"Failed to run '{cmd_str}'")
@@ -128,7 +156,7 @@ def install_benchmark(install_script, args=None, env=None, install_log=None):
 def install_tool(tool_name):
     install_script = "install_tool_" + tool_name + ".sh"
     if os.path.exists(install_script):
-        if verify_install(install_script):
+        if install_list_contains(install_script):
             return 0
         else:
             install_benchmark(install_script)
@@ -153,14 +181,7 @@ def clean_benchmark(clean_script, install_script):
     clean_benchmark_proc = subprocess.Popen(clean_benchmark_cmd, shell=False)
     clean_benchmark_proc.wait()
     if clean_benchmark_proc.returncode == 0:
-        if os.path.exists("benchmark_installs.txt"):
-            with open("benchmark_installs.txt", "r") as benchmark_installs_fp:
-                lines = benchmark_installs_fp.readlines()
-            with open("benchmark_installs.txt", "w") as benchmark_installs_fp:
-                for line in lines:
-                    if line.strip("\n") != install_script:
-                        benchmark_installs_fp.write(line)
-                benchmark_installs_fp.close()
+        install_list_remove(install_script)
 
 
 def clean_tool(tool_name):

@@ -66,7 +66,7 @@ class InstallCommand(BenchpressCommand):
                 elif retcode == 0:
                     install_log.write("Tool {} already installed \n".format(hook[0]))
                     click.echo("Tool {} already installed".format(hook[0]))
-            if args.force or not verify_install(job.install_script):
+            if args.force or not verify_install(job):
                 install_log.write(
                     "Installing benchmark for {}: {}\n".format(
                         job.name, job.description

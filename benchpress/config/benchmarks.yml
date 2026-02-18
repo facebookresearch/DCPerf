@@ -6,6 +6,10 @@ oss_performance_mediawiki:
   parser: mediawiki
   install_script: ./packages/mediawiki/install_oss_performance_mediawiki.sh
   cleanup_script: ./packages/mediawiki/cleanup_oss_performance_mediawiki.sh
+  install_markers:
+    - ./oss-performance/perf.php
+    - ./oss-performance/base/PerfRunner.php
+    - ./oss-performance/composer.phar
   path: ./packages/mediawiki/run.sh
   tags:
     scope:
@@ -19,6 +23,15 @@ django_workload:
   parser: django_workload
   install_script: ./packages/django_workload/install_django_workload.sh
   cleanup_script: ./packages/django_workload/cleanup_django_workload.sh
+  install_markers:
+    - ./benchmarks/django_workload/bin/run.sh
+    - ./benchmarks/django_workload/proxygen_binding/proxygen_binding*.so
+    - ./benchmarks/django_workload/django-workload/django-workload/django_workload/thrift/build/gen-py3/mock_services/MockAdsService-remote
+    - ./benchmarks/django_workload/django-workload/django-workload/django_workload/feed_timeline.py
+    - ./benchmarks/django_workload/django-workload/django-workload/cinder/cinder-build/bin/python3.10
+    - ./benchmarks/django_workload/django-workload/django-workload/Python-3.10.2/python-build/bin/python3.10
+    - ./benchmarks/django_workload/wrk/wrk
+    - ./benchmarks/django_workload/apache-cassandra/bin/cassandra
   path: ./benchmarks/django_workload/bin/run.sh
   tags:
     scope:
@@ -32,6 +45,9 @@ tao_bench:
   parser: tao_bench
   install_script: ./packages/tao_bench/install_tao_bench.sh
   cleanup_script: ./packages/tao_bench/cleanup_tao_bench.sh
+  install_markers:
+    - ./benchmarks/tao_bench/tao_bench_server
+    - ./benchmarks/tao_bench/tao_bench_client
   path: ./packages/tao_bench/run.py
   tags:
     scope:
@@ -77,6 +93,9 @@ feedsim:
   parser: feedsim
   install_script: ./packages/feedsim/install_feedsim.sh
   cleanup_script: ./packages/feedsim/cleanup_feedsim.sh
+  install_markers:
+    - ./benchmarks/feedsim/src/build/workloads/ranking/LeafNodeRank
+    - ./benchmarks/feedsim/src/build/workloads/ranking/DriverNodeRank
   path: ./benchmarks/feedsim/run.sh
   tags:
     scope:
@@ -116,6 +135,10 @@ spark_standalone:
   parser: spark_standalone
   install_script: ./packages/spark_standalone/install_spark_standalone.sh
   cleanup_script: ./packages/spark_standalone/cleanup_spark_standalone.sh
+  install_markers:
+    - ./benchmarks/spark_standalone/spark-4.0.1-bin-hadoop3/bin/spark-sql
+    - ./benchmarks/spark_standalone/scripts/run_perf_common.py
+    - /usr/lib/jvm/graalvm-community-openjdk-17.0.9+9.1/bin/java
   path: ./packages/spark_standalone/templates/runner.py
   tags:
     scope:

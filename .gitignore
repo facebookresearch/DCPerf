@@ -6,6 +6,7 @@ benchmarks/
 
 # benchmarks install log
 benchmark_installs.txt
+installed.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
