@@ -605,7 +605,8 @@
     Aggregator like workload with DLRM (Deep Learning Recommendation Model)
     inference. Uses async I/O for improved throughput on high-core CPUs.
     Finds maximum QPS that system can sustain while keeping
-    95th percentile latency <= 500 msecs.
+    95th percentile latency <= 500 msecs. Supports both server-side (default)
+    and client-side feature generation via FBThrift protocol.
   args:
     - '-p {port}'
     - '-o {output}'
@@ -616,6 +617,12 @@
     - '--dlrm-model={dlrm_model}'
     - '--dlrm-batch-size={dlrm_batch_size}'
     - '--dlrm-threads={dlrm_threads}'
+    - '--client-side-features={client_side_features}'
+    - '--client-batch-size={client_batch_size}'
+    - '--client-inferences={client_inferences}'
+    - '--client-feature-seed={client_feature_seed}'
+    - '--client-num-dense={client_num_dense}'
+    - '--client-num-sparse={client_num_sparse}'
   vars:
     - 'port=11222'
     - 'output=feedsim_results.txt'
@@ -625,6 +632,12 @@
     - 'dlrm_model=models/dlrm_small.pt'
     - 'dlrm_batch_size=256'
     - 'dlrm_threads=8'
+    - 'client_side_features=0'
+    - 'client_batch_size=256'
+    - 'client_inferences=1'
+    - 'client_feature_seed=42'
+    - 'client_num_dense=13'
+    - 'client_num_sparse=26'
   hooks:
     - hook: cpu-mpstat
       options:
