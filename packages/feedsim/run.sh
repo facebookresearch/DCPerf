@@ -92,6 +92,12 @@ Usage: ${0##*/} [OPTION]...
     --io-stddev I/O latency standard deviation in ms (for lognormal distribution). Default: 50
     --io-stages Number of I/O stages to simulate (models multi-hop data fetching). Default: 1
     --io-stage-latency Latency per I/O stage in ms (when --io-stages > 1). Default: 50
+    --client-side-features Enable client-side DLRM feature generation (0=disabled, non-zero=enabled). Default: 0
+    --client-batch-size Batch size for client-side feature generation. Default: 256
+    --client-inferences Number of DLRM inferences per request (client-side). Default: 1
+    --client-feature-seed Seed for client feature generation. Default: 42. Use -1 for random.
+    --client-num-dense Number of dense features per sample (client-side). Default: 13
+    --client-num-sparse Number of sparse features per sample (client-side). Default: 26
 EOF
 }
 
@@ -214,6 +220,25 @@ main() {
 
     local io_stage_latency_ms
     io_stage_latency_ms="50"
+
+    # Client-side DLRM feature options (Phase 7)
+    local client_side_features
+    client_side_features="0"
+
+    local client_batch_size
+    client_batch_size="256"
+
+    local client_inferences
+    client_inferences="1"
+
+    local client_feature_seed
+    client_feature_seed="42"
+
+    local client_num_dense
+    client_num_dense="13"
+
+    local client_num_sparse
+    client_num_sparse="26"
 
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
@@ -384,6 +409,48 @@ main() {
             --io-stage-latency=*)
                 io_stage_latency_ms="${1#*=}"
                 ;;
+            --client-side-features)
+                client_side_features="$2"
+                shift
+                ;;
+            --client-side-features=*)
+                client_side_features="${1#*=}"
+                ;;
+            --client-batch-size)
+                client_batch_size="$2"
+                shift
+                ;;
+            --client-batch-size=*)
+                client_batch_size="${1#*=}"
+                ;;
+            --client-inferences)
+                client_inferences="$2"
+                shift
+                ;;
+            --client-inferences=*)
+                client_inferences="${1#*=}"
+                ;;
+            --client-feature-seed)
+                client_feature_seed="$2"
+                shift
+                ;;
+            --client-feature-seed=*)
+                client_feature_seed="${1#*=}"
+                ;;
+            --client-num-dense)
+                client_num_dense="$2"
+                shift
+                ;;
+            --client-num-dense=*)
+                client_num_dense="${1#*=}"
+                ;;
+            --client-num-sparse)
+                client_num_sparse="$2"
+                shift
+                ;;
+            --client-num-sparse=*)
+                client_num_sparse="${1#*=}"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -427,6 +494,14 @@ main() {
 
         dlrm_opts="--workload_type=dlrm --dlrm_model_path=$dlrm_model_path --dlrm_batch_size=$dlrm_batch_size --dlrm_inferences_per_request=$dlrm_inferences_per_request --dlrm_threads=$dlrm_threads"
         echo "Using DLRM workload with model: $dlrm_model_path"
+        if [ "$client_side_features" != "0" ]; then
+            echo "  Client-side feature generation: ENABLED"
+            echo "    Batch size: $client_batch_size"
+            echo "    Inferences: $client_inferences"
+            echo "    Seed: $client_feature_seed"
+            echo "    Dense features: $client_num_dense"
+            echo "    Sparse features: $client_num_sparse"
+        fi
 
         # Set LD_LIBRARY_PATH for LibTorch if needed
         if [ -d "${FEEDSIM_ROOT}/third_party/libtorch/lib" ]; then
@@ -514,6 +589,12 @@ main() {
         qps_threshold_args="-r $qps_threshold -x $max_warmup_iterations"
     fi
 
+    # Build client-side feature options for DriverNodeRank
+    local client_feature_opts=""
+    if [ "$client_side_features" != "0" ]; then
+        client_feature_opts="--client_side_features --client_dlrm_batch_size=$client_batch_size --client_dlrm_inferences=$client_inferences --client_feature_seed=$client_feature_seed --client_num_dense_features=$client_num_dense --client_num_sparse_features=$client_num_sparse"
+    fi
+
     # Construct no retry mode parameter if specified
     no_retry_args=""
     if [ -n "$no_retry_mode" ]; then
@@ -528,7 +609,8 @@ main() {
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
                 --threads="${driver_threads}" \
-                --connections=4
+                --connections=4 \
+                $client_feature_opts
         benchreps_tell_state "after search_qps"
     elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
         benchreps_tell_state "before search_qps"
@@ -536,7 +618,8 @@ main() {
         scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --monitor_port "$client_monitor_port" \
-                --server "0.0.0.0:$port"
+                --server "0.0.0.0:$port" \
+                $client_feature_opts
         benchreps_tell_state "after search_qps"
     else
         # Adjust the number of workers according to QPS
