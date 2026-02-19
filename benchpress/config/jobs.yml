@@ -1395,3 +1395,186 @@
     - '{duration}'
   vars:
     - 'duration'
+
+- benchmark: ucache_bench
+  name: ucache_bench_memory
+  description: UcacheBench - Memory-only cache benchmark using CacheLib
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--port={port}'
+        - '--memory-mb={memory_mb}'
+        - '--hash-power={hash_power}'
+        - '--pool-name={pool_name}'
+        - '--cache-mode=memory'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'port=11211'
+        - 'memory_mb=1024'
+        - 'hash_power=20'
+        - 'pool_name=default'
+        - 'warmup_time=10'
+        - 'test_time=60'
+        - 'verbose=false'
+    client:
+      args:
+        - 'client'
+        - '--server-hostname={server_hostname}'
+        - '--server-port={server_port}'
+        - '--key-count={key_count}'
+        - '--value-size-min={value_size_min}'
+        - '--value-size-max={value_size_max}'
+        - '--get-ratio={get_ratio}'
+        - '--qps-target={qps_target}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'server_hostname'
+        - 'server_port=11211'
+        - 'key_count=100000'
+        - 'value_size_min=64'
+        - 'value_size_max=1024'
+        - 'get_ratio=0.9'
+        - 'qps_target=0'
+        - 'warmup_time=10'
+        - 'test_time=60'
+        - 'verbose=false'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'perf.data'
+
+- benchmark: ucache_bench
+  name: ucache_bench_hybrid
+  description: UcacheBench - Hybrid RAM+SSD cache benchmark using CacheLib
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--port={port}'
+        - '--memory-mb={memory_mb}'
+        - '--hash-power={hash_power}'
+        - '--pool-name={pool_name}'
+        - '--cache-mode=hybrid'
+        - '--ssd-cache-path={ssd_cache_path}'
+        - '--ssd-cache-size-mb={ssd_cache_size_mb}'
+        - '--ssd-block-size={ssd_block_size}'
+        - '--ssd-region-size-mb={ssd_region_size_mb}'
+        - '--ssd-clean-regions-pool={ssd_clean_regions_pool}'
+        - '--ssd-device-max-write-rate={ssd_device_max_write_rate}'
+        - '--ssd-truncate-file={ssd_truncate_file}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'port=11211'
+        - 'memory_mb=1024'
+        - 'hash_power=20'
+        - 'pool_name=hybrid'
+        - 'ssd_cache_path=/tmp/ucachebench_ssd'
+        - 'ssd_cache_size_mb=4096'
+        - 'ssd_block_size=4096'
+        - 'ssd_region_size_mb=16'
+        - 'ssd_clean_regions_pool=4'
+        - 'ssd_device_max_write_rate=0'
+        - 'ssd_truncate_file=true'
+        - 'warmup_time=30'
+        - 'test_time=300'
+        - 'verbose=true'
+    client:
+      args:
+        - 'client'
+        - '--server-hostname={server_hostname}'
+        - '--server-port={server_port}'
+        - '--key-count={key_count}'
+        - '--value-size-min={value_size_min}'
+        - '--value-size-max={value_size_max}'
+        - '--get-ratio={get_ratio}'
+        - '--qps-target={qps_target}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'server_hostname'
+        - 'server_port=11211'
+        - 'key_count=1000000'
+        - 'value_size_min=128'
+        - 'value_size_max=2048'
+        - 'get_ratio=0.95'
+        - 'qps_target=5000'
+        - 'warmup_time=30'
+        - 'test_time=300'
+        - 'verbose=true'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'perf.data'
+
+- benchmark: ucache_bench
+  name: ucache_bench_custom
+  description: UcacheBench - Cache benchmark with custom parameters
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--port={port}'
+        - '--memory-mb={memory_mb}'
+        - '--hash-power={hash_power}'
+        - '--pool-name={pool_name}'
+        - '--cache-mode={cache_mode}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'port=11211'
+        - 'memory_mb=2048'
+        - 'hash_power=22'
+        - 'pool_name=benchmark'
+        - 'cache_mode=memory'
+        - 'warmup_time=30'
+        - 'test_time=300'
+        - 'verbose=true'
+    client:
+      args:
+        - 'client'
+        - '--server-hostname={server_hostname}'
+        - '--server-port={server_port}'
+        - '--key-count={key_count}'
+        - '--value-size-min={value_size_min}'
+        - '--value-size-max={value_size_max}'
+        - '--get-ratio={get_ratio}'
+        - '--qps-target={qps_target}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'server_hostname'
+        - 'server_port=11211'
+        - 'key_count=1000000'
+        - 'value_size_min=128'
+        - 'value_size_max=2048'
+        - 'get_ratio=0.95'
+        - 'qps_target=10000'
+        - 'warmup_time=30'
+        - 'test_time=300'
+        - 'verbose=true'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'perf.data'
