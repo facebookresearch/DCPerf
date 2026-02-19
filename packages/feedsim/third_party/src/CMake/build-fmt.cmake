@@ -13,18 +13,19 @@ ExternalProject_Add(fmt
     CMAKE_ARGS
         -DCMAKE_BUILD_TYPE:STRING=Release
         -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=True
-        -DCMAKE_CXX_STANDARD:BOOL=17
+        -DCMAKE_CXX_STANDARD:BOOL=20
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+        -DCMAKE_INSTALL_LIBDIR:PATH=lib
         -DFMT_TEST:BOOL=OFF
     BINARY_DIR ${oldisim_BINARY_DIR}/third_party/fmt
-    BUILD_BYPRODUCTS <INSTALL_DIR>/lib64/libfmt.a
+    BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libfmt.a
     )
 
 # Specify include dir
 ExternalProject_Get_Property(fmt INSTALL_DIR)
 
 set(FMT_LIBRARIES
-  ${INSTALL_DIR}/lib64/libfmt.a
+  ${INSTALL_DIR}/lib/libfmt.a
   )
 message(STATUS "fmt Library: ${FMT_LIBRARIES}")
 
