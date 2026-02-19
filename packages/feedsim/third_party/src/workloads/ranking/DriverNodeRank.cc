@@ -15,6 +15,9 @@
 #include <memory>
 #include <string>
 
+#include <thrift/lib/cpp2/protocol/CompactProtocol.h>
+#include <thrift/lib/cpp2/protocol/Serializer.h>
+
 #include "oldisim/ChildConnectionStats.h"
 #include "oldisim/DriverNode.h"
 #include "oldisim/Log.h"
@@ -24,7 +27,10 @@
 #include "oldisim/Util.h"
 
 #include "DriverNodeRankCmdline.h"
+#include "FeatureGenerator.h"
 #include "RequestTypes.h"
+
+#include "if/gen-cpp2/ranking_types.h"
 
 #include "utils.h"
 
@@ -39,6 +45,10 @@ struct ThreadData {
   uint64_t request_delay; // This is per thread
   oldisim::TestDriver *test_driver;
   event *recompute_qps_timer;
+
+  // Phase 7: Client-side feature generation
+  std::unique_ptr<ranking::FeatureGenerator> feature_generator;
+  std::string serialized_request;  // Pre-allocated buffer for serialized request
 };
 
 // Specific timer handler to recompute inter-request delays for QPS
@@ -71,8 +81,16 @@ void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
     return;
   }
 
-  double measured_qps = static_cast<double>(
-      stats.query_counts_.at(ranking::kPageRankRequestType)) / elapsed_secs;
+  // Use the appropriate request type for QPS calculation
+  uint32_t request_type = args.client_side_features_given
+      ? ranking::kDLRMRequestType
+      : ranking::kPageRankRequestType;
+
+  double measured_qps = 0.0;
+  auto it = stats.query_counts_.find(request_type);
+  if (it != stats.query_counts_.end()) {
+    measured_qps = static_cast<double>(it->second) / elapsed_secs;
+  }
 
   // Compute target delay in microseconds
   double target_delay_us = 1000000.0 / this_thread->qps_per_thread;
@@ -110,6 +128,18 @@ void ThreadStartup(oldisim::NodeThread &thread,
   // Store pointer to test_driver
   this_thread.test_driver = &test_driver;
 
+  // Phase 7: Initialize client-side feature generator if enabled
+  if (args.client_side_features_given) {
+    ranking::FeatureGeneratorConfig config;
+    config.batch_size = args.client_dlrm_batch_size_arg;
+    config.num_dense_features = args.client_num_dense_features_arg;
+    config.num_sparse_features = args.client_num_sparse_features_arg;
+    config.seed = static_cast<unsigned>(args.client_feature_seed_arg);
+
+    this_thread.feature_generator =
+        std::make_unique<ranking::FeatureGenerator>(config, thread.get_thread_num());
+  }
+
   // If user gave QPS target, initialize QPS modulation
   if (args.qps_arg != 0) {
     this_thread.qps_per_thread =
@@ -127,9 +157,58 @@ void MakeRequest(oldisim::NodeThread &thread, oldisim::TestDriver &test_driver,
                  std::vector<ThreadData> &thread_data) {
   ThreadData &this_thread = thread_data[thread.get_thread_num()];
 
-  test_driver.SendRequest(ranking::kPageRankRequestType,
-                          this_thread.random_string.c_str(), 3000,
-                          this_thread.request_delay);
+  if (args.client_side_features_given) {
+    // Phase 7: Client-side feature generation mode
+    // Generate features and serialize into RankingRequest
+    int batch_size = args.client_dlrm_batch_size_arg;
+    int num_inferences = args.client_dlrm_inferences_arg;
+
+    // Generate features
+    auto dense_features = this_thread.feature_generator->generateDenseFeatures(batch_size);
+    auto sparse_features = this_thread.feature_generator->generateSparseFeatures(batch_size);
+
+    // Create RankingRequest with DLRMFeatures
+    ranking::RankingRequest request;
+    request.request_id() = static_cast<int64_t>(thread.get_thread_num());
+    request.num_inferences() = num_inferences;
+
+    // Populate DLRMFeatures
+    ranking::DLRMFeatures features;
+    features.batch_size() = batch_size;
+    features.num_dense_features() = args.client_num_dense_features_arg;
+    features.num_sparse_features() = args.client_num_sparse_features_arg;
+
+    // Convert float vector to double for Thrift
+    ranking::DenseFeatureVector dense_vec;
+    dense_vec.reserve(dense_features.size());
+    for (float f : dense_features) {
+      dense_vec.push_back(static_cast<double>(f));
+    }
+    features.dense_features() = std::move(dense_vec);
+    features.sparse_features() = std::move(sparse_features);
+
+    request.dlrm_features() = std::move(features);
+
+    // Serialize the request
+    folly::IOBufQueue bufq;
+    apache::thrift::CompactSerializer::serialize(request, &bufq);
+    auto buf = bufq.move();
+    // Coalesce the IOBuf chain into a single contiguous buffer.
+    // Without this, data() and length() only return the first segment,
+    // causing truncated payloads and deserialization underflow errors.
+    buf->coalesce();
+
+    // Send request with serialized RankingRequest
+    test_driver.SendRequest(ranking::kDLRMRequestType,
+                            reinterpret_cast<const char*>(buf->data()),
+                            buf->length(),
+                            this_thread.request_delay);
+  } else {
+    // Original mode: send random string payload
+    test_driver.SendRequest(ranking::kPageRankRequestType,
+                            this_thread.random_string.c_str(), 3000,
+                            this_thread.request_delay);
+  }
 }
 
 int main(int argc, char **argv) {
@@ -146,7 +225,7 @@ int main(int argc, char **argv) {
     log_level = QUIET;
   }
 
-  // Check requried arguments
+  // Check required arguments
   if (!args.server_given) {
     DIE("--server must be specified.");
   }
@@ -164,10 +243,27 @@ int main(int argc, char **argv) {
   driver_node.SetMakeRequestCallback(
       std::bind(MakeRequest, std::placeholders::_1, std::placeholders::_2,
                 std::ref(thread_data)));
-  driver_node.RegisterRequestType(ranking::kPageRankRequestType);
+
+  // Register only the request type that will be used
+  // This ensures stats are collected for a single type, avoiding output parsing issues
+  if (args.client_side_features_given) {
+    driver_node.RegisterRequestType(ranking::kDLRMRequestType);
+  } else {
+    driver_node.RegisterRequestType(ranking::kPageRankRequestType);
+  }
 
   // Enable remote monitoring
   driver_node.EnableMonitoring(args.monitor_port_arg);
+
+  // Log client-side feature generation mode
+  if (args.client_side_features_given) {
+    std::cout << "Client-side feature generation enabled:" << std::endl;
+    std::cout << "  Batch size: " << args.client_dlrm_batch_size_arg << std::endl;
+    std::cout << "  Inferences per request: " << args.client_dlrm_inferences_arg << std::endl;
+    std::cout << "  Dense features: " << args.client_num_dense_features_arg << std::endl;
+    std::cout << "  Sparse features: " << args.client_num_sparse_features_arg << std::endl;
+    std::cout << "  Seed: " << args.client_feature_seed_arg << std::endl;
+  }
 
   driver_node.Run(args.threads_arg, args.affinity_given, args.connections_arg,
                   args.depth_arg);

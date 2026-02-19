@@ -198,6 +198,51 @@ int DLRM::infer(int thread_id, int num_inferences, int batch_size) {
   return total_predictions;
 }
 
+int DLRM::inferWithFeatures(
+    int thread_id,
+    const float* dense_features,
+    const int64_t* sparse_features,
+    int batch_size,
+    int num_inferences) {
+  if (!model_loaded_) {
+    throw std::runtime_error("Model not loaded");
+  }
+
+  if (thread_id < 0 ||
+      thread_id >= static_cast<int>(pimpl_->thread_states.size())) {
+    throw std::out_of_range("Invalid thread_id: " + std::to_string(thread_id));
+  }
+
+  int total_predictions = 0;
+
+  for (int i = 0; i < num_inferences; ++i) {
+    // Create tensors from client-provided features
+    // Note: from_blob does not copy data, so the original arrays must remain valid
+    auto dense_tensor = torch::from_blob(
+        const_cast<float*>(dense_features),
+        {static_cast<int64_t>(batch_size), params_.num_dense_features},
+        torch::kFloat32);
+
+    auto sparse_tensor = torch::from_blob(
+        const_cast<int64_t*>(sparse_features),
+        {static_cast<int64_t>(batch_size), params_.num_sparse_features},
+        torch::kInt64);
+
+    // Run inference
+    std::vector<torch::jit::IValue> inputs;
+    inputs.push_back(dense_tensor);
+    inputs.push_back(sparse_tensor);
+
+    torch::NoGradGuard no_grad;
+    auto output = pimpl_->model.forward(inputs).toTensor();
+
+    // Count predictions (simulating actual work with the output)
+    total_predictions += output.numel();
+  }
+
+  return total_predictions;
+}
+
 void DLRM::warmup(int num_iterations) {
   if (!model_loaded_) {
     std::cerr << "Warning: Cannot warmup - model not loaded" << std::endl;

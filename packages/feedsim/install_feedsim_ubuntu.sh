@@ -40,7 +40,7 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    libfmt-dev sysstat jq xxhash libxxhash-dev unzip
+    sysstat jq xxhash libxxhash-dev unzip
 
 
 # Creates feedsim directory under benchmarks/
@@ -143,6 +143,9 @@ if ! [ -d "glog-0.4.0" ]; then
 else
     msg "[SKIPPED] glog-0.4.0"
 fi
+
+# Update linker cache so shared libs (gflags, glog) are found at runtime
+ldconfig
 
 # Installing JEMalloc
 if ! [ -d "jemalloc-5.3.0" ]; then
@@ -255,14 +258,13 @@ cmake -G Ninja \
     -DCMAKE_C_COMPILER="$BP_CC" \
     -DCMAKE_CXX_COMPILER="$BP_CXX" \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \
-    -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS -DFMT_HEADER_ONLY=1" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     -DFEEDSIM_USE_DLRM=ON \
     -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
     -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/libtorch" \
     ../
 
-sed -i 's/lib64/lib/' build.ninja
 ninja -v -j1
 
 msg ""
