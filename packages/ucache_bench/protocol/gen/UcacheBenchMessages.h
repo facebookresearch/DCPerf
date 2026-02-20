@@ -172,7 +172,102 @@ class UcbDeleteReply : public carbon::ReplyCommon, public facebook::ucachebench:
   friend class apache::thrift::Cpp2Ops<UcbDeleteReply>;
 
 };
+
 } // namespace ucachebench
 } // namespace facebook
 
+namespace facebook {
+namespace ucachebench {
+namespace thrift {
+
+template <class Writer>
+void serialize(const UcacheBenchRequestCommon& self, Writer&& writer);
+
+void deserialize(UcacheBenchRequestCommon& self, carbon::CarbonProtocolReader& reader);
+
+template <class V>
+void visitFields(UcacheBenchRequestCommon& self, V&& v);
+
+template <class V>
+void visitFields(const UcacheBenchRequestCommon& self, V&& v);
+
+template <class Writer>
+void serialize(const UcacheBenchReplyCommon& self, Writer&& writer);
+
+void deserialize(UcacheBenchReplyCommon& self, carbon::CarbonProtocolReader& reader);
+
+template <class V>
+void visitFields(UcacheBenchReplyCommon& self, V&& v);
+
+template <class V>
+void visitFields(const UcacheBenchReplyCommon& self, V&& v);
+
+template <class Writer>
+void serialize(const UcbGetRequest& self, Writer&& writer);
+
+void deserialize(UcbGetRequest& self, carbon::CarbonProtocolReader& reader);
+
+template <class V>
+void visitFields(UcbGetRequest& self, V&& v);
+
+template <class V>
+void visitFields(const UcbGetRequest& self, V&& v);
+
+template <class Writer>
+void serialize(const UcbGetReply& self, Writer&& writer);
+
+void deserialize(UcbGetReply& self, carbon::CarbonProtocolReader& reader);
+
+template <class V>
+void visitFields(UcbGetReply& self, V&& v);
+
+template <class V>
+void visitFields(const UcbGetReply& self, V&& v);
+
+template <class Writer>
+void serialize(const UcbSetRequest& self, Writer&& writer);
+
+void deserialize(UcbSetRequest& self, carbon::CarbonProtocolReader& reader);
+
+template <class V>
+void visitFields(UcbSetRequest& self, V&& v);
+
+template <class V>
+void visitFields(const UcbSetRequest& self, V&& v);
+
+template <class Writer>
+void serialize(const UcbSetReply& self, Writer&& writer);
+
+void deserialize(UcbSetReply& self, carbon::CarbonProtocolReader& reader);
+
+template <class V>
+void visitFields(UcbSetReply& self, V&& v);
+
+template <class V>
+void visitFields(const UcbSetReply& self, V&& v);
+
+template <class Writer>
+void serialize(const UcbDeleteRequest& self, Writer&& writer);
+
+void deserialize(UcbDeleteRequest& self, carbon::CarbonProtocolReader& reader);
+
+template <class V>
+void visitFields(UcbDeleteRequest& self, V&& v);
+
+template <class V>
+void visitFields(const UcbDeleteRequest& self, V&& v);
+
+template <class Writer>
+void serialize(const UcbDeleteReply& self, Writer&& writer);
+
+void deserialize(UcbDeleteReply& self, carbon::CarbonProtocolReader& reader);
+
+template <class V>
+void visitFields(UcbDeleteReply& self, V&& v);
+
+template <class V>
+void visitFields(const UcbDeleteReply& self, V&& v);
+} // namespace thrift
+} // namespace ucachebench
+} // namespace facebook
 #include "UcacheBenchMessages-inl.h"

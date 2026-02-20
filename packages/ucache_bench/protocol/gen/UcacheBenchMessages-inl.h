@@ -18,383 +18,503 @@ namespace ucachebench {
 namespace thrift {
 
 template <class Writer>
-void UcacheBenchRequestCommon::serialize(Writer&& writer) const {
+void serialize(const UcacheBenchRequestCommon& self, Writer&& writer) {
   writer.writeStructBegin();
-  writer.writeField(1 /* field id */, productId_ref());
-  writer.writeField(2 /* field id */, bucketId_ref());
+  writer.writeField(1 /* field id */, self.productId_ref());
+  writer.writeField(2 /* field id */, self.bucketId_ref());
   writer.writeFieldStop();
   writer.writeStructEnd();
+}
+
+template <class Writer>
+void UcacheBenchRequestCommon::serialize(Writer&& writer) const {
+  facebook::ucachebench::thrift::serialize(*this, std::forward<Writer>(writer));
+}
+
+template <class V>
+void visitFields(UcacheBenchRequestCommon& self, V&& v) {
+  if (!v.visitField(1, "productId", self.productId_ref())) {
+    return;
+  }
+  if (!v.visitField(2, "bucketId", self.bucketId_ref())) {
+    return;
+  }
+}
+
+template <class V>
+void visitFields(const UcacheBenchRequestCommon& self, V&& v) {
+  if (!v.visitField(1, "productId", self.productId_ref())) {
+    return;
+  }
+  if (!v.visitField(2, "bucketId", self.bucketId_ref())) {
+    return;
+  }
 }
 
 template <class V>
 void UcacheBenchRequestCommon::visitFields(V&& v) {
-  if (!v.visitField(1, "productId", this->productId_ref())) {
-    return;
-  }
-  if (!v.visitField(2, "bucketId", this->bucketId_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 
 template <class V>
 void UcacheBenchRequestCommon::visitFields(V&& v) const {
-  if (!v.visitField(1, "productId", this->productId_ref())) {
-    return;
-  }
-  if (!v.visitField(2, "bucketId", this->bucketId_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
+}
+
+template <class Writer>
+void serialize(const UcacheBenchReplyCommon& self, Writer&& writer) {
+  writer.writeStructBegin();
+  writer.writeField(1 /* field id */, self.replySourceBitMask_ref());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
 }
 
 template <class Writer>
 void UcacheBenchReplyCommon::serialize(Writer&& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(1 /* field id */, replySourceBitMask_ref());
-  writer.writeFieldStop();
-  writer.writeStructEnd();
+  facebook::ucachebench::thrift::serialize(*this, std::forward<Writer>(writer));
+}
+
+template <class V>
+void visitFields(UcacheBenchReplyCommon& self, V&& v) {
+  if (!v.visitField(1, "replySourceBitMask", *self.replySourceBitMask_ref())) {
+    return;
+  }
+}
+
+template <class V>
+void visitFields(const UcacheBenchReplyCommon& self, V&& v) {
+  if (!v.visitField(1, "replySourceBitMask", *self.replySourceBitMask_ref())) {
+    return;
+  }
 }
 
 template <class V>
 void UcacheBenchReplyCommon::visitFields(V&& v) {
-  if (!v.visitField(1, "replySourceBitMask", *this->replySourceBitMask_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 
 template <class V>
 void UcacheBenchReplyCommon::visitFields(V&& v) const {
-  if (!v.visitField(1, "replySourceBitMask", *this->replySourceBitMask_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
+}
+
+template <class Writer>
+void serialize(const UcbGetRequest& self, Writer&& writer) {
+  writer.writeStructBegin();
+  writer.writeField(-1 /* field id */, self.ucacheBenchRequestCommon_ref());
+  writer.writeField(1 /* field id */, self.key_ref());
+  writer.writeField(2 /* field id */, self.flags_ref());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
 }
 
 template <class Writer>
 void UcbGetRequest::serialize(Writer&& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(-1 /* field id */, ucacheBenchRequestCommon_ref());
-  writer.writeField(1 /* field id */, key_ref());
-  writer.writeField(2 /* field id */, flags_ref());
-  writer.writeFieldStop();
-  writer.writeStructEnd();
+  facebook::ucachebench::thrift::serialize(*this, std::forward<Writer>(writer));
 }
 
 template <class V>
-void UcbGetRequest::visitFields(V&& v) {
-  if (v.enterMixin(1, "UcacheBenchRequestCommon", ucacheBenchRequestCommon)) {
-    this->ucacheBenchRequestCommon.visitFields(std::forward<V>(v));
+void visitFields(UcbGetRequest& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
+    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "key", *this->key_ref())) {
+  if (!v.visitField(1, "key", *self.key_ref())) {
     return;
   }
-  if (!v.visitField(2, "flags", *this->flags_ref())) {
+  if (!v.visitField(2, "flags", *self.flags_ref())) {
     return;
   }
+}
+
+template <class V>
+void visitFields(const UcbGetRequest& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
+    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+  }
+  if (!v.leaveMixin()) {
+    return;
+  }
+  if (!v.visitField(1, "key", *self.key_ref())) {
+    return;
+  }
+  if (!v.visitField(2, "flags", *self.flags_ref())) {
+    return;
+  }
+}
+
+template <class V>
+void UcbGetRequest::visitFields(V&& v) {
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 
 template <class V>
 void UcbGetRequest::visitFields(V&& v) const {
-  if (v.enterMixin(1, "UcacheBenchRequestCommon", ucacheBenchRequestCommon)) {
-    this->ucacheBenchRequestCommon.visitFields(std::forward<V>(v));
-  }
-  if (!v.leaveMixin()) {
-    return;
-  }
-  if (!v.visitField(1, "key", *this->key_ref())) {
-    return;
-  }
-  if (!v.visitField(2, "flags", *this->flags_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
+}
+
+template <class Writer>
+void serialize(const UcbGetReply& self, Writer&& writer) {
+  writer.writeStructBegin();
+  writer.writeField(-1 /* field id */, self.ucacheBenchReplyCommon_ref());
+  writer.writeField(1 /* field id */, self.result_ref());
+  writer.writeField(2 /* field id */, self.value_ref());
+  writer.writeField(3 /* field id */, self.flags_ref());
+  writer.writeField(4 /* field id */, self.message_ref());
+  writer.writeField(5 /* field id */, self.appSpecificErrorCode_ref());
+  writer.writeField(6 /* field id */, self.exptime_ref());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
 }
 
 template <class Writer>
 void UcbGetReply::serialize(Writer&& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(-1 /* field id */, ucacheBenchReplyCommon_ref());
-  writer.writeField(1 /* field id */, result_ref());
-  writer.writeField(2 /* field id */, value_ref());
-  writer.writeField(3 /* field id */, flags_ref());
-  writer.writeField(4 /* field id */, message_ref());
-  writer.writeField(5 /* field id */, appSpecificErrorCode_ref());
-  writer.writeField(6 /* field id */, exptime_ref());
-  writer.writeFieldStop();
-  writer.writeStructEnd();
+  facebook::ucachebench::thrift::serialize(*this, std::forward<Writer>(writer));
 }
 
 template <class V>
-void UcbGetReply::visitFields(V&& v) {
-  if (v.enterMixin(1, "UcacheBenchReplyCommon", ucacheBenchReplyCommon)) {
-    this->ucacheBenchReplyCommon.visitFields(std::forward<V>(v));
+void visitFields(UcbGetReply& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
+    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "result", *this->result_ref())) {
+  if (!v.visitField(1, "result", *self.result_ref())) {
     return;
   }
-  if (!v.visitField(2, "value", this->value_ref())) {
+  if (!v.visitField(2, "value", self.value_ref())) {
     return;
   }
-  if (!v.visitField(3, "flags", *this->flags_ref())) {
+  if (!v.visitField(3, "flags", *self.flags_ref())) {
     return;
   }
-  if (!v.visitField(4, "message", *this->message_ref())) {
+  if (!v.visitField(4, "message", *self.message_ref())) {
     return;
   }
-  if (!v.visitField(5, "appSpecificErrorCode", *this->appSpecificErrorCode_ref())) {
+  if (!v.visitField(5, "appSpecificErrorCode", *self.appSpecificErrorCode_ref())) {
     return;
   }
-  if (!v.visitField(6, "exptime", this->exptime_ref())) {
+  if (!v.visitField(6, "exptime", self.exptime_ref())) {
     return;
   }
+}
+
+template <class V>
+void visitFields(const UcbGetReply& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
+    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
+  }
+  if (!v.leaveMixin()) {
+    return;
+  }
+  if (!v.visitField(1, "result", *self.result_ref())) {
+    return;
+  }
+  if (!v.visitField(2, "value", self.value_ref())) {
+    return;
+  }
+  if (!v.visitField(3, "flags", *self.flags_ref())) {
+    return;
+  }
+  if (!v.visitField(4, "message", *self.message_ref())) {
+    return;
+  }
+  if (!v.visitField(5, "appSpecificErrorCode", *self.appSpecificErrorCode_ref())) {
+    return;
+  }
+  if (!v.visitField(6, "exptime", self.exptime_ref())) {
+    return;
+  }
+}
+
+template <class V>
+void UcbGetReply::visitFields(V&& v) {
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 
 template <class V>
 void UcbGetReply::visitFields(V&& v) const {
-  if (v.enterMixin(1, "UcacheBenchReplyCommon", ucacheBenchReplyCommon)) {
-    this->ucacheBenchReplyCommon.visitFields(std::forward<V>(v));
-  }
-  if (!v.leaveMixin()) {
-    return;
-  }
-  if (!v.visitField(1, "result", *this->result_ref())) {
-    return;
-  }
-  if (!v.visitField(2, "value", this->value_ref())) {
-    return;
-  }
-  if (!v.visitField(3, "flags", *this->flags_ref())) {
-    return;
-  }
-  if (!v.visitField(4, "message", *this->message_ref())) {
-    return;
-  }
-  if (!v.visitField(5, "appSpecificErrorCode", *this->appSpecificErrorCode_ref())) {
-    return;
-  }
-  if (!v.visitField(6, "exptime", this->exptime_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
+}
+
+template <class Writer>
+void serialize(const UcbSetRequest& self, Writer&& writer) {
+  writer.writeStructBegin();
+  writer.writeField(-1 /* field id */, self.ucacheBenchRequestCommon_ref());
+  writer.writeField(1 /* field id */, self.key_ref());
+  writer.writeField(2 /* field id */, self.exptime_ref());
+  writer.writeField(3 /* field id */, self.flags_ref());
+  writer.writeField(4 /* field id */, self.value_ref());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
 }
 
 template <class Writer>
 void UcbSetRequest::serialize(Writer&& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(-1 /* field id */, ucacheBenchRequestCommon_ref());
-  writer.writeField(1 /* field id */, key_ref());
-  writer.writeField(2 /* field id */, exptime_ref());
-  writer.writeField(3 /* field id */, flags_ref());
-  writer.writeField(4 /* field id */, value_ref());
-  writer.writeFieldStop();
-  writer.writeStructEnd();
+  facebook::ucachebench::thrift::serialize(*this, std::forward<Writer>(writer));
 }
 
 template <class V>
-void UcbSetRequest::visitFields(V&& v) {
-  if (v.enterMixin(1, "UcacheBenchRequestCommon", ucacheBenchRequestCommon)) {
-    this->ucacheBenchRequestCommon.visitFields(std::forward<V>(v));
+void visitFields(UcbSetRequest& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
+    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "key", *this->key_ref())) {
+  if (!v.visitField(1, "key", *self.key_ref())) {
     return;
   }
-  if (!v.visitField(2, "exptime", *this->exptime_ref())) {
+  if (!v.visitField(2, "exptime", *self.exptime_ref())) {
     return;
   }
-  if (!v.visitField(3, "flags", *this->flags_ref())) {
+  if (!v.visitField(3, "flags", *self.flags_ref())) {
     return;
   }
-  if (!v.visitField(4, "value", *this->value_ref())) {
+  if (!v.visitField(4, "value", *self.value_ref())) {
     return;
   }
+}
+
+template <class V>
+void visitFields(const UcbSetRequest& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
+    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+  }
+  if (!v.leaveMixin()) {
+    return;
+  }
+  if (!v.visitField(1, "key", *self.key_ref())) {
+    return;
+  }
+  if (!v.visitField(2, "exptime", *self.exptime_ref())) {
+    return;
+  }
+  if (!v.visitField(3, "flags", *self.flags_ref())) {
+    return;
+  }
+  if (!v.visitField(4, "value", *self.value_ref())) {
+    return;
+  }
+}
+
+template <class V>
+void UcbSetRequest::visitFields(V&& v) {
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 
 template <class V>
 void UcbSetRequest::visitFields(V&& v) const {
-  if (v.enterMixin(1, "UcacheBenchRequestCommon", ucacheBenchRequestCommon)) {
-    this->ucacheBenchRequestCommon.visitFields(std::forward<V>(v));
-  }
-  if (!v.leaveMixin()) {
-    return;
-  }
-  if (!v.visitField(1, "key", *this->key_ref())) {
-    return;
-  }
-  if (!v.visitField(2, "exptime", *this->exptime_ref())) {
-    return;
-  }
-  if (!v.visitField(3, "flags", *this->flags_ref())) {
-    return;
-  }
-  if (!v.visitField(4, "value", *this->value_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
+}
+
+template <class Writer>
+void serialize(const UcbSetReply& self, Writer&& writer) {
+  writer.writeStructBegin();
+  writer.writeField(-1 /* field id */, self.ucacheBenchReplyCommon_ref());
+  writer.writeField(1 /* field id */, self.result_ref());
+  writer.writeField(2 /* field id */, self.flags_ref());
+  writer.writeField(3 /* field id */, self.value_ref());
+  writer.writeField(4 /* field id */, self.message_ref());
+  writer.writeField(5 /* field id */, self.appSpecificErrorCode_ref());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
 }
 
 template <class Writer>
 void UcbSetReply::serialize(Writer&& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(-1 /* field id */, ucacheBenchReplyCommon_ref());
-  writer.writeField(1 /* field id */, result_ref());
-  writer.writeField(2 /* field id */, flags_ref());
-  writer.writeField(3 /* field id */, value_ref());
-  writer.writeField(4 /* field id */, message_ref());
-  writer.writeField(5 /* field id */, appSpecificErrorCode_ref());
-  writer.writeFieldStop();
-  writer.writeStructEnd();
+  facebook::ucachebench::thrift::serialize(*this, std::forward<Writer>(writer));
 }
 
 template <class V>
-void UcbSetReply::visitFields(V&& v) {
-  if (v.enterMixin(1, "UcacheBenchReplyCommon", ucacheBenchReplyCommon)) {
-    this->ucacheBenchReplyCommon.visitFields(std::forward<V>(v));
+void visitFields(UcbSetReply& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
+    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "result", *this->result_ref())) {
+  if (!v.visitField(1, "result", *self.result_ref())) {
     return;
   }
-  if (!v.visitField(2, "flags", *this->flags_ref())) {
+  if (!v.visitField(2, "flags", *self.flags_ref())) {
     return;
   }
-  if (!v.visitField(3, "value", *this->value_ref())) {
+  if (!v.visitField(3, "value", *self.value_ref())) {
     return;
   }
-  if (!v.visitField(4, "message", *this->message_ref())) {
+  if (!v.visitField(4, "message", *self.message_ref())) {
     return;
   }
-  if (!v.visitField(5, "appSpecificErrorCode", *this->appSpecificErrorCode_ref())) {
+  if (!v.visitField(5, "appSpecificErrorCode", *self.appSpecificErrorCode_ref())) {
     return;
   }
+}
+
+template <class V>
+void visitFields(const UcbSetReply& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
+    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
+  }
+  if (!v.leaveMixin()) {
+    return;
+  }
+  if (!v.visitField(1, "result", *self.result_ref())) {
+    return;
+  }
+  if (!v.visitField(2, "flags", *self.flags_ref())) {
+    return;
+  }
+  if (!v.visitField(3, "value", *self.value_ref())) {
+    return;
+  }
+  if (!v.visitField(4, "message", *self.message_ref())) {
+    return;
+  }
+  if (!v.visitField(5, "appSpecificErrorCode", *self.appSpecificErrorCode_ref())) {
+    return;
+  }
+}
+
+template <class V>
+void UcbSetReply::visitFields(V&& v) {
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 
 template <class V>
 void UcbSetReply::visitFields(V&& v) const {
-  if (v.enterMixin(1, "UcacheBenchReplyCommon", ucacheBenchReplyCommon)) {
-    this->ucacheBenchReplyCommon.visitFields(std::forward<V>(v));
-  }
-  if (!v.leaveMixin()) {
-    return;
-  }
-  if (!v.visitField(1, "result", *this->result_ref())) {
-    return;
-  }
-  if (!v.visitField(2, "flags", *this->flags_ref())) {
-    return;
-  }
-  if (!v.visitField(3, "value", *this->value_ref())) {
-    return;
-  }
-  if (!v.visitField(4, "message", *this->message_ref())) {
-    return;
-  }
-  if (!v.visitField(5, "appSpecificErrorCode", *this->appSpecificErrorCode_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
+}
+
+template <class Writer>
+void serialize(const UcbDeleteRequest& self, Writer&& writer) {
+  writer.writeStructBegin();
+  writer.writeField(-1 /* field id */, self.ucacheBenchRequestCommon_ref());
+  writer.writeField(1 /* field id */, self.key_ref());
+  writer.writeField(2 /* field id */, self.flags_ref());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
 }
 
 template <class Writer>
 void UcbDeleteRequest::serialize(Writer&& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(-1 /* field id */, ucacheBenchRequestCommon_ref());
-  writer.writeField(1 /* field id */, key_ref());
-  writer.writeField(2 /* field id */, flags_ref());
-  writer.writeFieldStop();
-  writer.writeStructEnd();
+  facebook::ucachebench::thrift::serialize(*this, std::forward<Writer>(writer));
 }
 
 template <class V>
-void UcbDeleteRequest::visitFields(V&& v) {
-  if (v.enterMixin(1, "UcacheBenchRequestCommon", ucacheBenchRequestCommon)) {
-    this->ucacheBenchRequestCommon.visitFields(std::forward<V>(v));
+void visitFields(UcbDeleteRequest& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
+    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "key", *this->key_ref())) {
+  if (!v.visitField(1, "key", *self.key_ref())) {
     return;
   }
-  if (!v.visitField(2, "flags", *this->flags_ref())) {
+  if (!v.visitField(2, "flags", *self.flags_ref())) {
     return;
   }
+}
+
+template <class V>
+void visitFields(const UcbDeleteRequest& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
+    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+  }
+  if (!v.leaveMixin()) {
+    return;
+  }
+  if (!v.visitField(1, "key", *self.key_ref())) {
+    return;
+  }
+  if (!v.visitField(2, "flags", *self.flags_ref())) {
+    return;
+  }
+}
+
+template <class V>
+void UcbDeleteRequest::visitFields(V&& v) {
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 
 template <class V>
 void UcbDeleteRequest::visitFields(V&& v) const {
-  if (v.enterMixin(1, "UcacheBenchRequestCommon", ucacheBenchRequestCommon)) {
-    this->ucacheBenchRequestCommon.visitFields(std::forward<V>(v));
-  }
-  if (!v.leaveMixin()) {
-    return;
-  }
-  if (!v.visitField(1, "key", *this->key_ref())) {
-    return;
-  }
-  if (!v.visitField(2, "flags", *this->flags_ref())) {
-    return;
-  }
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 
 template <class Writer>
-void UcbDeleteReply::serialize(Writer&& writer) const {
+void serialize(const UcbDeleteReply& self, Writer&& writer) {
   writer.writeStructBegin();
-  writer.writeField(-1 /* field id */, ucacheBenchReplyCommon_ref());
-  writer.writeField(1 /* field id */, result_ref());
-  writer.writeField(2 /* field id */, flags_ref());
-  writer.writeField(3 /* field id */, message_ref());
-  writer.writeField(4 /* field id */, appSpecificErrorCode_ref());
+  writer.writeField(-1 /* field id */, self.ucacheBenchReplyCommon_ref());
+  writer.writeField(1 /* field id */, self.result_ref());
+  writer.writeField(2 /* field id */, self.flags_ref());
+  writer.writeField(3 /* field id */, self.message_ref());
+  writer.writeField(4 /* field id */, self.appSpecificErrorCode_ref());
   writer.writeFieldStop();
   writer.writeStructEnd();
 }
 
+template <class Writer>
+void UcbDeleteReply::serialize(Writer&& writer) const {
+  facebook::ucachebench::thrift::serialize(*this, std::forward<Writer>(writer));
+}
+
 template <class V>
-void UcbDeleteReply::visitFields(V&& v) {
-  if (v.enterMixin(1, "UcacheBenchReplyCommon", ucacheBenchReplyCommon)) {
-    this->ucacheBenchReplyCommon.visitFields(std::forward<V>(v));
+void visitFields(UcbDeleteReply& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
+    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "result", *this->result_ref())) {
+  if (!v.visitField(1, "result", *self.result_ref())) {
     return;
   }
-  if (!v.visitField(2, "flags", *this->flags_ref())) {
+  if (!v.visitField(2, "flags", *self.flags_ref())) {
     return;
   }
-  if (!v.visitField(3, "message", *this->message_ref())) {
+  if (!v.visitField(3, "message", *self.message_ref())) {
     return;
   }
-  if (!v.visitField(4, "appSpecificErrorCode", *this->appSpecificErrorCode_ref())) {
+  if (!v.visitField(4, "appSpecificErrorCode", *self.appSpecificErrorCode_ref())) {
     return;
   }
 }
 
 template <class V>
-void UcbDeleteReply::visitFields(V&& v) const {
-  if (v.enterMixin(1, "UcacheBenchReplyCommon", ucacheBenchReplyCommon)) {
-    this->ucacheBenchReplyCommon.visitFields(std::forward<V>(v));
+void visitFields(const UcbDeleteReply& self, V&& v) {
+  if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
+    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "result", *this->result_ref())) {
+  if (!v.visitField(1, "result", *self.result_ref())) {
     return;
   }
-  if (!v.visitField(2, "flags", *this->flags_ref())) {
+  if (!v.visitField(2, "flags", *self.flags_ref())) {
     return;
   }
-  if (!v.visitField(3, "message", *this->message_ref())) {
+  if (!v.visitField(3, "message", *self.message_ref())) {
     return;
   }
-  if (!v.visitField(4, "appSpecificErrorCode", *this->appSpecificErrorCode_ref())) {
+  if (!v.visitField(4, "appSpecificErrorCode", *self.appSpecificErrorCode_ref())) {
     return;
   }
+}
+
+template <class V>
+void UcbDeleteReply::visitFields(V&& v) {
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
+}
+
+template <class V>
+void UcbDeleteReply::visitFields(V&& v) const {
+  facebook::ucachebench::thrift::visitFields(*this, std::forward<V>(v));
 }
 } // namespace thrift
 } // namespace ucachebench

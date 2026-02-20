@@ -20,7 +20,7 @@ namespace facebook {
 namespace ucachebench {
 namespace thrift {
 
-void UcacheBenchRequestCommon::deserialize(carbon::CarbonProtocolReader& reader) {
+void deserialize(UcacheBenchRequestCommon& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
     const auto pr = reader.readFieldHeader();
@@ -33,11 +33,40 @@ void UcacheBenchRequestCommon::deserialize(carbon::CarbonProtocolReader& reader)
 
     switch (fieldId) {
       case 1: {
-        reader.readField(productId_ref(), fieldType);
+        reader.readField(self.productId_ref(), fieldType);
         break;
       }
       case 2: {
-        reader.readField(bucketId_ref(), fieldType);
+        reader.readField(self.bucketId_ref(), fieldType);
+        break;
+      }
+      default: {
+        reader.skip(fieldType);
+        break;
+      }
+    }
+  }
+  reader.readStructEnd();
+}
+
+void UcacheBenchRequestCommon::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
+void deserialize(UcacheBenchReplyCommon& self, carbon::CarbonProtocolReader& reader) {
+  reader.readStructBegin();
+  while (true) {
+    const auto pr = reader.readFieldHeader();
+    const auto fieldType = pr.first;
+    const auto fieldId = pr.second;
+
+    if (fieldType == carbon::FieldType::Stop) {
+      break;
+    }
+
+    switch (fieldId) {
+      case 1: {
+        reader.readField(self.replySourceBitMask_ref(), fieldType);
         break;
       }
       default: {
@@ -50,6 +79,10 @@ void UcacheBenchRequestCommon::deserialize(carbon::CarbonProtocolReader& reader)
 }
 
 void UcacheBenchReplyCommon::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
+void deserialize(UcbGetRequest& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
     const auto pr = reader.readFieldHeader();
@@ -61,8 +94,16 @@ void UcacheBenchReplyCommon::deserialize(carbon::CarbonProtocolReader& reader) {
     }
 
     switch (fieldId) {
+      case -1: {
+        reader.readField(*self.ucacheBenchRequestCommon_ref(), fieldType);
+        break;
+      }
       case 1: {
-        reader.readField(replySourceBitMask_ref(), fieldType);
+        reader.readField(self.key_ref(), fieldType);
+        break;
+      }
+      case 2: {
+        reader.readField(self.flags_ref(), fieldType);
         break;
       }
       default: {
@@ -75,6 +116,10 @@ void UcacheBenchReplyCommon::deserialize(carbon::CarbonProtocolReader& reader) {
 }
 
 void UcbGetRequest::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
+void deserialize(UcbGetReply& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
     const auto pr = reader.readFieldHeader();
@@ -87,15 +132,31 @@ void UcbGetRequest::deserialize(carbon::CarbonProtocolReader& reader) {
 
     switch (fieldId) {
       case -1: {
-        reader.readField(ucacheBenchRequestCommon, fieldType);
+        reader.readField(*self.ucacheBenchReplyCommon_ref(), fieldType);
         break;
       }
       case 1: {
-        reader.readField(key_ref(), fieldType);
+        reader.readField(self.result_ref(), fieldType);
         break;
       }
       case 2: {
-        reader.readField(flags_ref(), fieldType);
+        reader.readField(self.value_ref(), fieldType);
+        break;
+      }
+      case 3: {
+        reader.readField(self.flags_ref(), fieldType);
+        break;
+      }
+      case 4: {
+        reader.readField(self.message_ref(), fieldType);
+        break;
+      }
+      case 5: {
+        reader.readField(self.appSpecificErrorCode_ref(), fieldType);
+        break;
+      }
+      case 6: {
+        reader.readField(self.exptime_ref(), fieldType);
         break;
       }
       default: {
@@ -108,6 +169,10 @@ void UcbGetRequest::deserialize(carbon::CarbonProtocolReader& reader) {
 }
 
 void UcbGetReply::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
+void deserialize(UcbSetRequest& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
     const auto pr = reader.readFieldHeader();
@@ -120,31 +185,23 @@ void UcbGetReply::deserialize(carbon::CarbonProtocolReader& reader) {
 
     switch (fieldId) {
       case -1: {
-        reader.readField(ucacheBenchReplyCommon, fieldType);
+        reader.readField(*self.ucacheBenchRequestCommon_ref(), fieldType);
         break;
       }
       case 1: {
-        reader.readField(result_ref(), fieldType);
+        reader.readField(self.key_ref(), fieldType);
         break;
       }
       case 2: {
-        reader.readField(value_ref(), fieldType);
+        reader.readField(self.exptime_ref(), fieldType);
         break;
       }
       case 3: {
-        reader.readField(flags_ref(), fieldType);
+        reader.readField(self.flags_ref(), fieldType);
         break;
       }
       case 4: {
-        reader.readField(message_ref(), fieldType);
-        break;
-      }
-      case 5: {
-        reader.readField(appSpecificErrorCode_ref(), fieldType);
-        break;
-      }
-      case 6: {
-        reader.readField(exptime_ref(), fieldType);
+        reader.readField(self.value_ref(), fieldType);
         break;
       }
       default: {
@@ -157,6 +214,10 @@ void UcbGetReply::deserialize(carbon::CarbonProtocolReader& reader) {
 }
 
 void UcbSetRequest::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
+void deserialize(UcbSetReply& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
     const auto pr = reader.readFieldHeader();
@@ -169,23 +230,27 @@ void UcbSetRequest::deserialize(carbon::CarbonProtocolReader& reader) {
 
     switch (fieldId) {
       case -1: {
-        reader.readField(ucacheBenchRequestCommon, fieldType);
+        reader.readField(*self.ucacheBenchReplyCommon_ref(), fieldType);
         break;
       }
       case 1: {
-        reader.readField(key_ref(), fieldType);
+        reader.readField(self.result_ref(), fieldType);
         break;
       }
       case 2: {
-        reader.readField(exptime_ref(), fieldType);
+        reader.readField(self.flags_ref(), fieldType);
         break;
       }
       case 3: {
-        reader.readField(flags_ref(), fieldType);
+        reader.readField(self.value_ref(), fieldType);
         break;
       }
       case 4: {
-        reader.readField(value_ref(), fieldType);
+        reader.readField(self.message_ref(), fieldType);
+        break;
+      }
+      case 5: {
+        reader.readField(self.appSpecificErrorCode_ref(), fieldType);
         break;
       }
       default: {
@@ -198,6 +263,10 @@ void UcbSetRequest::deserialize(carbon::CarbonProtocolReader& reader) {
 }
 
 void UcbSetReply::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
+void deserialize(UcbDeleteRequest& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
     const auto pr = reader.readFieldHeader();
@@ -210,27 +279,15 @@ void UcbSetReply::deserialize(carbon::CarbonProtocolReader& reader) {
 
     switch (fieldId) {
       case -1: {
-        reader.readField(ucacheBenchReplyCommon, fieldType);
+        reader.readField(*self.ucacheBenchRequestCommon_ref(), fieldType);
         break;
       }
       case 1: {
-        reader.readField(result_ref(), fieldType);
+        reader.readField(self.key_ref(), fieldType);
         break;
       }
       case 2: {
-        reader.readField(flags_ref(), fieldType);
-        break;
-      }
-      case 3: {
-        reader.readField(value_ref(), fieldType);
-        break;
-      }
-      case 4: {
-        reader.readField(message_ref(), fieldType);
-        break;
-      }
-      case 5: {
-        reader.readField(appSpecificErrorCode_ref(), fieldType);
+        reader.readField(self.flags_ref(), fieldType);
         break;
       }
       default: {
@@ -243,6 +300,10 @@ void UcbSetReply::deserialize(carbon::CarbonProtocolReader& reader) {
 }
 
 void UcbDeleteRequest::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
+void deserialize(UcbDeleteReply& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
     const auto pr = reader.readFieldHeader();
@@ -255,15 +316,23 @@ void UcbDeleteRequest::deserialize(carbon::CarbonProtocolReader& reader) {
 
     switch (fieldId) {
       case -1: {
-        reader.readField(ucacheBenchRequestCommon, fieldType);
+        reader.readField(*self.ucacheBenchReplyCommon_ref(), fieldType);
         break;
       }
       case 1: {
-        reader.readField(key_ref(), fieldType);
+        reader.readField(self.result_ref(), fieldType);
         break;
       }
       case 2: {
-        reader.readField(flags_ref(), fieldType);
+        reader.readField(self.flags_ref(), fieldType);
+        break;
+      }
+      case 3: {
+        reader.readField(self.message_ref(), fieldType);
+        break;
+      }
+      case 4: {
+        reader.readField(self.appSpecificErrorCode_ref(), fieldType);
         break;
       }
       default: {
@@ -276,44 +345,7 @@ void UcbDeleteRequest::deserialize(carbon::CarbonProtocolReader& reader) {
 }
 
 void UcbDeleteReply::deserialize(carbon::CarbonProtocolReader& reader) {
-  reader.readStructBegin();
-  while (true) {
-    const auto pr = reader.readFieldHeader();
-    const auto fieldType = pr.first;
-    const auto fieldId = pr.second;
-
-    if (fieldType == carbon::FieldType::Stop) {
-      break;
-    }
-
-    switch (fieldId) {
-      case -1: {
-        reader.readField(ucacheBenchReplyCommon, fieldType);
-        break;
-      }
-      case 1: {
-        reader.readField(result_ref(), fieldType);
-        break;
-      }
-      case 2: {
-        reader.readField(flags_ref(), fieldType);
-        break;
-      }
-      case 3: {
-        reader.readField(message_ref(), fieldType);
-        break;
-      }
-      case 4: {
-        reader.readField(appSpecificErrorCode_ref(), fieldType);
-        break;
-      }
-      default: {
-        reader.skip(fieldType);
-        break;
-      }
-    }
-  }
-  reader.readStructEnd();
+  facebook::ucachebench::thrift::deserialize(*this, reader);
 }
 } // namespace thrift
 } // namespace ucachebench
