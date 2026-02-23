@@ -148,7 +148,7 @@ def run_server(args: argparse.Namespace) -> None:
     """Run the UcacheBench server.
 
     Server binary flags are defined in:
-    - main.cpp: port, verbose, cpu_arch, memory_mb, hash_power, pool_name, navy_* options
+    - main.cpp: port, verbose, memory_mb, hash_power, pool_name, navy_* options
                admin_port, num_clients, timeout_seconds (for multi-client coordination)
     - UcacheBenchRpcServer.cpp: rpc_io_threads, rpc_io_threads_multiplier,
       rpc_num_acceptor_threads, rpc_num_cpu_worker_threads, cpu_pinning_* options
@@ -174,7 +174,6 @@ def run_server(args: argparse.Namespace) -> None:
         f"--memory_mb={args.memory_mb}",
         f"--hash_power={hash_power}",
         f"--pool_name={args.pool_name}",
-        f"--cpu_arch={args.cpu_arch}",
     ]
 
     # Add DRAM tuning parameters if provided
@@ -280,7 +279,6 @@ def run_client(args: argparse.Namespace) -> None:
         f"--value_size_min={args.value_size_min}",
         f"--value_size_max={args.value_size_max}",
         f"--get_ratio={args.get_ratio}",
-        f"--qps_target={args.qps_target}",
         f"--num_proxies={args.num_proxies}",
         f"--num_threads={args.num_threads}",
         f"--max_inflight={args.max_inflight}",
@@ -363,7 +361,7 @@ def init_parser() -> argparse.ArgumentParser:
         "--hash-power",
         type=int,
         default=20,
-        help="Hash table power for cachelib (overridden by cpu_arch if set)",
+        help="Hash table power for cachelib",
     )
     server_parser.add_argument(
         "--pool-name",
@@ -371,14 +369,6 @@ def init_parser() -> argparse.ArgumentParser:
         default="default",
         help="Pool name for cachelib",
     )
-    server_parser.add_argument(
-        "--cpu-arch",
-        type=str,
-        default="default",
-        choices=["default", "turin", "sapphire_rapids", "spr", "skylake", "skl"],
-        help="CPU architecture for production-like cachelib settings",
-    )
-
     # DRAM tuning parameters (production-like settings)
     server_parser.add_argument(
         "--lru-rebalance-interval-sec",
@@ -665,13 +655,6 @@ def init_parser() -> argparse.ArgumentParser:
         default=0.9,
         help="Ratio of GET operations (vs SET operations)",
     )
-    client_parser.add_argument(
-        "--qps-target",
-        type=int,
-        default=0,
-        help="Target QPS (0 = unlimited)",
-    )
-
     # Traffic distribution configuration
     client_parser.add_argument(
         "--use-distribution",
