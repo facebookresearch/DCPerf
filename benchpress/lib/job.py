@@ -16,7 +16,7 @@ from subprocess import CalledProcessError
 
 import click
 from benchpress.lib.job_listing import formalize_tags
-from benchpress.lib.util import get_safe_cmd
+from benchpress.lib.util import get_safe_cmd, resolve_script_path
 
 from .hook_factory import HookFactory
 from .parser_factory import ParserFactory
@@ -200,7 +200,9 @@ class Job:
         selected benchmark
         """
         self.check_role(role, role_input)
-        return get_safe_cmd([self.binary] + self.args)
+        # Resolve relative binary paths to absolute paths based on BENCHPRESS_ROOT
+        resolved_binary = resolve_script_path(self.binary)
+        return get_safe_cmd([resolved_binary] + self.args)
 
     def get_file_based_cmd(self, role=None, role_input=None, fp=None):
         """Dump the run command in a file and execute it."""
@@ -237,7 +239,9 @@ class Job:
                     text=True,
                 )
             else:
-                cmd = get_safe_cmd([self.binary] + self.args)
+                # Resolve relative binary paths to absolute paths based on BENCHPRESS_ROOT
+                resolved_binary = resolve_script_path(self.binary)
+                cmd = get_safe_cmd([resolved_binary] + self.args)
                 click.echo("Job execution command: {}".format(cmd), err=True)
                 process = subprocess.Popen(
                     cmd,
