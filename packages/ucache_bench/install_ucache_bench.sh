@@ -46,6 +46,9 @@ mkdir -p "$BUILD_DIR"
 mkdir -p "$UCACHE_BENCH_DIR/server"
 mkdir -p "$UCACHE_BENCH_DIR/client"
 
+# Ensure run.py has execute permissions (may be lost during fbpkg packaging)
+chmod +x "$SCRIPT_DIR/run.py" 2>/dev/null || true
+
 # Helper function to clone or update a git repository
 # Supports both branches (e.g., "main") and tags (e.g., "11.0.2")
 clone_or_update() {

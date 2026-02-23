@@ -390,9 +390,9 @@ def init_parser() -> argparse.ArgumentParser:
     )
     server_parser.add_argument(
         "--lru-hits-victim-by-free-mem",
-        action="store_true",
-        default=False,
-        help="Use free memory for LRU rebalancing victim selection",
+        type=int,
+        default=0,
+        help="Use free memory for LRU rebalancing victim selection (set to non-zero to enable)",
     )
     server_parser.add_argument(
         "--hashtable-lock-power",
