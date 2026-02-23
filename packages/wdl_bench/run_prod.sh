@@ -8,13 +8,6 @@ set -Eeo pipefail
 #trap SIGINT SIGTERM ERR EXIT
 
 
-BREPS_LFILE=/tmp/wdl_log.txt
-
-function benchreps_tell_state () {
-    date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
-}
-
-
 # Constants
 WDL_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 # shellcheck disable=SC1091
@@ -44,7 +37,10 @@ prod_benchmark_vdso="vdso_bench"
 prod_benchmark_math="benchsleef128 benchsleef256 benchsleef512 gemm_bench"
 prod_benchmark_stdcpp="stdcpp_bench"
 
-prod_benchmarks="memcpy_benchmark memset_benchmark bench-memcmp hash_hash_benchmark xxhash_benchmark lzbench openssl libaegis_benchmark hash_checksum_benchmark  erasure_code_perf random_benchmark concurrency_concurrent_hash_map_bench ProtocolBench VarintUtilsBench container_hash_maps_bench synchronization_small_locks_benchmark synchronization_lifo_sem_bench vdso_bench benchsleef128 benchsleef256 benchsleef512 stdcpp_bench"
+# Compose prod_benchmarks from the category variables above.
+# Note: gemm_bench (in prod_benchmark_math) is excluded from the default prod
+# run because it is architecture-specific and may not always be installed.
+prod_benchmarks="${prod_benchmark_list_mem} ${prod_benchmark_list_hash} ${prod_benchmark_compression} ${prod_benchmark_crypto} ${prod_benchmark_checksum} ${prod_benchmark_rng} ${prod_benchmark_chm} ${prod_benchmark_thrift} ${prod_benchmark_f14} ${prod_benchmark_lock} ${prod_benchmark_vdso} ${prod_benchmark_math% gemm_bench} ${prod_benchmark_stdcpp}"
 
 benchmark_non_json_list=("openssl" "libaegis_benchmark" "lzbench" "vdso_bench" "xxhash_benchmark" "concurrency_concurrent_hash_map_bench" "container_hash_maps_bench" "erasure_code_perf")
 

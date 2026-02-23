@@ -14,6 +14,12 @@ ARMPL_VERSION="26.01"
 # Determine OS version
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
+BREPS_LFILE=/tmp/wdl_log.txt
+
+benchreps_tell_state() {
+    date +"%Y-%m-%d_%T ${1}" >> "$BREPS_LFILE"
+}
+
 has_real_conda() {
     # 1. Check if 'conda' command exists at all
     if ! command -v conda >/dev/null 2>&1; then

@@ -7,43 +7,66 @@
 import json
 import re
 
+_TIME_UNIT_RE = re.compile(r"([0-9](n|m|u|f|p)s)|([0-9]s)")
+_HASH_MAP_OPS_RE = re.compile(r"^(Find)|(Insert)|(InsertSqBr)|(Erase)|(Iter)")
+
+_THROUGHPUT_SUFFIX = {
+    "K": 1e3,
+    "M": 1e6,
+    "G": 1e9,
+    "T": 1e12,
+    "m": 1e-3,
+}
+
+_LATENCY_SUFFIX = {
+    "u": 1000,
+    "m": 1000 * 1000,
+}
+
+
+def _parse_throughput(raw: str) -> float:
+    if raw == "Infinity":
+        return float("inf")
+    if raw[-1] in _THROUGHPUT_SUFFIX:
+        return float(raw[:-1]) * _THROUGHPUT_SUFFIX[raw[-1]]
+    return float(raw)
+
+
+def _parse_latency_ns(raw: str) -> int:
+    suffix = raw[-2]
+    value = int(raw[:-2])
+    if suffix in _LATENCY_SUFFIX:
+        return value * _LATENCY_SUFFIX[suffix]
+    return value
+
 
 def parse_line_chm(f, sum_c):
     thread_count = 0
     for line in f:
-        if re.search("threads", line):
+        if "threads" in line:
             thread_count = int(line.split()[1])
-        elif re.search("CHM", line):
+        elif "CHM" in line:
             elements = line.split()
             idx_name = 0
-            for i in range(len(elements)):
-                if re.search("(item)|(empty)", elements[i]):
+            for i, elem in enumerate(elements):
+                if re.search("(item)|(empty)", elem):
                     idx_name = i
 
             bench_name = (
                 str(thread_count) + "threads " + " ".join(elements[: idx_name + 1])
             )
             bench_name = bench_name + ": ns"
-            # max_latency = "".join(elements[idx_name + 1 : idx_name + 3])
             avg_latency = "".join(elements[idx_name + 3 : idx_name + 5])
-            # min_latency = "".join(elements[idx_name + 5 : idx_name + 7])
-
-            if avg_latency[-2] == "u":
-                avg_latency = int(avg_latency[:-2]) * 1000
-            elif avg_latency[-2] == "m":
-                avg_latency = int(avg_latency[:-2]) * 1000 * 1000
-            else:
-                avg_latency = int(avg_latency[:-2])
-            sum_c[bench_name] = avg_latency
+            sum_c[bench_name] = _parse_latency_ns(avg_latency)
 
 
 def find_idx_time(elements):
     has_relative = False
     idx_time = 0
-    for i in range(len(elements)):
-        if re.search("%", elements[i]):
+    for i, elem in enumerate(elements):
+        if "%" in elem:
             has_relative = True
-        if re.search("([0-9](n|m|u|f|p)s)|([0-9]s)", elements[i]):
+        if _TIME_UNIT_RE.search(elem):
             idx_time = i
             break
 
@@ -53,30 +76,16 @@ def find_idx_time(elements):
 def parse_line(f, sum_c):
     for line in f:
         # capture the time unit here (ns, us, ms, s, ps, fs)
-        if re.search("([0-9](n|m|u|f|p)s)|([0-9]s)", line):
+        if _TIME_UNIT_RE.search(line):
             elements = line.split()
             has_relative, idx_time = find_idx_time(elements)
             throughput = elements[idx_time + 1]
-            bench_name = None
             if has_relative:
                 bench_name = " ".join(elements[: idx_time - 1])
             else:
                 bench_name = " ".join(elements[:idx_time])
             bench_name = bench_name + ": iters/s"
-            if throughput[-1] == "K":
-                throughput = float(throughput[:-1]) * 1000
-            elif throughput[-1] == "M":
-                throughput = float(throughput[:-1]) * 1000 * 1000
-            elif throughput[-1] == "G":
-                throughput = float(throughput[:-1]) * 1000 * 1000 * 1000
-            elif throughput[-1] == "T":
-                throughput = float(throughput[:-1]) * 1000 * 1000 * 1000 * 1000
-            elif throughput[-1] == "m":
-                throughput = float(throughput[:-1]) / 1000
-            elif throughput == "Infinity":
-                throughput = float("inf")
-            else:
-                throughput = float(throughput)
+            throughput = _parse_throughput(throughput)
 
             if bench_name not in sum_c:
                 sum_c[bench_name] = 0
@@ -85,11 +94,11 @@ def parse_line(f, sum_c):
 
 def parse_line_lzbench(f, sum_c):
     for line in f:
-        if re.search("datasets", line):
+        if "datasets" in line:
             elements = line.split()
             idx_time = 0
-            for i in range(len(elements)):
-                if re.search("MB", elements[i]):
+            for i, elem in enumerate(elements):
+                if "MB" in elem:
                     idx_time = i
                     break
             throughput_decomp = float(elements[idx_time + 1])
@@ -112,6 +121,9 @@ def parse_line_openssl(f, sum_c):
     last_line = None
     for line in f:
         last_line = line
+
+    if last_line is None:
+        return
 
     elements = last_line.split()
     name = elements[0]
@@ -143,6 +155,7 @@ def parse_line_libaegis_benchmark(f, sum_c):
 
 
 def parse_line_xxhash_benchmark(f, sum_c):
+    current_section = None
     for line in f:
         line = line.strip()
         if not line:
@@ -165,7 +178,7 @@ def parse_line_xxhash_benchmark(f, sum_c):
             current_section = "latency_small_random"
             sum_c[current_section] = {}
         # Parse data lines (format: "xxh3   , value1, value2, ...")
-        elif "," in line and current_section:
+        elif "," in line and current_section is not None:
             parts = [p.strip() for p in line.split(",")]
             if len(parts) > 1:
                 hash_name = parts[0]
@@ -188,7 +201,7 @@ def parse_line_xxhash_benchmark(f, sum_c):
 def parse_line_container_hash_maps_bench(f, sum_c):
     data = json.load(f)
     for k, v in data.items():
-        if re.search("^(Find)|(Insert)|(InsertSqBr)|(Erase)|(Iter)", k):
+        if _HASH_MAP_OPS_RE.search(k):
             sum_c[k] = v
 
 
@@ -199,3 +212,22 @@ def parse_line_erasure_code_perf(f, sum_c):
             name = elements[0]
             value = float(elements[-2])
             sum_c[name + ": MB/s"] = value
+
+
+# Registry mapping benchmark names to parser functions.
+# The default parser (parse_line) is used for benchmarks not listed here.
+PARSER_REGISTRY = {
+    "concurrency_concurrent_hash_map_bench": parse_line_chm,
+    "lzbench": parse_line_lzbench,
+    "openssl": parse_line_openssl,
+    "vdso_bench": parse_line_vdso_bench,
+    "libaegis_benchmark": parse_line_libaegis_benchmark,
+    "xxhash_benchmark": parse_line_xxhash_benchmark,
+    "container_hash_maps_bench": parse_line_container_hash_maps_bench,
+    "erasure_code_perf": parse_line_erasure_code_perf,
+}
+
+
+def get_parser(benchmark_name):
+    """Return the parser function for the given benchmark name."""
+    return PARSER_REGISTRY.get(benchmark_name, parse_line)

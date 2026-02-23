@@ -329,7 +329,7 @@ def compute_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> f
     return geomean(current_peak_ops) / geomean(baseline_peak_ops)
 
 
-def compute_memcpy_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
+def compute_memcpy_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
     scores = []
     for low, high in [
         ("0", "7"),
@@ -354,7 +354,7 @@ def compute_memcpy_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
     return score
 
 
-def compute_memset_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
+def compute_memset_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
     scores = []
     size = 1
     while size <= 32768:
@@ -385,7 +385,7 @@ def compute_memset_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
     return score
 
 
-def compute_xxhash_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]):
+def compute_xxhash_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
     scores = []
     res_large = sum_c["large_inputs"]["xxh3"]
     res_baseline = sum_baseline["large_inputs"]["xxh3"]
@@ -425,60 +425,68 @@ def compute_score_from_rate(
     return score
 
 
+# Registries for score dispatch.
+# Benchmarks with custom scoring functions:
+_CUSTOM_SCORERS: dict[str, Any] = {
+    "memcpy_benchmark": compute_memcpy_score,
+    "memset_benchmark": compute_memset_score,
+    "xxhash_benchmark": compute_xxhash_score,
+    "bench-memcmp": compute_memcmp_score,
+    "stdcpp_bench": compute_stdcpp_score,
+    "gemm_bench": compute_gemm_score,
+}
+
+# Benchmarks scored via compute_score_from_rate:
+_RATE_BASED: set[str] = {
+    "lzbench",
+    "openssl",
+    "erasure_code_perf",
+    "libaegis_benchmark",
+    "vdso_bench",
+}
+
+# Benchmarks scored via compute_score_from_time:
+_TIME_BASED: set[str] = {
+    "hash_hash_benchmark",
+    "hash_checksum_benchmark",
+    "random_benchmark",
+    "concurrency_concurrent_hash_map_bench",
+    "container_hash_maps_bench",
+    "ProtocolBench",
+    "VarintUtilsBench",
+    "synchronization_small_locks_benchmark",
+    "synchronization_lifo_sem_bench",
+}
+
+# Per-benchmark skip sets for rate/time scoring:
+_SKIP_SETS: dict[str, set[str]] = {
+    "vdso_bench": {"CLOCK_BOOTTIME_ALARM: M/s", "CLOCK_REALTIME_ALARM: M/s"},
+}
+
+
 def compute_benchmark_score(
     benchmark_name: str, input_file_name: str, baseline_name: str
 ) -> float:
-    with open(input_file_name) as f:
-        with open(baseline_name) as f_baseline:
-            sum_c = json.load(f)
-            sum_baseline = json.load(f_baseline)
-            if benchmark_name == "memcpy_benchmark":
-                score = compute_memcpy_score(sum_baseline, sum_c)
-            elif benchmark_name == "memset_benchmark":
-                score = compute_memset_score(sum_baseline, sum_c)
-            elif benchmark_name == "xxhash_benchmark":
-                score = compute_xxhash_score(sum_baseline, sum_c)
-            elif benchmark_name.startswith("benchsleef"):
-                score = compute_sleef_score(benchmark_name, sum_baseline, sum_c)
-            elif benchmark_name == "bench-memcmp":
-                score = compute_memcmp_score(sum_baseline, sum_c)
-            elif benchmark_name == "stdcpp_bench":
-                score = compute_stdcpp_score(sum_baseline, sum_c)
-            elif benchmark_name == "gemm_bench":
-                score = compute_gemm_score(sum_baseline, sum_c)
-            elif benchmark_name == "vdso_bench":
-                # Some Linux kernels may not support these clocks, so do not
-                # count them in the score.
-                skip_set = {"CLOCK_BOOTTIME_ALARM: M/s", "CLOCK_REALTIME_ALARM: M/s"}
-                score = compute_score_from_rate(sum_baseline, sum_c, skip_set)
-            elif benchmark_name in {
-                "lzbench",
-                "openssl",
-                "erasure_code_perf",
-                "libaegis_benchmark",
-            }:
-                score = compute_score_from_rate(sum_baseline, sum_c)
-            elif benchmark_name in {
-                "hash_hash_benchmark",
-                "hash_checksum_benchmark",
-                "random_benchmark",
-                "concurrency_concurrent_hash_map_bench",
-                "container_hash_maps_bench",
-                "ProtocolBench",
-                "VarintUtilsBench",
-                "synchronization_small_locks_benchmark",
-                "synchronization_lifo_sem_bench",
-                "benchsleef128",
-            }:
-                score = compute_score_from_time(sum_baseline, sum_c)
-            else:
-                # N.B.: if you add a new benchmark, double-check if the results are time
-                #       or rates. Call compute_score_from_time or compute_score_from_rate
-                #       accordingly.
-                print(
-                    f"{benchmark_name} score: error (unclear if results are time or rates)"
-                )
-                sys.exit(0)  # return 0 so run_prod.sh can continue
+    with open(input_file_name) as f, open(baseline_name) as f_baseline:
+        sum_c = json.load(f)
+        sum_baseline = json.load(f_baseline)
+
+        if benchmark_name in _CUSTOM_SCORERS:
+            score = _CUSTOM_SCORERS[benchmark_name](sum_baseline, sum_c)
+        elif benchmark_name.startswith("benchsleef"):
+            score = compute_sleef_score(benchmark_name, sum_baseline, sum_c)
+        elif benchmark_name in _RATE_BASED:
+            skip_set = _SKIP_SETS.get(benchmark_name)
+            score = compute_score_from_rate(sum_baseline, sum_c, skip_set)
+        elif benchmark_name in _TIME_BASED:
+            score = compute_score_from_time(sum_baseline, sum_c)
+        else:
+            # N.B.: if you add a new benchmark, add it to _CUSTOM_SCORERS,
+            #       _RATE_BASED, or _TIME_BASED above.
+            print(
+                f"{benchmark_name} score: error (unclear if results are time or rates)"
+            )
+            sys.exit(0)  # return 0 so run_prod.sh can continue
 
     return score
 

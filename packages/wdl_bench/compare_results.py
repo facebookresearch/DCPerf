@@ -157,6 +157,14 @@ def extract_default_results(data: dict[str, Any]) -> dict[str, float]:
     return results
 
 
+_EXTRACTOR_REGISTRY = {
+    "xxhash_benchmark": extract_xxhash_results,
+    "bench-memcmp": extract_memcmp_timings_for_compare,
+    "benchsleef": extract_sleef_results,
+    "concurrency_concurrent_hash_map_bench": extract_concurrent_hash_map_results,
+}
+
+
 def compare_results(
     data1: dict[str, Any],
     data2: dict[str, Any],
@@ -173,21 +181,9 @@ def compare_results(
     Returns:
         List of tuples (benchmark_name, value1, value2, ratio) sorted by ratio (high to low)
     """
-    if benchmark_type == "xxhash_benchmark":
-        results1 = extract_xxhash_results(data1)
-        results2 = extract_xxhash_results(data2)
-    elif benchmark_type == "bench-memcmp":
-        results1 = extract_memcmp_timings_for_compare(data1)
-        results2 = extract_memcmp_timings_for_compare(data2)
-    elif benchmark_type == "benchsleef":
-        results1 = extract_sleef_results(data1)
-        results2 = extract_sleef_results(data2)
-    elif benchmark_type == "concurrency_concurrent_hash_map_bench":
-        results1 = extract_concurrent_hash_map_results(data1)
-        results2 = extract_concurrent_hash_map_results(data2)
-    else:
-        results1 = extract_default_results(data1)
-        results2 = extract_default_results(data2)
+    extractor = _EXTRACTOR_REGISTRY.get(benchmark_type, extract_default_results)
+    results1 = extractor(data1)
+    results2 = extractor(data2)
 
     comparisons = []
     common_keys = set(results1.keys()) & set(results2.keys())
@@ -197,14 +193,7 @@ def compare_results(
         val2 = results2[key]
 
         if val2 != 0:
-            # For concurrency_concurrent_hash_map_bench, higher is better (throughput)
-            # so we invert the ratio to show speedup consistently
-            if benchmark_type == "concurrency_concurrent_hash_map_bench":
-                ratio = val1 / val2
-            else:
-                # For timing-based benchmarks, lower is better
-                # ratio > 1 means file2 is faster
-                ratio = val1 / val2
+            ratio = val1 / val2
             comparisons.append((key, val1, val2, ratio))
 
     # Sort by ratio from high to low
@@ -280,8 +269,8 @@ def main() -> None:
             f"# Comparison: {os.path.basename(file1)} vs {os.path.basename(file2)}\n"
         )
         f.write(f"# Benchmark type: {benchmark_type}\n")
-        f.write(f"# Ratio = file1 / file2\n")
-        f.write(f"# Sorted from high to low ratio\n")
+        f.write("# Ratio = file1 / file2\n")
+        f.write("# Sorted from high to low ratio\n")
         f.write("#\n")
         f.write(f"# {'Benchmark':<80} {'File1':>15} {'File2':>15} {'Ratio':>10}\n")
         f.write(f"# {'-' * 80} {'-' * 15} {'-' * 15} {'-' * 10}\n")

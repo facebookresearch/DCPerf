@@ -10,31 +10,24 @@ import sys
 
 import parse_line
 
-sum_c = {}
 
-input_file_name = "out_" + sys.argv[1] + ".txt"
+def main() -> None:
+    if len(sys.argv) != 2:
+        print("Usage: convert.py <benchmark_name>")
+        sys.exit(1)
+
+    benchmark_name = sys.argv[1]
+    input_file_name = "out_" + benchmark_name + ".txt"
+    sum_c = {}
+
+    parser = parse_line.get_parser(benchmark_name)
+    with open(input_file_name) as f:
+        parser(f, sum_c)
+
+    out_file_name = "out_" + benchmark_name + ".json"
+    with open(out_file_name, "w") as f:
+        json.dump(sum_c, f, indent=4, sort_keys=True)
 
 
-with open(input_file_name) as f:
-    if sys.argv[1] == "concurrency_concurrent_hash_map_bench":
-        parse_line.parse_line_chm(f, sum_c)
-    elif sys.argv[1] == "lzbench":
-        parse_line.parse_line_lzbench(f, sum_c)
-    elif sys.argv[1] == "openssl":
-        parse_line.parse_line_openssl(f, sum_c)
-    elif sys.argv[1] == "vdso_bench":
-        parse_line.parse_line_vdso_bench(f, sum_c)
-    elif sys.argv[1] == "libaegis_benchmark":
-        parse_line.parse_line_libaegis_benchmark(f, sum_c)
-    elif sys.argv[1] == "xxhash_benchmark":
-        parse_line.parse_line_xxhash_benchmark(f, sum_c)
-    elif sys.argv[1] == "container_hash_maps_bench":
-        parse_line.parse_line_container_hash_maps_bench(f, sum_c)
-    elif sys.argv[1] == "erasure_code_perf":
-        parse_line.parse_line_erasure_code_perf(f, sum_c)
-    else:
-        parse_line.parse_line(f, sum_c)
-
-out_file_name = "out_" + sys.argv[1] + ".json"
-with open(out_file_name, "w") as f:
-    json.dump(sum_c, f, indent=4, sort_keys=True)
+if __name__ == "__main__":
+    main()

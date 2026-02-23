@@ -291,16 +291,14 @@ build_libaegis()
     pushd "${WDL_SOURCE}"
     clone $lib || echo "Failed to clone $lib"
     if [ "$ARCH" = "aarch64" ]; then
-        # shellcheck disable=SC2046
-        curl $(get_curl_proxy_args) -O https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz
-        tar xvf zig-aarch64-linux-0.15.2.tar.xz
-        mv zig-aarch64-linux-0.15.2 zig
+        zig_arch="aarch64"
     else
-        # shellcheck disable=SC2046
-        curl $(get_curl_proxy_args) -O https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
-        tar xvf zig-x86_64-linux-0.15.2.tar.xz
-        mv zig-x86_64-linux-0.15.2 zig
+        zig_arch="x86_64"
     fi
+    # shellcheck disable=SC2046
+    curl $(get_curl_proxy_args) -O "https://ziglang.org/download/0.15.2/zig-${zig_arch}-linux-0.15.2.tar.xz"
+    tar xvf "zig-${zig_arch}-linux-0.15.2.tar.xz"
+    mv "zig-${zig_arch}-linux-0.15.2" zig
     cd "$lib" || exit
     ../zig/zig build -Drelease -Dfavor-performance -Dwith-benchmark
     cp ./zig-out/bin/benchmark "${WDL_ROOT}/libaegis_benchmark" || exit
@@ -439,7 +437,7 @@ build_stdcpp()
 
 build_gemm()
 {
-    lib='gemm_bench'
+    gemm_lib='gemm_bench'
     pushd "$WDL_BUILD"
     source /etc/profile.d/modules.sh
     if [ "$ARCH" = "aarch64" ]; then
@@ -460,9 +458,8 @@ build_gemm()
         fi
         module use apl/modulefiles
         module load "armpl/${ARMPL_VERSION}.0_gcc"
-        lib='gemm_bench' # reset lib to gemm_bench
-        cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH="${ARMPL_LIBRARIES};${WDL_BUILD}/acl/lib64;${WDL_BUILD}/acl/lib" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/acl/include -L ${WDL_BUILD}/acl/lib64 -L ${WDL_BUILD}/acl/lib" && cmake --build "$lib-build"
-        cp "$lib-build/$lib" "${WDL_ROOT}/" || exit 1
+        cmake -S "$BPKGS_WDL_ROOT/$gemm_lib" -B "$gemm_lib-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH="${ARMPL_LIBRARIES};${WDL_BUILD}/acl/lib64;${WDL_BUILD}/acl/lib" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/acl/include -L ${WDL_BUILD}/acl/lib64 -L ${WDL_BUILD}/acl/lib" && cmake --build "$gemm_lib-build"
+        cp "$gemm_lib-build/$gemm_lib" "${WDL_ROOT}/" || exit 1
     else
         cpu_vendor=$(grep -m 1 'vendor_id' /proc/cpuinfo | awk '{print $3}')
         # shellcheck disable=SC2046,SC2086
@@ -486,26 +483,24 @@ build_gemm()
             conda env remove -n "$AOCL_BUILD_ENV" -y
         )
         cd .. || exit
-        lib='gemm_bench' # reset lib to gemm_bench
-        cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-onemkl" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH="${MKLROOT}/lib" && cmake --build "$lib-build-onemkl"
-        cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-aocl" -DCMAKE_BUILD_TYPE=Release -DCPU_VENDOR=AMD -DCMAKE_INSTALL_RPATH="${WDL_BUILD}/aocl/lib" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/aocl/include -L ${WDL_BUILD}/aocl/lib" && cmake --build "$lib-build-aocl"
+        cmake -S "$BPKGS_WDL_ROOT/$gemm_lib" -B "$gemm_lib-build-onemkl" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH="${MKLROOT}/lib" && cmake --build "$gemm_lib-build-onemkl"
+        cmake -S "$BPKGS_WDL_ROOT/$gemm_lib" -B "$gemm_lib-build-aocl" -DCMAKE_BUILD_TYPE=Release -DCPU_VENDOR=AMD -DCMAKE_INSTALL_RPATH="${WDL_BUILD}/aocl/lib" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/aocl/include -L ${WDL_BUILD}/aocl/lib" && cmake --build "$gemm_lib-build-aocl"
         if [[ "$cpu_vendor" == "GenuineIntel" ]]; then
             echo "CPU is Intel"
-            cp "$lib-build-onemkl/$lib" "${WDL_ROOT}/" || exit 1
+            cp "$gemm_lib-build-onemkl/$gemm_lib" "${WDL_ROOT}/" || exit 1
         elif [[ "$cpu_vendor" == "AuthenticAMD" ]]; then
             echo "CPU is AMD"
-            cp "$lib-build-aocl/$lib" "${WDL_ROOT}/" || exit 1
+            cp "$gemm_lib-build-aocl/$gemm_lib" "${WDL_ROOT}/" || exit 1
         else
             echo "Unknown CPU vendor: $cpu_vendor"
         fi
     fi
-    cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-openblas" -DCMAKE_BUILD_TYPE=Release -DUSE_OPENBLAS=ON && cmake --build "$lib-build-openblas"
+    cmake -S "$BPKGS_WDL_ROOT/$gemm_lib" -B "$gemm_lib-build-openblas" -DCMAKE_BUILD_TYPE=Release -DUSE_OPENBLAS=ON && cmake --build "$gemm_lib-build-openblas"
     clone onednn || echo "Failed to clone onednn"
     cd onednn || exit
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/onednn" && cmake --build build --config release --target install -- -j"$(nproc)"
     cd .. || exit
-    lib='gemm_bench' # reset lib to gemm_bench
-    cmake -S "$BPKGS_WDL_ROOT/$lib" -B "$lib-build-onednn" -DCMAKE_BUILD_TYPE=Release -DUSE_ONEDNN=ON -DCMAKE_INSTALL_RPATH="${WDL_BUILD}/onednn/lib;${WDL_BUILD}/onednn/lib64" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/onednn/include -L ${WDL_BUILD}/onednn/lib -L ${WDL_BUILD}/onednn/lib64" && cmake --build "$lib-build-onednn"
+    cmake -S "$BPKGS_WDL_ROOT/$gemm_lib" -B "$gemm_lib-build-onednn" -DCMAKE_BUILD_TYPE=Release -DUSE_ONEDNN=ON -DCMAKE_INSTALL_RPATH="${WDL_BUILD}/onednn/lib;${WDL_BUILD}/onednn/lib64" -DCMAKE_CXX_FLAGS="-I${WDL_BUILD}/onednn/include -L ${WDL_BUILD}/onednn/lib -L ${WDL_BUILD}/onednn/lib64" && cmake --build "$gemm_lib-build-onednn"
     module purge
 
     popd || exit

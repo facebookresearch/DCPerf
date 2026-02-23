@@ -8,17 +8,10 @@ set -Eeo pipefail
 #trap SIGINT SIGTERM ERR EXIT
 
 
-BREPS_LFILE=/tmp/wdl_log.txt
-
-function benchreps_tell_state () {
-    date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
-}
-
-
 # Constants
 WDL_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
-WDL_DATASETS="${WDL_ROOT}/datasets"
-WDL_BUILD="${WDL_ROOT}/wdl_build"
+# shellcheck disable=SC1091
+source "$WDL_ROOT"/common.sh
 
 show_help() {
 cat <<EOF
@@ -41,6 +34,8 @@ run_list=""
 
 run_allcore()
 {
+    local -a pids=()
+    local nprocs
     nprocs=$(nproc)
 
     for i in $(seq "$nprocs")
@@ -81,42 +76,42 @@ main() {
     dataset="silesia.tar"
 
 
-    while :; do
-        case $1 in
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
             --output)
+                [[ -n "${2:-}" ]] || { echo "Invalid option: $1 requires an argument" 1>&2; exit 1; }
                 result_filename="$2"
+                shift 2
                 ;;
             --type)
+                [[ -n "${2:-}" ]] || { echo "Invalid option: $1 requires an argument" 1>&2; exit 1; }
                 run_type="$2"
+                shift 2
                 ;;
             --name)
+                [[ -n "${2:-}" ]] || { echo "Invalid option: $1 requires an argument" 1>&2; exit 1; }
                 name="$2"
+                shift 2
                 ;;
             --algo)
+                [[ -n "${2:-}" ]] || { echo "Invalid option: $1 requires an argument" 1>&2; exit 1; }
                 algo="$2"
+                shift 2
                 ;;
             --dataset)
+                [[ -n "${2:-}" ]] || { echo "Invalid option: $1 requires an argument" 1>&2; exit 1; }
                 dataset="$2"
+                shift 2
                 ;;
             -h)
                 show_help >&2
                 exit 1
                 ;;
-            *)  # end of input
-                echo "Unsupported arg $1"
-                break
-        esac
-
-        case $1 in
-            --output|--type|--name|--algo|--dataset)
-                if [ -z "$2" ]; then
-                    echo "Invalid option: $1 requires an argument" 1>&2
-                    exit 1
-                fi
-                shift   # Additional shift for the argument
+            *)
+                echo "Unsupported arg: $1"
+                exit 1
                 ;;
         esac
-        shift
     done
 
 
@@ -163,7 +158,7 @@ main() {
     elif [ "$name" != "none" ]; then
         run_list=$name
         if [ "$name" = "small_locks_benchmark" ] || [ "$name" = "iobuf_benchmark" ]; then
-                "./${name}" --bm_min_iters=1000000 > "out_${benchmark}".txt
+                "./${name}" --bm_min_iters=1000000 > "out_${name}".txt
             else
                 "./${name}"  > "out_${name}".txt
         fi
