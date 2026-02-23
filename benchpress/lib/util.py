@@ -168,16 +168,7 @@ def install_benchmark(install_script, args=None, env=None, install_log=None):
     stderr_catcher.join()
 
     if install_benchmark_proc.returncode == 0:
-        verify_install_cmd_1 = ["touch", BENCHMARK_INSTALLS_FILE]
-        verify_install_proc_1 = subprocess.Popen(verify_install_cmd_1, shell=False)
-        verify_install_proc_1.wait()
-        benchmark_installs_fp = open(BENCHMARK_INSTALLS_FILE, "a+")
-        verify_install_cmd_2 = ["echo", install_script]
-        verify_install_proc_2 = subprocess.Popen(
-            verify_install_cmd_2, stdout=benchmark_installs_fp, shell=False
-        )
-        verify_install_proc_2.wait()
-        benchmark_installs_fp.close()
+        install_list_append(install_script)
     else:
         cmd_str = " ".join(install_benchmark_cmd)
         raise Exception(f"Failed to run '{cmd_str}'")
