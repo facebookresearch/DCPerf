@@ -53,6 +53,13 @@ def read_csv(perf_csv_file):
         },
         na_values=["<not counted>"],
     )
+    # On some kernels, requesting 'cycles' in system-wide mode (-a) auto-expands
+    # to include uncore PMU cycles (e.g. nvidia_scf_pmu_0/cycles/). When the SCF
+    # memory group also explicitly requests nvidia_scf_pmu_0/cycles/, it appears
+    # twice per interval, causing series length mismatches in derived metrics.
+    # Keep the last occurrence per (timestamp, event_name) since the explicit SCF
+    # group entry appears later and has counter_runtime aligned with other SCF events.
+    df = df.drop_duplicates(subset=["timestamp", "event_name"], keep="last")
     return df
 
 
