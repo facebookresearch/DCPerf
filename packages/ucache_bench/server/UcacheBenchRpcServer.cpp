@@ -159,6 +159,22 @@ apache::thrift::ThriftServer& UcacheBenchRpcServer::addThriftServer() {
   }
   thriftServer_->setNumAcceptThreads(numAcceptorThreads);
 
+  // Match production ucache ThriftServer tuning:
+  // Prevent single connection from monopolizing an IO thread's event loop.
+  // Without this, a few hot connections can starve others, limiting
+  // multi-client scalability.
+  thriftServer_->setSocketMaxReadsPerEvent(1);
+
+  // Disable timeouts — let clients control timing, same as production ucache.
+  thriftServer_->setQueueTimeout(std::chrono::milliseconds(0));
+  thriftServer_->setTaskExpireTime(std::chrono::milliseconds(0));
+
+  // No limit on concurrent active requests.
+  thriftServer_->setMaxRequests(0);
+
+  // Disable per-request tracking overhead.
+  thriftServer_->disableActiveRequestsTracking();
+
   XLOG(INFO) << "ThriftServer configured with "
              << FLAGS_rpc_num_cpu_worker_threads << " CPU worker threads and "
              << numAcceptorThreads << " acceptor threads";
