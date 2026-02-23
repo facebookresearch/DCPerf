@@ -13,6 +13,7 @@
 #include <signal.h>
 #include <memory>
 
+#include "UcacheBenchAdminServer.h"
 #include "UcacheBenchOnRequest.h"
 #include "UcacheBenchRpcServer.h"
 #include "UcacheBenchServer.h"
@@ -23,6 +24,20 @@
 #endif
 
 DEFINE_uint32(port, 11212, "Port to listen on");
+
+// Admin server flags for multi-client coordination
+DEFINE_int32(
+    admin_port,
+    -1,
+    "Admin port for multi-client coordination (-1 = auto, uses port+1 when num_clients > 0; 0 = disabled)");
+DEFINE_uint32(
+    num_clients,
+    0,
+    "Number of clients expected to connect (enables admin server when > 0)");
+DEFINE_uint32(
+    timeout_seconds,
+    600,
+    "Timeout in seconds for waiting for clients (0 = no timeout)");
 DEFINE_bool(verbose, false, "Enable verbose logging");
 
 // CacheLib configuration flags
@@ -135,10 +150,16 @@ using namespace facebook::ucachebench;
 
 namespace {
 bool shutdown_requested = false;
+UcacheBenchAdminServer* g_adminServer = nullptr;
 
 void signal_handler(int sig) {
   fprintf(stderr, "Received signal %d, shutting down\n", sig);
   shutdown_requested = true;
+
+  // If admin server is running, request it to shutdown
+  if (g_adminServer) {
+    g_adminServer->requestShutdown();
+  }
 }
 
 void setup_signal_handlers() {
@@ -155,8 +176,8 @@ void setup_signal_handlers() {
   }
 }
 
-std::unique_ptr<UcacheBenchRpcServer> makeAndStartUcacheBenchRpcServer() {
-  // Create configuration from flags
+// Create configuration from command-line flags
+UcacheBenchConfig createConfigFromFlags() {
   UcacheBenchConfig config;
 
   // Basic settings
@@ -199,9 +220,11 @@ std::unique_ptr<UcacheBenchRpcServer> makeAndStartUcacheBenchRpcServer() {
   config.navy_clean_region_threads = FLAGS_navy_clean_region_threads;
   config.navy_metadata_size_mb = FLAGS_navy_metadata_size_mb;
 
-  // Create the benchmark server with configuration
-  auto server = std::make_shared<UcacheBenchServer>(config);
+  return config;
+}
 
+std::unique_ptr<UcacheBenchRpcServer> makeAndStartUcacheBenchRpcServer(
+    std::shared_ptr<UcacheBenchServer> server) {
   if (FLAGS_verbose) {
     printf("Server initialized successfully. Starting server...\n");
     server->printStats(); // Print initial cache stats
@@ -255,23 +278,121 @@ int main(int argc, char** argv) {
 
   setup_signal_handlers();
 
+  // Validate port flags
+  if (FLAGS_port > 65535) {
+    fprintf(
+        stderr, "Error: --port must be less than 65536 (got %u)\n", FLAGS_port);
+    return 1;
+  }
+
   if (FLAGS_verbose) {
     printf("Starting UcacheBench server on port %u\n", FLAGS_port);
   }
 
+  // Auto-compute admin_port if num_clients > 0 and admin_port not explicitly
+  // set
+  int32_t effectiveAdminPort = FLAGS_admin_port;
+  if (FLAGS_num_clients > 0 && FLAGS_admin_port == -1) {
+    effectiveAdminPort = static_cast<int32_t>(FLAGS_port) + 1;
+    printf(
+        "[Server] Multi-client mode enabled: admin_port auto-set to %d (port + 1)\n",
+        effectiveAdminPort);
+  } else if (FLAGS_admin_port == -1) {
+    // No multi-client mode, disable admin server
+    effectiveAdminPort = 0;
+  }
+
+  // Validate admin server flags
+  if (effectiveAdminPort > 65535) {
+    fprintf(
+        stderr,
+        "Error: --admin_port must be less than 65536 (got %d)\n",
+        effectiveAdminPort);
+    return 1;
+  }
+  if (effectiveAdminPort > 0 && FLAGS_num_clients == 0) {
+    fprintf(
+        stderr,
+        "Error: --num_clients is required when --admin_port is specified\n");
+    return 1;
+  }
+
   try {
+    // Create the cache server configuration and instance first
+    auto config = createConfigFromFlags();
+    auto server = std::make_shared<UcacheBenchServer>(config);
+
     if (FLAGS_verbose) {
       printf("UcacheBenchRpcServer starting\n");
     }
-    auto ucacheBenchRpcServer = makeAndStartUcacheBenchRpcServer();
+    auto ucacheBenchRpcServer = makeAndStartUcacheBenchRpcServer(server);
     if (FLAGS_verbose) {
       printf("UcacheBenchRpcServer started\n");
     }
 
-    // Wait for shutdown signal
-    folly::EventBase* evb = folly::EventBaseManager::get()->getEventBase();
-    while (!shutdown_requested) {
-      evb->loopOnce();
+    // Set up admin server for multi-client coordination if enabled
+    std::unique_ptr<UcacheBenchAdminServer> adminServer;
+    if (effectiveAdminPort > 0) {
+      adminServer = std::make_unique<UcacheBenchAdminServer>(
+          static_cast<uint16_t>(effectiveAdminPort),
+          FLAGS_num_clients,
+          FLAGS_timeout_seconds);
+
+      // Set global pointer for signal handler
+      g_adminServer = adminServer.get();
+
+      // Set up phase change callback for metric tracking
+      adminServer->setPhaseChangeCallback([server](
+                                              UcacheBenchAdminServer::Phase
+                                                  phase) {
+        switch (phase) {
+          case UcacheBenchAdminServer::Phase::WARMUP:
+            printf(
+                "[Main] Phase changed to WARMUP - starting warmup stats tracking\n");
+            server->setTrackingPhase(UcacheBenchServer::TrackingPhase::WARMUP);
+            break;
+          case UcacheBenchAdminServer::Phase::BENCHMARK:
+            printf(
+                "[Main] Phase changed to BENCHMARK - starting benchmark stats tracking\n");
+            server->setTrackingPhase(
+                UcacheBenchServer::TrackingPhase::BENCHMARK);
+            break;
+          default:
+            break;
+        }
+      });
+
+      // Set up print results callback
+      adminServer->setPrintResultsCallback([&adminServer, server]() {
+        auto benchmarkStart = adminServer->getBenchmarkStartTime();
+        auto benchmarkEnd = adminServer->getBenchmarkEndTime();
+        auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              benchmarkEnd - benchmarkStart)
+                              .count();
+        double durationSec = durationMs / 1000.0;
+
+        // Print results from the cache server
+        server->printFinalResults(durationSec);
+      });
+
+      adminServer->start();
+    }
+
+    // If admin server is enabled, wait for it to complete
+    // Otherwise, wait for shutdown signal
+    if (adminServer) {
+      bool completed = adminServer->waitForCompletion();
+      if (!completed) {
+        printf("Admin server timed out or failed\n");
+      }
+      // Stop the admin server
+      adminServer->stop();
+    } else {
+      // Wait for shutdown signal
+      folly::EventBase* evb = folly::EventBaseManager::get()->getEventBase();
+      while (!shutdown_requested) {
+        evb->loopOnce();
+      }
     }
 
     if (FLAGS_verbose) {

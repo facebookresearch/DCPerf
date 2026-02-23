@@ -7,33 +7,307 @@
 
 #include "UcacheBenchClient.h"
 
-#include <fmt/format.h>
-#include <folly/Format.h>
-#include <folly/Random.h>
-#include <folly/dynamic.h>
-#include <folly/json.h>
-
-#include <folly/coro/AsyncScope.h>
-#include <folly/coro/BlockingWait.h>
-#include <folly/coro/Collect.h>
-#include <folly/coro/Promise.h>
-#include <folly/coro/Task.h>
-#include <folly/executors/CPUThreadPoolExecutor.h>
-
-#include <folly/executors/IOThreadPoolExecutor.h>
-#include <folly/fibers/Baton.h>
-
-#include <folly/io/IOBuf.h>
-#include <folly/portability/GFlags.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstring>
 #include <fstream>
+#include <iostream>
+#include <random>
+#include <sstream>
 #include <thread>
 
-using namespace facebook::ucachebench;
+#include <folly/Random.h>
+#include <folly/coro/AsyncScope.h>
+#include <folly/coro/BlockingWait.h>
+#include <folly/coro/Promise.h>
+#include <folly/fibers/FiberManager.h>
+#include <folly/fibers/FiberManagerMap.h>
+#include <folly/io/async/ScopedEventBaseThread.h>
+#include <folly/portability/GFlags.h>
+#include <mcrouter/McrouterFiberContext.h>
+#include <mcrouter/lib/network/CpuController.h>
 
-DEFINE_string(server_host, "localhost", "Server hostname");
+DECLARE_string(config);
+DECLARE_uint32(warmup_ops);
+DECLARE_uint32(warmup_ops_per_key);
+DECLARE_uint32(benchmark_ops);
+DECLARE_double(get_ratio);
+DECLARE_uint32(key_size);
+DECLARE_uint32(value_size);
+DECLARE_uint32(num_keys);
+DECLARE_uint32(num_threads);
+DECLARE_bool(verbose);
+DECLARE_bool(enable_zipfian);
+DECLARE_double(zipfian_skew);
+DECLARE_uint32(max_inflight);
+DECLARE_string(traffic_distribution);
+
+// Declare admin port flag (will be defined in main.cpp)
+// Note: We use server_host for admin connection since admin server
+// runs on the same machine as the cache server
+DECLARE_uint32(admin_port);
+
+// Declare server connection flags (will be defined in main.cpp)
+DECLARE_string(server_host);
+DECLARE_uint32(server_port);
+DECLARE_uint32(duration_seconds);
+
+namespace facebook {
+namespace ucachebench {
+
+// Default socket timeout in seconds to prevent indefinite blocking.
+// 600 seconds (10 minutes) is long enough for normal multi-client
+// coordination but prevents the client from hanging forever.
+constexpr uint32_t kDefaultTimeoutSeconds = 600;
+
+// ============================================================================
+// AdminConnection implementation
+// ============================================================================
+
+AdminConnection::~AdminConnection() {
+  disconnect();
+}
+
+bool AdminConnection::connect(const std::string& host, uint16_t port) {
+  if (socket_ >= 0) {
+    disconnect();
+  }
+
+  // Resolve hostname
+  struct addrinfo hints, *result;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC; // IPv4 or IPv6
+  hints.ai_socktype = SOCK_STREAM;
+
+  std::string portStr = std::to_string(port);
+  int ret = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
+  if (ret != 0) {
+    printf(
+        "[AdminConnection] Failed to resolve host %s: %s\n",
+        host.c_str(),
+        gai_strerror(ret));
+    return false;
+  }
+
+  // Try each address until we connect
+  for (struct addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
+    socket_ = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (socket_ < 0) {
+      continue;
+    }
+
+    if (::connect(socket_, rp->ai_addr, rp->ai_addrlen) == 0) {
+      freeaddrinfo(result);
+
+      // Set default receive timeout during connection setup to prevent
+      // indefinite blocking if the server disconnects or the application
+      // needs to shut down. 600 seconds (10 minutes) is long enough for
+      // normal multi-client coordination but prevents hanging forever.
+      struct timeval tv;
+      tv.tv_sec = kDefaultTimeoutSeconds;
+      tv.tv_usec = 0;
+      if (setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        printf(
+            "[AdminConnection] Warning: Failed to set socket timeout: %s\n",
+            strerror(errno));
+      }
+
+      printf(
+          "[AdminConnection] Connected to admin server at %s:%u\n",
+          host.c_str(),
+          port);
+      return true;
+    }
+
+    ::close(socket_);
+    socket_ = -1;
+  }
+
+  freeaddrinfo(result);
+  printf(
+      "[AdminConnection] Failed to connect to %s:%u: %s\n",
+      host.c_str(),
+      port,
+      strerror(errno));
+  return false;
+}
+
+void AdminConnection::disconnect() {
+  if (socket_ >= 0) {
+    ::close(socket_);
+    socket_ = -1;
+  }
+  readBuffer_.clear();
+}
+
+std::string AdminConnection::sendCommand(const std::string& command) {
+  if (socket_ < 0) {
+    return "ERROR Not connected";
+  }
+
+  // Send command
+  std::string msg = command + "\n";
+  ssize_t sent = send(socket_, msg.c_str(), msg.size(), 0);
+  if (sent < 0) {
+    printf("[AdminConnection] Send failed: %s\n", strerror(errno));
+    return "ERROR Send failed";
+  }
+
+  // Read response, filtering out any broadcast notifications
+  while (true) {
+    std::string line = readLine();
+    if (line.empty()) {
+      return "ERROR Read failed";
+    }
+
+    // Check if this is a broadcast notification
+    if (isBroadcastNotification(line)) {
+      // Buffer it for later retrieval via waitForNotification()
+      pendingNotifications_.push_back(line);
+      continue;
+    }
+
+    // This is the actual response to our command
+    return line;
+  }
+}
+
+bool AdminConnection::isBroadcastNotification(const std::string& message) {
+  // Broadcast notifications from the server are:
+  // - ALL_REGISTERED
+  // - ALL_WARMUP_DONE
+  // - ALL_DONE
+  // Command responses start with "OK" or "ERROR" or "STATUS"
+  return message == "ALL_REGISTERED" || message == "ALL_WARMUP_DONE" ||
+      message == "ALL_DONE";
+}
+
+std::string AdminConnection::readLine() {
+  // Check if we already have a complete line in the buffer
+  size_t pos = readBuffer_.find('\n');
+  if (pos != std::string::npos) {
+    std::string line = readBuffer_.substr(0, pos);
+    readBuffer_.erase(0, pos + 1);
+    // Remove trailing \r if present
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    return line;
+  }
+
+  // Read more data
+  char buffer[1024];
+  while (true) {
+    ssize_t bytesRead = recv(socket_, buffer, sizeof(buffer) - 1, 0);
+    if (bytesRead <= 0) {
+      if (bytesRead == 0) {
+        printf("[AdminConnection] Connection closed by server\n");
+      } else {
+        printf("[AdminConnection] Recv failed: %s\n", strerror(errno));
+      }
+      return "";
+    }
+
+    buffer[bytesRead] = '\0';
+    readBuffer_ += buffer;
+
+    pos = readBuffer_.find('\n');
+    if (pos != std::string::npos) {
+      std::string line = readBuffer_.substr(0, pos);
+      readBuffer_.erase(0, pos + 1);
+      if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+      }
+      return line;
+    }
+  }
+}
+
+int32_t AdminConnection::sendRegister() {
+  std::string response = sendCommand("REGISTER");
+  if (response.empty()) {
+    return -1;
+  }
+
+  // Parse "OK <client_id>"
+  if (response.substr(0, 3) == "OK ") {
+    try {
+      return std::stoi(response.substr(3));
+    } catch (const std::exception&) {
+      printf(
+          "[AdminConnection] Failed to parse client ID from: %s\n",
+          response.c_str());
+      return -1;
+    }
+  }
+
+  printf("[AdminConnection] REGISTER failed: %s\n", response.c_str());
+  return -1;
+}
+
+bool AdminConnection::sendWarmupDone(int32_t clientId) {
+  std::string response = sendCommand("WARMUP_DONE " + std::to_string(clientId));
+  return response == "OK";
+}
+
+bool AdminConnection::sendBenchmarkDone(int32_t clientId) {
+  std::string response =
+      sendCommand("BENCHMARK_DONE " + std::to_string(clientId));
+  return response == "OK";
+}
+
+std::string AdminConnection::waitForNotification(uint32_t timeoutSeconds) {
+  if (socket_ < 0) {
+    return "";
+  }
+
+  // First check if we have any buffered notifications from sendCommand()
+  if (!pendingNotifications_.empty()) {
+    std::string notification = pendingNotifications_.front();
+    pendingNotifications_.erase(pendingNotifications_.begin());
+    return notification;
+  }
+
+  // If a custom timeout is specified, set it temporarily.
+  // Otherwise, use the default timeout set during connection setup.
+  bool customTimeout = (timeoutSeconds > 0);
+  if (customTimeout) {
+    struct timeval tv;
+    tv.tv_sec = timeoutSeconds;
+    tv.tv_usec = 0;
+    if (setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+      printf(
+          "[AdminConnection] Failed to set socket timeout: %s\n",
+          strerror(errno));
+    }
+  }
+
+  std::string line = readLine();
+
+  // Reset to default timeout if a custom one was used
+  if (customTimeout) {
+    struct timeval tv;
+    tv.tv_sec = kDefaultTimeoutSeconds;
+    tv.tv_usec = 0;
+    setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  }
+
+  return line;
+}
+
+} // namespace ucachebench
+} // namespace facebook
+
+// Server connection flags
+DEFINE_string(server_host, "::1", "Server hostname or IP address");
 DEFINE_uint32(server_port, 11211, "Server port");
-DEFINE_uint32(duration_seconds, 60, "Test duration in seconds");
+DEFINE_uint32(duration_seconds, 60, "Benchmark duration in seconds");
+
 DEFINE_uint32(warmup_seconds, 10, "Warmup duration in seconds");
 DEFINE_uint32(
     progress_interval_seconds,
@@ -155,8 +429,40 @@ uint64_t ZipfianGenerator::next() {
 }
 
 // ============================================================================
-// UcacheBenchClient Implementation
+// UcacheBenchClient implementation
 // ============================================================================
+
+bool UcacheBenchClient::connectToAdmin(const std::string& host, uint16_t port) {
+  adminConnection_ = std::make_unique<AdminConnection>();
+  if (!adminConnection_->connect(host, port)) {
+    adminConnection_.reset();
+    return false;
+  }
+
+  // Register with the admin server to get our client ID
+  clientId_ = adminConnection_->sendRegister();
+  if (clientId_ < 0) {
+    printf("[Client] Failed to register with admin server\n");
+    adminConnection_->disconnect();
+    adminConnection_.reset();
+    return false;
+  }
+
+  printf("[Client] Registered with admin server as client %d\n", clientId_);
+
+  // Wait for ALL_REGISTERED notification
+  printf("[Client] Waiting for all clients to register...\n");
+  std::string notification = adminConnection_->waitForNotification(0);
+  if (notification != "ALL_REGISTERED") {
+    printf(
+        "[Client] Unexpected notification while waiting for ALL_REGISTERED: %s\n",
+        notification.c_str());
+    return false;
+  }
+
+  printf("[Client] All clients registered, ready to start warmup\n");
+  return true;
+}
 
 UcacheBenchClient::UcacheBenchClient() {
   // Load traffic distribution if configured
@@ -554,6 +860,30 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     fflush(stdout);
   }
 
+  // Notify admin server that warmup is done (if connected)
+  if (hasAdminConnection()) {
+    printf("[Client %d] Sending WARMUP_DONE to admin server\n", clientId_);
+    if (!adminConnection_->sendWarmupDone(clientId_)) {
+      printf("[Client %d] Failed to send WARMUP_DONE\n", clientId_);
+    } else {
+      // Wait for ALL_WARMUP_DONE notification before returning
+      printf(
+          "[Client %d] Waiting for all clients to complete warmup...\n",
+          clientId_);
+      std::string notification = adminConnection_->waitForNotification(0);
+      if (notification == "ALL_WARMUP_DONE") {
+        printf(
+            "[Client %d] All clients completed warmup, ready for benchmark\n",
+            clientId_);
+      } else {
+        printf(
+            "[Client %d] Unexpected notification while waiting for ALL_WARMUP_DONE: %s\n",
+            clientId_,
+            notification.c_str());
+      }
+    }
+  }
+
   return warmupResults;
 }
 
@@ -949,6 +1279,28 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   }
 
   results.latencies = std::move(allLatencies);
+
+  // Notify admin server that benchmark is done (if connected)
+  if (hasAdminConnection()) {
+    printf("[Client %d] Sending BENCHMARK_DONE to admin server\n", clientId_);
+    if (!adminConnection_->sendBenchmarkDone(clientId_)) {
+      printf("[Client %d] Failed to send BENCHMARK_DONE\n", clientId_);
+    } else {
+      // Wait for ALL_DONE notification (server is printing results)
+      printf("[Client %d] Waiting for server to finish...\n", clientId_);
+      std::string notification = adminConnection_->waitForNotification(0);
+      if (notification == "ALL_DONE") {
+        printf("[Client %d] Server finished, benchmark complete\n", clientId_);
+      } else if (!notification.empty()) {
+        printf(
+            "[Client %d] Received notification: %s\n",
+            clientId_,
+            notification.c_str());
+      }
+    }
+    // Disconnect from admin server
+    adminConnection_->disconnect();
+  }
 
   return results;
 }

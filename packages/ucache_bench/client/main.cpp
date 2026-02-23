@@ -17,6 +17,26 @@ DECLARE_uint32(duration_seconds);
 DECLARE_uint32(warmup_seconds);
 DECLARE_bool(verbose);
 
+static bool ValidateServerPort(const char* flagname, uint32_t value) {
+  if (value > 0 && value < 65536) {
+    return true;
+  }
+  printf(
+      "Invalid value for --%s: %u (must be between 1 and 65535)\n",
+      flagname,
+      value);
+  return false;
+}
+DEFINE_validator(server_port, &ValidateServerPort);
+
+// Admin server flag for multi-client coordination
+// Note: admin_host is not needed - we use server_host since admin server
+// runs on the same machine as the cache server
+DEFINE_uint32(
+    admin_port,
+    0,
+    "Admin server port for multi-client coordination (0 = disabled)");
+
 using namespace facebook::ucachebench;
 
 int main(int argc, char** argv) {
@@ -36,6 +56,20 @@ int main(int argc, char** argv) {
 
   try {
     UcacheBenchClient client;
+
+    // Connect to admin server if configured (uses server_host since admin runs
+    // on same machine)
+    if (FLAGS_admin_port > 0) {
+      printf(
+          "Connecting to admin server at %s:%u for multi-client coordination\n",
+          FLAGS_server_host.c_str(),
+          FLAGS_admin_port);
+      if (!client.connectToAdmin(
+              FLAGS_server_host, static_cast<uint16_t>(FLAGS_admin_port))) {
+        printf("Failed to connect to admin server\n");
+        return 1;
+      }
+    }
 
     // Warmup phase
     auto warmupResults = client.warmup();

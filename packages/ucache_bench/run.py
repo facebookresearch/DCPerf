@@ -5,11 +5,28 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+"""
+UcacheBench benchmark runner.
+
+This script provides a Python interface to run the ucachebench server and client
+binaries. It aligns with the gflags defined in the C++ implementations:
+- Server: main.cpp, UcacheBenchRpcServer.cpp
+- Client: UcacheBenchClient.cpp
+
+Usage:
+    # Run server
+    ./run.py server --memory-mb=1024 --port=11212 --real
+
+    # Run client
+    ./run.py client --server-host=localhost --server-port=11212 --real
+"""
+
 import argparse
 import os
 import pathlib
 import subprocess
 from typing import List, Optional
+
 
 BENCHPRESS_ROOT: pathlib.Path = pathlib.Path(os.path.abspath(__file__)).parents[2]
 UCACHE_BENCH_DIR: str = os.path.join(BENCHPRESS_ROOT, "benchmarks", "ucache_bench")
@@ -128,11 +145,16 @@ def run_cmd(
 
 
 def run_server(args: argparse.Namespace) -> None:
-    # Calculate number of cores available
-    n_cores = len(os.sched_getaffinity(0))
+    """Run the UcacheBench server.
 
+    Server binary flags are defined in:
+    - main.cpp: port, verbose, cpu_arch, memory_mb, hash_power, pool_name, navy_* options
+               admin_port, num_clients, timeout_seconds (for multi-client coordination)
+    - UcacheBenchRpcServer.cpp: rpc_io_threads, rpc_io_threads_multiplier,
+      rpc_num_acceptor_threads, rpc_num_cpu_worker_threads, cpu_pinning_* options
+    """
     # Calculate memory size
-    memory_mb = int(args.memsize * 1024 * MEM_USAGE_FACTOR)
+    memory_mb = int(args.memory_mb * MEM_USAGE_FACTOR)
 
     # Auto-calculate hash_power if not explicitly set
     # (default value is 20, which is too small for production workloads)
@@ -141,22 +163,18 @@ def run_server(args: argparse.Namespace) -> None:
         hash_power = calculate_hash_power(memory_mb)
         print(f"Auto-calculated hash_power={hash_power} for {memory_mb}MB memory")
 
-    # Calculate number of threads
-    n_threads = calculate_num_threads(memory_mb, args.num_threads, n_cores)
-
     print(
-        f"Starting UcacheBench server with {n_threads} threads and {memory_mb}MB memory"
+        f"Starting UcacheBench server with {args.memory_mb}MB memory on port {args.port}"
     )
 
     server_binary = os.path.join(UCACHE_BENCH_DIR, "server", "ucachebench_server")
     server_cmd = [
         server_binary,
         f"--port={args.port}",
-        f"--memory_mb={memory_mb}",
-        f"--num_threads={n_threads}",
+        f"--memory_mb={args.memory_mb}",
         f"--hash_power={hash_power}",
         f"--pool_name={args.pool_name}",
-        f"--cache_mode={args.cache_mode}",
+        f"--cpu_arch={args.cpu_arch}",
     ]
 
     # Add DRAM tuning parameters if provided
@@ -181,8 +199,48 @@ def run_server(args: argparse.Namespace) -> None:
     if args.min_alloc_size is not None:
         server_cmd.append(f"--min_alloc_size={args.min_alloc_size}")
 
-    # Add Navy-specific options for hybrid mode
-    if args.cache_mode == "hybrid":
+    # Admin server configuration for multi-client coordination
+    # Pass admin_port to server if explicitly set (>0) or if num_clients > 0
+    # The server binary handles -1 as auto-default (port+1 when num_clients > 0)
+    if args.admin_port > 0:
+        server_cmd.append(f"--admin_port={args.admin_port}")
+    if args.num_clients > 0:
+        server_cmd.append(f"--num_clients={args.num_clients}")
+    if args.timeout_seconds != 600:
+        server_cmd.append(f"--timeout_seconds={args.timeout_seconds}")
+
+    # RPC configuration
+    if args.rpc_io_threads > 0:
+        server_cmd.append(f"--rpc_io_threads={args.rpc_io_threads}")
+    if args.rpc_io_threads_multiplier != 1.0:
+        server_cmd.append(
+            f"--rpc_io_threads_multiplier={args.rpc_io_threads_multiplier}"
+        )
+    if args.rpc_num_acceptor_threads != 4:
+        server_cmd.append(f"--rpc_num_acceptor_threads={args.rpc_num_acceptor_threads}")
+    if args.rpc_num_cpu_worker_threads != 1:
+        server_cmd.append(
+            f"--rpc_num_cpu_worker_threads={args.rpc_num_cpu_worker_threads}"
+        )
+
+    # CPU pinning configuration
+    if args.cpu_pinning_enabled:
+        server_cmd.append("--cpu_pinning_enabled=true")
+        if not args.cpu_pinning_avoid_irqs:
+            server_cmd.append("--cpu_pinning_avoid_irqs=false")
+        if args.cpu_pinning_network_interface != "eth0":
+            server_cmd.append(
+                f"--cpu_pinning_network_interface={args.cpu_pinning_network_interface}"
+            )
+        if args.cpu_pinning_physical_cores_only:
+            server_cmd.append("--cpu_pinning_physical_cores_only=true")
+        if args.cpu_pinning_exclusive:
+            server_cmd.append("--cpu_pinning_exclusive=true")
+        if not args.cpu_pinning_reduce_threads:
+            server_cmd.append("--cpu_pinning_reduce_threads=false")
+
+    # Navy (hybrid mode) configuration
+    if args.navy_cache_size_mb > 0:
         server_cmd.extend(
             [
                 f"--navy_cache_path={args.navy_cache_path}",
@@ -191,60 +249,78 @@ def run_server(args: argparse.Namespace) -> None:
                 f"--navy_device_max_write_rate={args.navy_device_max_write_rate}",
                 f"--navy_region_size_mb={args.navy_region_size_mb}",
                 f"--navy_clean_regions_pool={args.navy_clean_regions_pool}",
+                f"--navy_truncate_file={'true' if args.navy_truncate_file else 'false'}",
             ]
         )
-        if args.navy_truncate_file:
-            server_cmd.append("--navy_truncate_file=true")
-        else:
-            server_cmd.append("--navy_truncate_file=false")
 
     if args.verbose:
-        server_cmd.append("--verbose")
+        server_cmd.append("--verbose=true")
 
-    timeout = args.warmup_time + args.test_time + args.timeout_buffer
-    stdout = run_cmd(server_cmd, timeout, args.real)
+    stdout = run_cmd(server_cmd, timeout=None, for_real=args.real)
     print(stdout)
 
 
 def run_client(args: argparse.Namespace) -> None:
-    print("Starting UcacheBench client...")
+    """Run the UcacheBench client.
 
-    # Calculate number of cores available
-    n_cores = len(os.sched_getaffinity(0))
-
-    # Calculate memory size if available (for auto-scaling parameters)
-    # Note: Client doesn't directly use memory_mb, but we estimate based on server
-    # For simplicity, we use default scaling unless explicit values provided
-    memory_mb = 100000  # Default to medium config size for auto-scaling
-
-    # Calculate number of threads
-    n_threads = calculate_num_threads(memory_mb, args.num_threads, n_cores)
-    if args.num_threads == 0:
-        # Client default: use most cores, leaving a few for system
-        n_threads = max(1, n_cores - 2)
-
-    # Calculate number of proxy threads for connection management
-    n_proxies = calculate_num_proxies(memory_mb, args.num_proxies, n_cores)
+    Client binary flags are defined in UcacheBenchClient.cpp.
+    """
+    print(
+        f"Starting UcacheBench client connecting to {args.server_host}:{args.server_port}"
+    )
 
     client_binary = os.path.join(UCACHE_BENCH_DIR, "client", "ucachebench_client")
-
     client_cmd = [
         client_binary,
-        f"--server_host={args.server_hostname}",
-        f"--server_port={args.server_port_number}",
-        f"--num_threads={n_threads}",
-        f"--num_proxies={n_proxies}",
-        f"--duration_seconds={args.test_time}",
-        f"--warmup_seconds={args.warmup_time}",
+        f"--server_host={args.server_host}",
+        f"--server_port={args.server_port}",
+        f"--duration_seconds={args.duration_seconds}",
+        f"--warmup_seconds={args.warmup_seconds}",
         f"--key_count={args.key_count}",
         f"--value_size_min={args.value_size_min}",
         f"--value_size_max={args.value_size_max}",
         f"--get_ratio={args.get_ratio}",
         f"--qps_target={args.qps_target}",
+        f"--num_proxies={args.num_proxies}",
+        f"--num_threads={args.num_threads}",
+        f"--max_inflight={args.max_inflight}",
+        f"--additional_fanout={args.additional_fanout}",
     ]
 
+    # Admin server coordination (uses server_host since admin runs on same machine)
+    if args.admin_port > 0:
+        client_cmd.append(f"--admin_port={args.admin_port}")
+
+    # Timeout configuration
+    if args.connection_timeout_ms != 1000:
+        client_cmd.append(f"--connection_timeout_ms={args.connection_timeout_ms}")
+    if args.send_timeout_ms != 1000:
+        client_cmd.append(f"--send_timeout_ms={args.send_timeout_ms}")
+
+    # Security configuration
+    if args.security_mech != "plain":
+        client_cmd.append(f"--security_mech={args.security_mech}")
+
+    # Distribution configuration
+    if args.use_distribution:
+        client_cmd.append("--use_distribution=true")
+        if args.distribution_config:
+            client_cmd.append(f"--distribution_config={args.distribution_config}")
+
+    # Zipfian distribution configuration
+    if args.zipfian:
+        client_cmd.append("--zipfian=true")
+        if args.zipfian_skew != 0.99:
+            client_cmd.append(f"--zipfian_skew={args.zipfian_skew}")
+    if args.hot_key_ratio > 0.0:
+        client_cmd.append(f"--hot_key_ratio={args.hot_key_ratio}")
+
+    # Random source IP for fanout
+    if args.enable_random_source_ip:
+        client_cmd.append("--enable_random_source_ip=true")
+
     if args.verbose:
-        client_cmd.append("--verbose")
+        client_cmd.append("--verbose=true")
 
     stdout = run_cmd(client_cmd, timeout=None, for_real=args.real)
     print(stdout)
@@ -252,7 +328,8 @@ def run_client(args: argparse.Namespace) -> None:
 
 def init_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="UcacheBench benchmark runner",
     )
 
     # Sub-command parsers
@@ -260,36 +337,46 @@ def init_parser() -> argparse.ArgumentParser:
     server_parser = sub_parsers.add_parser(
         "server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        help="run server",
+        help="Run UcacheBench server",
     )
     client_parser = sub_parsers.add_parser(
         "client",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        help="run client",
+        help="Run UcacheBench client",
     )
 
-    # Server-side arguments
+    # =========================================================================
+    # Server arguments (aligned with main.cpp and UcacheBenchRpcServer.cpp)
+    # =========================================================================
+
+    # Basic server configuration
     server_parser.add_argument(
-        "--memsize", type=float, required=True, help="memory size in GB, e.g. 1 or 2"
+        "--port", type=int, default=11212, help="Port to listen on"
     )
-    server_parser.add_argument("--port", type=int, default=11211, help="Server port")
     server_parser.add_argument(
-        "--num-threads",
+        "--memory-mb",
         type=int,
-        default=0,
-        help="Number of server threads (0 = auto-detect)",
+        default=1024,
+        help="Memory size in MB for DRAM cache",
     )
     server_parser.add_argument(
         "--hash-power",
         type=int,
         default=20,
-        help="Hash table power for cachelib",
+        help="Hash table power for cachelib (overridden by cpu_arch if set)",
     )
     server_parser.add_argument(
         "--pool-name",
         type=str,
         default="default",
         help="Pool name for cachelib",
+    )
+    server_parser.add_argument(
+        "--cpu-arch",
+        type=str,
+        default="default",
+        choices=["default", "turin", "sapphire_rapids", "spr", "skylake", "skl"],
+        help="CPU architecture for production-like cachelib settings",
     )
 
     # DRAM tuning parameters (production-like settings)
@@ -336,101 +423,224 @@ def init_parser() -> argparse.ArgumentParser:
         help="Minimum allocation size in bytes",
     )
 
-    # Cache configuration arguments
+    # RPC configuration (from UcacheBenchRpcServer.cpp)
     server_parser.add_argument(
-        "--cache-mode",
-        type=str,
-        default="memory",
-        choices=["memory", "hybrid"],
-        help="Cache mode: 'memory' for RAM-only, 'hybrid' for RAM+SSD",
+        "--rpc-io-threads",
+        type=int,
+        default=0,
+        help="Number of IO threads for RPC server (0 = auto-detect)",
     )
+    server_parser.add_argument(
+        "--rpc-io-threads-multiplier",
+        type=float,
+        default=1.0,
+        help="Multiplier for IO thread count (production typically uses 0.75-1.0)",
+    )
+    server_parser.add_argument(
+        "--rpc-num-acceptor-threads",
+        type=int,
+        default=4,
+        help="Number of acceptor threads for handling new connections",
+    )
+    server_parser.add_argument(
+        "--rpc-num-cpu-worker-threads",
+        type=int,
+        default=1,
+        help="Number of CPU worker threads for ThriftServer",
+    )
+
+    # CPU pinning configuration
+    server_parser.add_argument(
+        "--cpu-pinning-enabled",
+        type=int,
+        default=0,
+        help="Enable CPU pinning for IO threads to reduce softirq overhead (set to non-zero to enable)",
+    )
+    server_parser.add_argument(
+        "--cpu-pinning-avoid-irqs",
+        type=int,
+        default=1,
+        help="Avoid CPUs that handle NIC IRQs (set to non-zero to enable)",
+    )
+    server_parser.add_argument(
+        "--cpu-pinning-network-interface",
+        type=str,
+        default="eth0",
+        help="Network interface name for IRQ detection",
+    )
+    server_parser.add_argument(
+        "--cpu-pinning-physical-cores-only",
+        type=int,
+        default=0,
+        help="Use only physical cores (skip hyperthreads) (set to non-zero to enable)",
+    )
+    server_parser.add_argument(
+        "--cpu-pinning-exclusive",
+        type=int,
+        default=0,
+        help="Pin each thread to exactly one CPU (exclusive mode) (set to non-zero to enable)",
+    )
+    server_parser.add_argument(
+        "--cpu-pinning-reduce-threads",
+        type=int,
+        default=1,
+        help="Reduce IO thread count to match non-IRQ CPU count (set to non-zero to enable)",
+    )
+
+    # Navy (hybrid mode) configuration
     server_parser.add_argument(
         "--navy-cache-path",
         type=str,
         default="/tmp/ucachebench_ssd",
-        help="Path for Navy cache files (hybrid mode only)",
+        help="Path for Navy cache files",
     )
     server_parser.add_argument(
         "--navy-cache-size-mb",
         type=int,
-        default=4096,
-        help="Navy cache size in MB (hybrid mode only)",
+        default=0,
+        help="Navy cache size in MB (0 = DRAM-only, >0 = hybrid mode)",
     )
     server_parser.add_argument(
         "--navy-block-size",
         type=int,
         default=4096,
-        help="Navy block size in bytes (hybrid mode only)",
+        help="Navy block size in bytes",
     )
     server_parser.add_argument(
         "--navy-device-max-write-rate",
         type=int,
         default=0,
-        help="Max Navy write rate MB/s, 0=unlimited (hybrid mode only)",
+        help="Max Navy write rate MB/s (0 = unlimited)",
     )
     server_parser.add_argument(
         "--navy-region-size-mb",
         type=int,
         default=16,
-        help="Navy region size in MB (hybrid mode only)",
+        help="Navy region size in MB",
     )
     server_parser.add_argument(
         "--navy-clean-regions-pool",
         type=int,
         default=4,
-        help="Number of clean regions to maintain (hybrid mode only)",
+        help="Number of clean regions to maintain",
     )
     server_parser.add_argument(
         "--navy-truncate-file",
-        action="store_true",
-        default=True,
-        help="Truncate Navy cache file on startup (hybrid mode only)",
-    )
-    server_parser.add_argument(
-        "--timeout-buffer",
         type=int,
-        default=120,
-        help="extra time the server will wait beyond warmup and test time, "
-        + "in seconds, for the clients to start up",
+        default=1,
+        help="Truncate Navy cache file on startup (set to non-zero to enable)",
+    )
+
+    # Admin server for multi-client coordination
+    server_parser.add_argument(
+        "--admin-port",
+        type=int,
+        default=-1,
+        help="Admin port for multi-client coordination (-1 = auto port+1 when num_clients > 0, 0 = disabled)",
     )
     server_parser.add_argument(
-        "--warmup-time", type=int, default=10, help="warmup time in seconds"
+        "--num-clients",
+        type=int,
+        default=0,
+        help="Number of clients expected to connect (enables admin server when > 0)",
     )
     server_parser.add_argument(
-        "--test-time", type=int, default=60, help="test time in seconds"
+        "--timeout-seconds",
+        type=int,
+        default=600,
+        help="Timeout in seconds for waiting for clients (0 = no timeout)",
     )
+
     server_parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging"
     )
-    server_parser.add_argument("--real", action="store_true", help="for real")
+    server_parser.add_argument(
+        "--real", action="store_true", help="Actually run the command"
+    )
 
-    # Client-side arguments
+    # =========================================================================
+    # Client arguments (aligned with UcacheBenchClient.cpp)
+    # =========================================================================
+
+    # Connection configuration
     client_parser.add_argument(
-        "--server-hostname", type=str, required=True, help="Server hostname"
+        "--server-host",
+        type=str,
+        required=True,
+        help="Server hostname",
     )
     client_parser.add_argument(
-        "--server-port-number", type=int, default=11211, help="Server port"
+        "--server-port",
+        type=int,
+        default=11211,
+        help="Server port",
+    )
+    client_parser.add_argument(
+        "--connection-timeout-ms",
+        type=int,
+        default=1000,
+        help="Connection timeout in milliseconds",
+    )
+    client_parser.add_argument(
+        "--send-timeout-ms",
+        type=int,
+        default=1000,
+        help="Send timeout in milliseconds",
+    )
+    client_parser.add_argument(
+        "--security-mech",
+        type=str,
+        default="plain",
+        help="Security mechanism for mcrouter (plain, tls_to_plain, fizz, etc.)",
+    )
+
+    # Benchmark duration
+    client_parser.add_argument(
+        "--duration-seconds",
+        type=int,
+        default=60,
+        help="Test duration in seconds",
+    )
+    client_parser.add_argument(
+        "--warmup-seconds",
+        type=int,
+        default=10,
+        help="Warmup duration in seconds",
+    )
+
+    # Thread and connection configuration
+    client_parser.add_argument(
+        "--num-proxies",
+        type=int,
+        default=0,
+        help="Number of mcrouter proxy threads (0 = auto-detect)",
     )
     client_parser.add_argument(
         "--num-threads",
         type=int,
         default=0,
-        help="Number of client threads (0 = auto-detect)",
+        help="Number of client worker threads for request generation (0 = auto-detect)",
     )
     client_parser.add_argument(
-        "--num-proxies",
+        "--max-inflight",
+        type=int,
+        default=1,
+        help="Maximum number of concurrent in-flight requests",
+    )
+    client_parser.add_argument(
+        "--additional-fanout",
         type=int,
         default=0,
-        help="Number of mcrouter proxy threads for connection pooling (0 = auto-detect). "
-        "To simulate production-scale connections (e.g., 20K), increase this value. "
-        "Each proxy thread establishes connections to the server as needed.",
+        help="Number of additional connections per server for fanout",
     )
     client_parser.add_argument(
-        "--connections-per-thread",
+        "--enable-random-source-ip",
         type=int,
-        default=10,
-        help="[DEPRECATED - Not currently used] Number of connections per client thread",
+        default=0,
+        help="Enable random source IP addresses for connection fanout (set to non-zero to enable)",
     )
+
+    # Workload configuration
     client_parser.add_argument(
         "--key-count",
         type=int,
@@ -461,16 +671,56 @@ def init_parser() -> argparse.ArgumentParser:
         default=0,
         help="Target QPS (0 = unlimited)",
     )
+
+    # Traffic distribution configuration
     client_parser.add_argument(
-        "--warmup-time", type=int, default=10, help="warmup time in seconds"
+        "--use-distribution",
+        type=int,
+        default=0,
+        help="Use production traffic distribution for key/value sizes (set to non-zero to enable)",
     )
     client_parser.add_argument(
-        "--test-time", type=int, default=60, help="test time in seconds"
+        "--distribution-config",
+        type=str,
+        default="",
+        help="Path to JSON file with traffic distribution config",
     )
+
+    # Zipfian distribution configuration
+    client_parser.add_argument(
+        "--zipfian",
+        type=int,
+        default=0,
+        help="Enable Zipfian key distribution for hot-key access patterns (set to non-zero to enable)",
+    )
+    client_parser.add_argument(
+        "--zipfian-skew",
+        type=float,
+        default=0.99,
+        help="Zipfian skew parameter (0.99 = standard Zipf)",
+    )
+    client_parser.add_argument(
+        "--hot-key-ratio",
+        type=float,
+        default=0.0,
+        help="Fraction of keys that are 'hot' (0.0 = disabled, use pure Zipfian)",
+    )
+
+    # Admin server coordination for multi-client benchmarks
+    client_parser.add_argument(
+        "--admin-port",
+        type=int,
+        default=0,
+        help="Admin server port for multi-client coordination (0 = disabled). "
+        "Uses server_host since admin server runs on same machine as cache server.",
+    )
+
     client_parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging"
     )
-    client_parser.add_argument("--real", action="store_true", help="for real")
+    client_parser.add_argument(
+        "--real", action="store_true", help="Actually run the command"
+    )
 
     # Set default functions
     server_parser.set_defaults(func=run_server)
@@ -488,20 +738,15 @@ def main() -> None:
     client_binary = os.path.join(UCACHE_BENCH_DIR, "client", "ucachebench_client")
 
     if not os.path.exists(server_binary):
-        print(f"Error: Server binary not found at {server_binary}")
-        print(
-            "Please build the benchmark using: buck build //cea/chips/benchpress/benchmarks/ucache_bench/server:ucachebench_server"
-        )
-        exit(1)
+        print(f"Warning: Server binary not found at {server_binary}")
 
     if not os.path.exists(client_binary):
-        print(f"Error: Client binary not found at {client_binary}")
-        print(
-            "Please build the benchmark using: buck build //cea/chips/benchpress/benchmarks/ucache_bench/client:ucachebench_client"
-        )
-        exit(1)
+        print(f"Warning: Client binary not found at {client_binary}")
 
-    args.func(args)
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
