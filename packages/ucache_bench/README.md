@@ -266,7 +266,6 @@ These parameters allow you to fine-tune the CacheLib DRAM cache for production-l
 - `--distribution_config`: Path to traffic distribution JSON file (default: ./traffic_dist.json)
 - `--value_size_min/max`: Value size range in bytes (default: 64-1024)
 - `--get_ratio`: Ratio of GET vs SET operations (default: 0.9)
-- `--qps_target`: Target QPS, 0 for unlimited (default: 0)
 - `--connection_timeout_ms`: Connection timeout in milliseconds (default: 1000)
 - `--send_timeout_ms`: Send timeout in milliseconds (default: 1000)
 - `--verbose`: Enable verbose logging
