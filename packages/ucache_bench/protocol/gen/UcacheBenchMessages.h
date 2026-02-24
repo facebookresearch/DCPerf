@@ -176,6 +176,32 @@ class UcbDeleteReply : public carbon::ReplyCommon, public facebook::ucachebench:
 } // namespace ucachebench
 } // namespace facebook
 
+namespace carbon {
+template <>
+struct IsCarbonStruct<::facebook::ucachebench::UcacheBenchRequestCommon> : std::true_type {};
+
+template <>
+struct IsCarbonStruct<::facebook::ucachebench::UcacheBenchReplyCommon> : std::true_type {};
+
+template <>
+struct IsCarbonStruct<::facebook::ucachebench::UcbGetRequest> : std::true_type {};
+
+template <>
+struct IsCarbonStruct<::facebook::ucachebench::UcbGetReply> : std::true_type {};
+
+template <>
+struct IsCarbonStruct<::facebook::ucachebench::UcbSetRequest> : std::true_type {};
+
+template <>
+struct IsCarbonStruct<::facebook::ucachebench::UcbSetReply> : std::true_type {};
+
+template <>
+struct IsCarbonStruct<::facebook::ucachebench::UcbDeleteRequest> : std::true_type {};
+
+template <>
+struct IsCarbonStruct<::facebook::ucachebench::UcbDeleteReply> : std::true_type {};
+} // namespace carbon
+
 namespace facebook {
 namespace ucachebench {
 namespace thrift {
