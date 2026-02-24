@@ -1,0 +1,64 @@
+{
+  "platform": "t1_trn",
+  "display_name": "AMD Turin (Yosemite V4 / Sentinel Dome)",
+  "vr_efficiency": 0.89,
+  "num_slots_shared": 8,
+  "components": {
+    "server": {
+      "sensor_pattern": "CALIBRATED_MEDUSA_MB\\d+_HSC_12V_INPUT_PWR_W",
+      "aggregation": "sum"
+    },
+    "cpu": {
+      "sensor_pattern": "SENTINEL_DOME_SLOT_\\d+_MB_CPU_PWR_W",
+      "aggregation": "sum"
+    },
+    "core": {
+      "sensor_pattern": "SENTINEL_DOME_SLOT_\\d+_MB_VR_CPU.*_PWR_W",
+      "aggregation": "sum"
+    },
+    "memory": {
+      "sensor_pattern": "SENTINEL_DOME_SLOT_\\d+_DIMM_A\\d+_PWR_W",
+      "aggregation": "sum"
+    },
+    "io": {
+      "sensor_pattern": "SENTINEL_DOME_SLOT_\\d+_MB_VR_PVDD.*_PWR_W",
+      "aggregation": "sum"
+    },
+    "soc_non_core": {
+      "sensor_pattern": "SENTINEL_DOME_SLOT_\\d+_MB_VR_SOC.*_PWR_W",
+      "aggregation": "sum"
+    },
+    "fan": {
+      "sensor_pattern": "VIRTUAL_FANBOARD\\d+_FAN\\d+_48V_PWR_W",
+      "aggregation": "sum",
+      "divisor": 8
+    },
+    "nic": {
+      "sensor_pattern": "SPIDER_PMON_NIC\\d+_12V_PWR_W",
+      "aggregation": "sum",
+      "divisor": 8
+    },
+    "motherboard": {
+      "sensor_pattern": "CALIBRATED_MEDUSA_HSC\\d+_48V_INPUT_PWR_W",
+      "aggregation": "sum",
+      "divisor": 8
+    },
+    "cxl_memory": {
+      "sensor_pattern": "WAILUA_FALLS_SLOT_WF_VR_ASIC.*_PWR_W",
+      "aggregation": "sum"
+    },
+    "retimer": {
+      "sensor_pattern": "SENTINEL_DOME_SLOT_\\d+_MB_.*_X8_RTM_.*_PWR_W",
+      "aggregation": "sum"
+    },
+    "boot_drive": {
+      "sensor_pattern": "SENTINEL_DOME_SLOT_\\d+_MB_PMON_E1S_BOOT.*PWR_W",
+      "aggregation": "sum"
+    },
+    "data_drive": {
+      "sensor_pattern": "SENTINEL_DOME_SLOT_\\d+_MB_.*_E1S_DATA_.*_PWR_W",
+      "aggregation": "sum"
+    }
+  },
+  "derived_metrics": {}
+}

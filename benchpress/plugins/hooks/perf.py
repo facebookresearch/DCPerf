@@ -41,7 +41,7 @@ DEFAULT_OPTIONS = {
     "netstat": {"interval": 5, "additional_counters": []},
     "memstat": {"interval": 5, "additional_counters": []},
     "topdown": {"interval": 5},
-    "power": {"interval": 1},
+    "power": {"interval": 1, "post_process": True},
     "vmstat": {"interval": 5},
 }
 

@@ -1,0 +1,37 @@
+{
+  "platform": "t11_grc_arm",
+  "display_name": "NVIDIA Grace (Java Island)",
+  "vr_efficiency": 0.89,
+  "components": {
+    "server": {
+      "sensors": ["MB_HSC_INPUT_PWR_W"],
+      "aggregation": "sum"
+    },
+    "cpu": {
+      "sensors": ["MB_CPU_PWR_W"],
+      "aggregation": "sum"
+    },
+    "boot_drive": {
+      "sensors": ["MB_E1S_SSD_PWR_W"],
+      "aggregation": "sum"
+    },
+    "fan": {
+      "sensor_pattern": "BB_FAN_PWR_W",
+      "aggregation": "sum",
+      "divisor": 2
+    },
+    "nic": {
+      "sensor_pattern": "BB_NIC_PWR_W",
+      "aggregation": "sum",
+      "divisor": 2
+    },
+    "motherboard": {
+      "sensor_pattern": "BB_MEDUSA_PWR_W",
+      "aggregation": "sum",
+      "divisor": 4
+    }
+  },
+  "derived_metrics": {
+    "memory": "(server - cpu) * vr_efficiency"
+  }
+}
