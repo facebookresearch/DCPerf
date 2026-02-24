@@ -28,6 +28,7 @@
 #include <thread>
 #include <vector>
 
+#include <folly/Benchmark.h>
 #include <folly/FileUtil.h>
 #include <folly/Format.h>
 #include <folly/Portability.h>
@@ -78,6 +79,41 @@ std::string formatByteSize(size_t bytes) {
     oss << (bytes / GB) << " GB";
   }
 
+  return oss.str();
+}
+
+/**
+ * Formats a duration into a human-readable string (s, ms, us, ns)
+ */
+std::string formatDuration(std::chrono::nanoseconds duration) {
+  using seconds = std::chrono::duration<double, std::ratio<1>>;
+  using milliseconds = std::chrono::duration<double, std::milli>;
+  using microseconds = std::chrono::duration<double, std::micro>;
+  using nanoseconds = std::chrono::duration<double, std::nano>;
+  std::ostringstream oss;
+  // Handle negative and zero durations
+  if (duration.count() == 0) {
+    return "0 ns";
+  }
+  if (duration.count() < 0) {
+    oss << "-";
+    duration = -duration;
+  }
+
+  // Choose unit and precision
+  if (duration.count() >= 1'000'000'000) {
+    oss << std::fixed << std::setprecision(2) << seconds(duration).count()
+        << " s";
+  } else if (duration.count() >= 1'000'000) {
+    oss << std::fixed << std::setprecision(2) << milliseconds(duration).count()
+        << " ms";
+  } else if (duration.count() >= 1'000) {
+    oss << std::fixed << std::setprecision(2) << microseconds(duration).count()
+        << " us";
+  } else {
+    oss << std::fixed << std::setprecision(2) << nanoseconds(duration).count()
+        << " ns";
+  }
   return oss.str();
 }
 
@@ -413,6 +449,8 @@ class WorkloadGenerator {
     size_t totalConfigurations{0};
     size_t totalInstances{0};
     size_t totalMemoryBytes{0};
+    size_t totalIOBufChainElements{0};
+    double averageIOBufChainElements{0};
   };
 
   /**
@@ -466,6 +504,7 @@ class WorkloadGenerator {
         // Calculate and add the size of this IOBuf chain
         stats.totalMemoryBytes += calculateIOBufSize(*instance.buf);
         stats.totalInstances++;
+        stats.totalIOBufChainElements += instance.buf->countChainElements();
 
         instances.push_back(std::move(instance));
       }
@@ -473,6 +512,10 @@ class WorkloadGenerator {
       result.push_back(std::move(instances));
     }
 
+    // Calculate the average number of IOBuf chain elements
+    stats.averageIOBufChainElements =
+        static_cast<double>(stats.totalIOBufChainElements) /
+        static_cast<double>(stats.totalInstances);
     return stats;
   }
 
@@ -487,6 +530,10 @@ class WorkloadGenerator {
               << std::endl;
     std::cout << "- " << stats.totalInstances << " total IOBuf instances ("
               << numCopiesPerConfig << " copies each)" << std::endl;
+    std::cout << "- " << stats.totalIOBufChainElements
+              << " total IOBuf chain elements (Average length of " << std::fixed
+              << std::setprecision(3) << stats.averageIOBufChainElements << ")"
+              << std::endl;
     std::cout << "- " << util::formatByteSize(stats.totalMemoryBytes)
               << " total memory usage" << std::endl;
   }
@@ -516,7 +563,11 @@ class DeserBenchmark {
     Duration pregenerationTime;
     Duration benchmarkTime;
     uint64_t totalOperations;
+    uint64_t totalDataCopied;
+    std::chrono::nanoseconds cpuTimePerOperation;
     double operationsPerSecond;
+    double dataCopiedPerSecond;
+    double dataCopiedPerOperation;
   };
 
   DeserBenchmark(
@@ -561,6 +612,15 @@ class DeserBenchmark {
     std::cout << "Total Operations: " << results.totalOperations << std::endl;
     std::cout << "Millions of Operations per Second: "
               << results.operationsPerSecond << " Mops/sec" << std::endl;
+    std::cout << "CPU Time per Operation: "
+              << util::formatDuration(results.cpuTimePerOperation) << "/op"
+              << std::endl;
+    std::cout << "Data Copied per operation: "
+              << util::formatByteSize(results.dataCopiedPerOperation) << "/op"
+              << std::endl;
+    std::cout << "Data Copied per second: "
+              << util::formatByteSize(results.dataCopiedPerSecond) << "/sec"
+              << std::endl;
   }
 
  private:
@@ -585,6 +645,7 @@ class DeserBenchmark {
     // Prepare for benchmark execution phase
     bool shouldStop(false);
     std::atomic<uint64_t> totalOps(0);
+    std::atomic<uint64_t> totalBytes(0);
     std::vector<std::thread> threads;
     threads.reserve(config_.numThreads);
 
@@ -603,7 +664,8 @@ class DeserBenchmark {
           std::ref(iobufSampler),
           std::ref(pregeneratedIOBufs),
           std::ref(shouldStop),
-          std::ref(totalOps));
+          std::ref(totalOps),
+          std::ref(totalBytes));
     }
 
     // Sleep for the specified duration
@@ -623,9 +685,17 @@ class DeserBenchmark {
 
     // Calculate results
     results.totalOperations = totalOps.load();
+    results.totalDataCopied = totalBytes.load();
     double durationSeconds = results.benchmarkTime.count() / 1000.0;
     results.operationsPerSecond =
         results.totalOperations / 1000000 / durationSeconds;
+    results.cpuTimePerOperation =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            results.benchmarkTime) *
+        config_.numThreads / results.totalOperations;
+    results.dataCopiedPerSecond = results.totalDataCopied / durationSeconds;
+    results.dataCopiedPerOperation =
+        results.totalDataCopied / results.totalOperations;
   }
 
   /**
@@ -642,11 +712,13 @@ class DeserBenchmark {
       const WorkloadGenerator::IOBufSampler& iobufSampler,
       const std::vector<std::vector<IOBufInstance>>& pregeneratedIOBufs,
       bool& shouldStop,
-      std::atomic<uint64_t>& totalOps) const {
+      std::atomic<uint64_t>& totalOps,
+      std::atomic<uint64_t>& totalBytes) const {
     // Random number generator with thread ID as seed
     std::mt19937 rng(threadId);
 
     uint64_t localOps = 0;
+    uint64_t localBytes = 0;
     constexpr uint64_t batchSize = 10000;
 
     while (!shouldStop) {
@@ -666,20 +738,17 @@ class DeserBenchmark {
       const auto& instance = instances[instanceIdx];
 
       // Call loadTensor with the pregenerated IOBuf
-      volatile auto result =
+      folly::IOBuf result =
           loadTensor(*instance.buf, instance.headroom, instance.tailroom);
 
+      folly::doNotOptimizeAway(result);
       localOps++;
-
-      // Update atomic counter periodically to reduce contention
-      if (localOps % batchSize == 0) {
-        totalOps.fetch_add(batchSize, std::memory_order_relaxed);
-        localOps = 0;
-      }
+      localBytes += result.length();
     }
 
-    // Update atomic counter with remaining operations
+    // Update totals
     totalOps.fetch_add(localOps, std::memory_order_relaxed);
+    totalBytes.fetch_add(localBytes, std::memory_order_relaxed);
   }
 
   const std::vector<IOBufChainDesc>& distribution_;
@@ -697,9 +766,9 @@ int main(int argc, char* argv[]) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   if (FLAGS_distribution_file.empty()) {
-    std::cerr
-        << "Error: Distribution file path is required. Use --distribution_file=<path>"
-        << std::endl;
+    std::cerr << "Error: Distribution file path is required. Use "
+                 "--distribution_file=<path>"
+              << std::endl;
     return 1;
   }
 
