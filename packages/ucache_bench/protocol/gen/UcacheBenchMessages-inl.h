@@ -116,7 +116,7 @@ void UcbGetRequest::serialize(Writer&& writer) const {
 template <class V>
 void visitFields(UcbGetRequest& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
-    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchRequestCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -132,7 +132,7 @@ void visitFields(UcbGetRequest& self, V&& v) {
 template <class V>
 void visitFields(const UcbGetRequest& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
-    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchRequestCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -177,7 +177,7 @@ void UcbGetReply::serialize(Writer&& writer) const {
 template <class V>
 void visitFields(UcbGetReply& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
-    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchReplyCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -205,7 +205,7 @@ void visitFields(UcbGetReply& self, V&& v) {
 template <class V>
 void visitFields(const UcbGetReply& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
-    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchReplyCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -260,7 +260,7 @@ void UcbSetRequest::serialize(Writer&& writer) const {
 template <class V>
 void visitFields(UcbSetRequest& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
-    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchRequestCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -282,7 +282,7 @@ void visitFields(UcbSetRequest& self, V&& v) {
 template <class V>
 void visitFields(const UcbSetRequest& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
-    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchRequestCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -332,7 +332,7 @@ void UcbSetReply::serialize(Writer&& writer) const {
 template <class V>
 void visitFields(UcbSetReply& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
-    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchReplyCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -357,7 +357,7 @@ void visitFields(UcbSetReply& self, V&& v) {
 template <class V>
 void visitFields(const UcbSetReply& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
-    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchReplyCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -407,7 +407,7 @@ void UcbDeleteRequest::serialize(Writer&& writer) const {
 template <class V>
 void visitFields(UcbDeleteRequest& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
-    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchRequestCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -423,7 +423,7 @@ void visitFields(UcbDeleteRequest& self, V&& v) {
 template <class V>
 void visitFields(const UcbDeleteRequest& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchRequestCommon", *self.ucacheBenchRequestCommon_ref())) {
-    (*self.ucacheBenchRequestCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchRequestCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -466,7 +466,7 @@ void UcbDeleteReply::serialize(Writer&& writer) const {
 template <class V>
 void visitFields(UcbDeleteReply& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
-    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchReplyCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
@@ -488,7 +488,7 @@ void visitFields(UcbDeleteReply& self, V&& v) {
 template <class V>
 void visitFields(const UcbDeleteReply& self, V&& v) {
   if (v.enterMixin(1, "UcacheBenchReplyCommon", *self.ucacheBenchReplyCommon_ref())) {
-    (*self.ucacheBenchReplyCommon_ref()).visitFields(std::forward<V>(v));
+    visitFields(*self.ucacheBenchReplyCommon_ref(), std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
