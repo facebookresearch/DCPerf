@@ -24,61 +24,16 @@ namespace cpp2 facebook.ucachebench.thrift
 namespace py3 facebook.ucachebench.thrift
 namespace hack ucachebench
 
-@thrift.DeprecatedUnvalidatedAnnotations{
-  items = {
-    "cpp.methods": "
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
-  template <class Writer>
-  void serialize(Writer&& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-"
-  },
-}
 struct UcacheBenchRequestCommon {
   1: optional i64 productId
   2: optional string bucketId
-}
-@thrift.DeprecatedUnvalidatedAnnotations{
-  items = {
-    "cpp.methods": "
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
-  template <class Writer>
-  void serialize(Writer&& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-"
-  },
 }
 struct UcacheBenchReplyCommon {
   1: carbon.ui32 replySourceBitMask
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
   items = {
-    "cpp.methods": "
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
-  template <class Writer>
-  void serialize(Writer&& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-",
-"cpp.virtual": "1"
-
+    "cpp.virtual": "1"
   },
 }
 struct UcbGetRequest {
@@ -89,20 +44,7 @@ struct UcbGetRequest {
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
   items = {
-    "cpp.methods": "
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
-  template <class Writer>
-  void serialize(Writer&& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-",
-"cpp.virtual": "1"
-
+    "cpp.virtual": "1"
   },
 }
 struct UcbGetReply {
@@ -117,20 +59,7 @@ struct UcbGetReply {
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
   items = {
-    "cpp.methods": "
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
-  template <class Writer>
-  void serialize(Writer&& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-",
-"cpp.virtual": "1"
-
+    "cpp.virtual": "1"
   },
 }
 struct UcbSetRequest {
@@ -143,20 +72,7 @@ struct UcbSetRequest {
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
   items = {
-    "cpp.methods": "
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
-  template <class Writer>
-  void serialize(Writer&& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-",
-"cpp.virtual": "1"
-
+    "cpp.virtual": "1"
   },
 }
 struct UcbSetReply {
@@ -170,20 +86,7 @@ struct UcbSetReply {
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
   items = {
-    "cpp.methods": "
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
-  template <class Writer>
-  void serialize(Writer&& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-",
-"cpp.virtual": "1"
-
+    "cpp.virtual": "1"
   },
 }
 struct UcbDeleteRequest {
@@ -194,20 +97,7 @@ struct UcbDeleteRequest {
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
   items = {
-    "cpp.methods": "
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
-  template <class Writer>
-  void serialize(Writer&& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-",
-"cpp.virtual": "1"
-
+    "cpp.virtual": "1"
   },
 }
 struct UcbDeleteReply {
