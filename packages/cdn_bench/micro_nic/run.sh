@@ -253,10 +253,15 @@ build_numactl_prefix() {
 }
 
 # Build iperf3 command for a single instance
+# $1: server IP (empty for server mode)
+# $2: port number
+# $3: title prefix
+# $4: CPU affinity for this specific instance (optional)
 build_single_iperf_cmd() {
     local server="$1"
     local port="$2"
     local title="$3"
+    local instance_affinity="$4"
     local cmd="iperf3"
 
     if [[ "$MODE" == "server" ]]; then
@@ -265,6 +270,8 @@ build_single_iperf_cmd() {
         cmd="$cmd -i $INTERVAL"
         cmd="$cmd -1"  # Always run in one-off mode for dc perf metrics collection
         [[ -n "$VERBOSE" ]] && cmd="$cmd $VERBOSE"
+        # Apply per-instance CPU affinity if provided
+        [[ -n "$instance_affinity" ]] && cmd="$cmd -A $instance_affinity"
     else
         cmd="$cmd -c $server"
         cmd="$cmd -p $port"
@@ -278,7 +285,12 @@ build_single_iperf_cmd() {
         [[ -n "$BUFFER_LENGTH" ]] && cmd="$cmd -l $BUFFER_LENGTH"
         [[ -n "$WINDOW_SIZE" ]] && cmd="$cmd -w $WINDOW_SIZE"
         [[ -n "$ZERO_COPY" ]] && cmd="$cmd $ZERO_COPY"
-        [[ -n "$CPU_AFFINITY" ]] && cmd="$cmd -A $CPU_AFFINITY"
+        # Apply per-instance CPU affinity if provided, otherwise use global
+        if [[ -n "$instance_affinity" ]]; then
+            cmd="$cmd -A $instance_affinity"
+        elif [[ -n "$CPU_AFFINITY" ]]; then
+            cmd="$cmd -A $CPU_AFFINITY"
+        fi
         [[ -n "$VERBOSE" ]] && cmd="$cmd $VERBOSE"
         [[ -n "$title" ]] && cmd="$cmd -T $title"
         [[ -n "$FORMAT" ]] && cmd="$cmd -f $FORMAT"
@@ -292,12 +304,14 @@ build_full_command() {
     local numactl_prefix
     numactl_prefix=$(build_numactl_prefix)
 
-    # Parse comma-separated servers and ports
+    # Parse comma-separated servers, ports, and CPU affinities
     IFS=',' read -ra SERVERS <<< "$SERVER_IP"
     IFS=',' read -ra PORTS <<< "$PORT"
+    IFS=',' read -ra CPU_AFFINITIES <<< "$CPU_AFFINITY"
 
     local num_servers=${#SERVERS[@]}
     local num_ports=${#PORTS[@]}
+    local num_affinities=${#CPU_AFFINITIES[@]}
 
     # If only one port specified, use it for all servers
     if [[ $num_ports -eq 1 && $num_servers -gt 1 ]]; then
@@ -312,15 +326,20 @@ build_full_command() {
     # Server mode: may need multiple listeners
     if [[ "$MODE" == "server" ]]; then
         if [[ $num_ports -eq 1 ]]; then
+            local instance_affinity=""
+            [[ $num_affinities -ge 1 ]] && instance_affinity="${CPU_AFFINITIES[0]}"
             local cmd
-            cmd=$(build_single_iperf_cmd "" "${PORTS[0]}" "")
+            cmd=$(build_single_iperf_cmd "" "${PORTS[0]}" "" "$instance_affinity")
             [[ -n "$numactl_prefix" ]] && cmd="$numactl_prefix $cmd"
             echo "$cmd"
         else
             local full_cmd=""
             for ((i=0; i<num_ports; i++)); do
+                # Get per-instance CPU affinity if available
+                local instance_affinity=""
+                [[ $i -lt $num_affinities ]] && instance_affinity="${CPU_AFFINITIES[$i]}"
                 local cmd
-                cmd=$(build_single_iperf_cmd "" "${PORTS[$i]}" "")
+                cmd=$(build_single_iperf_cmd "" "${PORTS[$i]}" "" "$instance_affinity")
                 [[ -n "$numactl_prefix" ]] && cmd="$numactl_prefix $cmd"
                 if [[ $i -lt $((num_ports - 1)) ]]; then
                     full_cmd="$full_cmd$cmd & "
@@ -335,8 +354,10 @@ build_full_command() {
 
     # Client mode: may connect to multiple servers
     if [[ $num_servers -eq 1 ]]; then
+        local instance_affinity=""
+        [[ $num_affinities -ge 1 ]] && instance_affinity="${CPU_AFFINITIES[0]}"
         local cmd
-        cmd=$(build_single_iperf_cmd "${SERVERS[0]}" "${PORTS[0]}" "$TITLE")
+        cmd=$(build_single_iperf_cmd "${SERVERS[0]}" "${PORTS[0]}" "$TITLE" "$instance_affinity")
         [[ -n "$numactl_prefix" ]] && cmd="$numactl_prefix $cmd"
         echo "$cmd"
     else
@@ -345,8 +366,11 @@ build_full_command() {
             local port="${PORTS[$i]:-${PORTS[0]}}"
             local title_suffix=""
             [[ -n "$TITLE" ]] && title_suffix="${TITLE}${i}" || title_suffix="s$((i+1))"
+            # Get per-instance CPU affinity if available
+            local instance_affinity=""
+            [[ $i -lt $num_affinities ]] && instance_affinity="${CPU_AFFINITIES[$i]}"
             local cmd
-            cmd=$(build_single_iperf_cmd "${SERVERS[$i]}" "$port" "$title_suffix")
+            cmd=$(build_single_iperf_cmd "${SERVERS[$i]}" "$port" "$title_suffix" "$instance_affinity")
             [[ -n "$numactl_prefix" ]] && cmd="$numactl_prefix $cmd"
             if [[ $i -lt $((num_servers - 1)) ]]; then
                 full_cmd="$full_cmd$cmd & "
