@@ -230,7 +230,7 @@ int main(int argc, char* argv[]) {
       "adcs %1, %1, xzr \n\t"
       "adcs %1, %1, xzr \n\t"
       "adcs %1, %1, xzr \n\t"
-      "b.ne 1b \n\t" // Branch if loop counter != 0
+      "cbnz %0, 1b \n\t" // Branch if loop counter != 0 (flag-independent)
       : "+r"(loop_count), "+r"(start_val) // Inputs/Outputs
       :
       : "cc", "memory" // Clobbers
