@@ -197,11 +197,50 @@ The server runs in one-off mode (`-1`) by default and should exit after the clie
 
 ### Poor Performance
 
-1. **Check NUMA alignment**: Ensure `-N` and `-M` match the NIC's NUMA node locality
-2. **Increase parallel streams**: Use `-P 32` for NICs which scale at higher parallelization
-3. **Increase port count**: Coma separated `server_ip` to reach NIC saturation limits
-4. **Check for CPU throttling**: `cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`
-5. **Verify MTU settings**: `ip link show eth0`
+1. **Use CPU pinning**:
+2. **Check NUMA alignment**: Ensure `-N` and `-M` match the NIC's NUMA node locality
+3. **Increase parallel streams**: Use `-P 32` for NICs which scale at higher parallelization
+4. **Increase port count**: Comma-separated `server_ip` to reach NIC saturation limits
+5. **Check for CPU throttling**: `cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`
+6. **Verify MTU settings**: `ip link show eth0`
+
+---
+### CPU Pinning Matters
+
+Single-core context switching overhead is the primary bottleneck when running multiple iperf3 instances without explicit CPU affinity. By pinning each iperf3 instance to a dedicated CPU core, we eliminate this overhead and achieve near line-rate throughput.
+
+### Per-Instance CPU Affinity
+
+The `-A` flag in `extra_args` supports **comma-separated CPU cores** that are automatically distributed to each iperf3 instance. This works for **both server and client modes**. For example, `-A 0,10,20,30,40,50,60,70` assigns:
+- Instance 1 (port 5201) → CPU 0
+- Instance 2 (port 5202) → CPU 10
+- Instance 3 (port 5203) → CPU 20
+- Instance 4 (port 5204) → CPU 30
+- Instance 5 (port 5205) → CPU 40
+- Instance 6 (port 5206) → CPU 50
+- Instance 7 (port 5207) → CPU 60
+- Instance 8 (port 5208) → CPU 70
+
+The number of CPU affinities provided should match the number of ports/instances. If fewer affinities are provided than instances, only the first N instances will have CPU pinning applied.
+
+### Recommended Configuration for 100G NIC Saturation
+
+**Server (Machine Under Test):**
+```bash
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201,5202,5203,5204,5205,5206,5207,5208","interval":"10","extra_args":"-A 0,10,20,30,40,50,60,70"}'
+```
+
+**Client (Traffic Generator):**
+```bash
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>","port":"5201,5202,5203,5204,5205,5206,5207,5208","duration":"60","parallel":"1","interval":"10","extra_args":"-f g -A 0,10,20,30,40,50,60,70"}'
+```
+
+### Choosing CPU Cores
+
+1. **Check NIC's NUMA node**: `cat /sys/class/net/eth0/device/numa_node`
+2. **Check NUMA topology**: `numactl --hardware`
+3. **Spread cores**: Use cores spread across the physical cores (e.g., 0, 10, 20, 30...) to avoid SMT sibling contention
+4. **Match NIC's NUMA node**: For multi-socket systems, use cores on the same NUMA node as the NIC
 
 ### iperf3 Not Found
 
