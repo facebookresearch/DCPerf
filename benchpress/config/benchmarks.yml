@@ -136,7 +136,7 @@ spark_standalone:
   install_script: ./packages/spark_standalone/install_spark_standalone.sh
   cleanup_script: ./packages/spark_standalone/cleanup_spark_standalone.sh
   install_markers:
-    - ./benchmarks/spark_standalone/spark-4.0.1-bin-hadoop3/bin/spark-sql
+    - ./benchmarks/spark_standalone/spark-4.0.2-bin-hadoop3/bin/spark-sql
     - ./benchmarks/spark_standalone/scripts/run_perf_common.py
     - /usr/lib/jvm/graalvm-community-openjdk-17.0.9+9.1/bin/java
   path: ./packages/spark_standalone/templates/runner.py

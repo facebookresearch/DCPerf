@@ -90,7 +90,6 @@ def init_configs(aggressive=0, use_ipv4=False):
             "-XX:+UnlockExperimentalVMOptions",
             "-XX:ParallelGCThreads=4",
             "-XX:+UseParallelGC",
-            "-XX:+UseParallelOldGC",
             "-XX:+PerfDisableSharedMem",
         ],
         "spark.memory.fraction": "0.2",

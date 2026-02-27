@@ -24,24 +24,27 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y git-lfs fio
 fi
-wget https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-17.0.9/graalvm-community-jdk-17.0.9_linux-${GRAALVM_ARCH}_bin.tar.gz
+if [ ! -f graalvm-community-jdk-17.0.9_linux-${GRAALVM_ARCH}_bin.tar.gz ]; then
+  wget https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-17.0.9/graalvm-community-jdk-17.0.9_linux-${GRAALVM_ARCH}_bin.tar.gz
+fi
 mkdir -p /usr/lib/jvm/
 tar -xzf graalvm-community-jdk-17.0.9_linux-${GRAALVM_ARCH}_bin.tar.gz -C /usr/lib/jvm/
 
-# copy over directory
-if [ ! -d "${OUT}/scripts" ]; then
+# sync scripts and settings; use rsync to skip unchanged files when available
+if command -v rsync &>/dev/null; then
+  rsync -a "${TEMPLATES_DIR}/proj_root/scripts" "${OUT}/"
+  rsync -a "${TEMPLATES_DIR}/proj_root/settings" "${OUT}/"
+else
   cp -r "${TEMPLATES_DIR}/proj_root/scripts" "${OUT}/"
-fi
-if [ ! -d "${OUT}/settings" ]; then
   cp -r "${TEMPLATES_DIR}/proj_root/settings" "${OUT}/"
 fi
 
 # download spark
 pushd "${OUT}" || exit 1
-if [ ! -f spark-4.0.1-bin-hadoop3.tgz ]; then
-  wget https://archive.apache.org/dist/spark/spark-4.0.1/spark-4.0.1-bin-hadoop3.tgz
+if [ ! -f spark-4.0.2-bin-hadoop3.tgz ]; then
+  wget https://dlcdn.apache.org/spark/spark-4.0.2/spark-4.0.2-bin-hadoop3.tgz
 fi
-tar xzf spark-4.0.1-bin-hadoop3.tgz
+tar xzf spark-4.0.2-bin-hadoop3.tgz
 popd || exit 1
 
 # create sub directories
