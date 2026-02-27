@@ -213,9 +213,14 @@ void UcacheBenchAdminServer::serverLoop() {
       continue;
     }
 
-    // Set receive timeout on client socket to prevent indefinite blocking
+    // Set receive timeout on client socket.
+    // Must be long enough to cover warmup + benchmark phases, since the client
+    // won't send the next command (WARMUP_DONE / BENCHMARK_DONE) until its
+    // current phase finishes. A too-short timeout causes recv() to return -1,
+    // which handleClient() interprets as a closed connection, dropping the
+    // socket before the client can report phase completion.
     struct timeval tv;
-    tv.tv_sec = 5;
+    tv.tv_sec = timeoutSeconds_ > 0 ? timeoutSeconds_ : 7200;
     tv.tv_usec = 0;
     if (setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) <
         0) {
