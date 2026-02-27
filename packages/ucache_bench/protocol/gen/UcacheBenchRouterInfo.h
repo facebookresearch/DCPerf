@@ -14,6 +14,8 @@
  */
 #pragma once
 
+#include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/UcacheBenchRouterInfoFwd.h"
+
 #include <chrono>
 #include <functional>
 #include <unordered_map>
@@ -53,27 +55,6 @@ class ProxyBase;
 
 namespace facebook {
 namespace ucachebench {
-
-namespace detail {
-
-using UcacheBenchRoutableRequests = carbon::List<
-    UcbDeleteRequest,
-    UcbGetRequest,
-    UcbSetRequest>;
-using UcacheBenchRoutableReplies = carbon::List<
-    UcbDeleteReply,
-    UcbGetReply,
-    UcbSetReply>;
-using UcacheBenchAllRequests = carbon::List<
-    UcbDeleteRequest,
-    UcbGetRequest,
-    UcbSetRequest,
-    memcache::McExecRequest,
-    memcache::McQuitRequest,
-    memcache::McShutdownRequest,
-    memcache::McStatsRequest,
-    memcache::McVersionRequest>;
-} // namespace detail
 
 struct UcacheBenchRouterInfo {
   using RouteHandleIf = UcacheBenchRouteHandleIf;
