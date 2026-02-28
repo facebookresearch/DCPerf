@@ -10,8 +10,11 @@
 #include <cachelib/allocator/CacheAllocator.h>
 #include <folly/futures/Future.h>
 #include <atomic>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #ifdef OSS_BUILD
 #include "UcacheBenchMessages.h"
 #else
@@ -126,6 +129,7 @@ struct UcacheBenchConfig {
 class UcacheBenchServer {
  public:
   explicit UcacheBenchServer(const UcacheBenchConfig& config);
+  ~UcacheBenchServer();
 
   // Request handlers using Carbon protocol
   folly::SemiFuture<UcbGetReply> processUcbGet(const UcbGetRequest& req);
@@ -163,6 +167,10 @@ class UcacheBenchServer {
   // Print final results in parseable format for benchpress
   void printFinalResults(double benchmarkDurationSec) const;
 
+  // Periodic stats reporting
+  void startPeriodicStats(uint32_t intervalSec);
+  void stopPeriodicStats();
+
  private:
   void setupCacheLib();
 
@@ -170,6 +178,9 @@ class UcacheBenchServer {
   void recordGet(bool hit);
   void recordSet();
   void recordDelete();
+
+  // Periodic stats thread function
+  void periodicStatsLoop(uint32_t intervalSec);
 
   UcacheBenchConfig config_;
   std::unique_ptr<CacheAllocator> cache_;
@@ -179,6 +190,12 @@ class UcacheBenchServer {
   std::atomic<TrackingPhase> currentPhase_{TrackingPhase::NONE};
   PhaseMetrics warmupMetrics_;
   PhaseMetrics benchmarkMetrics_;
+
+  // Periodic stats thread
+  std::thread statsThread_;
+  std::atomic<bool> statsRunning_{false};
+  std::mutex statsMutex_;
+  std::condition_variable statsCv_;
 };
 
 } // namespace ucachebench

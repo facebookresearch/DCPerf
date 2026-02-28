@@ -39,6 +39,10 @@ DEFINE_uint32(
     600,
     "Timeout in seconds for waiting for clients (0 = no timeout)");
 DEFINE_bool(verbose, false, "Enable verbose logging");
+DEFINE_uint32(
+    stats_interval_seconds,
+    10,
+    "Periodic stats reporting interval in seconds during warmup/benchmark (0 = disable)");
 
 // CacheLib configuration flags
 DEFINE_uint64(
@@ -376,6 +380,9 @@ int main(int argc, char** argv) {
       });
 
       adminServer->start();
+
+      // Start periodic server-side stats reporting
+      server->startPeriodicStats(FLAGS_stats_interval_seconds);
     }
 
     // If admin server is enabled, wait for it to complete
@@ -385,6 +392,8 @@ int main(int argc, char** argv) {
       if (!completed) {
         printf("Admin server timed out or failed\n");
       }
+      // Stop periodic stats before printing final results
+      server->stopPeriodicStats();
       // Stop the admin server
       adminServer->stop();
     } else {

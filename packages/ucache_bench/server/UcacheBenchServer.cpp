@@ -9,6 +9,7 @@
 
 #include <folly/Format.h>
 #include <folly/portability/GFlags.h>
+#include <chrono>
 
 #include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
@@ -22,6 +23,10 @@ namespace ucachebench {
 UcacheBenchServer::UcacheBenchServer(const UcacheBenchConfig& config)
     : config_(config) {
   setupCacheLib();
+}
+
+UcacheBenchServer::~UcacheBenchServer() {
+  stopPeriodicStats();
 }
 
 void UcacheBenchServer::setupCacheLib() {
@@ -473,6 +478,101 @@ void UcacheBenchServer::printFinalResults(double benchmarkDurationSec) const {
     printf("  SET requests: %lu\n", warmup.setRequests.load());
     printf("  Total ops:    %lu\n", warmupTotalOps);
     printf("\n");
+  }
+}
+
+void UcacheBenchServer::startPeriodicStats(uint32_t intervalSec) {
+  if (intervalSec == 0) {
+    return;
+  }
+  statsRunning_.store(true);
+  statsThread_ =
+      std::thread([this, intervalSec]() { periodicStatsLoop(intervalSec); });
+}
+
+void UcacheBenchServer::stopPeriodicStats() {
+  if (statsRunning_.load()) {
+    statsRunning_.store(false);
+    statsCv_.notify_all();
+    if (statsThread_.joinable()) {
+      statsThread_.join();
+    }
+  }
+}
+
+void UcacheBenchServer::periodicStatsLoop(uint32_t intervalSec) {
+  // Previous snapshot for computing interval QPS
+  uint64_t prevTotalOps = 0;
+  auto prevTime = std::chrono::steady_clock::now();
+  auto phaseStartTime = prevTime;
+  TrackingPhase prevPhase = TrackingPhase::NONE;
+
+  while (statsRunning_.load()) {
+    {
+      std::unique_lock<std::mutex> lock(statsMutex_);
+      statsCv_.wait_for(lock, std::chrono::seconds(intervalSec), [this]() {
+        return !statsRunning_.load();
+      });
+    }
+
+    if (!statsRunning_.load()) {
+      break;
+    }
+
+    auto phase = currentPhase_.load();
+    if (phase == TrackingPhase::NONE) {
+      continue;
+    }
+
+    // Reset snapshot on phase transition
+    if (phase != prevPhase) {
+      prevTotalOps = 0;
+      prevTime = std::chrono::steady_clock::now();
+      phaseStartTime = prevTime;
+      prevPhase = phase;
+    }
+
+    const PhaseMetrics& metrics =
+        (phase == TrackingPhase::WARMUP) ? warmupMetrics_ : benchmarkMetrics_;
+
+    uint64_t getReqs = metrics.getRequests.load(std::memory_order_relaxed);
+    uint64_t getHits = metrics.getHits.load(std::memory_order_relaxed);
+    uint64_t setReqs = metrics.setRequests.load(std::memory_order_relaxed);
+    uint64_t deleteReqs =
+        metrics.deleteRequests.load(std::memory_order_relaxed);
+    uint64_t totalOps = getReqs + setReqs + deleteReqs;
+
+    auto now = std::chrono::steady_clock::now();
+    double intervalElapsed =
+        std::chrono::duration<double>(now - prevTime).count();
+    double phaseElapsed =
+        std::chrono::duration<double>(now - phaseStartTime).count();
+
+    double intervalQps = (intervalElapsed > 0)
+        ? (totalOps - prevTotalOps) / intervalElapsed
+        : 0.0;
+    double avgQps = (phaseElapsed > 0) ? totalOps / phaseElapsed : 0.0;
+    double hitRatio = (getReqs > 0) ? (100.0 * getHits / getReqs) : 0.0;
+
+    const char* phaseName =
+        (phase == TrackingPhase::WARMUP) ? "WARMUP" : "BENCHMARK";
+
+    printf(
+        "[Server %s] %.0fs elapsed | QPS: %.0f (avg: %.0f) | "
+        "hit_ratio: %.2f%% | ops: %lu (GET: %lu, SET: %lu, DEL: %lu)\n",
+        phaseName,
+        phaseElapsed,
+        intervalQps,
+        avgQps,
+        hitRatio,
+        totalOps,
+        getReqs,
+        setReqs,
+        deleteReqs);
+    fflush(stdout);
+
+    prevTotalOps = totalOps;
+    prevTime = now;
   }
 }
 
