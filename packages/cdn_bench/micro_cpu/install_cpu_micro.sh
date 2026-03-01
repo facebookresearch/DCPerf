@@ -13,9 +13,9 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 ##########################################
 echo "Installing prerequisite packages..."
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt install -y sysbench numactl linux-tools-common
+  apt install -y stress-ng numactl linux-tools-common
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  dnf install -y sysbench numactl kernel-tools
+  dnf install -y stress-ng numactl kernel-tools
 fi
 
 echo "Installation complete!"
