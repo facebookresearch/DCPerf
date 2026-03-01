@@ -564,6 +564,8 @@ for f in "$PROTOCOL_GEN_DIR"/*.cpp "$PROTOCOL_GEN_DIR"/*.h "$PROTOCOL_GEN_DIR"/*
         sed -i 's|#include "cea/chips/benchpress/packages/ucache_bench/server/|#include "../server/|g' "$f"
         # Fix thrift include paths (for .thrift files)
         sed -i 's|include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/|include "|g' "$f"
+        # Fix cpp_include paths (for .thrift files)
+        sed -i 's|cpp_include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/|cpp_include "|g' "$f"
     fi
 done
 
