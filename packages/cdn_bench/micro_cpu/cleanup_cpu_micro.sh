@@ -15,9 +15,9 @@ LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 ##########################################
 echo "Removing prerequisite packages..."
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt remove -y sysbench
+  apt remove -y stress-ng
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  dnf remove -y sysbench
+  dnf remove -y stress-ng
 fi
 
 cd "$CPU_MICRO_DIR" || exit 1
@@ -28,8 +28,15 @@ if [ -f cpu_run.log ]; then
   rm -f cpu_run.log
 fi
 
+# Remove YAML metrics file
+if [ -f stress_ng_metrics.yaml ]; then
+  echo "Removing stress_ng_metrics.yaml..."
+  rm -f stress_ng_metrics.yaml
+fi
+
 # Remove any other log files
 echo "Removing any other log files..."
 rm -f ./*.log
+rm -f ./*.yaml
 
 echo "Cleanup complete!"
