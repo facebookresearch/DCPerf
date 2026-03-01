@@ -96,27 +96,28 @@ void EmbeddingTable::fill_random_weights() {
       break;
     }
 
-    futures.emplace_back(std::async(
-        std::launch::async, [this, start_row, end_row, weights_size]() {
-          std::minstd_rand fast_gen(42 + start_row);
-          std::uniform_int_distribution<uint8_t> byte_dist(0, 255);
+    futures.emplace_back(
+        std::async(
+            std::launch::async, [this, start_row, end_row, weights_size]() {
+              std::minstd_rand fast_gen(42 + start_row);
+              std::uniform_int_distribution<uint8_t> byte_dist(0, 255);
 
-          for (int i = start_row; i < end_row; ++i) {
-            uint8_t* row_ptr =
-                fused_embedding_table_.data() + i * fused_embedding_dim_;
+              for (int i = start_row; i < end_row; ++i) {
+                uint8_t* row_ptr =
+                    fused_embedding_table_.data() + i * fused_embedding_dim_;
 
-            // Fill quantized weights with random bytes
-            for (size_t j = 0; j < weights_size; ++j) {
-              row_ptr[j] = byte_dist(fast_gen);
-            }
+                // Fill quantized weights with random bytes
+                for (size_t j = 0; j < weights_size; ++j) {
+                  row_ptr[j] = byte_dist(fast_gen);
+                }
 
-            // Set scale and bias for quantized weights
-            float* scale_bias =
-                reinterpret_cast<float*>(row_ptr + weights_size);
-            scale_bias[0] = 2.0f; // scale
-            scale_bias[1] = 1.0f; // bias
-          }
-        }));
+                // Set scale and bias for quantized weights
+                float* scale_bias =
+                    reinterpret_cast<float*>(row_ptr + weights_size);
+                scale_bias[0] = 2.0f; // scale
+                scale_bias[1] = 1.0f; // bias
+              }
+            }));
   }
 
   for (auto& future : futures) {

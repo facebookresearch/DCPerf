@@ -9,7 +9,6 @@ import logging
 import re
 
 from benchpress.lib.baseline import BASELINES
-
 from benchpress.lib.parser import Parser
 
 FEEDSIM_TARGET_LATENCY = (

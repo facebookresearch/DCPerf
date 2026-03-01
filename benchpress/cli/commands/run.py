@@ -119,7 +119,7 @@ class RunCommand(BenchpressCommand):
 
         jobs = get_target_jobs(jobs, args.jobs).values()
 
-        click.echo("Will run {} job(s)".format(len(jobs)))
+        logger.info("Will run {} job(s)".format(len(jobs)))
 
         history = History(args.results)
         now = datetime.now(timezone.utc)
@@ -129,6 +129,7 @@ class RunCommand(BenchpressCommand):
         os_release_data = sys_specs.get_os_release_data()
         kernel_cmdline = sys_specs.get_kernel_cmdline()
         dmidecode_data = sys_specs.get_dmidecode_data()
+        numa_topology = sys_specs.get_numa_topology()
         numastat_data = sys_specs.get_numastat()
         ulimit_data = sys_specs.get_ulimit()
         sys_packages = []
@@ -146,6 +147,7 @@ class RunCommand(BenchpressCommand):
 
         sys_specs_dict = {}
         sys_specs_dict["cpu_topology"] = cpu_topology
+        sys_specs_dict["numa_topology"] = numa_topology
         sys_specs_dict["os_kernel"] = os_kernel_data
         sys_specs_dict["kernel_cmdline"] = kernel_cmdline
         sys_specs_dict["dmidecode"] = dmidecode_data
@@ -184,18 +186,19 @@ class RunCommand(BenchpressCommand):
             try:
                 role_in = json.loads(args.role_input)
             except Exception:
-                click.echo("role_input must be json dictionary format")
-                click.echo("example input format for iperf:")
+                click.echo("role_input must be json dictionary format", err=True)
+                click.echo("example input format for iperf:", err=True)
                 click.echo(
-                    './benchpress run iperf --role client --role_input=\'{"server_hostname":"rtptest1234.prn1"}\''
+                    './benchpress run iperf --role client --role_input=\'{"server_hostname":"rtptest1234.prn1"}\'',
+                    err=True,
                 )
                 exit(1)
 
         for job in jobs:
-            if not verify_install(job.install_script):
-                click.echo("Benchmark {} not installed".format(job.name))
+            if not verify_install(job):
+                logger.error("Benchmark {} not installed".format(job.name))
                 continue
-            click.echo('Running "{}": {}'.format(job.name, job.description))
+            click.echo('Running "{}": {}'.format(job.name, job.description), err=True)
 
             if args.dry_run:
                 job_cmd = job.dry_run(args.role, role_in)
@@ -218,7 +221,7 @@ class RunCommand(BenchpressCommand):
                 job.hooks.append((hook, HookFactory.create(hook), hook_opts))
 
             if args.disable_hooks:
-                click.echo("Hooks globally disabled as requested")
+                logger.warning("Hooks globally disabled as requested")
             else:
                 job.start_hooks()
             metrics_dir = f"benchmark_metrics_{job.uuid}"
@@ -254,7 +257,7 @@ class RunCommand(BenchpressCommand):
 
             final_metrics["metrics"] = metrics
             stdout_reporter = ReporterFactory.create("stdout")
-            click.echo("Results Report:")
+            click.echo("Results Report:", err=True)
             stdout_reporter.report(job, final_metrics)
 
             json_reporter.report(job, final_metrics)
@@ -265,7 +268,8 @@ class RunCommand(BenchpressCommand):
             click.echo(
                 'Finished running "{}": {} with uuid: {}'.format(
                     job.name, job.description, job.uuid
-                )
+                ),
+                err=True,
             )
 
         json_reporter.close()

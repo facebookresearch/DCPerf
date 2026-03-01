@@ -15,8 +15,15 @@ fi
 
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 FEEDSIM_LOG_PREFIX="${FEEDSIM_ROOT}/feedsim-multi-inst-${FIXQPS_SUFFIX}"
+# Calculate number of instances based on physical cores (1 instance per 50 physical cores).
+# nproc returns logical cores; divide by 2 when SMT is active to get physical cores.
 NCPU="$(nproc)"
-NUM_INSTANCES="$(( ( NCPU + 99 ) / 100 ))"
+if [ -f /sys/devices/system/cpu/smt/active ] && [ "$(cat /sys/devices/system/cpu/smt/active)" -eq 1 ]; then
+    PHYS_CORES="$(( NCPU / 2 ))"
+else
+    PHYS_CORES="$NCPU"
+fi
+NUM_INSTANCES="$(( ( PHYS_CORES + 49 ) / 50 ))"
 
 NUM_ICACHE_ITERATIONS="1600000"
 
@@ -25,7 +32,7 @@ cat <<EOF
 Usage: ${0##*/} [OPTION]...
 
     -h Display this help and exit
-    -n Number of parallel instances to run. Default: $(( ( NCPU + 99 ) / 100 ))
+    -n Number of parallel instances to run. Default: $(( ( PHYS_CORES + 49 ) / 50 ))
     -i Number of icache iterations to use. Default: 1600000
 
 Any remaining arguments are passed to run.sh

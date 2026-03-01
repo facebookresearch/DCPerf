@@ -13,7 +13,42 @@ from .users import suggested_users
 
 
 def wait_for(coro):
-    loop = asyncio.get_event_loop()
+    """
+    Run a coroutine synchronously, handling both event loop and non-event loop contexts.
+
+    This function is compatible with:
+    - Traditional synchronous context (uWSGI, Gunicorn)
+    - Async context when called from sync_to_async (Proxygen async server)
+    """
+    try:
+        # Try to get the running event loop
+        loop = asyncio.get_running_loop()
+        # We're inside an async context already, which shouldn't happen
+        # if this is called from a sync function. But if it does happen,
+        # we can't use run_until_complete (would cause "This event is already running" error)
+        # Instead, we need to use asyncio.run_coroutine_threadsafe or similar
+        raise RuntimeError(
+            "wait_for() called from within an event loop context. "
+            "The calling code should be made async instead of using wait_for()."
+        )
+    except RuntimeError:
+        # No running event loop - we can safely create one or use an existing one
+        pass
+
+    # Try to get or create an event loop for this thread
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            # Event loop is closed, create a new one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        # No event loop exists for this thread (common in ThreadPoolExecutor)
+        # Create a new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # Run the coroutine to completion
     return loop.run_until_complete(coro)
 
 
@@ -139,7 +174,7 @@ class FollowedEntries(AsyncStep):
         def fetch_users(userids):
             return {u.id: u for u in UserModel.objects.filter(id__in=list(userids))}
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         entries = await loop.run_in_executor(None, fetch_10_posts, self.context.user)
         userids = {e.userid for e in entries}
         usermap = await loop.run_in_executor(None, fetch_users, userids)
@@ -169,7 +204,7 @@ class SuggestedUsers(AsyncStep):
         if len(self.context.user.following) < 25:
             # only suggest when this user isn't following so many people yet
             userids = suggested_users(self.context.user)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, fetch_users, userids)
 
     def run(self):

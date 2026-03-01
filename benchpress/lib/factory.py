@@ -30,7 +30,7 @@ class BaseFactory:
         """
         if name not in self.classes:
             raise KeyError(
-                'No type "{}". ' "Did you forget to register() it?".format(name)
+                'No type "{}". Did you forget to register() it?'.format(name)
             )
         return self.classes[name]()
 

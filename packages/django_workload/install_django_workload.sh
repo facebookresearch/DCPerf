@@ -14,16 +14,16 @@ DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 
 source "${BENCHPRESS_ROOT}/packages/common/os-distro.sh"
 
-if distro_is_like ubuntu && [ "$(uname -p)" = "aarch64" ]; then
+if distro_is_like ubuntu && [ "$(uname -m)" = "aarch64" ]; then
     "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64_ubuntu22.sh
     exit $?
 fi
-if distro_is_like ubuntu && [ "$(uname -p)" = "x86_64" ]; then
+if distro_is_like ubuntu && [ "$(uname -m)" = "x86_64" ]; then
     "${DJANGO_PKG_ROOT}"/install_django_workload_x86_64_ubuntu22.sh
     exit $?
 fi
 
-if [ "$(uname -p)" = "aarch64" ]; then
+if [ "$(uname -m)" = "aarch64" ]; then
     "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64.sh
     exit $?
 fi
@@ -41,7 +41,7 @@ cd "$BP_TMP" || exit 1
 
 # Install system dependencies
 dnf install -y git memcached libmemcached-devel zlib-devel screen python36 \
-    python36-devel python3-numpy
+    python36-devel python3-numpy haproxy
 
 # Copy django-workload from srcs directory instead of cloning from GitHub
 mkdir -p "${OUT}/django-workload"
@@ -154,26 +154,6 @@ pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-
 pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 
-# Build oldisim icache buster library
-# Will only build once, the outcome library can be used in both CPython and Cinder
-set +u
-if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
-    if [ -z "${IBCC}" ]; then
-        IBCC="/bin/c++"
-    fi
-    cd "${TEMPLATES_DIR}" || exit 1
-    mkdir -p build
-    cd build || exit 1
-    python3 ../gen_icache_buster.py --num_methods=100000 --num_splits=24 --output_dir ./
-    # shellcheck disable=SC2086
-    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -c ./ICacheBuster*.cc
-    # shellcheck disable=SC2086
-    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -Wl,-soname,libicachebuster.so -o libicachebuster.so ./*.o
-    cp libicachebuster.so "${OUT}/django-workload/django-workload/libicachebuster.so" || exit 1
-    cd ../ || exit 1
-    rm -rfv build/
-fi
-
 # No need to copy template files as they are already in the srcs directory
 
 deactivate
@@ -194,5 +174,15 @@ pip install -e . --no-index --find-links file://"$OUT/django-workload/django-wor
 
 deactivate
 
-cd "${BENCHPRESS_ROOT}/packages/django_workload" || exit 1
-bash -x install_siege.sh
+# 6. Install wrk
+WRK_VERSION="4.2.0"
+pushd "${DJANGO_WORKLOAD_ROOT}" || exit 1
+if ! [ -d wrk ]; then
+  git clone --branch "${WRK_VERSION}" https://github.com/wg/wrk
+  pushd wrk || exit 1
+  git apply --check "${DJANGO_PKG_ROOT}/templates/wrk.diff" && \
+    git apply "${DJANGO_PKG_ROOT}/templates/wrk.diff"
+  make
+  popd # wrk
+fi
+popd # "${DJANGO_WORKLOAD_ROOT}"

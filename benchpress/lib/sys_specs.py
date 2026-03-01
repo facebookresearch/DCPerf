@@ -35,6 +35,58 @@ def get_cpu_topology():
     return lscpu_dict
 
 
+def get_numa_topology():
+    numa_p = subprocess.Popen(
+        ["numactl", "--hardware"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    (numa_data, err) = numa_p.communicate()
+    numa_data = numa_data.decode("utf-8").split("\n")
+
+    numa_dict = {}
+    in_distances_section = False
+    distance_headers = []
+
+    for line in numa_data:
+        stripped_line = line.strip()
+
+        # Capture node sizes (skip free memory as it's in numastat)
+        if "node" in stripped_line and "size:" in stripped_line:
+            parts = stripped_line.split()
+            numa_dict[f"node_{parts[1]}_size"] = f"{parts[3]} {parts[4]}".strip()
+
+        # Start of distance matrix section
+        if stripped_line.startswith("node distances:"):
+            in_distances_section = True
+            numa_dict["node_distances"] = {}
+            continue
+
+        # Parse distance matrix header row (node numbers)
+        if in_distances_section and stripped_line.startswith("node"):
+            distance_headers = stripped_line.split()[
+                1:
+            ]  # Skip "node" label, get numbers
+            continue
+
+        # Parse distance matrix data rows
+        if in_distances_section and distance_headers:
+            parts = stripped_line.split(":")
+            if len(parts) == 2:
+                source_node = parts[0].strip()
+                distances = parts[1].strip().split()
+
+                # Create entries like "0->0": 10, "0->1": 20
+                for i, dist in enumerate(distances):
+                    if i < len(distance_headers):
+                        target_node = distance_headers[i]
+                        key = f"{source_node}->{target_node}"
+                        try:
+                            numa_dict["node_distances"][key] = int(dist)
+                        except ValueError:
+                            numa_dict["node_distances"][key] = dist
+
+    return numa_dict
+
+
 def get_os_kernel():
     sys_name, node_name, kernel_release, version, machine = os.uname()
     return {

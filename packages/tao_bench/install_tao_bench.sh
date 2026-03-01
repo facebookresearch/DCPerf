@@ -9,6 +9,6 @@ set -Eeuo pipefail
 BPKGS_TAO_BENCH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
 
 # Use the alternative arch-specific installer scripts
-ARCH="$(uname -p)"
+ARCH="$(uname -m)"
 "${BPKGS_TAO_BENCH_ROOT}"/install_tao_bench_"${ARCH}".sh
 exit $?

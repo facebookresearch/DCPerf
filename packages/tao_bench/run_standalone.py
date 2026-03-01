@@ -12,7 +12,6 @@ import subprocess
 import threading
 
 import args_utils
-
 from run_autoscale import gen_client_instructions
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
@@ -183,6 +182,10 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
     if hasattr(args, "num_slow_threads") and args.num_slow_threads > 0:
         script_args["--num-slow-threads"] = args.num_slow_threads
 
+    # Add poll_interval if specified
+    if hasattr(args, "poll_interval") and args.poll_interval > 0:
+        script_args["--poll-interval"] = args.poll_interval
+
     cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
 
     for argname, argval in script_args.items():
@@ -197,7 +200,7 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
     print(stdout)
 
 
-def launch_client(cmd, n=1):
+def launch_client(cmd, n=1, client_id=0):
     # Use benchpress dry-run to get the real client command
     stdout, stderr, exitcode = exec_cmd(cmd + " --dry-run")
     match = re.search(r"Execution command: (.*)$", stdout)
@@ -207,6 +210,10 @@ def launch_client(cmd, n=1):
         print("STDERR: " + str(stderr))
         exit(1)
     real_cmd = match.group(1)
+
+    # Add client ID flag
+    real_cmd += f" --client-id={client_id}"
+
     with open(f"client_{n}.log", "w") as f:
         _, _, exitcode = exec_cmd(real_cmd, output_file=f)
     return exitcode
@@ -221,8 +228,7 @@ if __name__ == "__main__":
         # Set memory size to 75% of system memory in the standalone mode to avoid OOM,
         # because the clients will also use memory on the same system
         args.memsize = args_utils.get_system_memsize_gb() * 0.75
-    if args.warmup_time == 0:
-        args.warmup_time = args_utils.get_warmup_time(args)
+    args.warmup_time = args_utils.get_warmup_time(args)
     args.server_memsize = args.memsize
     args.server_hostname = "localhost"
 
@@ -245,11 +251,14 @@ if __name__ == "__main__":
     t_clients = []
     for n, client in enumerate(clients):
         cmd = str(BENCHPRESS_ROOT) + client[1:]
+        # Set client_id starting from 1 (first client gets ID 1)
+        client_id = n + 1
         tc = threading.Thread(
             target=launch_client,
             args=(
                 cmd,
                 n,
+                client_id,
             ),
         )
         tc.start()

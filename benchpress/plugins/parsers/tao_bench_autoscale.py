@@ -9,7 +9,6 @@
 import json
 
 from benchpress.lib.baseline import BASELINES
-
 from benchpress.lib.parser import Parser
 
 TAO_BENCH_BASELINE = BASELINES["taobench"]

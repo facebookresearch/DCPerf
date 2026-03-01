@@ -187,19 +187,49 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c {db_addr}'
-        - '-I {interpreter}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--skip-datagen {skip_datagen}'
       vars:
         - 'db_addr'
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
-        - 'interpreter=cpython'
+        - 'interpreter=cinder'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
+        - 'use_jit=1'
+        - 'skip_datagen=0'
     db:
       args:
         - '-r db'
         - '-b {bind_ip}'
+        - '--thrift-server-workers {thrift_server_workers}'
       vars:
         - 'bind_ip=default'
+        - 'thrift_server_workers=32'
+    server:
+      args:
+        - '-r server'
+        - '-c {db_addr}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--skip-datagen {skip_datagen}'
+      vars:
+        - 'db_addr'
+        - 'interpreter=cinder'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
+        - 'use_jit=1'
+        - 'skip_datagen=0'
     standalone:
       args:
         - '-r standalone'
@@ -209,18 +239,36 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c 127.0.0.1'
-        - '-I {interpreter}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--thrift-server-workers {thrift_server_workers}'
+        - '--skip-datagen {skip_datagen}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
-        - 'interpreter=cpython'
+        - 'interpreter=cinder'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
+        - 'use_jit=1'
+        - 'thrift_server_workers=32'
+        - 'skip_datagen=0'
   hooks:
     - hook: copymove
       options:
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/wrk_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
   name: django_workload_arm
@@ -236,21 +284,49 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c {db_addr}'
-        - '-m 50000'
-        - '-M 100000'
-        - '-I {interpreter}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--skip-datagen {skip_datagen}'
       vars:
         - 'db_addr'
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
         - 'interpreter=cpython'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
+        - 'use_jit=0'
+        - 'skip_datagen=0'
     db:
       args:
         - '-r db'
         - '-b {bind_ip}'
+        - '--thrift-server-workers {thrift_server_workers}'
       vars:
         - 'bind_ip=default'
+        - 'thrift_server_workers=32'
+    server:
+      args:
+        - '-r server'
+        - '-c {db_addr}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--skip-datagen {skip_datagen}'
+      vars:
+        - 'db_addr'
+        - 'interpreter=cpython'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
+        - 'use_jit=0'
+        - 'skip_datagen=0'
     standalone:
       args:
         - '-r standalone'
@@ -260,20 +336,36 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c 127.0.0.1'
-        - '-m 50000'
-        - '-M 100000'
-        - '-I {interpreter}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--thrift-server-workers {thrift_server_workers}'
+        - '--skip-datagen {skip_datagen}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
         - 'interpreter=cpython'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
+        - 'use_jit=0'
+        - 'thrift_server_workers=32'
+        - 'skip_datagen=0'
   hooks:
     - hook: copymove
       options:
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/wrk_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
   name: django_workload_arm_mini
@@ -289,21 +381,31 @@
         - '-l ./siege.log'
         - '-s urls.txt'
         - '-c 127.0.0.1'
-        - '-m 50000'
-        - '-M 100000'
         - '-S'
         - '-I {interpreter}'
+        - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'duration=1M'
         - 'iterations=1'
         - 'reps=1000'
         - 'interpreter=cpython'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
   hooks:
     - hook: copymove
       options:
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/wrk_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 - benchmark: django_workload
   name: django_workload_mini
@@ -321,17 +423,29 @@
         - '-c 127.0.0.1'
         - '-S'
         - '-I {interpreter}'
+        - '-A {use_async}'
+        - '-P {base_port}'
+        - '-T {stats_port}'
       vars:
         - 'duration=1M'
         - 'iterations=1'
         - 'reps=1000'
         - 'interpreter=cpython'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
   hooks:
     - hook: copymove
       options:
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/wrk_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 
 - benchmark: django_workload
@@ -350,19 +464,25 @@
         - '-c {db_addr}'
         - '-w {server_workers}'
         - '-x {client_workers}'
-        - '-m {ib_min}'
-        - '-M {ib_max}'
-        - '-I {interpreter}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--skip-datagen {skip_datagen}'
       vars:
         - 'duration=5M'
         - 'iterations=7'
         - 'reps=0'
-        - 'ib_min=100000'
-        - 'ib_max=200000'
         - 'db_addr'
         - 'server_workers'
         - 'client_workers'
         - 'interpreter=cpython'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
+        - 'use_jit=0'
+        - 'skip_datagen=0'
     client:
       args:
         - '-r client'
@@ -384,29 +504,74 @@
         - '-r server'
         - '-c {db_addr}'
         - '-w {server_workers}'
-        - '-m {ib_min}'
-        - '-M {ib_max}'
-        - '-I {interpreter}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--skip-datagen {skip_datagen}'
       vars:
         - 'db_addr'
         - 'server_workers'
-        - 'ib_min=100000'
-        - 'ib_max=200000'
         - 'interpreter=cpython'
+        - 'use_async=1'
+        - 'base_port=16668'
+        - 'stats_port=8001'
+        - 'use_jit=0'
+        - 'skip_datagen=0'
     db:
       args:
         - '-r db'
         - '-y {concur_writes}'
         - '-b {bind_ip}'
+        - '--thrift-server-workers {thrift_server_workers}'
       vars:
         - 'concur_writes'
         - 'bind_ip=default'
+        - 'thrift_server_workers=32'
+    standalone:
+      args:
+        - '-r standalone'
+        - '-d {duration}'
+        - '-i {iterations}'
+        - '-p {reps}'
+        - '-l ./siege.log'
+        - '-s urls.txt'
+        - '-c 127.0.0.1'
+        - '-w {server_workers}'
+        - '-x {client_workers}'
+        - '--interpreter {interpreter}'
+        - '--use-async {use_async}'
+        - '--base-port {base_port}'
+        - '-T {stats_port}'
+        - '--use-jit {use_jit}'
+        - '--thrift-server-workers {thrift_server_workers}'
+        - '--skip-datagen {skip_datagen}'
+      vars:
+        - 'server_workers'
+        - 'client_workers'
+        - 'duration=5M'
+        - 'iterations=7'
+        - 'reps=0'
+        - 'interpreter=cinder'
+        - 'use_async=1'
+        - 'base_port=16667'
+        - 'stats_port=8001'
+        - 'use_jit=1'
+        - 'thrift_server_workers=32'
+        - 'skip_datagen=0'
   hooks:
     - hook: copymove
       options:
         is_move: true
         after:
           - 'benchmarks/django_workload/django-workload/client/perf.data'
+          - 'benchmarks/django_workload/django-workload/django-workload/*.log'
+          - 'benchmarks/django_workload/django-workload/django-workload/log_load_balancer'
+          - 'benchmarks/django_workload/django-workload/client/*.log'
+          - 'benchmarks/django_workload/*.log'
+          - '/tmp/wrk_out_*'
+          - 'benchmarks/django_workload/breakdown.csv'
 
 - name: feedsim_default
   benchmark: feedsim
@@ -430,8 +595,63 @@
       options:
         is_move: true
         after:
+          - '/tmp/feedsim_log.txt'
           - 'benchmarks/feedsim/feedsim_results.txt'
           - 'benchmarks/feedsim/src/perf.data'
+
+- name: feedsim_dlrm
+  benchmark: feedsim
+  description: >
+    Aggregator like workload with DLRM (Deep Learning Recommendation Model)
+    inference. Uses async I/O for improved throughput on high-core CPUs.
+    Finds maximum QPS that system can sustain while keeping
+    95th percentile latency <= 500 msecs. Supports both server-side (default)
+    and client-side feature generation via FBThrift protocol.
+  args:
+    - '-p {port}'
+    - '-o {output}'
+    - '--async-io'
+    - '--io-dist={io_dist}'
+    - '--io-mean={io_mean}'
+    - '--workload={workload}'
+    - '--dlrm-model={dlrm_model}'
+    - '--dlrm-batch-size={dlrm_batch_size}'
+    - '--dlrm-threads={dlrm_threads}'
+    - '--client-side-features={client_side_features}'
+    - '--client-batch-size={client_batch_size}'
+    - '--client-inferences={client_inferences}'
+    - '--client-feature-seed={client_feature_seed}'
+    - '--client-num-dense={client_num_dense}'
+    - '--client-num-sparse={client_num_sparse}'
+  vars:
+    - 'port=11222'
+    - 'output=feedsim_results.txt'
+    - 'io_dist=fixed'
+    - 'io_mean=200'
+    - 'workload=dlrm'
+    - 'dlrm_model=models/dlrm_small.pt'
+    - 'dlrm_batch_size=256'
+    - 'dlrm_threads=8'
+    - 'client_side_features=0'
+    - 'client_batch_size=256'
+    - 'client_inferences=1'
+    - 'client_feature_seed=42'
+    - 'client_num_dense=13'
+    - 'client_num_sparse=26'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - '/tmp/feedsim_log.txt'
+          - 'benchmarks/feedsim/feedsim_results.txt'
+          - 'benchmarks/feedsim/src/perf.data'
+          - '/tmp/feedsim_log.txt'
 
 - name: feedsim_autoscale
   benchmark: feedsim_autoscale
@@ -460,6 +680,61 @@
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
           - 'benchmarks/feedsim/src/perf.data'
+          - '/tmp/feedsim_log.txt'
+
+- name: feedsim_autoscale_dlrm
+  benchmark: feedsim_autoscale
+  description: >
+    Multi-instance aggregator workload with DLRM (Deep Learning Recommendation Model)
+    inference. Uses async I/O for improved throughput on high-core CPUs.
+    Finds maximum QPS that system can sustain while keeping
+    95th percentile latency <= 500 msecs. Automatically spawns multiple
+    workload instances at 100 cores per instance (rounded up).
+  args:
+    - '-n {num_instances}'
+    - '--async-io'
+    - '--io-dist={io_dist}'
+    - '--io-mean={io_mean}'
+    - '--workload={workload}'
+    - '--dlrm-model={dlrm_model}'
+    - '--dlrm-batch-size={dlrm_batch_size}'
+    - '--dlrm-threads={dlrm_threads}'
+    - '--client-side-features={client_side_features}'
+    - '--client-batch-size={client_batch_size}'
+    - '--client-inferences={client_inferences}'
+    - '--client-feature-seed={client_feature_seed}'
+    - '--client-num-dense={client_num_dense}'
+    - '--client-num-sparse={client_num_sparse}'
+    - '{extra_args}'
+  vars:
+    - 'num_instances=-1'
+    - 'io_dist=fixed'
+    - 'io_mean=200'
+    - 'workload=dlrm'
+    - 'dlrm_model=models/dlrm_small.pt'
+    - 'dlrm_batch_size=256'
+    - 'dlrm_threads=4'
+    - 'client_side_features=0'
+    - 'client_batch_size=256'
+    - 'client_inferences=1'
+    - 'client_feature_seed=42'
+    - 'client_num_dense=13'
+    - 'client_num_sparse=26'
+    - 'extra_args='
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/src/perf.data'
+          - '/tmp/feedsim_log.txt'
 
 - name: feedsim_autoscale_mini
   benchmark: feedsim_autoscale
@@ -477,6 +752,9 @@
     - '-S {graph_store_path}'
     - '-L {graph_load_path}'
     - '-D {queue_drain_time}'
+    - '-R {node_rank_seed}'
+    - '-P {page_rank_seed}'
+    - '-C {pointer_chase_seed}'
     - '-N'
     - '{extra_args}'
   vars:
@@ -489,6 +767,9 @@
     - 'graph_store_path=default_do_not_store'
     - 'graph_load_path=default_do_not_load'
     - 'queue_drain_time=1'
+    - 'node_rank_seed=54321'
+    - 'page_rank_seed=12345'
+    - 'pointer_chase_seed=98765'
     - 'extra_args='
   hooks:
     - hook: copymove
@@ -498,6 +779,8 @@
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
           - 'benchmarks/feedsim/src/perf.data'
+          - 'benchmarks/feedsim/breakdown.csv'
+          - '/tmp/feedsim_log.txt'
 
 - name: feedsim_autoscale_arm
   benchmark: feedsim_autoscale
@@ -528,6 +811,7 @@
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
           - 'benchmarks/feedsim/src/perf.data'
+          - '/tmp/feedsim_log.txt'
 
 - name: feedsim_autoscale_arm_mini
   benchmark: feedsim_autoscale
@@ -569,6 +853,8 @@
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
           - 'benchmarks/feedsim/src/perf.data'
+          - 'benchmarks/feedsim/breakdown.csv'
+          - '/tmp/feedsim_log.txt'
 
 
 - benchmark: spark_standalone
@@ -586,6 +872,7 @@
         is_move: true
         after:
           - 'benchmarks/spark_standalone/work'
+          - 'benchmarks/spark_standalone/breakdown.csv'
 
 - benchmark: spark_standalone
   name: spark_standalone_remote_setup
@@ -615,6 +902,7 @@
         is_move: true
         after:
           - 'benchmarks/spark_standalone/work'
+          - 'benchmarks/spark_standalone/breakdown.csv'
 
 - benchmark: spark_standalone
   name: spark_standalone_remote_mini
@@ -633,9 +921,8 @@
   vars:
     - 'ipv4=0'
     - 'sanity=0'
-    - 'dataset_name=bpc_t93586_s2_synthetic_5GB'
-    - 'local_hostname='
     - 'dataset_name=bpc_t93586_s2_synthetic_1GB'
+    - 'local_hostname='
     - 'shuffle_partitions=20'
   hooks:
     - hook: copymove
@@ -643,6 +930,7 @@
         is_move: true
         after:
           - 'benchmarks/spark_standalone/work'
+          - 'benchmarks/spark_standalone/breakdown.csv'
 
 - benchmark: spark_standalone
   name: spark_standalone_remote_compute
@@ -665,6 +953,32 @@
         is_move: true
         after:
           - 'benchmarks/spark_standalone/work'
+          - 'benchmarks/spark_standalone/breakdown.csv'
+
+- benchmark: spark_standalone
+  name: spark_standalone_remote_3x
+  description: Spark standalone using remote SSDs with 3x query load (2 more joins) and auto-scaled shuffle partitions
+  args:
+    - 'run'
+    - '--dataset-path /flash23/'
+    - '--warehouse-dir /flash23/warehouse'
+    - '--shuffle-dir /flash23/spark_local_dir'
+    - '--ipv4 {ipv4}'
+    - '--real'
+    - '--sanity {sanity}'
+    - '--shuffle-partitions 0'
+    - '--query queries/release_test_93586_3x.sql'
+  vars:
+    - 'ipv4=0'
+    - 'sanity=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/spark_standalone/work'
+          - 'benchmarks/spark_standalone/breakdown.csv'
+
 
 - benchmark: tao_bench
   name: tao_bench_64g
@@ -702,6 +1016,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'perf.data'
 
 - benchmark: tao_bench
@@ -753,6 +1068,7 @@
         - '--sanity={sanity}'
         - '--wait-after-warmup={wait_after_warmup}'
         - '--disable-tls={disable_tls}'
+        - '--client-id={client_id}'
         - '--real'
       vars:
         - 'server_hostname'
@@ -766,12 +1082,14 @@
         - 'wait_after_warmup=5'
         - 'sanity=0'
         - 'disable_tls=0'
+        - 'client_id=0'
   hooks:
     - hook: copymove
       options:
         is_move: true
         after:
           - 'benchmarks/tao_bench/server.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'perf.data'
 
 - benchmark: tao_bench_autoscale
@@ -809,7 +1127,7 @@
     - 'fast_threads_ratio=0.75'
     - 'slow_to_fast_ratio=3'
     - 'interface_name=eth0'
-    - 'warmup_time=0'
+    - 'warmup_time=-1'
     - 'test_time=720'
     - 'server_hostname='
     - 'num_clients=2'
@@ -829,6 +1147,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'tao-bench-server-*.log'
           - 'perf.data'
 
@@ -836,10 +1155,8 @@
   name: tao_bench_standalone
   description:
       Spawns multiple Tao benchmark servers depending on the CPU
-      core count. After executing this job, please see the tail
-      of benchpress.log for instructions on starting clients.
-      Clients start on the same instance.
-      MAKE SURE to start clients within 1 minute.
+      core count.
+      This job starts clients Automatically on the same instance.
 
   args:
     - '--num-servers={num_servers}'
@@ -863,7 +1180,7 @@
     - 'memsize=0'
     - 'fast_threads_ratio=0.75'
     - 'slow_to_fast_ratio=3'
-    - 'warmup_time=0'
+    - 'warmup_time=-1'
     - 'test_time=720'
     - 'num_clients=2'
     - 'clients_per_thread=0'
@@ -881,6 +1198,65 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
+          - 'tao-bench-server-*.log'
+          - 'client_*.log'
+          - 'perf.data'
+
+- benchmark: tao_bench_standalone
+  name: tao_bench_standalone_mini
+  description:
+      This job starts clients Automatically on the same instance.
+
+  args:
+    - '--num-servers={num_servers}'
+    - '--memsize={memsize}'
+    - '--fast-threads-ratio={fast_threads_ratio}'
+    - '--slow-to-fast-ratio={slow_to_fast_ratio}'
+    - '--warmup-time={warmup_time}'
+    - '--test-time={test_time}'
+    - '--num-clients={num_clients}'
+    - '--clients-per-thread={clients_per_thread}'
+    - '--bind-cpu={bind_cpu}'
+    - '--bind-mem={bind_mem}'
+    - '--stats-interval={stats_interval}'
+    - '--port-number-start={port_number_start}'
+    - '--disable-tls={disable_tls}'
+    - '--num-slow-threads={num_slow_threads}'
+    - '--num-fast-threads={num_fast_threads}'
+    - '--num-client-threads={num_client_threads}'
+    - '--warmup-timeout-buffer={warmup_timeout_buffer}'
+    - '--test-timeout-buffer={test_timeout_buffer}'
+    - '--postprocessing-timeout-buffer={postprocessing_timeout_buffer}'
+    - '--poll-interval={poll_interval}'
+  vars:
+    - 'num_servers=0'
+    - 'memsize=0.5'
+    - 'fast_threads_ratio=0.75'
+    - 'slow_to_fast_ratio=3'
+    - 'warmup_time=0'
+    - 'test_time=30'
+    - 'num_clients=2'
+    - 'clients_per_thread=0'
+    - 'bind_cpu=1'
+    - 'bind_mem=1'
+    - 'stats_interval=5000'
+    - 'port_number_start=11211'
+    - 'disable_tls=0'
+    - 'num_slow_threads=0'
+    - 'num_fast_threads=0'
+    - 'num_client_threads=0'
+    - 'warmup_timeout_buffer=0'
+    - 'test_timeout_buffer=0'
+    - 'postprocessing_timeout_buffer=60'
+    - 'poll_interval=0.2'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'tao-bench-server-*.log'
           - 'client_*.log'
           - 'perf.data'
@@ -919,7 +1295,7 @@
     - 'slow_threads_use_semaphore=1'
     - 'pin_threads=0'
     - 'interface_name=eth0'
-    - 'warmup_time=0'
+    - 'warmup_time=-1'
     - 'test_time=720'
     - 'server_hostname='
     - 'num_clients=2'
@@ -935,6 +1311,7 @@
         is_move: true
         after:
           - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
           - 'tao-bench-server-*.log'
           - 'perf.data'
 
@@ -969,6 +1346,7 @@
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
           - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
 
 - name: video_transcode_bench_svt_mini
   benchmark: video_transcode_bench
@@ -1002,6 +1380,7 @@
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
           - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
 
 
 - name: video_transcode_bench_aom
@@ -1030,6 +1409,7 @@
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
           - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
 
 - name: video_transcode_bench_x264
   benchmark: video_transcode_bench
@@ -1057,6 +1437,7 @@
         after:
           - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
           - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
 
 - benchmark: health_check
   name: health_check

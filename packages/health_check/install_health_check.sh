@@ -40,4 +40,13 @@ cp "${BENCHPRESS_ROOT}/packages/health_check/sleepbench.cpp" "${HEALTH_ROOT}/sle
 cp "${BENCHPRESS_ROOT}/packages/health_check/collect-cpu-util.py" "${HEALTH_ROOT}/sleepbench"
 cd "$HEALTH_ROOT/sleepbench"
 g++ -o sleepbench -O2 -lpthread sleepbench.cpp
+
+# freq_est: CPU frequency estimation benchmark (ARM only)
+if [ "$(uname -m)" = "aarch64" ]; then
+  mkdir -p "$HEALTH_ROOT/freq_est"
+  cp "${BENCHPRESS_ROOT}/packages/health_check/freq_est.c" "${HEALTH_ROOT}/freq_est"
+  cd "$HEALTH_ROOT/freq_est"
+  gcc -O3 -Wall -march=armv8-a -o freq_est freq_est.c
+fi
+
 cp "${BENCHPRESS_ROOT}/packages/health_check/run.sh" "${HEALTH_ROOT}/run.sh"

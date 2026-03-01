@@ -48,14 +48,14 @@ class AdSimHandler : virtual public AdSimSvIf, public fb303::BaseService {
       std::unique_ptr<AdSimRequest> req) override;
 
   // fb303 stuff
-  facebook::fb303::cpp2::fb_status getStatus() override {
-    return facebook::fb303::cpp2::fb_status::ALIVE;
+  facebook::fb303::cpp2::fb303_status getStatus() override {
+    return facebook::fb303::cpp2::fb303_status::ALIVE;
   }
   // TODO: find out how FacebookBase2 returns the real stats
-  int64_t getMemoryUsage() override {
+  int64_t getMemoryUsage() {
     return 0;
   }
-  double getLoad() override {
+  double getLoad() {
     return 0;
   }
 

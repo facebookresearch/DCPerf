@@ -44,6 +44,17 @@ def read_csv(amd_perf_csv_file):
             "1",
             "2",
         ],
+        dtype={
+            "timestamp": "float64",
+            "socket": "str",
+            "numcpus": "int",
+            "counter_value": "float64",
+            "counter_unit": "str",
+            "event_name": "str",
+            "counter_runtime": "float64",
+            "mux": "float",
+        },
+        na_values=["<not counted>"],
     )
     return df
 

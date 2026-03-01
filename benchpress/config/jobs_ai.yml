@@ -133,7 +133,7 @@
   vars:
     - 'threads=1'
     - 'duration=300'
-    - 'size_dist=benchmarks/rebatch/model_a.dist'
+    - 'size_dist=benchmarks/ai_wdl/rebatch/model_a.dist'
     - 'tensors_num=54'
     - 'prefetch=0'
     - 'output_tensor_size=5023008'
@@ -154,7 +154,7 @@
   vars:
     - 'threads=1'
     - 'duration=300'
-    - 'size_dist=benchmarks/rebatch/model_b.dist'
+    - 'size_dist=benchmarks/ai_wdl/rebatch/model_b.dist'
     - 'tensors_num=53'
     - 'prefetch=0'
     - 'output_tensor_size=2421002'
@@ -169,13 +169,15 @@
     - '--duration_seconds={duration_seconds}'
     - '--batch_size={batch_size}'
     - '--num_batch_threads={num_batch_threads}'
+    - '--worker_loop_count={worker_loop_count}'
 
   vars:
-    - 'distribution_file=benchmarks/chm/model_a.dist'
+    - 'distribution_file=benchmarks/ai_wdl/chm/model_a.dist'
     - 'num_threads=80'
     - 'duration_seconds=360'
     - 'batch_size=10000000'
     - 'num_batch_threads=4'
+    - 'worker_loop_count=10'
 
 
 - benchmark: chm
@@ -187,14 +189,53 @@
     - '--duration_seconds={duration_seconds}'
     - '--batch_size={batch_size}'
     - '--num_batch_threads={num_batch_threads}'
+    - '--worker_loop_count={worker_loop_count}'
 
   vars:
-    - 'distribution_file=benchmarks/chm/model_b.dist'
+    - 'distribution_file=benchmarks/ai_wdl/chm/model_b.dist'
     - 'num_threads=80'
     - 'duration_seconds=360'
     - 'batch_size=10000000'
     - 'num_batch_threads=4'
+    - 'worker_loop_count=10'
 
+- benchmark: chm
+  name: chm_autoscale_a
+  description: Concurrent hash map benchmark for Model A with all available cpu threads.
+  args:
+    - '--distribution_file={distribution_file}'
+    - '--duration_seconds={duration_seconds}'
+    - '--batch_size={batch_size}'
+    - '--num_batch_threads={num_batch_threads}'
+    - '--worker_loop_count={worker_loop_count}'
+    - '--autoscale={autoscale}'
+
+  vars:
+    - 'distribution_file=benchmarks/ai_wdl/chm/model_a.dist'
+    - 'duration_seconds=360'
+    - 'batch_size=10000000'
+    - 'num_batch_threads=4'
+    - 'worker_loop_count=10'
+    - 'autoscale=true'
+
+- benchmark: chm
+  name: chm_autoscale_b
+  description: Concurrent hash map benchmark for Model B with all available cpu threads.
+  args:
+    - '--distribution_file={distribution_file}'
+    - '--duration_seconds={duration_seconds}'
+    - '--batch_size={batch_size}'
+    - '--num_batch_threads={num_batch_threads}'
+    - '--worker_loop_count={worker_loop_count}'
+    - '--autoscale={autoscale}'
+
+  vars:
+    - 'distribution_file=benchmarks/ai_wdl/chm/model_b.dist'
+    - 'duration_seconds=360'
+    - 'batch_size=10000000'
+    - 'num_batch_threads=4'
+    - 'worker_loop_count=10'
+    - 'autoscale=true'
 
 - benchmark: deser
   name: deser_a
@@ -206,7 +247,7 @@
     - '--pregenerated_copies={pregenerated_copies}'
 
   vars:
-    - 'distribution_file=benchmarks/deser/model_a.dist'
+    - 'distribution_file=benchmarks/ai_wdl/deser/model_a.dist'
     - 'num_threads=16'
     - 'duration_seconds=360'
     - 'pregenerated_copies=10'
@@ -222,7 +263,7 @@
     - '--pregenerated_copies={pregenerated_copies}'
 
   vars:
-    - 'distribution_file=benchmarks/deser/model_b.dist'
+    - 'distribution_file=benchmarks/ai_wdl/deser/model_b.dist'
     - 'num_threads=16'
     - 'duration_seconds=360'
     - 'pregenerated_copies=10'
@@ -293,3 +334,9 @@
         - 'lat_target_ms=100'
         - 'timeout=1800'
         - 'request_size_multiplier=6'
+
+- benchmark: type_conversion
+  name: type_conversion
+  description: Benchmark for common AI data type conversion
+  args:
+    - '--benchmark_format=json'

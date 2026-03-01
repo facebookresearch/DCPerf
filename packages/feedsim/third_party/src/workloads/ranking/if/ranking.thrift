@@ -106,3 +106,30 @@ struct RankingResponse {
   3: list<i32> objectCounts;
   4: string metadata;
 }
+
+// ============================================================================
+// Phase 7: Client-Side Feature Generation Types
+// ============================================================================
+
+// Dense features are floating-point values (e.g., normalized continuous features)
+typedef list<double> DenseFeatureVector
+
+// Sparse features are integer indices into embedding tables
+typedef list<i64> SparseFeatureVector
+
+// DLRM features structure for client-side feature generation
+struct DLRMFeatures {
+  1: DenseFeatureVector dense_features;
+  2: SparseFeatureVector sparse_features;
+  3: i32 batch_size;
+  4: i32 num_dense_features;
+  5: i32 num_sparse_features;
+}
+
+// Request structure for DLRM inference with client-provided features
+struct RankingRequest {
+  1: i64 request_id;
+  2: optional DLRMFeatures dlrm_features;
+  3: i32 num_inferences = 1;
+  4: map<string, string> metadata;
+}

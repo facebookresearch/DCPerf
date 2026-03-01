@@ -14,13 +14,6 @@ function benchreps_tell_state () {
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
 
-function dump_breakdown_info() {
-    # if dump_breakdown_info is true, dump the breakdown info
-    if [ "$dump_breakdown_info" = true ]; then
-        # TODO: add the breakdown info to a file
-        date +"%Y-%m-%d_%T ${1}"
-    fi
-}
 if [ "${DCPERF_PERF_RECORD:-unset}" = "unset" ]; then
     export DCPERF_PERF_RECORD=0
 fi
@@ -28,6 +21,11 @@ fi
 
 # Constants
 FFMPEG_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
+BENCHPRESS_ROOT="$(readlink -f "$FFMPEG_ROOT/../..")"
+BREAKDOWN_FOLDER="$FFMPEG_ROOT"
+
+# Source runtime breakdown utilities
+source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
 show_help() {
 cat <<EOF
@@ -84,8 +82,6 @@ main() {
 
     sleep_before_perf=60
 
-    dump_breakdown_info=false
-
     # Create a backup of generate_commands_all.py before making any changes, to restore it later and avoid replicating changes for susequent runs
     cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.backup.py
 
@@ -117,9 +113,6 @@ main() {
                 ;;
             --sleep-before-perf)
                 sleep_before_perf="$2"
-                ;;
-            --dump-breakdown-info)
-                dump_breakdown_info=true
                 ;;
             -h)
                 show_help >&2
@@ -190,10 +183,11 @@ main() {
         fi
     else
             echo "Invalid encoder, available options are svt and aom"
-            exit 1
-    fi
+              exit 1
+      fi
 
-    dump_breakdown_info "preprocessing started"
+    create_breakdown_csv "$BREAKDOWN_FOLDER"
+    log_preprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
     set -u  # Enable unbound variables check from here onwards
     benchreps_tell_state "working on config"
@@ -263,14 +257,16 @@ main() {
     ldconfig
 
     #run
-    dump_breakdown_info "benchmark started"
+    log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
+    log_main_benchmark_start "$BREAKDOWN_FOLDER" "$$"
     benchreps_tell_state "start"
     if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
         collect_perf_record &
     fi
     ./"${run_sh}"
     benchreps_tell_state "done"
-    dump_breakdown_info "post processing started"
+    log_main_benchmark_end "$BREAKDOWN_FOLDER" "$$"
+    log_postprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
     unset LD_LIBRARY_PATH
     ldconfig
@@ -305,7 +301,7 @@ main() {
     mv ${FFMPEG_ROOT}/generate_commands_all.backup.py ${FFMPEG_ROOT}/generate_commands_all.py
 
     popd
-    dump_breakdown_info "script ended"
+    log_postprocessing_end "$BREAKDOWN_FOLDER" "$$"
 
 }
 

@@ -81,8 +81,7 @@ if __name__ == "__main__":
         action="store",
         dest="rps_policy",
         default="same-node",
-        help="Specify RPS policy in {same-node, all-nodes}."
-        " To be used with -r/--rps.",
+        help="Specify RPS policy in {same-node, all-nodes}. To be used with -r/--rps.",
     )
     parser.add_argument(
         "-a",
@@ -108,7 +107,7 @@ if __name__ == "__main__":
         type=int,
         default=[],
         dest="cores",
-        help="Specify fixed CPU cores to affinitize IRQs." " Pass as list",
+        help="Specify fixed CPU cores to affinitize IRQs. Pass as list",
     )
     parser.add_argument(
         "--max-cpus",
@@ -168,12 +167,12 @@ if __name__ == "__main__":
         "--dry-run",
         action="store_true",
         default=False,
-        help="Do not actually change anything, just log what " "would be done.",
+        help="Do not actually change anything, just log what would be done.",
     )
     parser.add_argument(
         "--log",
         default="INFO",
-        help="Set log level DEBUG|INFO|WARNING|ERROR|CRITICAL. " "Default: %(default)s",
+        help="Set log level DEBUG|INFO|WARNING|ERROR|CRITICAL. Default: %(default)s",
     )
     parser.add_argument(
         "-n",

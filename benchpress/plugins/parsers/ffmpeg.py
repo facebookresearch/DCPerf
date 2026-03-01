@@ -10,7 +10,6 @@ import re
 import statistics
 
 from benchpress.lib.baseline import BASELINES
-
 from benchpress.lib.parser import Parser
 
 VIDEO_TRANSCODE_SVT_BASELINE = BASELINES["video_transcode_svt"]

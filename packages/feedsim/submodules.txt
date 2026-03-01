@@ -1,8 +1,8 @@
 https://github.com/USCiLab/cereal v1.3.2 third_party/cereal
-https://github.com/facebook/fbthrift v2025.06.23.00 third_party/fbthrift
-https://github.com/facebookincubator/fizz v2025.06.23.00 third_party/fizz
+https://github.com/facebook/fbthrift v2026.01.05.00 third_party/fbthrift
+https://github.com/facebookincubator/fizz v2026.01.05.00 third_party/fizz
 https://github.com/fmtlib/fmt 11.2.0 third_party/fmt
-https://github.com/facebook/folly v2025.06.23.00 third_party/folly
+https://github.com/facebook/folly v2026.01.05.00 third_party/folly
 https://github.com/sbeamer/gapbs v1.5 third_party/gapbs
-https://github.com/facebook/wangle v2025.06.23.00 third_party/wangle
-https://github.com/facebook/mvfst v2025.07.14.00 third_party/mvfst
+https://github.com/facebook/wangle v2026.01.05.00 third_party/wangle
+https://github.com/facebook/mvfst v2026.01.05.00 third_party/mvfst

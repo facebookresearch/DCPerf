@@ -4,7 +4,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -14,17 +14,15 @@
   * limitations under the License.
   */
- 
+
 -#include <cea/chips/adsim/cpp2/client/TLSConnect.h>
  #include <folly/SocketAddress.h>
  #include <folly/coro/BlockingWait.h>
@@ -19,16 +19,16 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +#include "CoWorker.h"
 +#include "TLSConnect.h"
 +#include "if/gen-cpp2/AdSim.h"
- 
+
  DEFINE_string(host, "::1", "AdSimServer host");
  DEFINE_int32(port, 10086, "AdSimServer port");
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/client/CoWorker.h adsim/cpp2/client/CoWorker.h
 --- adsim_src/cpp2/client/CoWorker.h	2025-08-11 16:40:31.473506519 -0700
 +++ adsim/cpp2/client/CoWorker.h	2025-08-08 01:31:53.329657548 -0700
 @@ -16,14 +16,16 @@
- 
+
  #pragma once
- 
+
 -#include <cea/chips/adsim/if/gen-cpp2/AdSim.h>
  #include <fizz/client/AsyncFizzClient.h>
  #include <folly/MoveWrapper.h>
@@ -40,16 +40,16 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  #include <thrift/lib/cpp2/security/extensions/ThriftParametersClientExtension.h>
 +#include "TLSConnect.h"
 +#include "if/gen-cpp2/AdSim.h"
- 
+
  namespace facebook::cea::chips::adsim {
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/AdSimServer.cpp adsim/cpp2/server/AdSimServer.cpp
 --- adsim_src/cpp2/server/AdSimServer.cpp	2025-08-11 16:40:31.492003858 -0700
 +++ adsim/cpp2/server/AdSimServer.cpp	2025-08-11 16:25:52.981966551 -0700
 @@ -19,8 +19,6 @@
  #include <streambuf>
  #include <string>
- 
+
 -#include <cea/chips/adsim/cpp2/server/AdSimService.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Dwarfs.h>
  #include <fizz/fizz-config.h>
@@ -61,7 +61,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
  #include <wangle/acceptor/FizzConfigUtil.h>
 +#include "cpp2/server/AdSimService.h"
 +#include "cpp2/server/dwarfs/Dwarfs.h"
- 
+
  DEFINE_string(config_file, "", "A json file of configurations");
  DEFINE_int32(port, -1, "Overwrite port in the config file");
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/AdSimService.cpp adsim/cpp2/server/AdSimService.cpp
@@ -70,21 +70,21 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -14,8 +14,8 @@
   * limitations under the License.
   */
- 
+
 -#include <cea/chips/adsim/cpp2/server/AdSimService.h>
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 +#include "cpp2/server/AdSimService.h"
 +#include "cpp2/server/DataObjects.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Collect.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/AdSimService.h adsim/cpp2/server/AdSimService.h
 --- adsim_src/cpp2/server/AdSimService.h	2025-08-11 16:40:31.493090351 -0700
-+++ adsim/cpp2/server/AdSimService.h	2025-08-08 01:31:53.341792209 -0700
++++ adsim/cpp2/server/AdSimService.h	2025-08-11 16:25:52.981966551 -0700
 @@ -22,10 +22,10 @@
  #include <folly/Executor.h>
  #include <folly/MapUtil.h>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 -#include <cea/chips/adsim/if/gen-cpp2/AdSim.h>
@@ -92,20 +92,42 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
 +#include "if/gen-cpp2/AdSim.h"
- 
+
  namespace facebook::cea::chips::adsim {
- 
+
+@@ -48,15 +48,16 @@
+   folly::coro::Task<std::unique_ptr<AdSimResponse>> co_sim(
+       std::unique_ptr<AdSimRequest> req) override;
+
+-  // fb303 stuff
+-  facebook::fb303::cpp2::fb_status getStatus() override {
+-    return facebook::fb303::cpp2::fb_status::ALIVE;
++  // fb303 status - OSS fb303 BaseService doesn't have these as virtual
++  facebook::fb303::cpp2::fb303_status getStatus() {
++    return facebook::fb303::cpp2::fb303_status::ALIVE;
+   }
+-  // TODO: find out how FacebookBase2 returns the real stats
+-  int64_t getMemoryUsage() override {
++  // These methods are not virtual in OSS fb303 BaseService
++  int64_t getMemoryUsage() {
+     return 0;
+   }
+-  double getLoad() override {
++  double getLoad() {
+     return 0;
+   }
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/DataObjects.cpp adsim/cpp2/server/DataObjects.cpp
 --- adsim_src/cpp2/server/DataObjects.cpp	2025-08-11 16:40:31.494161142 -0700
 +++ adsim/cpp2/server/DataObjects.cpp	2025-08-08 01:31:53.343138967 -0700
 @@ -14,7 +14,7 @@
   * limitations under the License.
   */
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 +#include "cpp2/server/DataObjects.h"
  #include <folly/Singleton.h>
- 
+
  namespace facebook::cea::chips::adsim {
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/DataObjects.h adsim/cpp2/server/DataObjects.h
 --- adsim_src/cpp2/server/DataObjects.h	2025-08-11 16:40:31.494634076 -0700
@@ -113,53 +135,53 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -27,7 +27,7 @@
  #include <thrift/lib/cpp2/protocol/CompactProtocol.h>
  #include <thrift/lib/cpp2/protocol/Serializer.h>
- 
+
 -#include <cea/chips/adsim/if/gen-cpp2/AdSim.h>
 +#include "if/gen-cpp2/AdSim.h"
- 
+
  namespace facebook::cea::chips::adsim {
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Compress.cc adsim/cpp2/server/dwarfs/Compress.cc
 --- adsim_src/cpp2/server/dwarfs/Compress.cc	2025-08-11 16:40:31.479344550 -0700
 +++ adsim/cpp2/server/dwarfs/Compress.cc	2025-08-08 01:31:53.347193603 -0700
 @@ -18,10 +18,10 @@
  #include <util.h>
- 
+
  #include <glog/logging.h>
 -#include <cstring>
 +#include <string.h>
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Compress.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "Compress.h"
 +#include "Kernel.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Task.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Compress.h adsim/cpp2/server/dwarfs/Compress.h
 --- adsim_src/cpp2/server/dwarfs/Compress.h	2025-08-11 16:40:31.479879439 -0700
 +++ adsim/cpp2/server/dwarfs/Compress.h	2025-08-08 01:31:53.349828359 -0700
 @@ -21,8 +21,8 @@
- 
+
  #include <string.h>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <folly/coro/Task.h>
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/ConcurrentHashMap.cc adsim/cpp2/server/dwarfs/ConcurrentHashMap.cc
 --- adsim_src/cpp2/server/dwarfs/ConcurrentHashMap.cc	2025-08-11 16:40:31.480419906 -0700
 +++ adsim/cpp2/server/dwarfs/ConcurrentHashMap.cc	2025-08-08 01:31:53.352038533 -0700
 @@ -14,7 +14,7 @@
   * limitations under the License.
   */
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h>
 +#include "ConcurrentHashMap.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/executors/CPUThreadPoolExecutor.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/ConcurrentHashMap.h adsim/cpp2/server/dwarfs/ConcurrentHashMap.h
@@ -168,12 +190,12 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -30,8 +30,8 @@
  #include <utility>
  #include <vector>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <folly/Likely.h>
  #include <folly/SharedMutex.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/DeepCopy.h adsim/cpp2/server/dwarfs/DeepCopy.h
@@ -182,26 +204,26 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -24,8 +24,8 @@
  #include <unordered_map>
  #include <vector>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/container/F14Map.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Delay.h adsim/cpp2/server/dwarfs/Delay.h
 --- adsim_src/cpp2/server/dwarfs/Delay.h	2025-08-11 16:40:31.481921437 -0700
 +++ adsim/cpp2/server/dwarfs/Delay.h	2025-08-08 01:31:53.357004548 -0700
 @@ -18,8 +18,8 @@
- 
+
  #include <unistd.h>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Task.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Dwarfs.cc adsim/cpp2/server/dwarfs/Dwarfs.cc
@@ -210,7 +232,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -19,21 +19,21 @@
  #include <folly/MapUtil.h>
  #include <folly/dynamic.h>
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Compress.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/DeepCopy.h>
@@ -241,34 +263,34 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +#include "Serialize.h"
 +#include "Shape.h"
 +#include "TensorDeser.h"
- 
+
  namespace facebook::cea::chips::adsim {
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Dwarfs.h adsim/cpp2/server/dwarfs/Dwarfs.h
 --- adsim_src/cpp2/server/dwarfs/Dwarfs.h	2025-08-11 16:40:31.483412603 -0700
 +++ adsim/cpp2/server/dwarfs/Dwarfs.h	2025-08-08 01:31:53.672498594 -0700
 @@ -19,9 +19,9 @@
  #include <string>
- 
+
  #include <folly/MapUtil.h>
 -#include <folly/json/dynamic.h>
 +#include <folly/dynamic.h>
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  namespace facebook::cea::chips::adsim {
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Embedding.cc adsim/cpp2/server/dwarfs/Embedding.cc
 --- adsim_src/cpp2/server/dwarfs/Embedding.cc	2025-08-11 16:40:31.484095456 -0700
 +++ adsim/cpp2/server/dwarfs/Embedding.cc	2025-08-08 01:31:53.793356796 -0700
 @@ -14,7 +14,7 @@
   * limitations under the License.
   */
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Embedding.h>
 +#include "Embedding.h"
- 
+
  #include <algorithm>
  #include <chrono>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Embedding.h adsim/cpp2/server/dwarfs/Embedding.h
@@ -277,26 +299,26 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -21,8 +21,8 @@
  #include <random>
  #include <vector>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Task.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/FakeIO.h adsim/cpp2/server/dwarfs/FakeIO.h
 --- adsim_src/cpp2/server/dwarfs/FakeIO.h	2025-08-11 16:40:31.485038282 -0700
 +++ adsim/cpp2/server/dwarfs/FakeIO.h	2025-08-08 01:31:53.798474870 -0700
 @@ -18,8 +18,8 @@
- 
+
  #include <unistd.h>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Task.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/GEMM.cc adsim/cpp2/server/dwarfs/GEMM.cc
@@ -304,40 +326,40 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +++ adsim/cpp2/server/dwarfs/GEMM.cc	2025-08-08 01:31:53.800483990 -0700
 @@ -22,17 +22,21 @@
  #include <glog/logging.h>
- 
+
  #ifdef _OPENMP
 +#include <omp.h>
  #endif
- 
+
  #ifdef USE_MKL
 +#include <mkl.h>
  #endif
- 
+
  #include "bench/BenchUtils.h"
  #include "fbgemm/Fbgemm.h"
 +#include "src/RefImplementations.h"
  #include "test/QuantizationHelpers.h"
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/GEMM.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include <folly/coro/Task.h>
 +#include "GEMM.h"
 +#include "Kernel.h"
- 
+
  using namespace std;
  using namespace fbgemm;
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/GEMM.h adsim/cpp2/server/dwarfs/GEMM.h
 --- adsim_src/cpp2/server/dwarfs/GEMM.h	2025-08-11 16:40:31.486000186 -0700
 +++ adsim/cpp2/server/dwarfs/GEMM.h	2025-08-08 01:31:53.803664512 -0700
 @@ -22,8 +22,8 @@
- 
+
  #include <assert.h>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/coro/Collect.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/HashMap.cc adsim/cpp2/server/dwarfs/HashMap.cc
@@ -346,53 +368,53 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -14,7 +14,7 @@
   * limitations under the License.
   */
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/HashMap.h>
 +#include "HashMap.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/HashMap.h adsim/cpp2/server/dwarfs/HashMap.h
 --- adsim_src/cpp2/server/dwarfs/HashMap.h	2025-08-11 16:40:31.486935100 -0700
 +++ adsim/cpp2/server/dwarfs/HashMap.h	2025-08-08 01:31:53.808046744 -0700
 @@ -24,8 +24,8 @@
  #include <unordered_map>
  #include <vector>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <folly/Synchronized.h>
  #include <folly/container/F14Map.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/IBRun.h adsim/cpp2/server/dwarfs/IBRun.h
 --- adsim_src/cpp2/server/dwarfs/IBRun.h	2025-08-11 16:40:31.487406294 -0700
 +++ adsim/cpp2/server/dwarfs/IBRun.h	2025-08-08 01:31:53.809471208 -0700
 @@ -16,9 +16,9 @@
- 
+
  #pragma once
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/icache_buster/ICacheBuster.h> // @manual=//cea/chips/adsim/cpp2/server/dwarfs/icache_buster:libicachebuster
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
 +#include "cpp2/server/dwarfs/icache_buster/ICacheBuster.h" // @manual=//cea/chips/adsim/cpp2/server/dwarfs/icache_buster:libicachebuster
- 
+
  #include <folly/coro/Task.h>
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py adsim/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py
 --- adsim_src/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py	2025-08-11 16:40:31.478209463 -0700
 +++ adsim/cpp2/server/dwarfs/icache_buster/gen_icache_buster.py	2025-08-08 01:31:53.810996567 -0700
 @@ -14,8 +14,6 @@
  # See the License for the specific language governing permissions and
  # limitations under the License.
- 
+
 -# pyre-unsafe
 -
  """Module to split file into multiple segments."""
- 
+
  import argparse
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Kernel.cc adsim/cpp2/server/dwarfs/Kernel.cc
 --- adsim_src/cpp2/server/dwarfs/Kernel.cc	2025-08-11 16:40:31.487821412 -0700
@@ -400,42 +422,42 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -20,7 +20,7 @@
  #include <fb303/ExportType.h>
  #include <fb303/ThreadCachedServiceData.h>
- 
+
 -#include "cea/chips/adsim/cpp2/server/dwarfs/Kernel.h"
 +#include "Kernel.h"
- 
+
  namespace facebook::cea::chips::adsim {
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Kernel.h adsim/cpp2/server/dwarfs/Kernel.h
 --- adsim_src/cpp2/server/dwarfs/Kernel.h	2025-08-11 16:40:31.488430894 -0700
 +++ adsim/cpp2/server/dwarfs/Kernel.h	2025-08-08 01:31:53.813180731 -0700
 @@ -21,10 +21,10 @@
  #include <unordered_map>
  #include <vector>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
  #include <folly/coro/Task.h>
 -#include <folly/json/dynamic.h>
 +#include <folly/dynamic.h>
  #include <glog/logging.h>
 +#include "cpp2/server/DataObjects.h"
- 
+
  namespace facebook::cea::chips::adsim {
- 
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Rebatch.cc adsim/cpp2/server/dwarfs/Rebatch.cc
 --- adsim_src/cpp2/server/dwarfs/Rebatch.cc	2025-08-11 16:40:31.488863107 -0700
 +++ adsim/cpp2/server/dwarfs/Rebatch.cc	2025-08-08 01:31:53.814875957 -0700
 @@ -14,7 +14,7 @@
   * limitations under the License.
   */
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Rebatch.h>
 +#include "Rebatch.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/futures/Future.h>
 @@ -466,7 +466,7 @@
- 
+
    // Select execution mode based on thread configuration and pool availability
    if (num_threads_ > 1 && pool) {
 -    co_await rebatch_multi_thread(std::move(pool));
@@ -449,43 +471,53 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -26,8 +26,8 @@
  #include <string>
  #include <vector>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <folly/CppAttributes.h>
  #include <folly/coro/Task.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Serialize.h adsim/cpp2/server/dwarfs/Serialize.h
 --- adsim_src/cpp2/server/dwarfs/Serialize.h	2025-08-11 16:40:31.489813905 -0700
 +++ adsim/cpp2/server/dwarfs/Serialize.h	2025-08-08 01:31:53.818122610 -0700
 @@ -20,15 +20,15 @@
- 
+
  #include <algorithm>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <folly/coro/Task.h>
- 
+
  #include <thrift/lib/cpp2/protocol/CompactProtocol.h>
  #include <thrift/lib/cpp2/protocol/Serializer.h>
- 
+
 -#include <cea/chips/adsim/if/gen-cpp2/Serialize_types.h>
 +#include "if/gen-cpp2/Serialize_types.h"
- 
+
  namespace facebook::cea::chips::adsim {
- 
+
+@@ -101,7 +101,7 @@
+     for (int32_t i = 0; i < UNIT_LIST_SIZE; i++) {
+       SerializableUnit unit;
+       // std::map doesn't have reserve(), unlike folly::F14VectorMap
+-      unit.map_of_list()->reserve(UNIT_LIST_MAP_SIZE);
++      // unit.map_of_list()->reserve(UNIT_LIST_MAP_SIZE);
+       for (int32_t j = 0; j < UNIT_LIST_MAP_SIZE; j++) {
+         std::vector<int32_t> list;
+         list.reserve(UNIT_LIST_MAP_LIST_SIZE);
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/Shape.h adsim/cpp2/server/dwarfs/Shape.h
 --- adsim_src/cpp2/server/dwarfs/Shape.h	2025-08-11 16:40:31.490449888 -0700
 +++ adsim/cpp2/server/dwarfs/Shape.h	2025-08-08 01:31:53.820252441 -0700
 @@ -16,10 +16,10 @@
- 
+
  #pragma once
- 
+
 -#include <cea/chips/adsim/cpp2/client/TLSConnect.h>
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
@@ -494,7 +526,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
 +#include "if/gen-cpp2/AdSim.h"
- 
+
  #include <fb303/ThreadCachedServiceData.h>
  #include <folly/MoveWrapper.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/cpp2/server/dwarfs/TensorDeser.cc adsim/cpp2/server/dwarfs/TensorDeser.cc
@@ -503,7 +535,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -14,7 +14,7 @@
   * limitations under the License.
   */
- 
+
 -#include <cea/chips/adsim/cpp2/server/dwarfs/TensorDeser.h>
 +#include "TensorDeser.h"
  #include <cstring>
@@ -515,12 +547,12 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -30,8 +30,8 @@
  #include <tuple>
  #include <vector>
- 
+
 -#include <cea/chips/adsim/cpp2/server/DataObjects.h>
 -#include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 +#include "cpp2/server/DataObjects.h"
 +#include "cpp2/server/dwarfs/Kernel.h"
- 
+
  #include <folly/FileUtil.h>
  #include <folly/Format.h>
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/if/AdSim.thrift adsim/if/AdSim.thrift
@@ -529,16 +561,66 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 @@ -1,4 +1,4 @@
 -include "common/fb303/if/fb303.thrift"
 +include "fb303.thrift"
- 
+
  namespace cpp2 facebook.cea.chips.adsim
  namespace py3 facebook.cea.chips.adsim
+diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/if/CMakeLists.txt adsim/if/CMakeLists.txt
+--- adsim_src/if/CMakeLists.txt	2025-08-11 16:40:31.497838213 -0700
++++ adsim/if/CMakeLists.txt	2025-08-11 16:25:52.981966551 -0700
+@@ -1,23 +1,9 @@
+ set(THRIFT1 ${CMAKE_PREFIX_PATH}/bin/thrift1)
+ set(THRIFTCPP2 ${CMAKE_PREFIX_PATH}/lib/libthriftcpp2.a)
+ include(ThriftLibrary)
+
+-thrift_library(
+-    "fb303"
+-    "FacebookService"
+-    "cpp2"
+-    "frozen2,reflection"
+-    "${CMAKE_CURRENT_LIST_DIR}"
+-    "${CMAKE_CURRENT_LIST_DIR}"
+-    "${CMAKE_CURRENT_LIST_DIR}"
+-    THRIFT_INCLUDE_DIRECTORIES
+-        "${CMAKE_PREFIX_PATH}/include/thrift-files"
+-        "${CMAKE_PREFIX_PATH}/include"
+-)
+-
+-add_dependencies(fb303-cpp2-target FBThrift::thriftcpp2 fb303::fb303)
+-
+-target_include_directories(fb303-cpp2-obj PRIVATE
+-    ${CMAKE_PREFIX_PATH}/include
+-)
++# fb303 thrift is pre-generated - use the installed fb303 library instead
++# Create a dummy fb303-cpp2 target that just links to the real fb303
++add_library(fb303-cpp2 INTERFACE)
++target_link_libraries(fb303-cpp2 INTERFACE fb303::fb303 fb303::fb303_thrift_cpp)
+
+ thrift_library(
+     "AdSim"
+@@ -51,10 +37,12 @@
+     "Serialize"
+     ""
+     "cpp2"
+     ""
+     "${CMAKE_CURRENT_LIST_DIR}"
+     "${CMAKE_CURRENT_LIST_DIR}"
+     "${CMAKE_CURRENT_LIST_DIR}"
++    THRIFT_INCLUDE_DIRECTORIES
++        "${CMAKE_PREFIX_PATH}/include/thrift-files"
++        "${CMAKE_PREFIX_PATH}/include"
+ )
+ add_dependencies(Serialize-cpp2-target FBThrift::thriftcpp2)
+ target_include_directories(Serialize-cpp2-obj PRIVATE
+
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' adsim_src/if/Serialize.thrift adsim/if/Serialize.thrift
 --- adsim_src/if/Serialize.thrift	2025-08-11 16:40:31.497838213 -0700
 +++ adsim/if/Serialize.thrift	2025-08-08 01:31:53.827141065 -0700
-@@ -3,20 +3,15 @@
- cpp_include "list"
- cpp_include "folly/container/F14Map.h"
- 
+@@ -1,30 +1,24 @@
+ namespace cpp2 facebook.cea.chips.adsim
+
+-cpp_include "list"
+-cpp_include "folly/container/F14Map.h"
+-
 -include "thrift/annotation/cpp.thrift"
 -
  struct SerializableInfo {
@@ -546,26 +628,24 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
    2: i32 var_i32;
    3: double var_double;
  }
- 
+
 -@cpp.Type{template = "std::list"}
--typedef list<i32> id_list_t
+ typedef list<i32> id_list_t
 -@cpp.Type{template = "folly::F14VectorMap"}
--typedef map<i32, id_list_t> id_map_t
+ typedef map<i32, id_list_t> id_map_t
 -@cpp.Type{template = "std::list"}
--typedef list<SerializableInfo> info_list_t
-+typedef list<i32> (cpp.template = "std::list") id_list_t
-+typedef map<i32, id_list_t> (cpp.template = "folly::F14VectorMap") id_map_t
-+typedef list<SerializableInfo> (cpp.template = "std::list") info_list_t
- 
+ typedef list<SerializableInfo> info_list_t
+
  struct SerializableUnit {
    1: id_map_t map_of_list;
-@@ -24,8 +19,7 @@
+   2: info_list_t list_of_info;
    3: id_list_t list_of_i32;
  }
- 
+
 -@cpp.Type{template = "std::list"}
--typedef list<SerializableUnit> unit_list_t
-+typedef list<SerializableUnit> (cpp.template = "std::list") unit_list_t
- 
+ typedef list<SerializableUnit> unit_list_t
+
  struct SerializableReq {
    1: i64 var_i64;
+   2: unit_list_t list_of_unit;
+ }

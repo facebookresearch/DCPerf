@@ -175,3 +175,26 @@
         after:
           - 'benchmarks/wdl_bench/wdl_bench_results.txt'
           - 'benchmarks/wdl_bench/out_*.json'
+
+- name: prod_set
+  benchmark: wdl_bench
+  description: >
+    a set of most popular and ubiquitous WDLs across Meta's fleet, with configs close to real production.
+  args:
+    - '--type {type}'
+    - '--output {output}'
+  vars:
+    - 'type=prod'
+    - 'output=wdl_bench_results.txt'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/wdl_bench/wdl_bench_results.txt'
+          - 'benchmarks/wdl_bench/out_*.json'

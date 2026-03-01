@@ -10,10 +10,8 @@ wdl_bench:
   path: ./benchmarks/wdl_bench/run.sh
   tags:
     scope:
-      - app
-      - folly
-      - fbthrift
-      - vdso
+      - wdl
+      - datacenter tax
     component:
       - cpu
   metrics: []

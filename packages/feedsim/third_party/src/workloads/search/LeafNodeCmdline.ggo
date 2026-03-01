@@ -25,5 +25,6 @@ option "quiet" - "Disable log messages."
 option "threads" - "Number of threads to use for serving." int default="1"
 option "port" - "Port to run server on." int default="11222"
 option "monitor_port" - "Port to run monitoring server on." int default="8888"
+option "node_seed" - "Seed for random number generator. If not provided, current time will be used." long optional
 option "noaffinity" - "Specify to disable thread pinning"
 option "noloadbalance" - "Specify to disable thread load balancing"

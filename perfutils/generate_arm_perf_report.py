@@ -43,7 +43,23 @@ def read_csv(perf_csv_file):
             "1",
             "2",
         ],
+        dtype={
+            "timestamp": "float64",
+            "counter_value": "float64",
+            "counter_unit": "str",
+            "event_name": "str",
+            "counter_runtime": "float64",
+            "mux": "float",
+        },
+        na_values=["<not counted>"],
     )
+    # On some kernels, requesting 'cycles' in system-wide mode (-a) auto-expands
+    # to include uncore PMU cycles (e.g. nvidia_scf_pmu_0/cycles/). When the SCF
+    # memory group also explicitly requests nvidia_scf_pmu_0/cycles/, it appears
+    # twice per interval, causing series length mismatches in derived metrics.
+    # Keep the last occurrence per (timestamp, event_name) since the explicit SCF
+    # group entry appears later and has counter_runtime aligned with other SCF events.
+    df = df.drop_duplicates(subset=["timestamp", "event_name"], keep="last")
     return df
 
 
@@ -132,14 +148,11 @@ def timestamp(grouped_df):
 
 @skip_if_missing
 def duration(grouped_df):
-    duration_series = grouped_df.get_group("duration_time").counter_value
-    mux_series = grouped_df.get_group("instructions").mux / 100.0
-
-    duration_series.index = mux_series.index
+    duration_series = get_duration_series(grouped_df.get_group("duration_time"))
 
     return {
         "name": "Per-Sample Effective Sampling Duration (msecs)",
-        "series": duration_series * mux_series,
+        "series": duration_series,
         "prefix": 10**-6,
     }
 
@@ -300,33 +313,33 @@ def branch_inst_percent(grouped_df):
 
 
 @skip_if_missing
-def flops(grouped_df):
-    fp_scale_series = grouped_df.get_group("r80c0").counter_value  # FP_SCALE_OPS_SPEC
-    fp_fixed_series = grouped_df.get_group("r80c1").counter_value  # FP_FIXED_OPS_SPEC
-    duration_series = grouped_df.get_group("duration_time").counter_value
+def gflops(grouped_df):
+    fp_scale_series = grouped_df.get_group("r80C0").counter_value  # FP_SCALE_OPS_SPEC
+    fp_fixed_series = grouped_df.get_group("r80C1").counter_value  # FP_FIXED_OPS_SPEC
+    duration_series = get_duration_series(grouped_df.get_group("r80C0"))
 
     fp_scale_series.index = duration_series.index
     fp_fixed_series.index = duration_series.index
 
     flop_sum_series = fp_fixed_series + fp_scale_series
-    flops_series = flop_sum_series.div(duration_series / 10**9) / 10**9
+    gflops_series = flop_sum_series.div(duration_series / 10**9) / 10**9
     return {
         "name": "GFLOPS (any precision, incl SVE)",
-        "series": flops_series,
+        "series": gflops_series,
     }
 
 
 @skip_if_missing
-def sve_flops(grouped_df):
-    fp_scale_series = grouped_df.get_group("r80c1").counter_value  # FP_FIXED_OPS_SPEC
-    duration_series = grouped_df.get_group("duration_time").counter_value
+def sve_gflops(grouped_df):
+    fp_scale_series = grouped_df.get_group("r80C1").counter_value  # FP_FIXED_OPS_SPEC
+    duration_series = get_duration_series(grouped_df.get_group("r80C1"))
 
     fp_scale_series.index = duration_series.index
 
-    sve_flops_series = fp_scale_series.div(duration_series / 10**9) / 10**9
+    sve_gflops_series = fp_scale_series.div(duration_series / 10**9) / 10**9
     return {
         "name": "SVE GFLOPS (any precision)",
-        "series": sve_flops_series,
+        "series": sve_gflops_series,
     }
 
 
@@ -783,13 +796,10 @@ def nvidia_scf_mem_read_bw_MBps(grouped_df):
         "nvidia_scf_pmu_0/cmem_rd_data/"
     ).counter_runtime
 
-    pcnt_running_series = grouped_df.get_group("nvidia_scf_pmu_0/cmem_rd_data/").mux
-    dt_series = duration_series * (100.0 / pcnt_running_series)
-
-    cmem_rd_data_series.index = dt_series.index
+    cmem_rd_data_series.index = duration_series.index
 
     local_mem_read_series = cmem_rd_data_series * 32
-    local_mem_bw_read_series = local_mem_read_series.div(dt_series)
+    local_mem_bw_read_series = local_mem_read_series.div(duration_series)
     return {
         "name": "SCF Local Memory Read Bandwidth (MBps)",
         "series": local_mem_bw_read_series,
@@ -806,14 +816,9 @@ def nvidia_scf_mem_write_bw_MBps(grouped_df):
         "nvidia_scf_pmu_0/cmem_wr_total_bytes/"
     ).counter_runtime
 
-    pcnt_running_series = grouped_df.get_group(
-        "nvidia_scf_pmu_0/cmem_wr_total_bytes/"
-    ).mux
-    dt_series = duration_series * (100.0 / pcnt_running_series)
+    cmem_wr_bytes_series.index = duration_series.index
 
-    cmem_wr_bytes_series.index = dt_series.index
-
-    local_mem_bw_write_series = cmem_wr_bytes_series.div(dt_series)
+    local_mem_bw_write_series = cmem_wr_bytes_series.div(duration_series)
     return {
         "name": "SCF Local Memory Write Bandwidth (MBps)",
         "series": local_mem_bw_write_series,
@@ -837,16 +842,10 @@ def nvidia_scf_mem_latency_ns(grouped_df):
     cmem_rd_outstanding_series.index = sfc_cycles_series.index
     cmem_rd_access_series.index = sfc_cycles_series.index
     duration_series.index = sfc_cycles_series.index
-    pcnt_running_series = grouped_df.get_group(
-        "nvidia_scf_pmu_0/cmem_rd_outstanding/"
-    ).mux
-    pcnt_running_series.index = duration_series.index
-    dt_series = duration_series * (100.0 / pcnt_running_series)
-    dt_series.index = sfc_cycles_series.index
 
     local_mem_read_lat_ns_series = (
         cmem_rd_outstanding_series.div(cmem_rd_access_series)
-    ) / (sfc_cycles_series.div(dt_series))
+    ) / (sfc_cycles_series.div(duration_series))
     return {
         "name": "SCF Local Memory Read Latency (nsecs)",
         "series": local_mem_read_lat_ns_series,
@@ -878,8 +877,6 @@ def main(
     df = read_csv(perf_csv_file)
     grouped_df = df.groupby("event_name")
     metrics = [
-        timestamp(grouped_df),
-        duration(grouped_df),
         mips(grouped_df),
         muopps(grouped_df),
         ipc(grouped_df),
@@ -890,8 +887,8 @@ def main(
         st_inst_percent(grouped_df),
         crypto_inst_percent(grouped_df),
         branch_inst_percent(grouped_df),
-        flops(grouped_df),
-        sve_flops(grouped_df),
+        gflops(grouped_df),
+        sve_gflops(grouped_df),
         branch_mpki(grouped_df),
         branch_miss_rate(grouped_df),
         l1_icache_mpki(grouped_df),

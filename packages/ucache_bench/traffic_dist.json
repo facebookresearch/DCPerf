@@ -1,0 +1,15 @@
+{
+  "get_ratio": 0.9256984153889152,
+  "get_key_size_avg": 41.12018124413886,
+  "get_response_size_avg": 862.7496055013081,
+  "get_response_size_p50": 63.48554876707823,
+  "get_response_size_p75": 225.77646753713933,
+  "get_response_size_p95": 1412.7676124028005,
+  "get_response_size_p99": 13335.563241596921,
+  "set_key_size_avg": 67.06123771141154,
+  "set_value_size_avg": 1385.353510955472,
+  "set_value_size_p50": 39.517609919114435,
+  "set_value_size_p75": 97.74232269074469,
+  "set_value_size_p95": 1802.5370005260888,
+  "set_value_size_p99": 24941.446055057026
+}

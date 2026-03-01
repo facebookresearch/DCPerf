@@ -1,3 +1,20 @@
+diff --git a/libavcodec/libsvtav1.c b/libavcodec/libsvtav1.c
+index c6a0ff90bc..f20b78b6e9 100644
+--- a/libavcodec/libsvtav1.c
++++ b/libavcodec/libsvtav1.c
+@@ -238,7 +238,12 @@ static int config_enc_params(EbSvtAv1EncConfiguration *param,
+     } else if (svt_enc->qp > 0) {
+         param->qp                   = svt_enc->qp;
+         param->rate_control_mode    = 0;
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++        param->aq_mode = 0;
++#else
+         param->enable_adaptive_quantization = 0;
++#endif
++
+     }
+
+     desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 diff --git a/libavfilter/vf_libvmaf.c b/libavfilter/vf_libvmaf.c
 index 10d5b7f59b..d7b2550230 100644
 --- a/libavfilter/vf_libvmaf.c

@@ -7,7 +7,7 @@
 # Template file to configure the cluster.
 # Copy this file to cluster_settings.py before starting the WSGI server
 # and adjust as needed.
-from django_workload.settings import *  # noqa F403
+from django_workload.settings import CACHES, DATABASES, MIDDLEWARE
 
 # Security settings
 SECRET_KEY = "()2uyyko+p=dv*nmu$b5my9px!e0=6r5unm19or$02$-c62%gb"
@@ -16,6 +16,11 @@ ALLOWED_HOSTS = ["localhost", "ip6-localhost", "127.0.0.1", "::1", "*"]
 
 # Cassandra database
 DATABASES["default"]["HOST"] = "127.0.0.1"
+
+# Thrift RPC services (for FeedFlow architecture)
+# Use the same host as Cassandra for remote RPC services
+THRIFT_SERVER_HOST = DATABASES["default"]["HOST"]
+THRIFT_SERVER_PORT = 9090  # Default Thrift server port
 
 # Monitoring server
 STATSD_HOST = "localhost"
@@ -40,7 +45,7 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "verbose": {
-            "format": "[{asctime}] {levelname}: {name}.{message}",
+            "format": "[{asctime}] {filename}:{lineno} {name} {levelname}: {message}",
             "style": "{",
         },
     },

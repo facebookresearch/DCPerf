@@ -1,33 +1,45 @@
 fbgemm:
   parser: fbgemm
-  install_script: ./packages/fbgemm/install_fbgemm_bench.sh
-  cleanup_script: ./packages/fbgemm/cleanup_fbgemm_bench.sh
-  path: ./benchmarks/fbgemm/run.sh
+  install_script: ./packages/ai_wdl/fbgemm/install_fbgemm_bench.sh
+  cleanup_script: ./packages/ai_wdl/fbgemm/cleanup_fbgemm_bench.sh
+  path: ./benchmarks/ai_wdl/fbgemm/run.sh
   metrics:
     - bandwidth
 
 rebatch:
   parser: rebatch
-  install_script: ./packages/rebatch/install_rebatch.sh
-  cleanup_script: ./packages/rebatch/cleanup_rebatch.sh
-  path: ./benchmarks/rebatch/rebatchBench
+  install_script: ./packages/ai_wdl/rebatch/install_rebatch.sh
+  cleanup_script: ./packages/ai_wdl/rebatch/cleanup_rebatch.sh
+  install_markers:
+    - ./benchmarks/ai_wdl/rebatch/rebatchBench
+    - ./benchmarks/ai_wdl/rebatch/model_a.dist
+    - ./benchmarks/ai_wdl/rebatch/model_b.dist
+  path: ./benchmarks/ai_wdl/rebatch/rebatchBench
   metrics:
     - bandwidth
     - time_per_batch_us
 
 chm:
   parser: chm
-  install_script: ./packages/chm/install_chm.sh
-  cleanup_script: ./packages/chm/cleanup_chm.sh
-  path: ./benchmarks/chm/chm_bench
+  install_script: ./packages/ai_wdl/chm/install_chm.sh
+  cleanup_script: ./packages/ai_wdl/chm/cleanup_chm.sh
+  install_markers:
+    - ./benchmarks/ai_wdl/chm/chm_bench
+    - ./benchmarks/ai_wdl/chm/model_a.dist
+    - ./benchmarks/ai_wdl/chm/model_b.dist
+  path: ./benchmarks/ai_wdl/chm/chm_bench
   metrics:
     - Mops/sec
 
 deser:
   parser: deser
-  install_script: ./packages/deser/install_deser.sh
-  cleanup_script: ./packages/deser/cleanup_deser.sh
-  path: ./benchmarks/deser/deser_bench
+  install_script: ./packages/ai_wdl/deser/install_deser.sh
+  cleanup_script: ./packages/ai_wdl/deser/cleanup_deser.sh
+  path: ./benchmarks/ai_wdl/deser/deser_bench
+  install_markers:
+    - ./benchmarks/ai_wdl/deser/deser_bench
+    - ./benchmarks/ai_wdl/deser/model_a.dist
+    - ./benchmarks/ai_wdl/deser/model_b.dist
   metrics:
     - Mops/sec
 
@@ -52,3 +64,11 @@ adsim:
     - final_requested_qps
     - target_latency_msec
     - target_latency_percentile
+
+type_conversion:
+  parser: type_conversion
+  install_script: ./packages/ai_wdl/type_conversion/install_type_conversion.sh
+  cleanup_script: ./packages/ai_wdl/type_conversion/cleanup_type_conversion.sh
+  path: ./benchmarks/ai_wdl/type_conversion/type_conversion_bench
+  metrics:
+    - elem/s

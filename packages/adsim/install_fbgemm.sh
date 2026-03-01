@@ -979,7 +979,23 @@ install_fbgemm() {
   # Return to the previous directory (outside of fbgemm_gpu)
   # This restores the directory we were in before entering fbgemm_gpu
   echo "[BUILD] Returning to previous directory..."
-  popd || exist
+  popd || exit
+
+  # Manually copy FBGEMM files to staging directory
+  # This ensures cmake config files are available even if make install fails
+  echo "[BUILD] Copying FBGEMM cmake config to staging directory..."
+  mkdir -p "${ADSIM_STAGING_DIR}/share/cmake/fbgemm"
+  mkdir -p "${ADSIM_STAGING_DIR}/lib"
+  mkdir -p "${ADSIM_STAGING_DIR}/include"
+
+  # Find and copy cmake config files
+  find "${FBGEMM_STAGING_DIR}/fbgemm/build" -name "fbgemmLibraryConfig*.cmake" -exec cp {} "${ADSIM_STAGING_DIR}/share/cmake/fbgemm/" \;
+
+  # Copy library
+  cp "${FBGEMM_STAGING_DIR}/fbgemm/build/libfbgemm.so"* "${ADSIM_STAGING_DIR}/lib/" 2>/dev/null || true
+
+  # Copy headers
+  cp -r "${FBGEMM_STAGING_DIR}/fbgemm/include/fbgemm" "${ADSIM_STAGING_DIR}/include/" 2>/dev/null || true
 
   echo "[BUILD] FBGEMM installation complete."
 }

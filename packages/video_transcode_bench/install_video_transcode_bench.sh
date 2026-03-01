@@ -19,7 +19,7 @@ declare -A REPOS=(
 declare -A TAGS=(
     ['aom']='v3.8.2'
     ['ffmpeg']='n8.0'
-    ['SVT-AV1']='v3.1.2'
+    ['SVT-AV1']='v4.0.1'
     ['vmaf']='v3.0.0'
     ['aom-testing']='81b0dbfc2e357518c23071eb44860ed8637402c2'
     ['x264']='b35605ace3ddf7c1a5d67a2eb553f034aef41d55'
@@ -28,7 +28,7 @@ declare -A TAGS=(
 ##################### SYS CONFIG AND DEPS #########################
 
 BPKGS_FFMPEG_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
-ARCH="$(uname -p)"
+ARCH="$(uname -m)"
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_FFMPEG_ROOT/../..")"
 FFMPEG_ROOT="${BENCHPRESS_ROOT}/benchmarks/video_transcode_bench"
 FFMPEG_SOURCE="${FFMPEG_ROOT}/ffmpeg_sources"

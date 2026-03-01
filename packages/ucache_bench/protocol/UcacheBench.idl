@@ -1,0 +1,120 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+namespace facebook::ucachebench;
+thrift_namespace facebook.ucachebench.thrift;
+thrift_namespace_hack ucachebench;
+
+import "mcrouter/lib/network/Common.idl"
+
+struct UcacheBenchRequestCommon {
+  # Product identifier
+  1: optional int64_t productId;
+  # Additional routing information if needed
+  2: optional std::string bucketId;
+};
+
+struct UcacheBenchReplyCommon {
+  # Bitmask used to hold information about the source of the request
+  1: uint32_t replySourceBitMask;
+};
+
+request UcbGetRequest with 1: UcacheBenchRequestCommon {
+  id: 1;
+  name: "ucb_get";
+  thrift_method: ucbGet;
+  reply: UcbGetReply;
+
+  1: carbon::Keys<folly::IOBuf> key;
+  2: uint64_t flags;
+};
+
+reply UcbGetReply with 1: UcacheBenchReplyCommon {
+  throws: {
+    1: facebook::memcache::CarbonResultBusy carbonResultBusy;
+    2: facebook::memcache::CarbonResultRemoteError carbonResultRemoteError;
+  };
+
+  1: Result result;
+  2: optional folly::IOBuf value;
+  3: uint64_t flags;
+  4: std::string message;
+  5: int16_t appSpecificErrorCode;
+  6: optional int32_t exptime;
+};
+
+request UcbSetRequest with 1: UcacheBenchRequestCommon {
+  id: 2;
+  name: "ucb_set";
+  thrift_method: ucbSet;
+  reply: UcbSetReply;
+
+  1: carbon::Keys<folly::IOBuf> key;
+  2: int32_t exptime;
+  3: uint64_t flags;
+  4: folly::IOBuf value;
+};
+
+reply UcbSetReply with 1: UcacheBenchReplyCommon {
+  throws: {
+    1: facebook::memcache::CarbonResultBusy carbonResultBusy;
+    2: facebook::memcache::CarbonResultRemoteError carbonResultRemoteError;
+  };
+
+  1: Result result;
+  2: uint64_t flags;
+  3: folly::IOBuf value;
+  4: std::string message;
+  5: int16_t appSpecificErrorCode;
+};
+
+request UcbDeleteRequest with 1: UcacheBenchRequestCommon {
+  id: 3;
+  name: "ucb_delete";
+  thrift_method: ucbDelete;
+  reply: UcbDeleteReply;
+
+  1: carbon::Keys<folly::IOBuf> key;
+  2: uint64_t flags;
+};
+
+reply UcbDeleteReply with 1: UcacheBenchReplyCommon {
+  throws: {
+    1: facebook::memcache::CarbonResultBusy carbonResultBusy;
+    2: facebook::memcache::CarbonResultRemoteError carbonResultRemoteError;
+  };
+
+  1: Result result;
+  2: uint64_t flags;
+  3: std::string message;
+  4: int16_t appSpecificErrorCode;
+};
+
+
+service {
+  additional_requests: [];
+  additional_route_handles: [];
+  enable_shutdown: false;
+  stats: {
+    UcbGetRequest,
+    UcbSetRequest,
+    UcbDeleteRequest
+  };
+  routing_groups: {
+    get: [
+      UcbGetRequest
+    ],
+    update: [
+      UcbSetRequest
+    ],
+    delete: [
+      UcbDeleteRequest
+    ]
+  };
+  gen_client_tool: true;
+  disable_fb303: true;
+  bucketization: true;
+  use_request_acl_checker: true;
+};

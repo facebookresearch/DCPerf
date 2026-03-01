@@ -86,7 +86,7 @@ build_treadmill() {
   pushd treadmill || exit 1
 
   # Apply AdSim-specific patches for integration
-  patch -p1 --follow-symlinks --forward < "${BENCHPRESS_ROOT}/packages/adsim/patches/treadmill.patch"
+  patch -p1 --follow-symlinks --forward < "${BENCHPRESS_ROOT}/packages/adsim/patches/treadmill.patch" || true
 
   # Make build script executable and compile Treadmill
   sudo chmod u+x build.sh
@@ -101,9 +101,38 @@ post_build() {
   cp "${BUILD_DIR}/treadmill/build/services/adsim/treadmill_adsim" "${BENCHMARKS_DIR}"
 
   # Create library directory and copy all shared libraries
+  # Note: Libraries may be in lib/ or lib64/ depending on the system architecture
   mkdir -p "${BENCHMARKS_DIR}/lib/"
-  cp ${BUILD_DIR}/staging/lib/*.so* "${BENCHMARKS_DIR}/lib/"
-  cp ${BUILD_DIR}/staging/lib64/*.so* "${BENCHMARKS_DIR}/lib/"
+  cp ${BUILD_DIR}/staging/lib/*.so* "${BENCHMARKS_DIR}/lib/" 2>/dev/null || true
+  cp ${BUILD_DIR}/staging/lib64/*.so* "${BENCHMARKS_DIR}/lib/" 2>/dev/null || true
+
+  # Copy Boost shared libraries (may be system-wide or in custom locations)
+  # These are required by the adsim_server and treadmill_adsim executables
+  BOOST_LIBS="atomic context filesystem program_options thread system coroutine date_time regex chrono"
+  BOOST_SEARCH_PATHS="/usr/lib64 /usr/lib /usr/local/lib64 /usr/local/lib /usr/lib/x86_64-linux-gnu /opt/conda/lib /root/miniforge3/lib /root/miniconda3/lib /root/anaconda3/lib"
+
+  for boost_lib in $BOOST_LIBS; do
+    for lib_path in $BOOST_SEARCH_PATHS; do
+      if ls ${lib_path}/libboost_${boost_lib}.so* 1>/dev/null 2>&1; then
+        cp ${lib_path}/libboost_${boost_lib}.so* "${BENCHMARKS_DIR}/lib/" 2>/dev/null || true
+        echo "Copied libboost_${boost_lib} from ${lib_path}"
+        break
+      fi
+    done
+  done
+
+  # Also copy any other required libraries detected by ldd
+  echo "Checking for additional required libraries..."
+  for exe in "${BUILD_DIR}/adsim/build/cpp2/server/adsim_server" "${BUILD_DIR}/treadmill/build/services/adsim/treadmill_adsim"; do
+    if [ -f "$exe" ]; then
+      ldd "$exe" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read -r lib; do
+        if [ -f "$lib" ] && [[ "$lib" == *libboost* ]]; then
+          cp "$lib" "${BENCHMARKS_DIR}/lib/" 2>/dev/null || true
+          echo "Copied $(basename "$lib") from ldd detection"
+        fi
+      done
+    fi
+  done
 
   # Copy runtime configurations, Python scripts, and QPS search tool
   cp -R "${BENCHPRESS_ROOT}/packages/adsim/configs" "${BENCHMARKS_DIR}"
@@ -111,12 +140,12 @@ post_build() {
   cp "${BENCHPRESS_ROOT}/packages/adsim/adsim_config.py" "${BENCHMARKS_DIR}"
   cp "${BENCHPRESS_ROOT}/packages/adsim/qps_search.sh" "${BENCHMARKS_DIR}"
 
+  # Copy distribution files from ai_wdl package
+  cat "${BENCHPRESS_ROOT}/packages/ai_wdl/deser/model_a_part_"*.dist > "${BENCHMARKS_DIR}/deser_model_a.dist"
+  cat "${BENCHPRESS_ROOT}/packages/ai_wdl/deser/model_b_part_"*.dist > "${BENCHMARKS_DIR}/deser_model_b.dist"
 
-  cat "${BENCHPRESS_ROOT}/packages/deser/model_a_part_"*.dist > "${BENCHMARKS_DIR}/deser_model_a.dist"
-  cat "${BENCHPRESS_ROOT}/packages/deser/model_b_part_"*.dist > "${BENCHMARKS_DIR}/deser_model_b.dist"
-
-  cp "${BENCHPRESS_ROOT}/packages/rebatch/model_a.dist" "${BENCHMARKS_DIR}/rebatch_model_a.dist"
-  cp "${BENCHPRESS_ROOT}/packages/rebatch/model_b.dist" "${BENCHMARKS_DIR}/rebatch_model_b.dist"
+  cp "${BENCHPRESS_ROOT}/packages/ai_wdl/rebatch/model_a.dist" "${BENCHMARKS_DIR}/rebatch_model_a.dist"
+  cp "${BENCHPRESS_ROOT}/packages/ai_wdl/rebatch/model_b.dist" "${BENCHMARKS_DIR}/rebatch_model_b.dist"
 
   # Install patchelf and set runtime library paths for executables
   install_packages patchelf

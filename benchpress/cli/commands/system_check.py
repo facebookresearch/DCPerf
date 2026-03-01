@@ -246,9 +246,9 @@ class SystemCheckCommand(BenchpressCommand):
 
     def version_to_fbk(self, version: Version) -> str:
         assert isinstance(version, Version), "version must be a Version object"
-        assert (
-            len(str(version)) == 4
-        ), "fbk version must be a Version object with 5 parts"
+        assert len(str(version)) == 4, (
+            "fbk version must be a Version object with 5 parts"
+        )
 
         version_toks = str(version).split(".")
 
@@ -434,9 +434,9 @@ class SystemCheckCommand(BenchpressCommand):
         # We need to parse the value and the expected value if a parse rule is present
         # Before we match them
         if "parse_rule" in check:
-            assert (
-                check["match_type"] == "semantic"
-            ), "Currently only semantic match is supported with parse rules"
+            assert check["match_type"] == "semantic", (
+                "Currently only semantic match is supported with parse rules"
+            )
 
             parser_result = self.parse_value_with_rule(value_found, check["parse_rule"])
             if parser_result.failed:

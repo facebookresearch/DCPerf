@@ -9,7 +9,6 @@ import json
 import logging
 
 from benchpress.lib.baseline import BASELINES
-
 from benchpress.lib.parser import Parser
 
 FEEDSIM_BASELINE = BASELINES["feedsim"]

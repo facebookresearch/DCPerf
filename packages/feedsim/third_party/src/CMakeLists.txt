@@ -6,7 +6,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(oldisim C CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -96,6 +96,7 @@ endif()
 
 include(build-config)
 include(build-fmt)
+include(build-libaegis)
 include(build-folly)
 include(build-fizz)
 include(build-wangle)

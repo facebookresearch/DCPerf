@@ -21,11 +21,11 @@ namespace search {
 
 class PointerChase {
  public:
-  explicit PointerChase(size_t num_elems);
+  explicit PointerChase(size_t num_elems, unsigned seed = 0);
   void Chase(size_t num_iterations);
 
  private:
   std::vector<uint64_t> data_;
   size_t current_index_;
 };
-}  // namespace search
+} // namespace search

@@ -13,10 +13,16 @@ DJANGO_SERVER_ROOT="$(readlink -f "${SCRIPT_ROOT}/../django-workload/django-work
 CPYTHON_PATH="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build"
 CINDER_PATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
 MEMCACHED_PID=
+CASSANDRA_PID=
 CLEANUP_REQS=0
 TABLE_NAMES="bundle_entry_model bundle_seen_model feed_entry_model inbox_entries user_model"
 CASSANDRA_DATA_PATH="/data/cassandra/data"
 KEY_SPACE_NAME="db"
+BREAKDOWN_FOLDER="${SCRIPT_ROOT}/.."
+
+# Source runtime breakdown utilities
+source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
+
 if [ -z "$JAVA_HOME" ]; then
   _JAVA_HOME="$("${BENCHPRESS_ROOT}"/packages/common/find_java_home.py)"
   export JAVA_HOME="${_JAVA_HOME}"
@@ -24,20 +30,147 @@ if [ -z "$JAVA_HOME" ]; then
 fi
 
 
+# Helper function to find and kill process using a specific port
+# Defined outside cleanup() so it can be used globally
+kill_process_on_port() {
+  local port=$1
+  local service_name=$2
+
+  # Use ss (socket statistics) instead of lsof - much faster and doesn't hang
+  local pid
+  pid=$(ss -tlnp 2>/dev/null | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1 || echo "")
+
+  # Fallback to fuser if ss doesn't find it
+  if [ -z "$pid" ]; then
+    pid=$(fuser "${port}/tcp" 2>/dev/null | awk '{print $1}' || echo "")
+  fi
+
+  if [ -n "$pid" ]; then
+    echo "Stopping ${service_name} on port ${port} (PID: ${pid})..."
+    kill "$pid" 2>/dev/null || true
+    sleep 0.5
+
+    # Force kill if still running
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "Force killing ${service_name} (PID: ${pid})..."
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+}
+
 # shellcheck disable=SC2317
 cleanup() {
   echo "Stopping services ..."
   cd "${SCRIPT_ROOT}/.." || exit 1
 
-  # Stop django-workload
-  [ -f uwsgi.pid ] && { echo "Stopping uwsgi"; kill -INT "$(cat uwsgi.pid)" || true; }
+  # Stop django-workload (send INT for graceful shutdown)
+  if [ -f uwsgi.pid ]; then
+    echo "Stopping uwsgi gracefully"
+    kill -INT "$(cat uwsgi.pid)" 2>/dev/null || true
+
+    # Wait for uwsgi to shutdown gracefully
+    local retries=10
+    while [ -f uwsgi.pid ] && [ "$retries" -gt 0 ]; do
+      sleep 1
+      retries=$((retries - 1))
+    done
+
+    # Force kill if still running
+    if [ -f uwsgi.pid ]; then
+      echo "Force killing uwsgi"
+      kill -9 "$(cat uwsgi.pid)" 2>/dev/null || true
+      rm -f uwsgi.pid
+    fi
+  fi
+
+  # Stop start_loadbalanced_server.py process
+  LOADBALANCER_PID="$(pgrep -f 'start_loadbalanced_server.py')"
+  if [ -n "$LOADBALANCER_PID" ]; then
+    echo "Stopping load balancer (PID: $LOADBALANCER_PID)"
+    kill -TERM "$LOADBALANCER_PID" || true
+    # Wait a bit for graceful shutdown
+    sleep 5
+    # Force kill if still running
+    if kill -0 "$LOADBALANCER_PID" 2>/dev/null; then
+      echo "Force killing load balancer (PID: $LOADBALANCER_PID)"
+      kill -9 "$LOADBALANCER_PID" || true
+    fi
+  fi
+
+  # Stop Django HAProxy load balancer (listening on port 8000)
+  echo "Stopping Django HAProxy load balancer on port 8000..."
+  kill_process_on_port 8000 "Django HAProxy"
+
+  # Stop Thrift servers and HAProxy using port-based process discovery
+  THRIFT_DIR="${SCRIPT_ROOT}/../django-workload/django-workload/django_workload/thrift"
+  HAPROXY_FRONTEND_PORT=9090
+
+  # Stop HAProxy load balancer (listening on port 9090)
+  echo "Stopping HAProxy Thrift load balancer..."
+  kill_process_on_port "$HAPROXY_FRONTEND_PORT" "HAProxy"
+  rm -f "${THRIFT_DIR}/haproxy_thrift.pid" 2>/dev/null || true
+
+  # Stop Thrift backend servers (use ports from PID file)
+  if [ -f "${THRIFT_DIR}/thrift_servers.pids" ]; then
+    echo "Stopping Thrift backend servers..."
+
+    # Extract unique ports from PID file
+    while IFS=: read -r pid port; do
+      if [ -n "$port" ]; then
+        kill_process_on_port "$port" "Thrift server"
+      fi
+    done < "${THRIFT_DIR}/thrift_servers.pids"
+
+    rm -f "${THRIFT_DIR}/thrift_servers.pids" 2>/dev/null || true
+  fi
+
+  # Fallback: Use pgrep to find any remaining thrift_server.py or haproxy processes
+  # in case they're not bound to ports yet or lsof failed
+  # THRIFT_PIDS=$(pgrep -f "thrift_server.py" 2>/dev/null || echo "")
+  # if [ -n "$THRIFT_PIDS" ]; then
+  #   echo "Cleaning up remaining Thrift server processes via pgrep: $THRIFT_PIDS"
+  #   echo "$THRIFT_PIDS" | xargs -r kill 2>/dev/null || true
+  #   sleep 0.5
+  #   echo "$THRIFT_PIDS" | xargs -r kill -9 2>/dev/null || true
+  # fi
+
+  # HAPROXY_PIDS=$(pgrep -f "haproxy.*haproxy_thrift.cfg" 2>/dev/null || echo "")
+  # if [ -n "$HAPROXY_PIDS" ]; then
+  #   echo "Cleaning up remaining HAProxy processes via pgrep: $HAPROXY_PIDS"
+  #   echo "$HAPROXY_PIDS" | xargs -r kill 2>/dev/null || true
+  #   sleep 0.5
+  #   echo "$HAPROXY_PIDS" | xargs -r kill -9 2>/dev/null || true
+  # fi
+
   # Stop memcached
-  [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" || true; }
-  # Stop Cassandra
-  [ -f cassandra.pid ] && { echo "Stopping cassandra"; kill "$(cat cassandra.pid)" || true; }
-  # Kill Siege
-  SIEGE_PID="$(pgrep siege)"
-  [ -n "$SIEGE_PID" ] && { echo "Killing siege"; kill -9 "$SIEGE_PID" || true; }
+  [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" 2>/dev/null || true; }
+
+  # Stop Cassandra using PID file
+  if [ -f cassandra.pid ]; then
+    CASS_PID="$(cat cassandra.pid)"
+    echo "Stopping cassandra (PID: $CASS_PID)"
+    kill -TERM "$CASS_PID" 2>/dev/null || true
+
+    # Wait for Cassandra to shutdown gracefully
+    local retries=10
+    while kill -0 "$CASS_PID" 2>/dev/null && [ "$retries" -gt 0 ]; do
+      sleep 1
+      retries=$((retries - 1))
+    done
+
+    # Force kill if still running
+    if kill -0 "$CASS_PID" 2>/dev/null; then
+      echo "Force killing Cassandra (PID: $CASS_PID)"
+      kill -9 "$CASS_PID" 2>/dev/null || true
+    fi
+
+    rm -f cassandra.pid
+  fi
+
+  # Kill wrk
+  WRK_PID="$(pgrep wrk)"
+  [ -n "$WRK_PID" ] && { echo "Killing wrk"; kill -9 "$WRK_PID" 2>/dev/null || true; }
+
   echo "Done"
   if [ "$CLEANUP_REQS" -gt 0 ]; then
     exit
@@ -48,21 +181,98 @@ cleanup() {
 
 trap 'cleanup' ERR EXIT SIGINT SIGTERM
 
+check_port_available() {
+  local port=$1
+  local port_name=$2
+
+  # Check for LISTENING sockets only (TIME_WAIT won't appear here)
+  # With SO_REUSEADDR enabled, TIME_WAIT sockets won't prevent binding
+  if ss -tan | grep -q ":${port} "; then
+    echo "ERROR: Port ${port} (${port_name}) has an active LISTENING socket!"
+
+    # Check if there's a process associated with this port
+    local pid=$(ss -tlnp | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1)
+
+    if [ -n "$pid" ]; then
+      echo "ERROR: Process with PID ${pid} is actively listening on port ${port}"
+      echo "Process details:"
+      ps -p "$pid" -o pid,cmd 2>/dev/null || echo "  (Process information unavailable)"
+      echo ""
+      echo "To fix this issue:"
+      echo "  1. Kill the process: kill ${pid}"
+      echo "  2. Or choose a different port using -P (base port) or -T (stats port) options"
+    else
+      echo "WARNING: Port ${port} appears to be listening but no process ID found."
+      echo "This is unusual and may indicate a kernel-level issue."
+      echo ""
+      echo "To fix this issue:"
+      echo "  1. Try running the benchmark anyway (SO_REUSEADDR may allow binding)"
+      echo "  2. Or choose a different port using -P (base port) or -T (stats port) options"
+      echo "  3. Or check for zombie processes: ps aux | grep defunct"
+    fi
+    return 1
+  fi
+
+  # With SO_REUSEADDR enabled, we don't need to check for TIME_WAIT sockets
+  # The kernel will allow us to bind even if old connections are in TIME_WAIT
+  return 0
+}
+
+check_port_range_available() {
+  local base_port=$1
+  local num_workers=$2
+  local lb_port=8000
+  local stats_port=$3
+
+  echo "Checking port availability..."
+
+  # Check load balancer port
+  if ! check_port_available "$lb_port" "Load Balancer"; then
+    return 1
+  fi
+
+  # Check stats port
+  if ! check_port_available "$stats_port" "HAProxy Stats"; then
+    return 1
+  fi
+
+  # Check worker ports (base_port to base_port + num_workers - 1)
+  for ((i=0; i<num_workers; i++)); do
+    local port=$((base_port + i))
+    if ! check_port_available "$port" "Worker $((i+1))"; then
+      return 1
+    fi
+  done
+
+  echo "All ports are available."
+  return 0
+}
+
 show_help() {
 cat <<EOF
 Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] \
 [-d duration of workload] [-p number of repetitions] [-l siege logfile path] \
 [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] \
-[-t snapshot taking] [-I interpreter]
+[-t snapshot taking] [--interpreter cpython|cinder] [--base-port port] [-T stats port] \
+[--thrift-server-workers num] [--use-async 0|1] [--use-jit 0|1] [--skip-datagen 0|1]
+
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
 For role "server", "clientserver":
     -w          number of server workers (default NPROC)
     -c          ip address of the cassandra server (required)
-    -m          minimum icachebuster calling rounds (default 100000)
-    -M          maximum icachebuster calling rounds (default 200000)
-    -I          python interpreter to use (cpython or cinder, default is cpython)
+    --interpreter
+                python interpreter to use (cpython or cinder, default is cpython)
+    --base-port
+                base port for Proxygen workers (default 16668)
+    -T          HAProxy stats port (default 8001)
+    --use-async
+                set to 1 to enable async mode with load balancing (default 1)
+    --use-jit   set to a positive number to enable JIT (Cinder on x86 only).
+                If enabled, sets PYTHONJIT environment variables. (default 0)
+    --skip-datagen
+                set to 1 to skip data generation and use existing data (default 0)
     -L          when provided snapshot loading is enabled, meaning that the database is loaded from a snapshot stored in the specifed path (default disabled)
     -t          when provided snapshot taking is enabled, meaning that the a snapshot of the generetaed database will be stored in the specifed path (default disabled)
     -S          skip the database setup and use the snapshot stored in the Cassandra data directory (default disabled)
@@ -81,6 +291,8 @@ For role "client":
 For role "db":
     -y          number of cassandra concurrent writes (default 128)
     -b          ip address that cassandra will bind to (default to the first IP from "hostname -i": $(hostname -i))
+    --thrift-server-workers
+                number of thrift server workers (default: min(nproc, 32))
 
 
 EOF
@@ -95,7 +307,7 @@ collect_perf_record() {
 }
 
 run_benchmark() {
-  core_factor=1.2
+  core_factor=1.0
   local _num_workers=$1
   if [ "$_num_workers" -le 0 ] || [ -z "$_num_workers" ]; then
     _num_workers=$(echo "scale=2; $(nproc)*$core_factor" | bc) # this do decimal times
@@ -118,7 +330,8 @@ run_benchmark() {
   DURATION="$_duration" \
   LOG="$_siege_logs_path" \
   SOURCE="$_urls_path" \
-  python3 ./run-siege -i "${iterations}" -r "${reps}" -R "${BENCHPRESS_ROOT}/packages/django_workload/templates/siege.conf"
+  BASE_URL="http://localhost:8000" \
+  python3 ./run-wrk -i "${iterations}" -r "${reps}"
 }
 
 load_snapshot(){
@@ -171,9 +384,15 @@ load_snapshot(){
 wait_for_cassandra_to_start() {
    # Wait for cassandra to start
   retries=60
-  if ! nc -z "${cassandra_addr}" 9042; then
-    echo "Waiting for Cassandra to start..."
-    while ! nc -z "${cassandra_addr}" 9042; do
+  if [ -n "$1" ]; then
+    check_addr="$1"
+  else
+    check_addr="${cassandra_addr}"
+  fi
+
+  if ! nc -z "${check_addr}" 9042; then
+    echo "Waiting for Cassandra to start by checking ${check_addr}:9042..."
+    while ! nc -z "${check_addr}" 9042; do
       sleep 1
       retries=$((retries-1))
       if [[ "$retries" -le 0 ]]; then
@@ -182,6 +401,23 @@ wait_for_cassandra_to_start() {
       fi
     done
     echo "Cassandra is ready."
+  fi
+}
+
+wait_for_thrift_servers_to_start() {
+   # Wait for Thrift servers to start (check load balancer on port 9090)
+  retries=30
+  if ! nc -z localhost 9090; then
+    echo "Waiting for Thrift load balancer to start..."
+    while ! nc -z localhost 9090; do
+      sleep 1
+      retries=$((retries-1))
+      if [[ "$retries" -le 0 ]]; then
+        echo "Thrift load balancer could not start."
+        exit 1
+      fi
+    done
+    echo "Thrift load balancer is ready."
   fi
 }
 
@@ -220,6 +456,23 @@ take_snapshot(){
   echo "The snapshot is stored in ${snapshot_dir} "
 }
 
+start_thrift_servers() {
+  num_thrift_servers="$1"
+  # Start Thrift RPC server with load balancer
+  echo "Starting Thrift RPC server with load balancer..."
+  export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
+  if [ "$num_thrift_servers" -gt 0 ]; then
+    export NUM_SERVERS="$num_thrift_servers"
+  else
+    export NUM_SERVERS=16
+  fi
+  cd "${SCRIPT_ROOT}/../django-workload/django-workload/django_workload/thrift" || exit 1
+  bash manage_servers.sh start --with-haproxy
+
+  # Wait for Thrift servers to start
+  wait_for_thrift_servers_to_start
+}
+
 start_cassandra() {
   cd "${SCRIPT_ROOT}/.." || exit 1
   # Set the listening address
@@ -240,14 +493,41 @@ start_cassandra() {
     ${CASSANDRA_YAML}.tmp > ${CASSANDRA_YAML}.tmp2
   mv -f "${CASSANDRA_YAML}.tmp2" "${CASSANDRA_YAML}"
 
-  ./apache-cassandra/bin/cassandra -R -f -p cassandra.pid > cassandra.log 2>&1
+  # Start Cassandra in the background and capture its PID
+  ./apache-cassandra/bin/cassandra -R -f > cassandra.log 2>&1 &
+  CASSANDRA_PID=$!
 
+  # Write PID to file for cleanup() function
+  echo "$CASSANDRA_PID" > cassandra.pid
+
+  echo "Cassandra started with PID: $CASSANDRA_PID"
+
+  wait "${CASSANDRA_PID}"
 }
 
 start_django_server() {
   local cassandra_addr=$1
   local num_server_workers=$2
   local interpreter=${3:-cpython}
+  local use_async=${4:-0}
+  local use_jit=${5:-0}
+
+  # Export FBTHRIFT_PREFIX for thrift Python bindings
+  export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
+
+  # Enable JIT if requested (Cinder on x86 only)
+  if [ "${use_jit}" -gt 0 ] && [ "${interpreter}" = "cinder" ]; then
+    echo "Enabling Cinder JIT..."
+    export PYTHONJIT=1
+    export PYTHONJITWRITEPROFILE=/tmp/cinder-jit.profile
+    export PYTHONJITPROFILEINTERP=1
+    export PYTHONJITPROFILEINTERPPERIOD=10
+    #export PYTHONJITDUMPSTATS=1
+    export PYTHONJITALLSTATICFUNCTIONS=1
+  fi
+
+  # Export FBTHRIFT_PREFIX for thrift Python bindings
+  export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
 
   # Start Memcached
   cd "${SCRIPT_ROOT}/.." || exit 1
@@ -299,13 +579,41 @@ ${python_libs}:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     if [ "$take_a_snapshot" = true ]; then
       take_snapshot
     fi
-  echo "Running django server with ${num_server_workers} uWSGI workers using ${interpreter} interpreter"
 
-  "${venv_dir}"/bin/uwsgi \
-    --ini uwsgi.ini \
-    -H "${SCRIPT_ROOT}/../django-workload/django-workload/${venv_dir}" \
-    --safe-pidfile "${SCRIPT_ROOT}/../uwsgi.pid" \
-    --workers "${num_server_workers}"
+    # Should we run in async mode with load balancing?
+  if [ "${use_async}" = "1" ] || [ "${use_async}" -gt "0" ]; then
+    echo "Running django server with uWSGI + HAProxy load balancing"
+    echo "  Workers: ${num_server_workers}"
+    echo "  Interpreter: ${interpreter}"
+    echo "  Base port: ${base_port}"
+    echo "  Stats port: ${stats_port}"
+    echo "  Load balancer: http://127.0.0.1:8000"
+    echo "  HAProxy stats: http://127.0.0.1:${stats_port}/stats"
+
+    # Check port availability before starting
+    if ! check_port_range_available "${base_port}" "${num_server_workers}" "${stats_port}"; then
+      echo "ERROR: Cannot start server due to port conflicts"
+      exit 1
+    fi
+
+    # Run the load balanced server with uWSGI + Proxygen + HAProxy
+    DJANGO_SETTINGS_MODULE=cluster_settings \
+      python start_loadbalanced_server.py \
+        --use-uwsgi \
+        --workers "${num_server_workers}" \
+        --stats-port "${stats_port}" \
+        --base-port "${base_port}" \
+        --log-dir load_balancer_logs \
+        > lb.log 2>&1
+  else
+    echo "Running django server with ${num_server_workers} uWSGI workers using ${interpreter} interpreter"
+
+    "${venv_dir}"/bin/uwsgi \
+      --ini uwsgi.ini \
+      -H "${SCRIPT_ROOT}/../django-workload/django-workload/${venv_dir}" \
+      --safe-pidfile "${SCRIPT_ROOT}/../uwsgi.pid" \
+      --workers "${num_server_workers}"
+  fi
 }
 
 start_client() {
@@ -331,6 +639,58 @@ start_client() {
   python_libs="${CPYTHON_PATH}/lib"
   export LD_LIBRARY_PATH="${python_libs}:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
+  # Wait for load balancer to be ready (try to connect to the server)
+  local retries=60
+  echo "Waiting for server to be ready at http://localhost:8000..."
+  while ! curl -s -f http://localhost:8000/feed_timeline > /dev/null 2>&1; do
+    sleep 1
+    retries=$((retries-1))
+    if [[ "$retries" -le 0 ]]; then
+      echo "Server did not become ready within 60 seconds"
+      exit 1
+    fi
+  done
+  echo "Server is ready!"
+
+  # Wait for HAProxy to mark all backend workers as healthy
+  # HAProxy health checks run every 2s and need 2 successful checks (rise 2)
+  # So we need at least 4-6 seconds after initial connection for all workers
+  # to be marked as UP. We wait for HAProxy stats to confirm all backends are UP.
+  echo "Waiting for HAProxy to mark all backend workers as healthy..."
+  local haproxy_retries=30
+  while true; do
+    # Query HAProxy stats and check if any backend is DOWN or not ready
+    # HAProxy stats CSV format: backend name,server name,status,...
+    local stats_output
+    stats_output=$(curl -s "http://localhost:${stats_port}/stats;csv" 2>/dev/null || echo "")
+
+    if [ -n "$stats_output" ]; then
+      # Count workers that are UP vs total workers in django_workers backend
+      # Use awk to avoid grep exit code issues (grep -c returns exit 1 when count is 0)
+      local total_workers down_workers
+      total_workers=$(echo "$stats_output" | awk '/django_workers,worker/{count++} END{print count+0}')
+      down_workers=$(echo "$stats_output" | awk '/django_workers,worker/ && !/,UP,/{count++} END{print count+0}')
+
+      if [ "$total_workers" -gt 0 ] && [ "$down_workers" -eq 0 ]; then
+        echo "All $total_workers HAProxy backend workers are UP and healthy!"
+        break
+      else
+        echo "Waiting for backend workers... ($((total_workers - down_workers))/$total_workers UP)"
+      fi
+    fi
+
+    sleep 1
+    haproxy_retries=$((haproxy_retries-1))
+    if [[ "$haproxy_retries" -le 0 ]]; then
+      echo "WARNING: Not all HAProxy backends became healthy within 30 seconds, proceeding anyway"
+      break
+    fi
+  done
+
+  # Additional small delay to ensure workers are fully warmed up
+  echo "Brief warmup delay before starting benchmark..."
+  sleep 2
+
   run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "${iterations}" "${reps}"
 }
 
@@ -343,25 +703,53 @@ start_clientserver() {
   local urls_path=$6
   local iterations="$7"
   local reps="$8"
-  local interpreter="$9"
+  local interpreter="${9:-cpython}"
+  local use_async="${10:-0}"
+  local use_jit="${11:-0}"
 
-  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" &
+  create_breakdown_csv "$BREAKDOWN_FOLDER"
+  log_preprocessing_start "$BREAKDOWN_FOLDER" "$$"
+
+  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" "${use_async}" "${use_jit}" &
+  server_pid="$!"
 
   # Wait for the server to start
-  local retries_init=150
+  local retries_init=1200
   local retries=$retries_init
   while ! nc -z localhost 8000; do
       sleep 1
       retries=$((retries-1))
+      echo "Waiting for Django server to start on port 8000, ${retries} retries left..."
       if [[ "$retries" -le 0 ]]; then
-          echo "Django server could not start within ${retries_init}s"
-          exit 1
+          echo "ERROR: Django server could not start within ${retries_init}s"
+          cleanup
+          return 1
+      fi
+      # fail early if the server process does not exist
+      if ! kill -0 "$server_pid" 2>/dev/null; then
+          echo "ERROR: Django server exited unexpectedly, stopping execution"
+          echo "Please check logs to debug the problems"
+          cleanup
+          return 1
       fi
   done
-  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" localhost "${iterations}" "${reps}"
+  echo "Django server started on port 8000, will start client"
+
+  local django_server_pid
+  django_server_pid="$server_pid"
+
+  log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
+  log_main_benchmark_start "$BREAKDOWN_FOLDER" "$django_server_pid"
+
+  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "127.0.0.1" "${iterations}" "${reps}"
+
+  log_main_benchmark_end "$BREAKDOWN_FOLDER" "$django_server_pid"
+  log_postprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
   # Report interpreter type
   echo "Interpreter: ${interpreter}"
+
+  log_postprocessing_end "$BREAKDOWN_FOLDER" "$$"
 }
 
 main() {
@@ -399,24 +787,10 @@ main() {
   cassandra_addr_IPV6=''
 
   local server_addr
-  server_addr='::1'
+  server_addr='127.0.0.1'
 
   local cassandra_bind_addr
   cassandra_bind_addr=''
-
-  local django_ib_min
-  if [ -n "${IB_MIN}" ]; then
-    django_ib_min="${IB_MIN}"
-  else
-    django_ib_min="100000"
-  fi
-
-  local django_ib_max
-  if [ -n "${IB_MAX}" ]; then
-    django_ib_max="${IB_MAX}"
-  else
-    django_ib_max="200000"
-  fi
 
   local take_a_snapshot
   take_a_snapshot=false
@@ -433,7 +807,95 @@ main() {
   local snapshot_dir
   snapshot_dir="${BENCHPRESS_ROOT}/benchmarks/django_workload/cassandra_snapshots/synthetic_dataset_snapshot"
 
-  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:m:M:L:t:SI:' OPTION "${@}"; do
+  local use_async
+  use_async=1
+
+  local base_port
+  base_port=16668
+
+  local stats_port
+  stats_port=8001
+
+  local thrift_server_workers
+  thrift_server_workers=32
+  if [ "$(nproc)" -lt "${thrift_server_workers}" ]; then
+    thrift_server_workers="$(nproc)"
+  fi
+
+  local use_jit
+  use_jit=0
+
+  local skip_datagen
+  skip_datagen=0
+
+  # Parse long options manually
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --interpreter)
+        interpreter="$2"
+        shift 2
+        ;;
+      --interpreter=*)
+        interpreter="${1#*=}"
+        shift
+        ;;
+      --use-async)
+        use_async="$2"
+        shift 2
+        ;;
+      --use-async=*)
+        use_async="${1#*=}"
+        shift
+        ;;
+      --base-port)
+        base_port="$2"
+        shift 2
+        ;;
+      --base-port=*)
+        base_port="${1#*=}"
+        shift
+        ;;
+      --thrift-server-workers)
+        thrift_server_workers="$2"
+        shift 2
+        ;;
+      --thrift-server-workers=*)
+        thrift_server_workers="${1#*=}"
+        shift
+        ;;
+      --use-jit)
+        use_jit="$2"
+        shift 2
+        ;;
+      --use-jit=*)
+        use_jit="${1#*=}"
+        shift
+        ;;
+      --skip-datagen)
+        skip_datagen="$2"
+        shift 2
+        ;;
+      --skip-datagen=*)
+        skip_datagen="${1#*=}"
+        shift
+        ;;
+      --)
+        shift
+        args+=("$@")
+        break
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  # Reset positional parameters to remaining args for getopts
+  set -- "${args[@]}"
+
+  while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:L:t:ST:h' OPTION "${@}"; do
     case "$OPTION" in
       w)
         # Use readlink to get absolute path if relative is given
@@ -478,12 +940,6 @@ main() {
       b)
         cassandra_bind_addr="${OPTARG}"
         ;;
-      m)
-        django_ib_min="${OPTARG}"
-        ;;
-      M)
-        django_ib_max="${OPTARG}"
-        ;;
       t)
         take_a_snapshot=true
         snapshot_dir="${OPTARG}"
@@ -510,8 +966,12 @@ main() {
       S)
         skip_data_setup=true
         ;;
-      I)
-        interpreter="${OPTARG}"
+      T)
+        stats_port="${OPTARG}"
+        ;;
+      h)
+        show_help
+        exit 0
         ;;
       ?)
         show_help >&2
@@ -542,34 +1002,35 @@ main() {
   readonly cassandra_addr
   readonly server_addr
   readonly cassandra_bind_addr
-  readonly django_ib_min
-  readonly django_ib_max
   readonly take_a_snapshot
   readonly load_a_snapshot
+  readonly use_async
+  readonly use_jit
+  readonly skip_datagen
+
+  # Export skip_datagen as environment variable for use in start_django_server
+  export SKIP_DATAGEN="${skip_datagen}"
 
 
   if [ "$role" = "db" ]; then
+    start_thrift_servers "$thrift_server_workers"
     start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
   elif [ "$role" = "clientserver" ]; then
-    export IB_MIN="${django_ib_min}"
-    export IB_MAX="${django_ib_max}"
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
-      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}";
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}" "${use_async}" "${use_jit}";
   elif [ "$role" = "client" ]; then
     start_client "$num_client_workers" "$duration" "$siege_logs_path" \
       "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
-    export IB_MIN="${django_ib_min}"
-    export IB_MAX="${django_ib_max}"
-    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter";
+    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter" "${use_async}" "${use_jit}";
     # Report interpreter type
     echo "Interpreter: ${interpreter}"
   elif [ "$role" = "standalone" ]; then
-    export IB_MIN="${django_ib_min}"
-    export IB_MAX="${django_ib_max}"
+    start_thrift_servers "$thrift_server_workers"
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
-      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter";
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter" \
+      "${use_async}" "${use_jit}";
     pgrep -f cassandra | xargs kill
 
   else

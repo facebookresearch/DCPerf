@@ -73,7 +73,7 @@ fi
 
 # Install libevent
 if ! [ -d "libevent" ]; then
-    git clone --branch release-2.1.8-stable https://github.com/libevent/libevent
+    git clone --branch release-2.1.10-stable https://github.com/libevent/libevent
     pushd libevent/
     ./autogen.sh
     ./configure --prefix="${TAO_BENCH_DEPS}" PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" \
@@ -82,7 +82,17 @@ if ! [ -d "libevent" ]; then
     make install
     popd
 else
-    echo "[SKIPPED] libevent-2.1.8"
+    echo "[SKIPPED] libevent-2.1.10"
+fi
+
+# Download binutils
+BINUTILS_TARBALL_PATH="${FOLLY_BUILD_ROOT}/downloads/libiberty-binutils-2.42.tar.xz"
+BINUTILS_TARBALL_URL="https://mirrors.ocf.berkeley.edu/gnu/binutils/binutils-2.42.tar.xz"
+if ! [ -f "${BINUTILS_TARBALL_PATH}" ]; then
+    echo "Downloading libiberty-binutils-2.42.tar.xz..."
+    source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
+    mkdir -p "$(dirname "${BINUTILS_TARBALL_PATH}")"
+    download_with_retry "${BINUTILS_TARBALL_URL}" "${BINUTILS_TARBALL_PATH}" 5
 fi
 
 # Installing folly
@@ -93,6 +103,7 @@ else
 fi
 pushd folly
 git checkout v2024.06.24.00
+git apply "${BENCHPRESS_ROOT}/packages/tao_bench/folly_zlib_uri.patch"
 sed -i 's/FOLLY_ALWAYS_INLINE//g' "${TAO_BENCH_ROOT}/folly/folly/experimental/symbolizer/StackTrace.cpp"
 OPENSSL_ROOT_DIR="${TAO_BENCH_DEPS}" ./build/fbcode_builder/getdeps.py --allow-system-packages build \
     --extra-cmake-defines '{"CMAKE_LIBRARY_ARCHITECTURE": "aarch64"}' \

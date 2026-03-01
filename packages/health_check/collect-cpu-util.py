@@ -6,8 +6,6 @@
 
 import subprocess
 import sys
-import threading
-import time
 
 
 keys = ["user", "nice", "sys", "idle", "iowait", "irq", "softirq", "steal", "guest"]

@@ -4,9 +4,12 @@
 # LICENSE file in the root directory of this source tree.
 
 # pyre-unsafe
+import logging
 import re
 
 from benchpress.lib.parser import Parser
+
+logger = logging.getLogger(__name__)
 
 
 class ClangParser(Parser):
@@ -65,6 +68,6 @@ class ClangParser(Parser):
             minute = int(m.group(1))
             second = float(m.group(2))
         except ValueError:
-            print("Failed to parse clang build time")
+            logger.error("Failed to parse clang build time")
             return -1
         return minute * 60 + second

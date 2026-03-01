@@ -120,7 +120,7 @@ void ICBInit_{SPLIT_NUM}(std::vector<void (*)(unsigned int*, unsigned int*, unsi
 }}
 """
 
-STORE_METHOD_CODE_TEMPLATE = "  methods[{METHOD_NUM}] = " "&ICBMethod_{METHOD_NUM};"
+STORE_METHOD_CODE_TEMPLATE = "  methods[{METHOD_NUM}] = &ICBMethod_{METHOD_NUM};"
 
 
 def grouper(n, iterable, fillvalue=None):

@@ -22,6 +22,7 @@ from .perf_monitors import (
     perfstat,
     power,
     topdown,
+    vmstat,
 )
 
 BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -41,6 +42,7 @@ DEFAULT_OPTIONS = {
     "memstat": {"interval": 5, "additional_counters": []},
     "topdown": {"interval": 5},
     "power": {"interval": 1},
+    "vmstat": {"interval": 5},
 }
 
 AVAIL_MONITORS = {
@@ -52,6 +54,7 @@ AVAIL_MONITORS = {
     "memstat": memstat.MemStat,
     "topdown": topdown.TopDown,
     "power": power.Power,
+    "vmstat": vmstat.VMStat,
 }
 
 logger = logging.getLogger(__name__)

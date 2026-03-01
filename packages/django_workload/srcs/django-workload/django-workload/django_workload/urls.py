@@ -16,4 +16,5 @@ urlpatterns = [
     url(r"^bundle_tray$", views.bundle_tray, name="bundle_tray"),
     url(r"^inbox$", views.inbox, name="inbox"),
     url(r"^seen$", views.seen, name="seen"),
+    url(r"^clips$", views.clips, name="clips"),
 ]

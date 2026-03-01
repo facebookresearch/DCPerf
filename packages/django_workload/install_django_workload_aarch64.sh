@@ -14,11 +14,36 @@ DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 DJANGO_SERVER_ROOT="${DJANGO_REPO_ROOT}/django-workload"
 DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
 
-# Install system dependencies
+# Source the build parallelism utility and calculate optimal job count
+# This considers both CPU cores and memory limits (including cgroup constraints)
+# shellcheck source=../common/get_build_parallelism.sh
+source "${BENCHPRESS_ROOT}/packages/common/get_build_parallelism.sh"
+
+# Number of parallel build jobs - use environment variable if set, otherwise calculate optimal value
+if [ -n "${NUM_BUILD_JOBS:-}" ]; then
+    echo "Using user-specified NUM_BUILD_JOBS=${NUM_BUILD_JOBS}"
+else
+    NUM_BUILD_JOBS=$(get_build_parallelism)
+    echo "Calculated optimal NUM_BUILD_JOBS=${NUM_BUILD_JOBS} based on CPU and memory constraints"
+fi
+print_build_parallelism_info
+
+# =====================================================================
+# Step 1: Install System Dependencies
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 1: Installing System Dependencies"
+echo "====================================================================="
+
 dnf groupinstall "Development Tools" -y --exclude="texlive*"
 dnf install -y memcached libmemcached-awesome-devel zlib-devel screen \
-    openssl-devel bzip2-devel libffi-devel wget make xz-devel
-#s
+    openssl-devel bzip2-devel libffi-devel wget make xz-devel haproxy \
+    xxhash-devel perl-FindBin perl-JSON perl-core liburing-devel \
+    ninja-build
+
+echo "System dependencies installed successfully"
+
 # Copy django-workload from srcs directory instead of cloning from GitHub
 mkdir -p "${DJANGO_WORKLOAD_ROOT}"
 pushd "${DJANGO_WORKLOAD_ROOT}"
@@ -28,6 +53,14 @@ if ! [ -d "django-workload" ]; then
 else
     echo "[SKIPPED] copying django-workload"
 fi
+
+# =====================================================================
+# Step 2: Download pip third-party dependencies for django-workload
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 2: Downloading pip third-party dependencies"
+echo "====================================================================="
 
 # Download pip third-party dependencies for django-workload
 if ! [ -d "${DJANGO_WORKLOAD_DEPS}" ]; then
@@ -136,11 +169,22 @@ mkdir -p "${DJANGO_WORKLOAD_ROOT}/bin"
 cp -r "${DJANGO_PKG_ROOT}/srcs/bin/"* "${DJANGO_WORKLOAD_ROOT}/bin/"
 chmod +x "${DJANGO_WORKLOAD_ROOT}/bin/"*.sh
 
-# 2. Install JDK
+echo "Pip dependencies downloaded successfully"
+
+# =====================================================================
+# Step 3: Install JDK and Cassandra
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 3: Installing JDK and Cassandra"
+echo "====================================================================="
+
+# Install JDK
 JDK_NAME=java-1.8.0-openjdk-devel
 dnf install -y "${JDK_NAME}" || { echo "Could not install ${JDK_NAME} package"; exit 1;}
+echo "JDK installed successfully"
 
-# 4. Install Cassandra
+# Install Cassandra
 # Download Cassandra from third-party source
 cassandra_version=3.11.19
 CASSANDRA_NAME="apache-cassandra-${cassandra_version}"
@@ -172,7 +216,16 @@ chmod -R 0700 /data/cassandra
 cp "${TEMPLATES_DIR}/cassandra.yaml" "${CASSANDRA_ROOT}/conf/cassandra.yaml.template" || exit 1
 popd
 
-# 5. Install Django and its dependencies
+echo "JDK and Cassandra installed successfully"
+
+# =====================================================================
+# Step 4: Build CPython 3.10
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 4: Building CPython 3.10"
+echo "====================================================================="
+
 pushd "${DJANGO_SERVER_ROOT}"
 
 # Install python3.10
@@ -181,9 +234,23 @@ if ! [ -d Python-3.10.2 ]; then
     tar -xzf Python-3.10.2.tgz
     cd Python-3.10.2
     ./configure --enable-optimizations --prefix="$(pwd)/python-build" --enable-shared LN="ln -s"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 fi
+
+CPYTHON_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build"
+export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
+
+echo "CPython 3.10 built successfully"
+
+# =====================================================================
+# Step 5: Build Cinder 3.10
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 5: Building Cinder 3.10"
+echo "====================================================================="
 
 # Download and build Cinder
 if ! [ -d "cinder" ]; then
@@ -191,24 +258,32 @@ if ! [ -d "cinder" ]; then
     pushd cinder
     mkdir -p cinder-build
     ./configure --prefix="$(pwd)/cinder-build" --enable-optimizations --enable-shared LN="ln -s"
-    make -j
+    make -j"${NUM_BUILD_JOBS}"
     make install
     popd
 fi
 
+CINDER_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
+export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+
+echo "Cinder 3.10 built successfully"
+
+# =====================================================================
+# Step 6: Install Python dependencies in virtual environments
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 6: Installing Python dependencies in virtual environments"
+echo "====================================================================="
+
 # Create virtual environments for both CPython and Cinder
-# Create CPython virtual env
-CPYTHON_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build"
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 [ ! -d venv_cpython ] && "${CPYTHON_INSTALL_PREFIX}/bin/python3.10" -m venv venv_cpython
 
-# Create Cinder virtual env
-CINDER_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
 export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
 [ ! -d venv_cinder ] && "${CINDER_INSTALL_PREFIX}/bin/python3" -m venv venv_cinder
 
-# Install packages in both virtual environments
-# First, CPython environment
+# Install packages in CPython environment
 set +u
 # shellcheck disable=SC1091
 source ./venv_cpython/bin/activate
@@ -217,47 +292,25 @@ set -u
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 export CMAKE_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 export CPATH="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build/include:${DJANGO_SERVER_ROOT}/Python-3.10.2/Include"
+
 # Install dependencies using third_party pip dependencies
 pip3.10 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3.10 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3.10 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 
-# No need to copy configuration files as they are already in the srcs directory
-
-# No need to apply patches as the code in srcs already has the desired changes
-
-# Build oldisim icache buster library
-set +u
-if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
-    if [ -z "${IBCC}" ]; then
-        IBCC="/bin/c++"
-    fi
-    cd "${TEMPLATES_DIR}" || exit 1
-    mkdir -p build
-    cd build || exit 1
-    python3 ../gen_icache_buster.py --num_methods=100000 --num_splits=24 --output_dir ./
-    # shellcheck disable=SC2086
-    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -c ./ICacheBuster*.cc
-    # shellcheck disable=SC2086
-    ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -Wl,-soname,libicachebuster.so -o libicachebuster.so ./*.o
-    cp libicachebuster.so "${OUT}/django-workload/django-workload/libicachebuster.so" || exit 1
-    cd ../ || exit 1
-    rm -rfv build/
-fi
+echo "Dependencies installed in CPython venv"
 
 # Configure Java options directly
 # shellcheck disable=SC2016
 echo 'JVM_OPTS="$JVM_OPTS -Xss512k"' >> "${DJANGO_WORKLOAD_ROOT}/apache-cassandra/conf/cassandra-env.sh"
 
-# No need to copy template files as they are already in the srcs directory
-
 deactivate
 
-# Now install packages in Cinder environment
-pushd "${DJANGO_SERVER_ROOT}"  # Make sure we're in the right directory
+# Install packages in Cinder environment
+pushd "${DJANGO_SERVER_ROOT}"
+export CPATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build/include:${DJANGO_SERVER_ROOT}/cinder/Include"
 export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
 export CMAKE_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
-export CPATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build/include:${DJANGO_SERVER_ROOT}/cinder/Include"
 source ./venv_cinder/bin/activate
 set -u
 
@@ -266,10 +319,250 @@ pip3.10 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO
 pip3.10 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 pip3.10 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 
+echo "Dependencies installed in Cinder venv"
+
 deactivate
 popd  # ${DJANGO_SERVER_ROOT}
 
-# Install siege
-pushd "${DJANGO_PKG_ROOT}" || exit 1
-bash -x install_siege.sh
-popd
+echo "Python dependencies installation completed"
+
+WRK_VERSION="4.2.0"
+pushd "${DJANGO_WORKLOAD_ROOT}" || exit 1
+if ! [ -d wrk ]; then
+  git clone --branch "${WRK_VERSION}" https://github.com/wg/wrk
+  pushd wrk || exit 1
+  git apply --check "${DJANGO_PKG_ROOT}/templates/wrk.diff" && \
+    git apply "${DJANGO_PKG_ROOT}/templates/wrk.diff"
+  make && echo "Wrk built successfully"
+  popd # wrk
+fi
+popd # "${DJANGO_WORKLOAD_ROOT}"
+
+# =====================================================================
+# Step 7: Build and Install Proxygen (for DjangoBench V2)
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 7: Building and Installing Proxygen"
+echo "====================================================================="
+
+# Clone Proxygen if not already present
+PROXYGEN_VERSION="v2025.10.13.00"
+if [ ! -d "${DJANGO_WORKLOAD_ROOT}/proxygen" ]; then
+    echo "Cloning Proxygen from GitHub..."
+    cd "${DJANGO_WORKLOAD_ROOT}"
+    git clone https://github.com/facebook/proxygen.git
+    cd proxygen
+    git checkout "${PROXYGEN_VERSION}"
+    echo "Proxygen cloned successfully"
+else
+    echo "Proxygen directory already exists at ${DJANGO_WORKLOAD_ROOT}/proxygen"
+    cd "${DJANGO_WORKLOAD_ROOT}/proxygen"
+fi
+
+# Overwrite build script with custom version
+echo "Installing custom build script with -fPIC support..."
+cp "${TEMPLATES_DIR}/build_proxygen.sh" "${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen/build_proxygen.sh"
+chmod +x "${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen/build_proxygen.sh"
+
+# Build Proxygen
+echo "Building Proxygen (this may take 10-20 minutes)..."
+cd "${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen"
+bash -x ./build_proxygen.sh --prefix "${DJANGO_WORKLOAD_ROOT}/proxygen/staging" -j "${NUM_BUILD_JOBS}"
+bash -x ./install.sh
+
+echo "Proxygen built and installed at ${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
+
+# =====================================================================
+# Step 7.5: Build and Install fbthrift (for Thrift RPC Services)
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 7.5: Building and Installing fbthrift"
+echo "====================================================================="
+
+FBTHRIFT_VERSION="v2025.09.22.00"
+FBTHRIFT_PREFIX="${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen/_build/deps"
+
+# Clone fbthrift if not already present
+if [ ! -d "${DJANGO_WORKLOAD_ROOT}/fbthrift" ]; then
+    echo "Cloning fbthrift from GitHub..."
+    cd "${DJANGO_WORKLOAD_ROOT}"
+    git clone https://github.com/facebook/fbthrift.git
+    cd fbthrift
+    git checkout "${FBTHRIFT_VERSION}"
+    echo "fbthrift cloned successfully"
+else
+    echo "fbthrift directory already exists at ${DJANGO_WORKLOAD_ROOT}/fbthrift"
+    cd "${DJANGO_WORKLOAD_ROOT}/fbthrift"
+fi
+
+# Build fbthrift
+if [ ! -f "${FBTHRIFT_PREFIX}/bin/thrift1" ]; then
+    echo "Building fbthrift (this may take 15-25 minutes)..."
+    cd "${DJANGO_WORKLOAD_ROOT}/fbthrift"
+    mkdir -p _build
+    cd _build
+
+    cmake -G Ninja \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_C_COMPILER=gcc \
+        -DCMAKE_CXX_COMPILER=g++ \
+        -DCMAKE_PREFIX_PATH="${FBTHRIFT_PREFIX}" \
+        -DCMAKE_INSTALL_PREFIX="${FBTHRIFT_PREFIX}" \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=True \
+        -DCXX_STD=gnu++20 \
+        -DCMAKE_CXX_STANDARD=20 \
+        ..
+
+    ninja -v -j "${NUM_BUILD_JOBS}" install
+    echo "fbthrift built and installed at ${FBTHRIFT_PREFIX}"
+else
+    echo "fbthrift already built and installed"
+fi
+
+# =====================================================================
+# Step 7.6: Download and Extract Silesia Corpus Dataset
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 7.6: Downloading and Extracting Silesia Corpus Dataset"
+echo "====================================================================="
+
+DATASET_DIR="${DJANGO_SERVER_ROOT}/django_workload/feed_flow/dataset"
+mkdir -p "${DATASET_DIR}/text"
+mkdir -p "${DATASET_DIR}/binary"
+
+DATASET_DIR2="${DJANGO_SERVER_ROOT}/django_workload/clips_discovery/dataset"
+ln -sf "${DATASET_DIR}" "${DATASET_DIR2}"
+
+DATASET_DIR3="${DJANGO_SERVER_ROOT}/django_workload/reels_tray/dataset"
+ln -sf "${DATASET_DIR}" "${DATASET_DIR3}"
+
+DATASET_DIR4="${DJANGO_SERVER_ROOT}/django_workload/inbox/dataset"
+ln -sf "${DATASET_DIR}" "${DATASET_DIR4}"
+
+# Download Silesia Corpus if not already present
+if [ ! -f "${DJANGO_WORKLOAD_ROOT}/silesia.zip" ]; then
+    echo "Downloading Silesia Corpus dataset..."
+    cd "${DJANGO_WORKLOAD_ROOT}"
+    wget "https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip"
+    echo "Silesia Corpus downloaded successfully"
+else
+    echo "Silesia Corpus already downloaded"
+fi
+
+# Extract dataset files
+if [ ! -f "${DATASET_DIR}/text/dickens" ]; then
+    echo "Extracting Silesia Corpus dataset..."
+    cd "${DJANGO_WORKLOAD_ROOT}"
+    unzip -o silesia.zip -d silesia_extracted
+
+    # Copy text files
+    echo "Copying text files to ${DATASET_DIR}/text..."
+    cp silesia_extracted/dickens "${DATASET_DIR}/text/"
+
+    # Copy binary files
+    echo "Copying binary files to ${DATASET_DIR}/binary..."
+    cp silesia_extracted/sao "${DATASET_DIR}/binary/"
+
+    echo "Dataset files extracted and organized successfully"
+else
+    echo "Dataset files already extracted"
+fi
+
+# =====================================================================
+# Step 7.7: Build Mock Thrift Server
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 7.7: Building Mock Thrift Server"
+echo "====================================================================="
+
+THRIFT_SERVER_DIR="${DJANGO_SERVER_ROOT}/django_workload/thrift"
+export FBTHRIFT_PREFIX="${FBTHRIFT_PREFIX}"
+
+# Build thrift server
+echo "Building mock thrift server..."
+cd "${THRIFT_SERVER_DIR}"
+./build.sh
+echo "Mock thrift server built"
+
+# =====================================================================
+# Step 8: Build and Install proxygen_binding (for DjangoBench V2)
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 8: Building and Installing proxygen_binding"
+echo "====================================================================="
+
+# Copy proxygen_binding to django_workload root
+if [ ! -d "${DJANGO_WORKLOAD_ROOT}/proxygen_binding" ]; then
+    echo "Copying proxygen_binding module..."
+    cp -r "${DJANGO_PKG_ROOT}/srcs/proxygen_binding" "${DJANGO_WORKLOAD_ROOT}/"
+    echo "proxygen_binding copied to ${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+else
+    echo "proxygen_binding directory already exists, updating..."
+    rm -rf "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+    cp -r "${DJANGO_PKG_ROOT}/srcs/proxygen_binding" "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+fi
+
+# Set Proxygen installation directory for building proxygen_binding
+export PROXYGEN_INSTALL_DIR="${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
+
+# Build and install in venv_cpython
+echo ""
+echo "Installing proxygen_binding in venv_cpython..."
+cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install pybind11
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install -e .
+echo "proxygen_binding installed in venv_cpython"
+
+# Build and install in venv_cinder
+echo ""
+echo "Installing proxygen_binding in venv_cinder..."
+cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install pybind11
+"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install -e .
+echo "proxygen_binding installed in venv_cinder"
+
+# =====================================================================
+# Step 9: Generate Code Variants for FeedFlow
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 9: Generating Code Variants for FeedFlow"
+echo "====================================================================="
+
+# Install jinja2 in venv_cpython
+echo "Installing jinja2 for code generation..."
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install jinja2
+
+# Generate code variants
+echo "Generating FeedFlow code variants..."
+cd "${DJANGO_SERVER_ROOT}"
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" generate_code_variants.py
+
+echo "Code variants generated successfully"
+
+echo ""
+echo "====================================================================="
+echo "DjangoBench installation completed successfully!"
+echo "====================================================================="
+echo ""
+echo "Installation directory: ${DJANGO_WORKLOAD_ROOT}"
+echo ""
+echo "DjangoBench V2 Components (Async HTTP with Proxygen):"
+echo "  - Proxygen: ${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
+echo "  - proxygen_binding: ${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+echo "  - Django workload: ${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload"
+echo ""
+echo "To run DjangoBench V2 with Proxygen (asynchronous HTTP):"
+echo "  cd ${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload"
+echo "  ./run_proxygen.sh"
+echo ""
+echo "To run DjangoBench V1 with uWSGI (traditional):"
+echo "  cd ${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload"
+echo "  ./run.sh"
+echo ""
+echo "====================================================================="

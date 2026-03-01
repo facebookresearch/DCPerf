@@ -99,8 +99,9 @@ class AdSimBaseObjs {
     shared_obj_map.withWLock([&](auto& objs) {
       auto iter = objs.find(key);
       if (objs.end() == iter) {
-        iter = objs.insert(std::pair<std::string, std::shared_ptr<T>>(
-                               key.c_str(), f()))
+        iter = objs.insert(
+                       std::pair<std::string, std::shared_ptr<T>>(
+                           key.c_str(), f()))
                    .first;
       }
       ret = std::static_pointer_cast<T>(iter->second);

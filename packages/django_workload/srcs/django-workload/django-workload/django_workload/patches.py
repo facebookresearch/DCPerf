@@ -9,7 +9,6 @@ from inspect import getdoc
 
 from django.conf import settings
 from statsd.client import StatsClient
-
 from statsd.defaults import django as statsd_django_defaults
 
 from .global_request import get_view_name

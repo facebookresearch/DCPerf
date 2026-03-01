@@ -49,9 +49,7 @@ class InstallCommand(BenchpressCommand):
         install_log = open("install.log", "w")
         for job in jobs.values():
             if not job.install_script:
-                msg = (
-                    "{} does not have install script," " try running without install it"
-                )
+                msg = "{} does not have install script, try running without install it"
                 install_log.write(msg.format(job.name) + "\n")
                 click.echo(msg.format(job.name))
                 continue
@@ -68,7 +66,7 @@ class InstallCommand(BenchpressCommand):
                 elif retcode == 0:
                     install_log.write("Tool {} already installed \n".format(hook[0]))
                     click.echo("Tool {} already installed".format(hook[0]))
-            if args.force or not verify_install(job.install_script):
+            if args.force or not verify_install(job):
                 install_log.write(
                     "Installing benchmark for {}: {}\n".format(
                         job.name, job.description

@@ -1,0 +1,635 @@
+{% if variant_header %}
+{{ variant_header }}
+{% endif %}
+# Copyright 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""
+Inbox Service{{ variant_suffix }} for DjangoBench V2.
+
+This module implements the InboxService that models the workload of
+activity.api.views.inbox from production IG Django server.
+
+Key components:
+- InboxService: Main service for inbox data aggregation
+- InboxContext: Context object for request processing
+- InboxThread: Represents a thread in the inbox
+- InboxResponse: Final response object with inbox data
+
+Based on the production architecture:
+- InboxService: Core inbox logic, data aggregation, caching
+- ThreadService: Thread/message fetching and metadata
+- SpamFilteringService: Spam detection for threads
+- PubSubSubscription: Real-time updates and resnapshotting
+"""
+
+import logging
+import random
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from django.core.cache import cache
+
+from .primitives import (
+    ConfigConstructionPrimitives,
+    ExperimentationPrimitives,
+    ExperimentResolverPrimitives,
+    FeatureFlagPrimitives,
+    FeatureGatingPrimitives,
+    MemoizationPrimitives,
+    MetricsCollectionPrimitives,
+    NotificationRenderPrimitives,
+    PropertyAccessPrimitives,
+    SchemaValidationPrimitives,
+    TypeCachingPrimitives,
+    ViewerContextPrimitives,
+)
+from .thrift_client import (
+    get_inbox_thread_client,
+    get_inbox_user_metadata_client,
+    get_pubsub_subscription_client,
+    get_spam_filtering_client,
+    InboxMessagePreview,
+    InboxThreadData,
+    InboxUserMetadata,
+    PubSubSubscriptionState,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _uuid_to_int(uuid_obj: UUID) -> int:
+    """Convert UUID to integer for Thrift RPC calls that expect i64."""
+    return uuid_obj.int & 0x7FFFFFFFFFFFFFFF
+
+
+@dataclass
+class InboxRequest:
+    """
+    Request schema for inbox endpoint.
+    Models InboxRequestData from production IG.
+    """
+
+    reason: str = "cold_start"
+    cursor: Optional[str] = None
+    page_size: int = 20
+    include_spam: bool = False
+    include_pending: bool = True
+    filter_category: str = "primary"
+    request_id: Optional[str] = None
+
+    @classmethod
+    def from_request(cls, request) -> "InboxRequest":
+        """Create InboxRequest from Django request."""
+        params = {}
+        if hasattr(request, "GET"):
+            params = dict(request.GET.items())
+        elif hasattr(request, "POST"):
+            params = dict(request.POST.items())
+
+        return cls(
+            reason=params.get("reason", "cold_start"),
+            cursor=params.get("cursor"),
+            page_size=int(params.get("page_size", "20")),
+            include_spam=params.get("include_spam", "false").lower() == "true",
+            include_pending=params.get("include_pending", "true").lower() == "true",
+            filter_category=params.get("filter_category", "primary"),
+            request_id=params.get("request_id"),
+        )
+
+
+@dataclass
+class InboxThread:
+    """
+    Represents a thread in the inbox.
+    Models the thread structure in production IG inbox.
+    """
+
+    thread_id: str
+    participant_ids: List[str]
+    participants: List[Dict[str, Any]] = field(default_factory=list)
+    last_activity_at: int = 0
+    unread_count: int = 0
+    is_spam: bool = False
+    is_muted: bool = False
+    thread_type: str = "private"
+    title: Optional[str] = None
+    last_message: Optional[Dict[str, Any]] = None
+    read_state: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "thread_id": self.thread_id,
+            "participant_ids": self.participant_ids,
+            "participants": self.participants,
+            "last_activity_at": self.last_activity_at,
+            "unread_count": self.unread_count,
+            "is_spam": self.is_spam,
+            "is_muted": self.is_muted,
+            "thread_type": self.thread_type,
+            "title": self.title,
+            "last_message": self.last_message,
+            "read_state": self.read_state,
+        }
+
+
+@dataclass
+class InboxContext:
+    """
+    Context object for inbox request.
+    Carries state between processing steps.
+    """
+
+    request: InboxRequest
+    user: Any
+    user_id: int
+
+    # Processing state
+    raw_threads: List[InboxThreadData] = field(default_factory=list)
+    threads: List[InboxThread] = field(default_factory=list)
+    user_metadata: Dict[str, InboxUserMetadata] = field(default_factory=dict)
+    message_previews: Dict[str, List[InboxMessagePreview]] = field(default_factory=dict)
+    pubsub_state: Optional[PubSubSubscriptionState] = None
+
+    # Aggregation results
+    pinned_items: List[Dict[str, Any]] = field(default_factory=list)
+    badge_count: int = 0
+    total_unread: int = 0
+
+    # Pagination
+    next_cursor: Optional[str] = None
+    has_more: bool = True
+
+    # Metrics
+    metrics: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class InboxResponse:
+    """
+    Final response object for inbox.
+    Models InboxResponse from production IG.
+    """
+
+    threads: List[Dict[str, Any]]
+    paging_info: Dict[str, Any]
+    badge_count: int = 0
+    total_unread: int = 0
+    pinned_items: List[Dict[str, Any]] = field(default_factory=list)
+    pending_requests_count: int = 0
+    status: str = "ok"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "threads": self.threads,
+            "paging_info": self.paging_info,
+            "badge_count": self.badge_count,
+            "total_unread": self.total_unread,
+            "pinned_items": self.pinned_items,
+            "pending_requests_count": self.pending_requests_count,
+            "status": self.status,
+        }
+
+
+class InboxService:
+    """
+    Main service class for inbox data aggregation.
+
+    Models InboxService from production IG Django.
+    Handles:
+    - Thread list fetching from multiple sources
+    - Message preview aggregation
+    - User metadata fetching
+    - Spam filtering
+    - Read state management
+    - Badge count calculation
+    - Caching with Direct cache patterns
+    """
+
+    # Cache configuration
+    CACHE_TTL = 300  # 5 minutes
+    CACHE_KEY_PREFIX = "inbox"
+
+    # Processing constants
+    NUM_CPU_PRIMITIVES = 12  # Number of CPU primitives per request
+    MAX_THREADS_PER_PAGE = 20
+
+    def __init__(self, request, user):
+        """
+        Initialize inbox service.
+
+        Args:
+            request: Django request object
+            user: Authenticated user
+        """
+        self.django_request = request
+        self.user = user
+        self.inbox_request = InboxRequest.from_request(request)
+
+        self.context = InboxContext(
+            request=self.inbox_request,
+            user=user,
+            user_id=_uuid_to_int(user.id),
+        )
+
+        # Thrift clients
+        self.thread_client = get_inbox_thread_client()
+        self.metadata_client = get_inbox_user_metadata_client()
+        self.spam_client = get_spam_filtering_client()
+        self.pubsub_client = get_pubsub_subscription_client()
+
+    def get_inbox(self) -> InboxResponse:
+        """
+        Main entry point for inbox data aggregation.
+
+        Returns:
+            InboxResponse with aggregated inbox data
+        """
+        start_time = time.time()
+
+        # Step 1: Check cache for prefetched results
+        cached_result = self._get_cached_results()
+        if cached_result:
+            logger.debug("Serving inbox from cache")
+            return cached_result
+
+        # Step 2: Check Iris subscription state for resnapshot trigger
+        self._check_pubsub_state()
+
+        # Step 3: Execute CPU primitives (experimentation phase)
+        self._execute_experimentation_primitives()
+
+        # Step 4: Fetch threads from thread service (Thrift RPC)
+        self._fetch_threads()
+
+        # Step 5: Apply spam filtering (Thrift RPC)
+        self._apply_spam_filtering()
+
+        # Step 6: Fetch message previews (Thrift RPC)
+        self._fetch_message_previews()
+
+        # Step 7: Fetch user metadata for participants (Thrift RPC)
+        self._fetch_user_metadata()
+
+        # Step 8: Build thread objects with all data
+        self._build_threads()
+
+        # Step 9: Calculate read states and badge counts
+        self._calculate_read_states()
+
+        # Step 10: Insert pinned items (friend requests, etc.)
+        self._insert_pinned_items()
+
+        # Step 11: Build final response
+        response = self._build_response()
+
+        # Record metrics
+        self.context.metrics["total_duration_ms"] = (time.time() - start_time) * 1000
+        self.context.metrics["num_threads"] = len(self.context.threads)
+        self.context.metrics["badge_count"] = self.context.badge_count
+
+        # Cache results
+        self._cache_results(response)
+
+        return response
+
+    def _get_cached_results(self) -> Optional[InboxResponse]:
+        """Check Direct cache for prefetched inbox results."""
+        # Pre-permuted CPU primitives (cache check phase)
+        {{ cache_check_primitives }}
+
+        cache_key = (
+            f"{self.CACHE_KEY_PREFIX}:{self.context.user_id}:"
+            f"{self.inbox_request.cursor or 'head'}:"
+            f"{self.inbox_request.filter_category}"
+        )
+        cached = cache.get(cache_key)
+        if cached:
+            logger.debug(f"Cache hit for inbox: {cache_key}")
+            return cached
+        return None
+
+    def _cache_results(self, response: InboxResponse) -> None:
+        """Cache inbox results in Direct cache."""
+        cache_key = (
+            f"{self.CACHE_KEY_PREFIX}:{self.context.user_id}:"
+            f"{self.inbox_request.cursor or 'head'}:"
+            f"{self.inbox_request.filter_category}"
+        )
+        cache.set(cache_key, response, self.CACHE_TTL)
+        logger.debug(f"Cached inbox results: {cache_key}")
+
+    def _check_pubsub_state(self) -> None:
+        """
+        Check PubSub subscription state for resnapshot trigger.
+
+        Models the PubSub real-time update pattern where the inbox
+        may need to be refreshed if sequence ID is outdated.
+        """
+        # Pre-permuted CPU primitives (pubsub state phase)
+        {{ iris_state_primitives }}
+
+        try:
+            self.context.pubsub_state = self.pubsub_client.get_subscription_state(
+                viewer_id=self.context.user_id
+            )
+
+            if self.context.pubsub_state.has_pending_updates:
+                logger.debug(
+                    f"PubSub has pending updates: {len(self.context.pubsub_state.pending_thread_ids)} threads"
+                )
+
+        except Exception as e:
+            logger.error(f"Error checking PubSub state: {e}")
+
+    def _execute_experimentation_primitives(self) -> None:
+        """Execute CPU-intensive experimentation primitives."""
+        # Pre-permuted CPU primitives (experimentation phase)
+        {{ experimentation_primitives }}
+
+    def _fetch_threads(self) -> None:
+        """
+        Fetch threads from thread service via Thrift RPC.
+
+        Models the pattern of fetching thread lists from Direct cache
+        and database.
+        """
+        # Pre-permuted CPU primitives (thread fetch phase)
+        {{ fetch_threads_primitives }}
+
+        try:
+            self.context.raw_threads = self.thread_client.get_threads(
+                viewer_id=self.context.user_id,
+                cursor=self.inbox_request.cursor,
+                page_size=self.inbox_request.page_size,
+                include_spam=self.inbox_request.include_spam,
+            )
+            logger.debug(f"Fetched {len(self.context.raw_threads)} threads")
+
+        except Exception as e:
+            logger.error(f"Error fetching threads: {e}")
+            self.context.raw_threads = []
+
+    def _apply_spam_filtering(self) -> None:
+        """
+        Apply spam filtering to threads via Thrift RPC.
+
+        Models the spam detection service call.
+        """
+        if not self.context.raw_threads:
+            return
+
+        # Pre-permuted CPU primitives (spam filtering phase)
+        {{ spam_filtering_primitives }}
+
+        try:
+            thread_ids = [t.thread_id for t in self.context.raw_threads]
+            spam_results = self.spam_client.check_threads_batch(
+                thread_ids=thread_ids,
+                viewer_id=self.context.user_id,
+            )
+
+            # Update threads with spam status
+            for thread in self.context.raw_threads:
+                spam_result = spam_results.get(thread.thread_id)
+                if spam_result and spam_result.is_spam:
+                    thread.is_spam = True
+
+            logger.debug(f"Applied spam filtering to {len(thread_ids)} threads")
+
+        except Exception as e:
+            logger.error(f"Error applying spam filtering: {e}")
+
+    def _fetch_message_previews(self) -> None:
+        """
+        Fetch message previews for threads via Thrift RPC.
+
+        Models fetching the latest message for each thread
+        for inbox display.
+        """
+        if not self.context.raw_threads:
+            return
+
+        # Pre-permuted CPU primitives (message preview phase)
+        {{ message_preview_primitives }}
+
+        try:
+            thread_ids = [t.thread_id for t in self.context.raw_threads]
+            self.context.message_previews = self.thread_client.get_message_previews(
+                thread_ids=thread_ids,
+                messages_per_thread=1,
+            )
+            logger.debug(f"Fetched message previews for {len(thread_ids)} threads")
+
+        except Exception as e:
+            logger.error(f"Error fetching message previews: {e}")
+            self.context.message_previews = {}
+
+    def _fetch_user_metadata(self) -> None:
+        """
+        Fetch user metadata for all thread participants.
+
+        Models the NodeAPI/LazyUserDict pattern for batch
+        fetching user info.
+        """
+        if not self.context.raw_threads:
+            return
+
+        # Pre-permuted CPU primitives (metadata fetch phase)
+        {{ metadata_fetch_primitives }}
+
+        try:
+            # Collect all unique participant IDs
+            all_participant_ids = set()
+            for thread in self.context.raw_threads:
+                all_participant_ids.update(thread.participant_ids)
+
+            if all_participant_ids:
+                self.context.user_metadata = (
+                    self.metadata_client.get_user_metadata_batch(
+                        user_ids=list(all_participant_ids)
+                    )
+                )
+                logger.debug(
+                    f"Fetched metadata for {len(all_participant_ids)} participants"
+                )
+
+        except Exception as e:
+            logger.error(f"Error fetching user metadata: {e}")
+            self.context.user_metadata = {}
+
+    def _build_threads(self) -> None:
+        """
+        Build thread objects with all aggregated data.
+
+        Combines thread data, message previews, and participant
+        metadata into final thread objects.
+        """
+        # Pre-permuted CPU primitives (thread building phase)
+        {{ thread_building_primitives }}
+
+        threads = []
+
+        for raw_thread in self.context.raw_threads:
+            # Skip spam threads unless explicitly requested
+            if raw_thread.is_spam and not self.inbox_request.include_spam:
+                continue
+
+            # Get participant info
+            participants = []
+            for pid in raw_thread.participant_ids:
+                user_meta = self.context.user_metadata.get(pid)
+                if user_meta:
+                    participants.append(user_meta.to_dict())
+                else:
+                    participants.append({"pk": pid, "username": f"user_{pid[-4:]}"})
+
+            # Get message preview
+            message_previews = self.context.message_previews.get(
+                raw_thread.thread_id, []
+            )
+            last_message = None
+            if message_previews:
+                preview = message_previews[0]
+                last_message = preview.to_dict()
+
+            # Generate thread title
+            title = raw_thread.title
+            if not title and participants:
+                if len(participants) == 1:
+                    title = participants[0].get("username", "Unknown")
+                elif len(participants) == 2:
+                    title = f"{participants[0].get('username', 'Unknown')}"
+                else:
+                    title = f"{participants[0].get('username', 'Unknown')} and {len(participants) - 1} others"
+
+            thread = InboxThread(
+                thread_id=raw_thread.thread_id,
+                participant_ids=raw_thread.participant_ids,
+                participants=participants,
+                last_activity_at=raw_thread.last_activity_at,
+                unread_count=raw_thread.unread_count,
+                is_spam=raw_thread.is_spam,
+                is_muted=raw_thread.is_muted,
+                thread_type=raw_thread.thread_type,
+                title=title,
+                last_message=last_message,
+            )
+            threads.append(thread)
+
+        # Sort by last activity
+        threads.sort(key=lambda t: t.last_activity_at, reverse=True)
+
+        self.context.threads = threads
+        logger.debug(f"Built {len(threads)} thread objects")
+
+    def _calculate_read_states(self) -> None:
+        """
+        Calculate read states and badge counts.
+
+        Models the read state computation and badge count
+        aggregation for the inbox.
+        """
+        # Pre-permuted CPU primitives (read state phase)
+        {{ read_state_primitives }}
+
+        total_unread = 0
+        threads_with_unread = 0
+
+        for thread in self.context.threads:
+            if thread.unread_count > 0:
+                threads_with_unread += 1
+                total_unread += thread.unread_count
+
+            # Set read state
+            thread.read_state = {
+                "is_unread": thread.unread_count > 0,
+                "unread_count": thread.unread_count,
+                "last_seen_at": thread.last_activity_at - random.randint(0, 3600),
+            }
+
+        self.context.total_unread = total_unread
+        self.context.badge_count = min(total_unread, 99)  # Cap at 99
+
+        logger.debug(
+            f"Calculated read states: {threads_with_unread} unread threads, "
+            f"total unread: {total_unread}, badge: {self.context.badge_count}"
+        )
+
+    def _insert_pinned_items(self) -> None:
+        """
+        Insert pinned items at fixed positions.
+
+        Models the pattern of injecting pinned rows like friend
+        requests, copyright notices, and branded content.
+        """
+        # Pre-permuted CPU primitives (pinned items phase)
+        {{ pinned_items_primitives }}
+
+        pinned = []
+
+        # Check for pending requests
+        if self.inbox_request.include_pending:
+            pending_count = random.randint(0, 5)
+            if pending_count > 0:
+                pinned.append(
+                    {
+                        "type": "pending_requests",
+                        "count": pending_count,
+                        "position": 0,
+                    }
+                )
+
+        # Add other pinned items randomly
+        if random.random() < 0.1:
+            pinned.append(
+                {
+                    "type": "branded_content",
+                    "position": 1,
+                }
+            )
+
+        self.context.pinned_items = pinned
+        logger.debug(f"Inserted {len(pinned)} pinned items")
+
+    def _build_response(self) -> InboxResponse:
+        """Build the final InboxResponse."""
+        # Pre-permuted CPU primitives (response building phase)
+        {{ build_response_primitives }}
+
+        thread_dicts = [t.to_dict() for t in self.context.threads]
+
+        # Set pagination
+        if self.context.threads:
+            last_thread = self.context.threads[-1]
+            self.context.next_cursor = last_thread.thread_id
+            self.context.has_more = (
+                len(self.context.threads) >= self.inbox_request.page_size
+            )
+
+        # Calculate pending requests count
+        pending_count = 0
+        for item in self.context.pinned_items:
+            if item.get("type") == "pending_requests":
+                pending_count = item.get("count", 0)
+                break
+
+        return InboxResponse(
+            threads=thread_dicts,
+            paging_info={
+                "cursor": self.context.next_cursor,
+                "has_more": self.context.has_more,
+            },
+            badge_count=self.context.badge_count,
+            total_unread=self.context.total_unread,
+            pinned_items=self.context.pinned_items,
+            pending_requests_count=pending_count,
+            status="ok",
+        )

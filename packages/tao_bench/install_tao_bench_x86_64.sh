@@ -81,6 +81,16 @@ else
     echo "[SKIPPED] libevent-2.1.8"
 fi
 
+# Download binutils
+BINUTILS_TARBALL_PATH="${FOLLY_BUILD_ROOT}/downloads/libiberty-binutils-2.42.tar.xz"
+BINUTILS_TARBALL_URL="https://mirrors.ocf.berkeley.edu/gnu/binutils/binutils-2.42.tar.xz"
+if ! [ -f "${BINUTILS_TARBALL_PATH}" ]; then
+    echo "Downloading libiberty-binutils-2.42.tar.xz..."
+    source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
+    mkdir -p "$(dirname "${BINUTILS_TARBALL_PATH}")"
+    download_with_retry "${BINUTILS_TARBALL_URL}" "${BINUTILS_TARBALL_PATH}" 5
+fi
+
 # Installing folly
 if ! [ -d "folly" ]; then
     git clone https://github.com/facebook/folly
@@ -89,6 +99,7 @@ else
 fi
 pushd folly
 git checkout v2024.06.24.00
+git apply "${BENCHPRESS_ROOT}/packages/tao_bench/folly_zlib_uri.patch"
 sed -i 's/FOLLY_ALWAYS_INLINE//g' "${TAO_BENCH_ROOT}/folly/folly/experimental/symbolizer/StackTrace.cpp"
 OPENSSL_ROOT_DIR="${TAO_BENCH_DEPS}" ./build/fbcode_builder/getdeps.py --allow-system-packages build \
     --scratch-path "${FOLLY_BUILD_ROOT}"

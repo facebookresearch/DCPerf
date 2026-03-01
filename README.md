@@ -113,34 +113,34 @@ DCPerf includes specialized benchmarks focusing on AI/ML workloads commonly foun
    <td>Application domain they represent</td>
   </tr>
   <tr>
-   <td><a href="packages/fbgemm_gpu/README.md">FBGEMM Embedding</a></td>
-   <td>C++, Python</td>
-   <td>FBGEMM</td>
-   <td>Table-based Embedding Inference, Recommendation Systems</td>
+   <td><a href="packages/adsim/README.md">AdSim</a></td>
+   <td>C++</td>
+   <td>AdSim Framework, Folly, FBThrift, FBGEMM, Treadmill</td>
+   <td>Server-client AI Inference workload Simulation, Model Inference</td>
   </tr>
   <tr>
-   <td><a href="packages/rebatch/README.md">Rebatch</a></td>
+   <td><a href="packages/ai_wdl/fbgemm/README.md">FBGEMM</a> (AI_WDL) </td>
+   <td>C++, Python</td>
+   <td>FBGEMM</td>
+   <td>Table-based Embedding Inference, Recommendation Systems, key GEMM kernels</td>
+  </tr>
+  <tr>
+   <td><a href="packages/ai_wdl/rebatch/README.md">Rebatch</a> (AI_WDL) </td>
    <td>C++</td>
    <td>Memcpy</td>
    <td>Tensor Rebatching, Model Inference Optimization</td>
   </tr>
   <tr>
-   <td><a href="packages/deser/README.md">Tensor Deserialization</a></td>
+   <td><a href="packages/ai_wdl/deser/README.md">Tensor Deserialization</a> (AI_WDL) </td>
    <td>C++</td>
    <td>folly, memcpy</td>
    <td>Tensor Deserialization, Prediction Request Tensor Deserialization</td>
   </tr>
   <tr>
-   <td><a href="packages/chm/README.md">Concurrent HashMap</a></td>
+   <td><a href="packages/ai_wdl/chm/README.md">Concurrent HashMap</a> (AI_WDL) </td>
    <td>C++</td>
    <td>Concurrent Data Structures, folly</td>
    <td>Concurrent HashMap Operations, Model Feature Lookup</td>
-  </tr>
-  <tr>
-   <td><a href="packages/adsim/README.md">AdSim</a></td>
-   <td>C++</td>
-   <td>AdSim Framework, Folly, FBThrift, FBGEMM, Treadmill</td>
-   <td>Server-client AI Inference workload Simulation, Model Inference</td>
   </tr>
 </table>
 
@@ -193,7 +193,7 @@ DCPerf's system bench focuses on system performance metrics (kernel scheduler an
     <a href="packages/syscall/README.md">Syscall</a>
    </td>
    <td>C++</td>
-   <td>clock_gettime, getpid, nanosleep, tcp-related</td>
+   <td>getpid, nanosleep, tcp-related</td>
    <td>Common system call benchmarks</td>
   </tr>
 </table>
@@ -320,7 +320,7 @@ scl enable gcc-toolset-11 bash
 Install git, click, pyyaml and tabulate using DNF, then install Pandas with pip:
 
 ```bash
-dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel
+dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel wget numactl sysstat
 pip-3.9 install pandas packaging
 ```
 
@@ -337,7 +337,7 @@ Install git, pip, then install click, pyyaml, tabulate and pandas:
 
 ```bash
 sudo apt update
-sudo apt install -y python3-pip git
+sudo apt install -y python3-pip git numactl sysstat
 sudo pip3 install click pyyaml tabulate pandas packaging
 ```
 

@@ -27,6 +27,11 @@ BC_MIN_FN='define min (a, b) { if (a <= b) return (a); return (b); }'
 # Constants
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 FEEDSIM_ROOT_SRC="${FEEDSIM_ROOT}/src"
+BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
+BREAKDOWN_FOLDER="$FEEDSIM_ROOT"
+
+# Source runtime breakdown utilities
+source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
 # Thrift threads: scale with logical CPUs till 216. Having more than that
 # will risk running out of memory and getting killed
@@ -73,6 +78,26 @@ Usage: ${0##*/} [OPTION]...
     -x Maximum number of warmup iterations when using QPS threshold. Default: 10
     -N No retry mode. Skip sleep and PID checking in load test startup, break immediately without retrying.
     -D Drain time in seconds. Time to wait for queue to drain after experiments. Default: 5
+    -R Seed for LeafNodeRank random number generator. If not provided, current time will be used.
+    -P Seed for PageRank random number generator. If not provided, current time will be used.
+    -C Seed for PointerChase random number generator. If not provided, current time will be used.
+    --workload Workload type: 'pagerank' (default) or 'dlrm'. Requires DLRM-enabled build.
+    --dlrm-model Path to DLRM TorchScript model file (.pt). Required when --workload=dlrm is used.
+    --dlrm-batch-size DLRM batch size for inference. Default: 256
+    --dlrm-inferences Number of DLRM inference calls per request. Default: 1
+    --dlrm-threads Number of LibTorch threads for DLRM inference. Default: 8
+    --async-io Enable async (non-blocking) I/O mode. Eliminates thread starvation on high-core CPUs.
+    --io-dist I/O latency distribution: 'fixed' (default), 'exponential', or 'lognormal'.
+    --io-mean Mean I/O latency in milliseconds. Default: 200
+    --io-stddev I/O latency standard deviation in ms (for lognormal distribution). Default: 50
+    --io-stages Number of I/O stages to simulate (models multi-hop data fetching). Default: 1
+    --io-stage-latency Latency per I/O stage in ms (when --io-stages > 1). Default: 50
+    --client-side-features Enable client-side DLRM feature generation (0=disabled, non-zero=enabled). Default: 0
+    --client-batch-size Batch size for client-side feature generation. Default: 256
+    --client-inferences Number of DLRM inferences per request (client-side). Default: 1
+    --client-feature-seed Seed for client feature generation. Default: 42. Use -1 for random.
+    --client-num-dense Number of dense features per sample (client-side). Default: 13
+    --client-num-sparse Number of sparse features per sample (client-side). Default: 26
 EOF
 }
 
@@ -152,6 +177,69 @@ main() {
     local queue_drain_time
     queue_drain_time="5"
 
+    local leafnoderank_seed
+    leafnoderank_seed=""
+
+    local pagerank_seed
+    pagerank_seed=""
+
+    local pointerchase_seed
+    pointerchase_seed=""
+
+    # DLRM options
+    local workload_type
+    workload_type="pagerank"
+
+    local dlrm_model_path
+    dlrm_model_path=""
+
+    local dlrm_batch_size
+    dlrm_batch_size="256"
+
+    local dlrm_inferences_per_request
+    dlrm_inferences_per_request="1"
+
+    local dlrm_threads
+    dlrm_threads="8"
+
+    # Phase 3: Async I/O options
+    local async_io
+    async_io=""
+
+    local io_latency_distribution
+    io_latency_distribution="fixed"
+
+    local io_latency_mean_ms
+    io_latency_mean_ms="200"
+
+    local io_latency_stddev_ms
+    io_latency_stddev_ms="50"
+
+    local io_stages
+    io_stages="1"
+
+    local io_stage_latency_ms
+    io_stage_latency_ms="50"
+
+    # Client-side DLRM feature options (Phase 7)
+    local client_side_features
+    client_side_features="0"
+
+    local client_batch_size
+    client_batch_size="256"
+
+    local client_inferences
+    client_inferences="1"
+
+    local client_feature_seed
+    client_feature_seed="42"
+
+    local client_num_dense
+    client_num_dense="13"
+
+    local client_num_sparse
+    client_num_sparse="26"
+
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
     fi
@@ -161,46 +249,58 @@ main() {
         case $1 in
             -t)
                 thrift_threads="$2"
+                shift
                 ;;
             -c)
                 ranking_cpu_threads="$2"
+                shift
                 ;;
             -s)
                 srv_io_threads="$2"
+                shift
                 ;;
             -l)
                 driver_threads="$2"
+                shift
                 ;;
             -a)
                 auto_driver_threads="1"
                 ;;
             -q)
                 fixed_qps="$2"
+                shift
                 ;;
             -d)
                 fixed_qps_duration="$2"
+                shift
                 ;;
             -w)
                 warmup_time="$2"
+                shift
                 ;;
             -p)
                 port="$2"
+                shift
                 ;;
             -o)
                 result_filename="$2"
+                shift
                 ;;
             -i)
                 icache_iterations="$2"
+                shift
                 ;;
             -S)
                 if [ "$2" != "default_do_not_store" ]; then
                     store_graph="--store_graph=$2"
                 fi
+                shift
                 ;;
             -L)
                 if [ "$2" != "default_do_not_load" ]; then
                     load_graph="--load_graph=$2"
                 fi
+                shift
                 ;;
             -I)
                 instrument_graph="--instrument_graph"
@@ -209,17 +309,147 @@ main() {
                 if [[ "$2" -gt 0 ]]; then
                     qps_threshold="$2"
                 fi
+                shift
                 ;;
             -x)
                 if [[ "$2" -gt 0 ]]; then
                     max_warmup_iterations="$2"
                 fi
+                shift
                 ;;
             -N)
                 no_retry_mode="1"
                 ;;
             -D)
                 queue_drain_time="$2"
+                shift
+                ;;
+            -R)
+                leafnoderank_seed="--node_rank_seed=$2"
+                shift
+                ;;
+            -P)
+                pagerank_seed="--page_rank_seed=$2"
+                shift
+                ;;
+            -C)
+                pointerchase_seed="--pointer_chase_seed=$2"
+                shift
+                ;;
+            --workload)
+                workload_type="$2"
+                shift
+                ;;
+            --workload=*)
+                workload_type="${1#*=}"
+                ;;
+            --dlrm-model)
+                dlrm_model_path="$2"
+                shift
+                ;;
+            --dlrm-model=*)
+                dlrm_model_path="${1#*=}"
+                ;;
+            --dlrm-batch-size)
+                dlrm_batch_size="$2"
+                shift
+                ;;
+            --dlrm-batch-size=*)
+                dlrm_batch_size="${1#*=}"
+                ;;
+            --dlrm-inferences)
+                dlrm_inferences_per_request="$2"
+                shift
+                ;;
+            --dlrm-inferences=*)
+                dlrm_inferences_per_request="${1#*=}"
+                ;;
+            --dlrm-threads)
+                dlrm_threads="$2"
+                shift
+                ;;
+            --dlrm-threads=*)
+                dlrm_threads="${1#*=}"
+                ;;
+            --async-io)
+                async_io="1"
+                ;;
+            --io-dist)
+                io_latency_distribution="$2"
+                shift
+                ;;
+            --io-dist=*)
+                io_latency_distribution="${1#*=}"
+                ;;
+            --io-mean)
+                io_latency_mean_ms="$2"
+                shift
+                ;;
+            --io-mean=*)
+                io_latency_mean_ms="${1#*=}"
+                ;;
+            --io-stddev)
+                io_latency_stddev_ms="$2"
+                shift
+                ;;
+            --io-stddev=*)
+                io_latency_stddev_ms="${1#*=}"
+                ;;
+            --io-stages)
+                io_stages="$2"
+                shift
+                ;;
+            --io-stages=*)
+                io_stages="${1#*=}"
+                ;;
+            --io-stage-latency)
+                io_stage_latency_ms="$2"
+                shift
+                ;;
+            --io-stage-latency=*)
+                io_stage_latency_ms="${1#*=}"
+                ;;
+            --client-side-features)
+                client_side_features="$2"
+                shift
+                ;;
+            --client-side-features=*)
+                client_side_features="${1#*=}"
+                ;;
+            --client-batch-size)
+                client_batch_size="$2"
+                shift
+                ;;
+            --client-batch-size=*)
+                client_batch_size="${1#*=}"
+                ;;
+            --client-inferences)
+                client_inferences="$2"
+                shift
+                ;;
+            --client-inferences=*)
+                client_inferences="${1#*=}"
+                ;;
+            --client-feature-seed)
+                client_feature_seed="$2"
+                shift
+                ;;
+            --client-feature-seed=*)
+                client_feature_seed="${1#*=}"
+                ;;
+            --client-num-dense)
+                client_num_dense="$2"
+                shift
+                ;;
+            --client-num-dense=*)
+                client_num_dense="${1#*=}"
+                ;;
+            --client-num-sparse)
+                client_num_sparse="$2"
+                shift
+                ;;
+            --client-num-sparse=*)
+                client_num_sparse="${1#*=}"
                 ;;
             -h|--help)
                 show_help >&2
@@ -229,18 +459,17 @@ main() {
                 echo "Unsupported arg '$1'" 1>&2
                 break
         esac
-
-        case $1 in
-            -t|-c|-s|-d|-p|-q|-o|-w|-i|-l|-S|-L|-r|-x|-D)
-                if [ -z "$2" ]; then
-                    echo "Invalid option: '$1' requires an argument" 1>&2
-                    exit 1
-                fi
-                shift   # Additional shift for the argument
-                ;;
-        esac
         shift # pop the previously read argument
     done
+
+    # Validate long option arguments
+    if [ "$async_io" = "1" ]; then
+        if [ "$io_latency_distribution" != "fixed" ] && [ "$io_latency_distribution" != "exponential" ] && [ "$io_latency_distribution" != "lognormal" ]; then
+            die "Invalid --io-dist value '$io_latency_distribution'. Must be 'fixed', 'exponential', or 'lognormal'."
+        fi
+    fi
+
+    create_breakdown_csv "$BREAKDOWN_FOLDER"
 
     set -u  # Enable unbound variables check from here onwards
 
@@ -251,8 +480,56 @@ main() {
 
     cd "${FEEDSIM_ROOT_SRC}"
 
+    # Build DLRM options if workload type is dlrm
+    local dlrm_opts=""
+    if [ "$workload_type" = "dlrm" ]; then
+        if [ -z "$dlrm_model_path" ]; then
+            die "DLRM workload requires --dlrm-model <model_path> to specify the TorchScript model"
+        fi
+
+        # Resolve dlrm_model_path: if relative, prepend FEEDSIM_ROOT
+        if [[ "$dlrm_model_path" != /* ]]; then
+            dlrm_model_path="${FEEDSIM_ROOT}/${dlrm_model_path}"
+        fi
+
+        dlrm_opts="--workload_type=dlrm --dlrm_model_path=$dlrm_model_path --dlrm_batch_size=$dlrm_batch_size --dlrm_inferences_per_request=$dlrm_inferences_per_request --dlrm_threads=$dlrm_threads"
+        echo "Using DLRM workload with model: $dlrm_model_path"
+        if [ "$client_side_features" != "0" ]; then
+            echo "  Client-side feature generation: ENABLED"
+            echo "    Batch size: $client_batch_size"
+            echo "    Inferences: $client_inferences"
+            echo "    Seed: $client_feature_seed"
+            echo "    Dense features: $client_num_dense"
+            echo "    Sparse features: $client_num_sparse"
+        fi
+
+        # Set LD_LIBRARY_PATH for LibTorch if needed
+        if [ -d "${FEEDSIM_ROOT}/third_party/libtorch/lib" ]; then
+            export LD_LIBRARY_PATH="${FEEDSIM_ROOT}/third_party/libtorch/lib:${LD_LIBRARY_PATH:-}"
+        fi
+    else
+        dlrm_opts="--workload_type=pagerank"
+        echo "Using PageRank workload"
+    fi
+
+    # Build async I/O options (Phase 3)
+    local async_io_opts=""
+    if [ "$async_io" = "1" ]; then
+        async_io_opts="--async_io --io_latency_distribution=$io_latency_distribution --io_latency_mean_ms=$io_latency_mean_ms --io_latency_stddev_ms=$io_latency_stddev_ms --io_stages=$io_stages --io_stage_latency_ms=$io_stage_latency_ms"
+        echo "Using ASYNC I/O mode (non-blocking) - eliminates thread starvation"
+        echo "  I/O latency distribution: $io_latency_distribution"
+        echo "  I/O latency mean: ${io_latency_mean_ms}ms"
+        if [ "$io_latency_distribution" = "lognormal" ]; then
+            echo "  I/O latency stddev: ${io_latency_stddev_ms}ms"
+        fi
+        if [ "$io_stages" -gt 1 ]; then
+            echo "  I/O stages: $io_stages x ${io_stage_latency_ms}ms"
+        fi
+    fi
+
     # Starting leaf node service
     monitor_port=$((port-1000))
+    # shellcheck disable=SC2086
     MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
         --monitor_port="$monitor_port" \
@@ -268,9 +545,14 @@ main() {
         --graph_max_iters=1 \
         --noaffinity \
         --min_icache_iterations="$icache_iterations" \
-        "$store_graph" \
-        "$load_graph" \
-        "$instrument_graph" >> $BREPS_LFILE 2>&1 &
+        $dlrm_opts \
+        $async_io_opts \
+        $store_graph \
+        $load_graph \
+        $instrument_graph \
+        $leafnoderank_seed \
+        $pagerank_seed \
+        $pointerchase_seed >> $BREPS_LFILE 2>&1 &
 
     LEAF_PID=$!
 
@@ -307,6 +589,12 @@ main() {
         qps_threshold_args="-r $qps_threshold -x $max_warmup_iterations"
     fi
 
+    # Build client-side feature options for DriverNodeRank
+    local client_feature_opts=""
+    if [ "$client_side_features" != "0" ]; then
+        client_feature_opts="--client_side_features --client_dlrm_batch_size=$client_batch_size --client_dlrm_inferences=$client_inferences --client_feature_seed=$client_feature_seed --client_num_dense_features=$client_num_dense --client_num_sparse_features=$client_num_sparse"
+    fi
+
     # Construct no retry mode parameter if specified
     no_retry_args=""
     if [ -n "$no_retry_mode" ]; then
@@ -316,20 +604,22 @@ main() {
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -w 15 -f 300 -s 95p:500 $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        scripts/search_qps.sh -w 15 -f 300 -s 95p:500 -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
                 --threads="${driver_threads}" \
-                --connections=4
+                --connections=4 \
+                $client_feature_opts
         benchreps_tell_state "after search_qps"
     elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
         benchreps_tell_state "before search_qps"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --monitor_port "$client_monitor_port" \
-                --server "0.0.0.0:$port"
+                --server "0.0.0.0:$port" \
+                $client_feature_opts
         benchreps_tell_state "after search_qps"
     else
         # Adjust the number of workers according to QPS
@@ -347,6 +637,7 @@ main() {
         scripts/search_qps.sh -s 95p -t "$fixed_qps_duration" \
            -m "$warmup_time" \
            -q "$fixed_qps" \
+           -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" \
            $qps_threshold_args $no_retry_args \
            -o "${FEEDSIM_ROOT}/${result_filename}" \
            -- build/workloads/ranking/DriverNodeRank \

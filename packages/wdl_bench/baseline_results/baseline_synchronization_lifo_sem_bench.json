@@ -1,0 +1,21 @@
+{
+  "contendedUse(16_to_16)": 226327.319,
+  "contendedUse(1_to_1)": 106526.52399999999,
+  "contendedUse(1_to_32)": 369055.657,
+  "contendedUse(1_to_4)": 309159.57999999996,
+  "contendedUse(32_to_1)": 143842.414,
+  "contendedUse(32_to_1000)": 888473.755,
+  "contendedUse(32_to_32)": 449498.588,
+  "contendedUse(4_to_1)": 99130.812,
+  "contendedUse(4_to_24)": 525434.2429999999,
+  "contendedUse(8_to_100)": 696449.1939999999,
+  "lifo_sem_oneway": 161454.06,
+  "lifo_sem_pingpong": 650953.63,
+  "single_thread_lifo_post": 11179.966999999999,
+  "single_thread_lifo_postwait": 23464.468,
+  "single_thread_lifo_trypost": 334.11800000000005,
+  "single_thread_lifo_trywait": 334.13000000000005,
+  "single_thread_lifo_wait": 12311.563999999998,
+  "single_thread_native_postwait": 22525.864,
+  "single_thread_native_trywait": 4469.9710000000005
+}

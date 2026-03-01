@@ -16,7 +16,7 @@ centos9() {
 
     # These are not necessary if it's run under internal test env
     if ! [ "${IS_INTERNAL_TEST:-}" = "1" ]; then
-        $SUDO dnf install -y epel-release
+        $SUDO dnf install -y epel-release numactl
         $SUDO dnf install -y 'dnf-command(config-manager)'
         $SUDO dnf config-manager --set-enabled crb
     fi
@@ -40,7 +40,7 @@ centos8() {
     read -n 1 -s -r -p  "Press any key to continue. "
     echo
 
-    $SUDO dnf install -y python38 python38-pip git lshw sysstat dmidecode
+    $SUDO dnf install -y python38 python38-pip git lshw sysstat dmidecode numactl
     $SUDO alternatives --set python3 /usr/bin/python3.8
     pip-3.8 install click pyyaml tabulate pandas packaging
 
@@ -58,7 +58,7 @@ ubuntu22() {
     echo "Installing dependencies for Ubuntu 22.04"
 
     $SUDO apt update
-    $SUDO apt install -y python3-pip git lshw sysstat dmidecode
+    $SUDO apt install -y python3-pip git lshw sysstat dmidecode numactl
     $SUDO pip3 install click pyyaml tabulate pandas packaging
 
     $SUDO apt install -y libssl-dev

@@ -12,6 +12,8 @@ FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
 FEEDSIM_ROOT_SRC="${BENCHPRESS_ROOT}/benchmarks/feedsim"
 FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
+LIBTORCH_VERSION="2.8.0"
+DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-dlrm/dlrm_small.tar.gz"
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
 
 cleanup() {
@@ -38,7 +40,7 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    libfmt-dev sysstat jq xxhash libxxhash-dev
+    sysstat jq xxhash libxxhash-dev unzip
 
 
 # Creates feedsim directory under benchmarks/
@@ -90,7 +92,7 @@ cd ../
 if ! [ -d "gengetopt-2.23" ]; then
     # Source the download retry function
     source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
-    download_with_retry "https://ftpmirror.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz"
+    download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
     tar -xf "gengetopt-2.23.tar.xz"
     cd "gengetopt-2.23"
     ./configure
@@ -142,6 +144,9 @@ else
     msg "[SKIPPED] glog-0.4.0"
 fi
 
+# Update linker cache so shared libs (gflags, glog) are found at runtime
+ldconfig
+
 # Installing JEMalloc
 if ! [ -d "jemalloc-5.3.0" ]; then
     wget "https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2"
@@ -171,6 +176,48 @@ fi
 
 msg "Installing third-party dependencies ... DONE"
 
+# Installing LibTorch for DLRM support
+msg "Installing LibTorch for DLRM support..."
+cd "${FEEDSIM_THIRD_PARTY_SRC}"
+
+ARCH="$(uname -m)"
+if [ "$ARCH" = "x86_64" ]; then
+    LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+elif [ "$ARCH" = "aarch64" ]; then
+    msg "WARNING: Pre-built LibTorch for ARM64 may not be available."
+    msg "Attempting to download CPU version..."
+    LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+else
+    die "Unsupported architecture: ${ARCH}"
+fi
+
+if ! [ -d "libtorch" ]; then
+    msg "Downloading LibTorch ${LIBTORCH_VERSION}..."
+    wget "${LIBTORCH_URL}" -O libtorch.zip
+    msg "Extracting LibTorch..."
+    unzip -q libtorch.zip
+    rm libtorch.zip
+    msg "LibTorch installed to ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+else
+    msg "[SKIPPED] LibTorch already installed"
+fi
+
+# Download DLRM model
+msg "Downloading DLRM model..."
+DLRM_MODEL_DIR="${FEEDSIM_ROOT_SRC}/models"
+mkdir -p "${DLRM_MODEL_DIR}"
+
+if ! [ -f "${DLRM_MODEL_DIR}/dlrm_small.pt" ]; then
+    msg "Downloading DLRM model from ${DLRM_MODEL_URL}..."
+    wget "${DLRM_MODEL_URL}" -O "${DLRM_MODEL_DIR}/dlrm_small.tar.gz"
+    msg "Extracting DLRM model..."
+    tar -xzf "${DLRM_MODEL_DIR}/dlrm_small.tar.gz" -C "${DLRM_MODEL_DIR}"
+    rm "${DLRM_MODEL_DIR}/dlrm_small.tar.gz"
+    msg "DLRM model installed to ${DLRM_MODEL_DIR}"
+else
+    msg "[SKIPPED] DLRM model already installed"
+fi
+
 
 # Installing FeedSim
 cd "${FEEDSIM_ROOT_SRC}"
@@ -198,7 +245,7 @@ fi
 
 mkdir -p build && cd build/
 
-# Build FeedSim
+# Build FeedSim with DLRM support
 FS_CFLAGS="${BP_CFLAGS:--O3 -DNDEBUG}"
 FS_CXXFLAGS="${BP_CXXFLAGS:--O3 -DNDEBUG }"
 FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic"
@@ -211,9 +258,22 @@ cmake -G Ninja \
     -DCMAKE_C_COMPILER="$BP_CC" \
     -DCMAKE_CXX_COMPILER="$BP_CXX" \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \
-    -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS -DFMT_HEADER_ONLY=1" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
+    -DFEEDSIM_USE_DLRM=ON \
+    -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
+    -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/libtorch" \
     ../
 
-sed -i 's/lib64/lib/' build.ninja
 ninja -v -j1
+
+msg ""
+msg "=== FeedSim Installation Complete ==="
+msg ""
+msg "To run FeedSim with DLRM workload:"
+msg "  cd ${FEEDSIM_ROOT_SRC}"
+msg "  ./run.sh --workload=dlrm --dlrm-model=${DLRM_MODEL_DIR}/dlrm_small.pt"
+msg ""
+msg "Or use the standard PageRank workload:"
+msg "  ./run.sh"
+msg ""

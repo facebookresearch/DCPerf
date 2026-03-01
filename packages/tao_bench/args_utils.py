@@ -18,7 +18,7 @@ def get_default_num_servers(max_cores_per_inst=72):
 
 
 def get_warmup_time(args, secs_per_gb=5, min_time=1200):
-    if args.warmup_time > 0:
+    if args.warmup_time >= 0:
         return args.warmup_time
     else:
         time_to_fill = int(secs_per_gb * args.memsize)
@@ -153,6 +153,19 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
         default=0,
         help="randomized nanosleep with exponential backoff",
     )
+    server_parser.add_argument(
+        "--postprocessing-timeout-buffer",
+        type=int,
+        default=60,
+        help="extra time buffer for server to complete postprocessing in seconds",
+    )
+    server_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=0,
+        help="poll interval in seconds for process completion detection; "
+        + "if > 0, use polling mechanism instead of fixed timeout",
+    )
     server_parser.add_argument("--real", action="store_true", help="for real")
 
     return get_opt_strings(server_parser)
@@ -224,6 +237,18 @@ def add_common_client_args(client_parser: ArgumentParser) -> List[Tuple[str, str
         type=int,
         default=0,
         help="set to non-zero to disable TLS",
+    )
+    client_parser.add_argument(
+        "--warmup-timeout-buffer",
+        type=int,
+        default=30,
+        help="extra time buffer for warmup phase timeout in seconds",
+    )
+    client_parser.add_argument(
+        "--test-timeout-buffer",
+        type=int,
+        default=30,
+        help="extra time buffer for test phase timeout in seconds",
     )
     client_parser.add_argument("--real", action="store_true", help="for real")
 

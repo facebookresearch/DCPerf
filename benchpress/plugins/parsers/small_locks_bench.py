@@ -33,5 +33,4 @@ class SmallLocksParser(Parser):
                 metrics[lock_name + " stddev in us"] = float(stddev_val)
                 max_val = re.findall(REGEX_VAL_AFTER_MAX, line)[0]
                 metrics[lock_name + " max in us"] = float(max_val)
-        print(metrics)
         return metrics

@@ -1,0 +1,6 @@
+{
+    "zstd 1.5.7 -1 compression: MB/s": 303.0,
+    "zstd 1.5.7 -1 decompression: MB/s": 972.0,
+    "zstd 1.5.7 -3 compression: MB/s": 156.0,
+    "zstd 1.5.7 -3 decompression: MB/s": 792.0
+}

@@ -91,11 +91,11 @@ CSRGraph<int32_t> PageRankParams::makeGraphCopy(
       original.out_neigh(0).begin(),
       original.out_neigh(num_nodes - 1).end(),
       out_neighbors);
- // Set up index pointers for each node
- #pragma omp parallel for
+// Set up index pointers for each node
+#pragma omp parallel for
   for (int64_t n = 0; n < num_nodes; n++) {
-    //TODO: check this is correct
-    out_index[n] = out_neighbors  +
+    // TODO: check this is correct
+    out_index[n] = out_neighbors +
         (original.out_neigh(n).begin() - original.out_neigh(0).begin());
   }
   // Set the last index pointer
@@ -112,8 +112,8 @@ CSRGraph<int32_t> PageRankParams::makeGraphCopy(
         original.in_neigh(num_nodes - 1).end(),
         in_neighbors);
 
-    // Set up index pointers for each node
-    #pragma omp parallel for
+// Set up index pointers for each node
+#pragma omp parallel for
     for (int64_t n = 0; n < num_nodes; n++) {
       in_index[n] = in_neighbors +
           (original.in_neigh(n).begin() - original.in_neigh(0).begin());
@@ -177,7 +177,8 @@ void PageRankParams::storeGraphToFile(
       } else if (n == num_nodes) {
         in_offsets[n] = num_edges;
       } else {
-        in_offsets[n] = original.in_neigh(n).begin() - original.in_neigh(0).begin();
+        in_offsets[n] =
+            original.in_neigh(n).begin() - original.in_neigh(0).begin();
       }
     }
     outFile.write(
@@ -222,7 +223,7 @@ CSRGraph<int32_t> PageRankParams::loadGraphFromFile(
 
   // Create out_index pointer array
   int32_t** out_index = new int32_t*[num_nodes + 1];
-  #pragma omp parallel for
+#pragma omp parallel for
   for (int64_t n = 0; n <= num_nodes; n++) {
     out_index[n] = out_neighbors + out_offsets[n];
   }
@@ -241,7 +242,7 @@ CSRGraph<int32_t> PageRankParams::loadGraphFromFile(
 
     // Create in_index pointer array
     int32_t** in_index = new int32_t*[num_nodes + 1];
-    #pragma omp parallel for
+#pragma omp parallel for
     for (int64_t n = 0; n <= num_nodes; n++) {
       in_index[n] = in_neighbors + in_offsets[n];
     }
@@ -255,8 +256,13 @@ CSRGraph<int32_t> PageRankParams::loadGraphFromFile(
   }
 }
 
-PageRank::PageRank(CSRGraph<int32_t> graph, int num_pvectors_entries)
-    : graph_(std::move(graph)), num_pvectors_entries_(num_pvectors_entries) {
+PageRank::PageRank(
+    CSRGraph<int32_t> graph,
+    int num_pvectors_entries,
+    unsigned seed)
+    : graph_(std::move(graph)),
+      num_pvectors_entries_(num_pvectors_entries),
+      seed_(seed) {
   const float init_score = 1.0f / graph_.num_nodes();
   for (int i = 0; i < num_pvectors_entries; i++) {
     pvector<float> scores{graph_.num_nodes(), init_score};
@@ -285,14 +291,17 @@ int PageRank::rank(
       0,
       num_nodes < graph_.num_nodes() ? graph_.num_nodes() - num_nodes
                                      : graph_.num_nodes()};
-  std::random_device rd;
-  std::mt19937 gen(rd());
+  // Use the seed passed to the constructor
+  unsigned local_seed = seed_ != 0
+      ? seed_ + thread_id
+      : std::chrono::system_clock::now().time_since_epoch().count();
+  std::mt19937 gen(local_seed);
   NodeID start = u_dist(gen);
 
   const auto split_size = std::max(num_pvectors_entries_, 1);
   std::uniform_int_distribution<int64_t> split_dist{
       0, graph_.num_nodes() / split_size - 1};
-  std::mt19937 split_gen(rd());
+  std::mt19937 split_gen(local_seed + 1);
   NodeID split_start = split_dist(split_gen);
   NodeID split_end = split_start + (graph_.num_nodes() / split_size) - 1;
 

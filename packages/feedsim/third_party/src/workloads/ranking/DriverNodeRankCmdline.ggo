@@ -32,3 +32,11 @@ option "qps" - "Rate to send requests at. 0 means send as fast as it can." float
 option "monitor_port" - "Port to run monitoring server on." int default="7777"
 
 option "affinity" - "Set distinct CPU affinity for threads, round-robin"
+
+# Phase 7: Client-side DLRM feature generation options
+option "client_side_features" - "Generate DLRM features on client side and send via RankingRequest" flag off
+option "client_dlrm_batch_size" - "Batch size for client-side feature generation" int default="256"
+option "client_dlrm_inferences" - "Number of DLRM inferences per request" int default="1"
+option "client_feature_seed" - "Seed for client feature generation. Default 42 for deterministic. Use -1 for random." long default="42"
+option "client_num_dense_features" - "Number of dense features per sample" int default="13"
+option "client_num_sparse_features" - "Number of sparse features per sample" int default="26"

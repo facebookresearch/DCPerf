@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import errno
+import glob
 import multiprocessing
 import os
 import pathlib
@@ -20,6 +21,27 @@ import click
 
 
 BENCHMARKS_ROOT = "benchmarks"
+
+# Root directory of the benchpress installation (where the binary is located)
+# This is used to resolve relative paths for scripts and tracking files
+BENCHPRESS_ROOT = os.path.dirname(os.path.realpath(sys.argv[0]))
+
+# Path to the benchmark installs tracking file
+BENCHMARK_INSTALLS_FILE = os.path.join(BENCHPRESS_ROOT, "benchmark_installs.txt")
+
+
+def resolve_script_path(script_path: str) -> str:
+    """Resolve relative script paths to absolute paths based on BENCHPRESS_ROOT.
+
+    This allows benchpress to be run from any directory while still finding
+    scripts that use relative paths like ./packages/cdn_bench/...
+    """
+    if not script_path:
+        return script_path
+    if os.path.isabs(script_path):
+        return script_path
+    # Resolve relative path from BENCHPRESS_ROOT
+    return os.path.join(BENCHPRESS_ROOT, script_path)
 
 
 def eprint(*args, **kwargs):
@@ -55,16 +77,52 @@ def issue_background_command(cmd, stdout, stderr, env=None):
     return proc
 
 
-def verify_install(install_script):
-    if not install_script:
-        # install_script not set means this "benchmark" does not need installation
+def install_list_contains(installer_name: str) -> bool:
+    if not installer_name:
         return True
-    if os.path.exists("benchmark_installs.txt"):
-        with open("benchmark_installs.txt", "r") as benchmark_installs:
+    if os.path.exists(BENCHMARK_INSTALLS_FILE):
+        with open(BENCHMARK_INSTALLS_FILE, "r") as benchmark_installs:
             for benchmark_install in benchmark_installs:
-                if install_script.strip() == benchmark_install.strip():
+                if installer_name.strip() == benchmark_install.strip():
                     return True
     return False
+
+
+def install_list_append(installer_name: str):
+    if not install_list_contains(installer_name):
+        with open(BENCHMARK_INSTALLS_FILE, "a") as installs_file:
+            # Note: we could os.path.expandvars() to match the echo approach
+            installs_file.write(installer_name + "\n")
+
+
+def install_list_remove(installer_name: str):
+    if os.path.exists(BENCHMARK_INSTALLS_FILE):
+        with open(BENCHMARK_INSTALLS_FILE, "r") as benchmark_installs_fp:
+            lines = benchmark_installs_fp.readlines()
+        with open(BENCHMARK_INSTALLS_FILE, "w") as benchmark_installs_fp:
+            for line in lines:
+                if line.strip() != installer_name.strip():
+                    benchmark_installs_fp.write(line)
+
+
+def verify_install(job) -> bool:
+    """
+    If the yaml file provided install markers, any marker being missing will
+    lead to this function returning False. Assuming no markers are provided,
+    this function checks installed.txt for a record of the install script
+    being run. The actual binary is allways checked for existance.
+
+    Arguments
+        - job is a Benchpress Job. Class is defined in lib/job.py
+    """
+
+    if job.install_markers:
+        return all(glob.glob(marker) for marker in job.install_markers)
+    elif job.install_script:
+        return install_list_contains(job.install_script)
+    else:
+        # No install markers and no install script --> assume installed
+        return True
 
 
 def output_catcher(reader, writer=None):
@@ -77,7 +135,9 @@ def output_catcher(reader, writer=None):
 
 
 def install_benchmark(install_script, args=None, env=None, install_log=None):
-    install_benchmark_cmd = ["bash", "-x", install_script]
+    # Resolve relative script paths to absolute paths based on BENCHPRESS_ROOT
+    resolved_script = resolve_script_path(install_script)
+    install_benchmark_cmd = ["bash", "-x", resolved_script]
     if args:
         install_benchmark_cmd.extend(args)
     install_benchmark_cmd = get_safe_cmd(install_benchmark_cmd)
@@ -108,16 +168,7 @@ def install_benchmark(install_script, args=None, env=None, install_log=None):
     stderr_catcher.join()
 
     if install_benchmark_proc.returncode == 0:
-        verify_install_cmd_1 = ["touch", "benchmark_installs.txt"]
-        verify_install_proc_1 = subprocess.Popen(verify_install_cmd_1, shell=False)
-        verify_install_proc_1.wait()
-        benchmark_installs_fp = open("benchmark_installs.txt", "a+")
-        verify_install_cmd_2 = ["echo", install_script]
-        verify_install_proc_2 = subprocess.Popen(
-            verify_install_cmd_2, stdout=benchmark_installs_fp, shell=False
-        )
-        verify_install_proc_2.wait()
-        benchmark_installs_fp.close()
+        install_list_append(install_script)
     else:
         cmd_str = " ".join(install_benchmark_cmd)
         raise Exception(f"Failed to run '{cmd_str}'")
@@ -128,7 +179,7 @@ def install_benchmark(install_script, args=None, env=None, install_log=None):
 def install_tool(tool_name):
     install_script = "install_tool_" + tool_name + ".sh"
     if os.path.exists(install_script):
-        if verify_install(install_script):
+        if install_list_contains(install_script):
             return 0
         else:
             install_benchmark(install_script)
@@ -149,14 +200,16 @@ def create_benchmark_metrics_dir(run_id):
 
 
 def clean_benchmark(clean_script, install_script):
-    clean_benchmark_cmd = ["bash", "-x", clean_script]
+    # Resolve relative script paths to absolute paths based on BENCHPRESS_ROOT
+    resolved_clean_script = resolve_script_path(clean_script)
+    clean_benchmark_cmd = ["bash", "-x", resolved_clean_script]
     clean_benchmark_proc = subprocess.Popen(clean_benchmark_cmd, shell=False)
     clean_benchmark_proc.wait()
     if clean_benchmark_proc.returncode == 0:
-        if os.path.exists("benchmark_installs.txt"):
-            with open("benchmark_installs.txt", "r") as benchmark_installs_fp:
+        if os.path.exists(BENCHMARK_INSTALLS_FILE):
+            with open(BENCHMARK_INSTALLS_FILE, "r") as benchmark_installs_fp:
                 lines = benchmark_installs_fp.readlines()
-            with open("benchmark_installs.txt", "w") as benchmark_installs_fp:
+            with open(BENCHMARK_INSTALLS_FILE, "w") as benchmark_installs_fp:
                 for line in lines:
                     if line.strip("\n") != install_script:
                         benchmark_installs_fp.write(line)

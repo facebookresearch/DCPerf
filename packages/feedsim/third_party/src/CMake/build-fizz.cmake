@@ -23,6 +23,9 @@ ExternalProject_Add(fizz
         -DCMAKE_PREFIX_PATH:PATH=<INSTALL_DIR>
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
         -DBUILD_TESTS:BOOL=OFF
+        -DBOOST_ROOT:PATH=${BOOST_ROOT}
+        -DBoost_INCLUDE_DIR:PATH=${Boost_INCLUDE_DIR}
+        -DBoost_NO_BOOST_CMAKE:BOOL=${Boost_NO_BOOST_CMAKE}
     BINARY_DIR ${oldisim_BINARY_DIR}/third_party/fizz
     BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libfizz.a
     BUILD_COMMAND
@@ -30,7 +33,7 @@ ExternalProject_Add(fizz
     )
 
 
-ExternalProject_Add_StepDependencies(fizz configure folly)
+ExternalProject_Add_StepDependencies(fizz configure folly libaegis)
 
 ExternalProject_Get_Property(fizz SOURCE_DIR)
 ExternalProject_Get_Property(fizz INSTALL_DIR)

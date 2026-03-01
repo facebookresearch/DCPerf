@@ -45,11 +45,10 @@ class PageRankParams {
   CSRGraph<int32_t> makeGraphCopy(const CSRGraph<int32_t>& original);
 
   void storeGraphToFile(
-    const CSRGraph<int32_t>& original,
-    const std::string& filePath);
+      const CSRGraph<int32_t>& original,
+      const std::string& filePath);
 
-  CSRGraph<int32_t> loadGraphFromFile(
-    const std::string& filePath);
+  CSRGraph<int32_t> loadGraphFromFile(const std::string& filePath);
 
  private:
   struct Impl;
@@ -63,7 +62,10 @@ class PageRank {
  public:
   constexpr static const float kDamp = 0.85;
 
-  explicit PageRank(CSRGraph<int32_t> graph, int num_pvectors_entries);
+  explicit PageRank(
+      CSRGraph<int32_t> graph,
+      int num_pvectors_entries,
+      unsigned seed = 0);
 
   int rank(
       int thread_id,
@@ -75,6 +77,7 @@ class PageRank {
  private:
   CSRGraph<int32_t> graph_;
   int num_pvectors_entries_;
+  unsigned seed_;
   folly::F14FastMap<int, pvector<float>> scores_pvectors_map_;
   folly::F14FastMap<int, pvector<float>> outgoing_pvectors_map_;
 };
