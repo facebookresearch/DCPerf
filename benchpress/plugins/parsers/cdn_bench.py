@@ -540,11 +540,19 @@ class CDNBenchParser(Parser):
 
     def _parse_cpu_metrics(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
         """
-        Parse CPU/Memory benchmark output from sysbench.
+        Parse CPU benchmark output from stress-ng.
+        Extracts metrics from inline YAML output and metrics-brief table.
         Args:
-            stdout: stdout lines from sysbench benchmark execution
+            stdout: stdout lines from stress-ng benchmark execution
             metrics: dictionary to store metrics
         """
+        self._parse_cpu_config(stdout, metrics)
+        self._parse_cpu_metrics_brief(stdout, metrics)
+        self._parse_cpu_yaml(stdout, metrics)
+        self._parse_cpu_times(stdout, metrics)
+
+    def _parse_cpu_config(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
+        """Parse configuration and system info from stress-ng run output."""
         current_section = ""
 
         for line in stdout:
@@ -553,163 +561,237 @@ class CDNBenchParser(Parser):
             # Track sections
             if "CPU Governor Configuration" in line_stripped:
                 current_section = "governor"
-            elif "Running Sysbench Benchmark" in line_stripped:
-                current_section = "benchmark"
-            elif "CPU speed:" in line_stripped:
-                current_section = "cpu_speed"
-            elif "Latency (ms):" in line_stripped:
-                current_section = "latency"
-            elif "Threads fairness:" in line_stripped:
-                current_section = "fairness"
-            elif line_stripped.startswith("General statistics:"):
-                current_section = "general"
+            elif "System Information" in line_stripped:
+                current_section = "sysinfo"
+            elif "Configuration" in line_stripped and "===" in line:
+                current_section = "config"
+            elif "Running stress-ng" in line_stripped:
+                current_section = "running"
+            elif "Post-Benchmark" in line_stripped:
+                current_section = "post"
 
             # Parse governor info
             if current_section == "governor":
                 if "Setting CPU governor to:" in line_stripped:
                     metrics["cpu_governor"] = line_stripped.split(":")[-1].strip()
 
-            # Parse benchmark configuration
-            if current_section == "benchmark":
-                if line_stripped.startswith("Test:"):
-                    metrics["test_type"] = line_stripped.split(":", 1)[-1].strip()
-                elif line_stripped.startswith("- cpu-max-prime:"):
+            # Parse system info
+            if current_section == "sysinfo":
+                if line_stripped.startswith("Hostname:"):
+                    metrics["hostname"] = line_stripped.split(":", 1)[-1].strip()
+                elif line_stripped.startswith("Kernel:"):
+                    metrics["kernel_version"] = line_stripped.split(":", 1)[-1].strip()
+                elif line_stripped.startswith("Architecture:"):
+                    metrics["architecture"] = line_stripped.split(":", 1)[-1].strip()
+                elif line_stripped.startswith("CPU Model:"):
+                    metrics["cpu_model"] = line_stripped.split(":", 1)[-1].strip()
+                elif line_stripped.startswith("Physical Cores:"):
                     try:
-                        metrics["cpu_max_prime"] = int(
+                        metrics["physical_cores"] = int(
                             line_stripped.split(":", 1)[-1].strip()
                         )
                     except ValueError:
                         pass
-                elif line_stripped.startswith("- threads:"):
+                elif line_stripped.startswith("NUMA Nodes:"):
                     try:
-                        metrics["threads"] = int(
+                        metrics["numa_nodes"] = int(
                             line_stripped.split(":", 1)[-1].strip()
                         )
                     except ValueError:
                         pass
-                elif line_stripped.startswith("- time:"):
+
+            # Parse configuration
+            if current_section == "config":
+                if line_stripped.startswith("Stressor:"):
+                    metrics["stressor"] = line_stripped.split(":", 1)[-1].strip()
+                elif line_stripped.startswith("Workers:"):
+                    try:
+                        metrics["workers"] = int(
+                            line_stripped.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line_stripped.startswith("Timeout:"):
                     match = re.search(r"(\d+)", line_stripped)
                     if match:
-                        metrics["time_secs"] = int(match.group(1))
-                elif line_stripped.startswith("- memory-block-size:"):
-                    metrics["memory_block_size"] = line_stripped.split(":", 1)[
-                        -1
-                    ].strip()
-                elif line_stripped.startswith("- memory-total-size:"):
-                    metrics["memory_total_size"] = line_stripped.split(":", 1)[
-                        -1
-                    ].strip()
-                elif line_stripped.startswith("- memory-oper:"):
-                    metrics["memory_oper"] = line_stripped.split(":", 1)[-1].strip()
-                elif line_stripped.startswith("- memory-access-mode:"):
-                    metrics["memory_access_mode"] = line_stripped.split(":", 1)[
-                        -1
-                    ].strip()
-
-            # Parse sysbench version
-            if line_stripped.startswith("Sysbench version:"):
-                metrics["sysbench_version"] = line_stripped.split(":", 1)[-1].strip()
-
-            # Parse number of threads from sysbench output
-            if "Number of threads:" in line_stripped:
-                try:
-                    metrics["num_threads"] = int(line_stripped.split(":")[-1].strip())
-                except ValueError:
-                    pass
-
-            # Parse CPU speed metrics
-            if current_section == "cpu_speed":
-                if "events per second:" in line_stripped:
+                        metrics["timeout_secs"] = int(match.group(1))
+                elif line_stripped.startswith("CPU Method:"):
+                    metrics["cpu_method"] = line_stripped.split(":", 1)[-1].strip()
+                elif line_stripped.startswith("Matrix Size:"):
                     try:
-                        metrics["cpu_events_per_sec"] = float(
-                            line_stripped.split(":")[-1].strip()
+                        metrics["matrix_size"] = int(
+                            line_stripped.split(":", 1)[-1].strip()
                         )
                     except ValueError:
                         pass
 
-            # Parse latency metrics (for both CPU and memory tests)
-            if current_section == "latency":
-                if line_stripped.startswith("min:"):
-                    try:
-                        metrics["latency_min_ms"] = float(
-                            line_stripped.split(":")[-1].strip()
-                        )
-                    except ValueError:
-                        pass
-                elif line_stripped.startswith("avg:"):
-                    try:
-                        metrics["latency_avg_ms"] = float(
-                            line_stripped.split(":")[-1].strip()
-                        )
-                    except ValueError:
-                        pass
-                elif line_stripped.startswith("max:"):
-                    try:
-                        metrics["latency_max_ms"] = float(
-                            line_stripped.split(":")[-1].strip()
-                        )
-                    except ValueError:
-                        pass
-                elif "95th percentile:" in line_stripped:
-                    try:
-                        metrics["latency_p95_ms"] = float(
-                            line_stripped.split(":")[-1].strip()
-                        )
-                    except ValueError:
-                        pass
-                elif line_stripped.startswith("sum:"):
-                    try:
-                        metrics["latency_sum_ms"] = float(
-                            line_stripped.split(":")[-1].strip()
-                        )
-                    except ValueError:
-                        pass
+            # Parse stress-ng version
+            if line_stripped.startswith("stress-ng Version:"):
+                metrics["stress_ng_version"] = line_stripped.split(":", 1)[-1].strip()
+            elif line_stripped.startswith("Execution Date:"):
+                metrics["execution_date"] = line_stripped.split(":", 1)[-1].strip()
 
-            # Parse general statistics
-            if current_section == "general":
-                if "total time:" in line_stripped:
-                    match = re.search(r"([\d.]+)s", line_stripped)
-                    if match:
-                        metrics["total_time_secs"] = float(match.group(1))
-                elif "total number of events:" in line_stripped:
-                    try:
-                        metrics["total_events"] = int(
-                            line_stripped.split(":")[-1].strip()
-                        )
-                    except ValueError:
-                        pass
+    def _parse_cpu_metrics_brief(
+        self, stdout: List[str], metrics: Dict[str, Any]
+    ) -> None:
+        """Parse stress-ng --metrics-brief table output.
 
-            # Parse threads fairness metrics
-            if current_section == "fairness":
-                if "events (avg/stddev):" in line_stripped:
-                    match = re.search(r"([\d.]+)/([\d.]+)", line_stripped)
-                    if match:
-                        metrics["fairness_events_avg"] = float(match.group(1))
-                        metrics["fairness_events_stddev"] = float(match.group(2))
-                elif "execution time (avg/stddev):" in line_stripped:
-                    match = re.search(r"([\d.]+)/([\d.]+)", line_stripped)
-                    if match:
-                        metrics["fairness_time_avg_secs"] = float(match.group(1))
-                        metrics["fairness_time_stddev_secs"] = float(match.group(2))
+        Expected format (from stderr, captured via 2>&1):
+        stress-ng: info: [...] stressor  bogo ops real time ...
+        stress-ng: info: [...] cpu       8640000    60.00 ...
+        """
+        for line in stdout:
+            line_stripped = line.strip()
 
-            # Parse memory throughput (for memory tests)
-            # Format: "102400.00 MiB transferred (1706.49 MiB/sec)"
-            if "MiB transferred" in line_stripped:
+            # Match metrics-brief data lines
+            # Format: stress-ng: info:  [PID] <stressor> <bogo_ops> <real_time>
+            #         <usr_time> <sys_time> <bogo_ops_rt> <bogo_ops_ust> <cpu_pct>
+            brief_match = re.search(
+                r"stress-ng:\s+info:\s+\[\d+\]\s+"
+                r"(\w+)\s+"
+                r"(\d+)\s+"
+                r"([\d.]+)\s+"
+                r"([\d.]+)\s+"
+                r"([\d.]+)\s+"
+                r"([\d.]+)\s+"
+                r"([\d.]+)\s+"
+                r"([\d.]+)",
+                line_stripped,
+            )
+            if brief_match:
+                stressor_name = brief_match.group(1)
+                # Skip header lines
+                if stressor_name in ("stressor", "info"):
+                    continue
+                metrics["brief_stressor"] = stressor_name
+                metrics["brief_bogo_ops"] = int(brief_match.group(2))
+                metrics["brief_real_time_secs"] = float(brief_match.group(3))
+                metrics["brief_usr_time_secs"] = float(brief_match.group(4))
+                metrics["brief_sys_time_secs"] = float(brief_match.group(5))
+                metrics["brief_bogo_ops_per_sec_real"] = float(brief_match.group(6))
+                metrics["brief_bogo_ops_per_sec_usr_sys"] = float(brief_match.group(7))
+                metrics["brief_cpu_used_per_instance_pct"] = float(brief_match.group(8))
+
+            # Parse successful run completion
+            if "successful run completed in" in line_stripped:
+                match = re.search(r"completed in ([\d.]+)s", line_stripped)
+                if match:
+                    metrics["total_run_time_secs"] = float(match.group(1))
+
+    def _parse_cpu_yaml(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
+        """Parse stress-ng YAML output block delimited by markers."""
+        import yaml
+
+        full_output = "\n".join(stdout)
+
+        # Extract YAML block between markers
+        yaml_start = full_output.find("BEGIN_STRESS_NG_YAML")
+        yaml_end = full_output.find("END_STRESS_NG_YAML")
+
+        if yaml_start == -1 or yaml_end == -1:
+            return
+
+        # Skip the marker line itself
+        yaml_start = full_output.index("\n", yaml_start) + 1
+        yaml_str = full_output[yaml_start:yaml_end].strip()
+
+        if not yaml_str:
+            return
+
+        try:
+            data = yaml.safe_load(yaml_str)
+            if not isinstance(data, dict) or "stress-ng" not in data:
+                return
+
+            stress_data = data["stress-ng"]
+
+            if "system-info" in stress_data:
+                self._extract_yaml_sysinfo(stress_data["system-info"], metrics)
+            if "metrics" in stress_data:
+                self._extract_yaml_stressor_metrics(stress_data["metrics"], metrics)
+            if "times" in stress_data and isinstance(stress_data["times"], dict):
+                if "run-time" in stress_data["times"]:
+                    metrics["yaml_run_time_secs"] = float(
+                        stress_data["times"]["run-time"]
+                    )
+
+        except yaml.YAMLError as e:
+            logger.warning(f"Failed to parse stress-ng YAML output: {e}")
+        except Exception as e:
+            logger.warning(f"Error parsing stress-ng YAML metrics: {e}")
+
+    def _extract_yaml_sysinfo(
+        self, sysinfo: Dict[str, Any], metrics: Dict[str, Any]
+    ) -> None:
+        """Extract system-info fields from stress-ng YAML."""
+        if "stress-ng-version" in sysinfo:
+            metrics["stress_ng_version"] = str(sysinfo["stress-ng-version"])
+        if "num-cpus-online" in sysinfo:
+            metrics["yaml_cpus_online"] = int(sysinfo["num-cpus-online"])
+        if "compiler" in sysinfo:
+            metrics["compiler"] = str(sysinfo["compiler"])
+
+    def _extract_yaml_stressor_metrics(
+        self, stressor_metrics: List[Dict[str, Any]], metrics: Dict[str, Any]
+    ) -> None:
+        """Extract per-stressor metrics from stress-ng YAML."""
+        yaml_metric_map = {
+            "bogo-ops": ("bogo_ops", int),
+            "bogo-ops-per-second-usr-sys-time": ("bogo_ops_per_sec_usr_sys", float),
+            "bogo-ops-per-second-real-time": ("bogo_ops_per_sec_real", float),
+            "wall-clock-time": ("wall_clock_time_secs", float),
+            "user-time": ("user_time_secs", float),
+            "system-time": ("system_time_secs", float),
+            "cpu-usage-per-instance": ("cpu_usage_per_instance_pct", float),
+        }
+        for entry in stressor_metrics:
+            if not isinstance(entry, dict):
+                continue
+            metrics["yaml_stressor"] = entry.get("stressor", "unknown")
+            for yaml_key, (metric_name, converter) in yaml_metric_map.items():
+                if yaml_key in entry:
+                    metrics[metric_name] = converter(entry[yaml_key])
+
+    def _parse_cpu_times(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
+        """Parse stress-ng --times output for time breakdown."""
+        for line in stdout:
+            line_stripped = line.strip()
+
+            # Parse times output lines like:
+            # stress-ng: info: [PID]   4320.00s available CPU time
+            # stress-ng: info: [PID]   4319.78s user time   ( 99.99%)
+            # stress-ng: info: [PID]      0.22s system time (  0.01%)
+
+            if "available CPU time" in line_stripped:
+                match = re.search(r"([\d.]+)s\s+available CPU time", line_stripped)
+                if match:
+                    metrics["available_cpu_time_secs"] = float(match.group(1))
+
+            elif "user time" in line_stripped and "stress-ng" in line_stripped:
                 match = re.search(
-                    r"([\d.]+)\s+MiB transferred\s+\(([\d.]+)\s+MiB/sec\)",
-                    line_stripped,
+                    r"([\d.]+)s\s+user time\s+\(\s*([\d.]+)%\)", line_stripped
                 )
                 if match:
-                    metrics["memory_transferred_mib"] = float(match.group(1))
-                    metrics["memory_throughput_mib_per_sec"] = float(match.group(2))
+                    metrics["times_user_secs"] = float(match.group(1))
+                    metrics["times_user_pct"] = float(match.group(2))
 
-            # Parse memory operations per second
-            # Format: "Total operations: 26214400 (436889.96 per second)"
-            if "Total operations:" in line_stripped:
+            elif "system time" in line_stripped and "stress-ng" in line_stripped:
                 match = re.search(
-                    r"Total operations:\s*(\d+)\s*\(([\d.]+)\s*per second\)",
-                    line_stripped,
+                    r"([\d.]+)s\s+system time\s+\(\s*([\d.]+)%\)", line_stripped
                 )
                 if match:
-                    metrics["memory_total_ops"] = int(match.group(1))
-                    metrics["memory_ops_per_sec"] = float(match.group(2))
+                    metrics["times_system_secs"] = float(match.group(1))
+                    metrics["times_system_pct"] = float(match.group(2))
+
+            elif "total time" in line_stripped and "stress-ng" in line_stripped:
+                match = re.search(
+                    r"([\d.]+)s\s+total time\s+\(\s*([\d.]+)%\)", line_stripped
+                )
+                if match:
+                    metrics["times_total_secs"] = float(match.group(1))
+                    metrics["times_total_pct"] = float(match.group(2))
+
+            elif "stressors started" in line_stripped:
+                match = re.search(r"(\d+)\s+stressors started", line_stripped)
+                if match:
+                    metrics["stressors_started"] = int(match.group(1))
