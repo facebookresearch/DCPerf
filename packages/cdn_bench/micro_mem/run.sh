@@ -19,15 +19,24 @@ BIN="stream"
 # Change to mem_micro directory
 cd "$MEM_MICRO_DIR" || exit 1
 
-# Compile the STREAM benchmark
-echo "Compiling $SRC with stream array size = $ARRAY_SIZE and iterations =$NTIMES..."
-gcc -O -mcmodel=large -DSTREAM_ARRAY_SIZE="$ARRAY_SIZE" -DNTIMES="$NTIMES" "$SRC" -o "$BIN"
+# Detect number of physical cores for OpenMP
+NUM_THREADS=$(nproc)
+echo "Detected $NUM_THREADS available CPUs for OpenMP parallelization"
+
+# Compile the STREAM benchmark with OpenMP support
+echo "Compiling $SRC with OpenMP, stream array size = $ARRAY_SIZE and iterations = $NTIMES..."
+gcc -O3 -fopenmp -mcmodel=large -DSTREAM_ARRAY_SIZE="$ARRAY_SIZE" -DNTIMES="$NTIMES" "$SRC" -o "$BIN"
 
 # Check compilation success
 if [[ ! -x "$BIN" ]]; then
   echo "ERROR: Compilation failed or binary not found!"
   exit 1
 fi
+
+# Set OpenMP environment variables for optimal performance
+export OMP_NUM_THREADS="$NUM_THREADS"
+export OMP_PROC_BIND=spread
+export OMP_PLACES=threads
 
 # Collect system metadata before benchmark
 echo "MEM"
@@ -39,12 +48,25 @@ echo "Execution Date: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Arguments Passed:"
 echo "  - STREAM_ARRAY_SIZE: $ARRAY_SIZE"
 echo "  - NTIMES: $NTIMES"
+echo "OpenMP Configuration:"
+echo "  - OMP_NUM_THREADS: $OMP_NUM_THREADS"
+echo "  - OMP_PROC_BIND: $OMP_PROC_BIND"
+echo "  - OMP_PLACES: $OMP_PLACES"
 echo "====================================================================="
-./"$BIN" 2>&1
+
+# Run STREAM with NUMA interleaving for optimal memory access
+if command -v numactl &> /dev/null; then
+  echo "Running with numactl --interleave=all for NUMA optimization"
+  numactl --interleave=all ./"$BIN" 2>&1
+else
+  echo "WARNING: numactl not found, running without NUMA optimization"
+  ./"$BIN" 2>&1
+fi
 echo ""
 
 # Get memory information
-echo "Total Memory: $(free -h | awk '/^Mem:/ {print $2}')\n"
+echo "Total Memory: $(free -h | awk '/^Mem:/ {print $2}')"
+printf "\n"
 echo "====================================================================="
 echo "Memory Configuration"
 echo "====================================================================="
