@@ -3,10 +3,20 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-echo "MEM"
+
 set -Eeuo pipefail
 
+# Get the directory where this script is located
 MEM_MICRO_DIR="$(dirname "$(readlink -f "$0")")"
+LOG_FILE="${MEM_MICRO_DIR}/stream_run.log"
+
+# Clear previous log file
+true > "$LOG_FILE"
+
+# Redirect all output to both stdout and log file
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "MEM"
 
 # Parse arguments with defaults
 ARRAY_SIZE="${1:-201326592}"
