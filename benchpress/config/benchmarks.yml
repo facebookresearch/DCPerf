@@ -174,3 +174,39 @@ sleep:
   path: /usr/bin/sleep
   parser: returncode
   metrics: []
+
+ucache_bench:
+  parser: ucache_bench
+  install_script: ./packages/ucache_bench/install_ucache_bench.sh
+  cleanup_script: ./packages/ucache_bench/cleanup_ucache_bench.sh
+  path: ./packages/ucache_bench/run.py
+  roles:
+    - server
+    - client
+  tags:
+    scope:
+      - app
+      - cache
+    component:
+      - cpu
+      - memory
+  metrics:
+    - qps
+    - hit_ratio_percent
+    - latency:
+        - p50
+        - p95
+        - p99
+        - p99_9
+    - get_operations
+    - set_operations
+    - get_hits
+    - get_misses
+    - get_errors
+    - set_successes
+    - set_errors
+    - warmup:
+        - success
+        - qps
+        - total_operations
+        - success_rate_percent

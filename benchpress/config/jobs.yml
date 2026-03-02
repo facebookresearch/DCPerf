@@ -1462,3 +1462,239 @@
     - '{duration}'
   vars:
     - 'duration'
+
+- benchmark: ucache_bench
+  name: ucache_bench_memory
+  description: UcacheBench - Memory-only cache benchmark using CacheLib
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--port={port}'
+        - '--memory-mb={memory_mb}'
+        - '--hash-power={hash_power}'
+        - '--pool-name={pool_name}'
+        - '--lru-rebalance-interval-sec={lru_rebalance_interval_sec}'
+        - '--lru-rebalancing-hits-min-age-sec={lru_rebalancing_hits_min_age_sec}'
+        - '--lru-rebalancing-hits-max-age-sec={lru_rebalancing_hits_max_age_sec}'
+        - '--lru-hits-victim-by-free-mem={lru_hits_victim_by_free_mem}'
+        - '--hashtable-lock-power={hashtable_lock_power}'
+        - '--cachelib-num-shards={cachelib_num_shards}'
+        - '--min-alloc-size={min_alloc_size}'
+        - '--rpc-io-threads={rpc_io_threads}'
+        - '--rpc-io-threads-multiplier={rpc_io_threads_multiplier}'
+        - '--rpc-num-acceptor-threads={rpc_num_acceptor_threads}'
+        - '--rpc-num-cpu-worker-threads={rpc_num_cpu_worker_threads}'
+        - '--cpu-pinning-enabled={cpu_pinning_enabled}'
+        - '--cpu-pinning-avoid-irqs={cpu_pinning_avoid_irqs}'
+        - '--cpu-pinning-network-interface={cpu_pinning_network_interface}'
+        - '--cpu-pinning-physical-cores-only={cpu_pinning_physical_cores_only}'
+        - '--cpu-pinning-exclusive={cpu_pinning_exclusive}'
+        - '--cpu-pinning-reduce-threads={cpu_pinning_reduce_threads}'
+        - '--admin-port={admin_port}'
+        - '--num-clients={num_clients}'
+        - '--timeout-seconds={timeout_seconds}'
+        - '--real'
+      vars:
+        - 'port=11212'
+        - 'memory_mb=1024'
+        - 'hash_power=20'
+        - 'pool_name=default'
+        - 'lru_rebalance_interval_sec=0'
+        - 'lru_rebalancing_hits_min_age_sec=0'
+        - 'lru_rebalancing_hits_max_age_sec=0'
+        - 'lru_hits_victim_by_free_mem=0'
+        - 'hashtable_lock_power=20'
+        - 'cachelib_num_shards=0'
+        - 'min_alloc_size=64'
+        - 'rpc_io_threads=0'
+        - 'rpc_io_threads_multiplier=1.0'
+        - 'rpc_num_acceptor_threads=4'
+        - 'rpc_num_cpu_worker_threads=1'
+        - 'cpu_pinning_enabled=0'
+        - 'cpu_pinning_avoid_irqs=1'
+        - 'cpu_pinning_network_interface=eth0'
+        - 'cpu_pinning_physical_cores_only=0'
+        - 'cpu_pinning_exclusive=0'
+        - 'cpu_pinning_reduce_threads=1'
+        - 'admin_port=0'
+        - 'num_clients=0'
+        - 'timeout_seconds=600'
+    client:
+      args:
+        - 'client'
+        - '--server-host={server_host}'
+        - '--server-port={server_port}'
+        - '--duration-seconds={duration_seconds}'
+        - '--warmup-seconds={warmup_seconds}'
+        - '--num-proxies={num_proxies}'
+        - '--num-threads={num_threads}'
+        - '--max-inflight={max_inflight}'
+        - '--additional-fanout={additional_fanout}'
+        - '--key-count={key_count}'
+        - '--value-size-min={value_size_min}'
+        - '--value-size-max={value_size_max}'
+        - '--get-ratio={get_ratio}'
+        - '--connection-timeout-ms={connection_timeout_ms}'
+        - '--send-timeout-ms={send_timeout_ms}'
+        - '--security-mech={security_mech}'
+        - '--use-distribution={use_distribution}'
+        - '--distribution-config={distribution_config}'
+        - '--zipfian={zipfian}'
+        - '--zipfian-skew={zipfian_skew}'
+        - '--hot-key-ratio={hot_key_ratio}'
+        - '--enable-random-source-ip={enable_random_source_ip}'
+        - '--admin-port={admin_port}'
+        - '--real'
+      vars:
+        - 'server_host'
+        - 'server_port=11212'
+        - 'duration_seconds=60'
+        - 'warmup_seconds=10'
+        - 'num_proxies=0'
+        - 'num_threads=0'
+        - 'max_inflight=1'
+        - 'additional_fanout=0'
+        - 'key_count=100000'
+        - 'value_size_min=64'
+        - 'value_size_max=1024'
+        - 'get_ratio=0.9'
+        - 'connection_timeout_ms=1000'
+        - 'send_timeout_ms=1000'
+        - 'security_mech=plain'
+        - 'use_distribution=0'
+        - 'distribution_config='
+        - 'zipfian=0'
+        - 'zipfian_skew=0.99'
+        - 'hot_key_ratio=0.0'
+        - 'enable_random_source_ip=0'
+        - 'admin_port=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'perf.data'
+
+- benchmark: ucache_bench
+  name: ucache_bench_hybrid
+  description: UcacheBench - Hybrid RAM+SSD cache benchmark using CacheLib
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--port={port}'
+        - '--memory-mb={memory_mb}'
+        - '--hash-power={hash_power}'
+        - '--pool-name={pool_name}'
+        - '--cache-mode=hybrid'
+        - '--ssd-cache-path={ssd_cache_path}'
+        - '--ssd-cache-size-mb={ssd_cache_size_mb}'
+        - '--ssd-block-size={ssd_block_size}'
+        - '--ssd-region-size-mb={ssd_region_size_mb}'
+        - '--ssd-clean-regions-pool={ssd_clean_regions_pool}'
+        - '--ssd-device-max-write-rate={ssd_device_max_write_rate}'
+        - '--ssd-truncate-file={ssd_truncate_file}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'port=11211'
+        - 'memory_mb=1024'
+        - 'hash_power=20'
+        - 'pool_name=hybrid'
+        - 'ssd_cache_path=/tmp/ucachebench_ssd'
+        - 'ssd_cache_size_mb=4096'
+        - 'ssd_block_size=4096'
+        - 'ssd_region_size_mb=16'
+        - 'ssd_clean_regions_pool=4'
+        - 'ssd_device_max_write_rate=0'
+        - 'ssd_truncate_file=true'
+        - 'warmup_time=30'
+        - 'test_time=300'
+        - 'verbose=true'
+    client:
+      args:
+        - 'client'
+        - '--server-hostname={server_hostname}'
+        - '--server-port={server_port}'
+        - '--key-count={key_count}'
+        - '--value-size-min={value_size_min}'
+        - '--value-size-max={value_size_max}'
+        - '--get-ratio={get_ratio}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'server_hostname'
+        - 'server_port=11211'
+        - 'key_count=1000000'
+        - 'value_size_min=128'
+        - 'value_size_max=2048'
+        - 'get_ratio=0.95'
+        - 'warmup_time=30'
+        - 'test_time=300'
+        - 'verbose=true'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'perf.data'
+
+- benchmark: ucache_bench
+  name: ucache_bench_custom
+  description: UcacheBench - Cache benchmark with custom parameters
+  roles:
+    server:
+      args:
+        - 'server'
+        - '--port={port}'
+        - '--memory-mb={memory_mb}'
+        - '--hash-power={hash_power}'
+        - '--pool-name={pool_name}'
+        - '--cache-mode={cache_mode}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'port=11211'
+        - 'memory_mb=2048'
+        - 'hash_power=22'
+        - 'pool_name=benchmark'
+        - 'cache_mode=memory'
+        - 'warmup_time=30'
+        - 'test_time=300'
+        - 'verbose=true'
+    client:
+      args:
+        - 'client'
+        - '--server-hostname={server_hostname}'
+        - '--server-port-number={server_port}'
+        - '--key-count={key_count}'
+        - '--value-size-min={value_size_min}'
+        - '--value-size-max={value_size_max}'
+        - '--get-ratio={get_ratio}'
+        - '--warmup-time={warmup_time}'
+        - '--test-time={test_time}'
+        - '--verbose={verbose}'
+        - '--real'
+      vars:
+        - 'server_hostname'
+        - 'server_port=11211'
+        - 'key_count=1000000'
+        - 'value_size_min=128'
+        - 'value_size_max=2048'
+        - 'get_ratio=0.95'
+        - 'warmup_time=30'
+        - 'test_time=300'
+        - 'verbose=true'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'perf.data'
