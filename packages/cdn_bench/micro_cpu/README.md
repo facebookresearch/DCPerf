@@ -60,19 +60,19 @@ Override default parameters using the `-o` flag with the format `"micro_cpu:<arg
 
 ```bash
 # CPU stressor with specific method
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=matrixprod --timeout=120" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=matrixprod --timeout=120" run micro_cpu
 
 # Matrix stressor for SIMD/vectorization testing
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=matrix --matrix-size=256 --timeout=60" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=matrix --matrix-size=256 --timeout=60" run micro_cpu
 
 # Cache hierarchy testing
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cache --workers=0 --timeout=120" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cache --workers=0 --timeout=120" run micro_cpu
 
 # Vector math stressor
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=vecmath --timeout=60" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=vecmath --timeout=60" run micro_cpu
 
 # Full example with multiple parameters
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=all --workers=16 --timeout=120 --governor=performance --verify=1" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=all --workers=16 --timeout=120 --governor=performance --verify=1" run micro_cpu
 ```
 
 ---
@@ -137,7 +137,7 @@ sudo ./packages/cdn_bench/micro_cpu/cleanup_cpu_micro.sh
 Full CPU stressor sweep across all methods - the default for qualifying new CPUs.
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=all --timeout=120" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=all --timeout=120" run micro_cpu
 ```
 
 **What to look at:**
@@ -150,12 +150,12 @@ sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=all --
 Simulates edge request processing: branchy code, high syscall rate, latency-sensitive.
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=callfunc --timeout=60" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=callfunc --timeout=60" run micro_cpu
 ```
 
 **With branch prediction stress:**
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=bsearch --timeout=60" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=bsearch --timeout=60" run micro_cpu
 ```
 
 **What to look at:**
@@ -168,7 +168,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=bsearch --timeout=60" r
 Evaluate L1/L2/L3 cache performance and coherence.
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cache --timeout=120" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cache --timeout=120"  run micro_cpu
 ```
 
 **What to look at:**
@@ -186,7 +186,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=matrix --matrix-size=25
 
 **Vector math variant:**
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=vecmath --timeout=60" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=vecmath --timeout=60" run micro_cpu
 ```
 
 **What to look at:**
@@ -199,7 +199,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=vecmath --timeout=60" r
 For storage/networking hosts doing inline compression.
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=zlib --timeout=120" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=zlib --timeout=120" run micro_cpu
 ```
 
 **What to look at:**
@@ -212,7 +212,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=zlib --timeout=120" run
 Fast sanity check before deeper testing:
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=matrixprod --timeout=30" run
+sudo ./benchpress_cli.py -b ehw -o "micro_cpu:--stressor=cpu --cpu-method=matrixprod --timeout=30" run micro_cpu
 ```
 
 ---

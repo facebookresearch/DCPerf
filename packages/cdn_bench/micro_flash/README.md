@@ -59,16 +59,16 @@ Override default parameters using the `-o` flag with the format `"micro_flash:<a
 
 ```bash
 # CDN-style workload
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=95 --bs=16k --numjobs=16 --iodepth=64" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=95 --bs=16k --numjobs=16 --iodepth=64" run micro_flash
 
 # Test a specific device with larger size
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--filename=/dev/nvme1n1 --size=100G" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--filename=/dev/nvme1n1 --size=100G" run micro_flash
 
 # Use io_uring engine with high priority
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--ioengine=io_uring --hipri=1" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--ioengine=io_uring --hipri=1" run micro_flash
 
 # Full example with multiple parameters
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=60 --bs=32k --numjobs=12 --iodepth=32 --size=1T --runtime=300 --ramp_time=30" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=60 --bs=32k --numjobs=12 --iodepth=32 --size=1T --runtime=300 --ramp_time=30" run micro_flash
 ```
 
 ---
@@ -165,7 +165,7 @@ sudo ./packages/cdn_bench/micro_flash/cleanup_flash_micro.sh
 Simulates edge cache behavior: read-heavy, small-medium objects, many concurrent clients.
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=95 --bs=16k --numjobs=16 --iodepth=64 --runtime=300 --ramp_time=30" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=95 --bs=16k --numjobs=16 --iodepth=64 --runtime=300 --ramp_time=30" run micro_flash
 ```
 
 **What to look at:**
@@ -178,7 +178,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=95 --bs=
 For search indexes, analytics replicas, AI embeddings — fast reads, infrequent writes.
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randread --bs=4k --numjobs=8 --iodepth=128 --ioengine=io_uring --runtime=240 --ramp_time=20" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randread --bs=4k --numjobs=8 --iodepth=128 --ioengine=io_uring --runtime=240 --ramp_time=20" run micro_flash
 ```
 
 **What to look at:**
@@ -196,7 +196,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randwrite --bs=16k --numjob
 For Redis/Memcached backing store, NVMe cache — write bursts, eviction, mixed access.
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=60 --bs=32k --numjobs=12 --iodepth=32 --size=1T --runtime=300 --ramp_time=30" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=60 --bs=32k --numjobs=12 --iodepth=32 --size=1T --runtime=300 --ramp_time=30" run micro_flash
 ```
 
 **What to look at:**
@@ -206,7 +206,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randrw --rwmixread=60 --bs=
 
 **Optional: Cache warm-up phase first**
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=write --bs=128k --numjobs=4 --iodepth=16 --runtime=120" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=write --bs=128k --numjobs=4 --iodepth=16 --runtime=120" run micro_flash
 ```
 
 ### 4. Object Storage / Large File Servers
@@ -214,7 +214,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=write --bs=128k --numjobs=4
 For S3-like workloads, media storage, backups — focus on MB/s, not IOPS.
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=read --bs=1M --numjobs=4 --iodepth=16 --runtime=180" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=read --bs=1M --numjobs=4 --iodepth=16 --runtime=180" run micro_flash
 ```
 
 ### 5. Quick System Validation
@@ -222,7 +222,7 @@ sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=read --bs=1M --numjobs=4 --
 Fast sanity check before deeper testing:
 
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randread --bs=4k --numjobs=4 --iodepth=32 --runtime=60 --ramp_time=10" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--rw=randread --bs=4k --numjobs=4 --iodepth=32 --runtime=60 --ramp_time=10" run micro_flash
 ```
 
 ---
@@ -300,7 +300,7 @@ umount /dev/nvme0n1p1  # if applicable
 ### io_uring Not Available
 Fall back to libaio:
 ```bash
-sudo ./benchpress_cli.py -b ehw -o "micro_flash:--ioengine=libaio" run
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--ioengine=libaio" run micro_flash
 ```
 
 Check kernel support:
