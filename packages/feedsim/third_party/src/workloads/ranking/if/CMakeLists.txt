@@ -6,4 +6,5 @@ thrift_library(
     "${CMAKE_CURRENT_LIST_DIR}" # Directory where thrift file lives
     "${CMAKE_CURRENT_LIST_DIR}" # Directory where thrift objects will be built
     "ranking/if"
+    THRIFT_INCLUDE_DIRECTORIES ${FBTHRIFT_INCLUDE_DIR}
 )
