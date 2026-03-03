@@ -324,7 +324,7 @@ def gflops(grouped_df):
     flop_sum_series = fp_fixed_series + fp_scale_series
     gflops_series = flop_sum_series.div(duration_series / 10**9) / 10**9
     return {
-        "name": "GFLOPS (any precision, incl SVE)",
+        "name": "GFLOPS (any precision incl SVE)",
         "series": gflops_series,
     }
 
