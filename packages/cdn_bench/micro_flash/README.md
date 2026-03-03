@@ -308,6 +308,81 @@ Check kernel support:
 cat /proc/kallsyms | grep io_uring
 ```
 
+### BTRFS Filesystem Goes Read-Only
+
+⚠️ **WARNING**: Running FIO directly on raw block devices (e.g., `/dev/nvme0n1`) that contain your OS or BTRFS filesystem will corrupt on-disk structures and force the filesystem into read-only mode. This is **extremely dangerous**.
+
+#### Verify Filesystem State
+
+```bash
+# Check if filesystem is read-only
+mount | grep ' / '
+
+# Check for BTRFS read-only events
+dmesg | grep -i -E "readonly|read-only|btrfs"
+
+# Test if filesystem is writable
+touch /tmp/test && rm /tmp/test && echo "OK" || echo "READ-ONLY"
+
+# View BTRFS filesystem info
+sudo btrfs filesystem show
+
+# Check which devices are in the BTRFS pool
+sudo dmsetup deps transient
+
+# List NVMe devices and partitions
+ls -la /dev/nvme*
+lsblk
+```
+
+#### Recovery
+
+```bash
+# Reboot the host (only fix for BTRFS forced read-only)
+sudo reboot
+```
+
+#### Safe FIO Setup for BTRFS Systems
+
+When running on systems with BTRFS, **always use file-based I/O** instead of raw block devices:
+
+```bash
+# 1. Create dedicated test directory
+mkdir -p /tmp/fio_bench
+
+# 2. Disable Copy-on-Write (critical for BTRFS)
+chattr +C /tmp/fio_bench
+
+# 3. Verify +C attribute was set
+lsattr -d /tmp/fio_bench
+# Should show: ---------------C------ /tmp/fio_bench
+
+# 4. Run FIO with directory instead of raw device
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--directory=/tmp/fio_bench --rw=randrw --rwmixread=95 --bs=16k --numjobs=16 --iodepth=64 --filesize=10G" run micro_flash
+```
+
+#### Identify Safe Target Devices
+
+```bash
+# List all NVMe devices and partitions
+lsblk
+
+# Identify which device has the OS (DO NOT USE THIS ONE)
+df -h /
+
+# Use a DATA partition or separate NVMe (not the one with the OS)
+# Example: If nvme0n1 has the OS, use nvme1n1 for testing
+sudo ./benchpress_cli.py -b ehw -o "micro_flash:--filename=/dev/nvme1n1 --rw=randrw ..." run micro_flash
+```
+
+#### Best Practices
+
+| ✅ Safe | ❌ Dangerous |
+|---------|-------------|
+| `--directory=/tmp/fio_bench` | `--filename=/dev/nvme0n1` (raw OS disk) |
+| `--filename=/dev/nvme1n1` (separate data disk) | `--filename=/dev/nvme0n1p1` (OS partition) |
+| File-based I/O on mounted filesystem | Direct I/O to block device with BTRFS |
+
 ---
 
 ## See Also
