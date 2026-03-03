@@ -116,10 +116,14 @@ if(FEEDSIM_USE_DLRM)
             ${CMAKE_CURRENT_SOURCE_DIR}/../../
             ${CMAKE_CURRENT_SOURCE_DIR}/../../../
             ${TORCH_INCLUDE_DIRS}
+        PRIVATE
+            ${FOLLY_INCLUDE_DIR}
     )
     target_link_libraries(rankingDLRM
         PUBLIC
             ${TORCH_LIBRARIES}
+        PRIVATE
+            ${FOLLY_LIBRARIES}
     )
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 endif()

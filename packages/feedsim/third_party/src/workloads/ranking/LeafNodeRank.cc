@@ -333,6 +333,35 @@ ranking::RankingResponse deserializePayload(const folly::IOBuf* buf) {
   return resp;
 }
 
+#ifdef FEEDSIM_USE_DLRM
+static int dlrmInferenceServerSideDataGeneration(ThreadData& this_thread,
+                                                 int total_num_inferences) {
+  int num_inferences_max =
+      (total_num_inferences + args.cpu_threads_arg - 1)
+      / args.cpu_threads_arg;
+  int batch_size = args.dlrm_batch_size_arg;
+
+  std::vector<folly::Future<int>> futures;
+  for (int i = 0; i < args.cpu_threads_arg; i++) {
+    int num_inferences = std::min(num_inferences_max, total_num_inferences);
+    auto f = folly::via(
+        this_thread.cpuThreadPool.get(),
+        [num_inferences, batch_size, &this_thread]() {
+          return this_thread.dlrm_ranker->infer(num_inferences, batch_size);
+        });
+    futures.push_back(std::move(f));
+    total_num_inferences -= num_inferences;
+    if (total_num_inferences <= 0) break;
+  }
+  auto fs = folly::collectAll(std::move(futures)).get();
+  int result = 0;
+  for (auto& f : fs) {
+    result += f.value();
+  }
+  return result;
+}
+#endif
+
 /**
  * Phase 3: Async (non-blocking) request handler using continuation-passing style.
  *
@@ -402,23 +431,8 @@ void AsyncPageRankRequestHandler(
   }
 #ifdef FEEDSIM_USE_DLRM
   else if (g_workload_type == WorkloadType::DLRM) {
-    int num_inferences = args.dlrm_inferences_per_request_arg;
-    int batch_size = args.dlrm_batch_size_arg;
-
-    std::vector<folly::Future<int>> futures;
-    for (int i = 0; i < args.cpu_threads_arg; i++) {
-      auto f = folly::via(
-          this_thread.cpuThreadPool.get(),
-          [thread_id, num_inferences, batch_size, &this_thread]() {
-            return this_thread.dlrm_ranker->infer(
-                thread_id, num_inferences, batch_size);
-          });
-      futures.push_back(std::move(f));
-    }
-    auto fs = folly::collectAll(std::move(futures)).get();
-    for (auto& f : fs) {
-      ranking_result += f.value();
-    }
+    ranking_result = dlrmInferenceServerSideDataGeneration(
+        this_thread, args.dlrm_inferences_per_request_arg);
   }
 #endif
 
@@ -571,7 +585,7 @@ void DLRMRequestHandler(
   if (request.dlrm_features().has_value()) {
     const auto& features = request.dlrm_features().value();
     int batch_size = *features.batch_size();
-    int num_inferences = *request.num_inferences();
+    int total_num_inferences = *request.num_inferences();
 
     // Convert from Thrift types to arrays
     const auto& dense_vec = *features.dense_features();
@@ -584,40 +598,34 @@ void DLRMRequestHandler(
       dense_floats.push_back(static_cast<float>(d));
     }
 
+    // Calculate max number of inferences per thread
+    int num_inferences_max =
+        (total_num_inferences + args.cpu_threads_arg - 1)
+        / args.cpu_threads_arg;
+
     // Run inference with client-provided features
     std::vector<folly::Future<int>> futures;
     for (int i = 0; i < args.cpu_threads_arg; i++) {
+      int num_inferences = std::min(num_inferences_max, total_num_inferences);
       auto f = folly::via(
           this_thread.cpuThreadPool.get(),
-          [thread_id, num_inferences, batch_size, &dense_floats, &sparse_vec, &this_thread]() {
+          [num_inferences, batch_size, &dense_floats, &sparse_vec, &this_thread]() {
             return this_thread.dlrm_ranker->inferWithFeatures(
-                thread_id,
                 dense_floats.data(),
                 sparse_vec.data(),
                 batch_size,
                 num_inferences);
           });
       futures.push_back(std::move(f));
+      total_num_inferences -= num_inferences;
+      if (total_num_inferences <= 0) break;
     }
     auto fs = folly::collect(futures).get();
     result = std::accumulate(fs.begin(), fs.end(), 0);
   } else {
     // Fallback to server-side feature generation
-    int num_inferences = *request.num_inferences();
-    int batch_size = args.dlrm_batch_size_arg;
-
-    std::vector<folly::Future<int>> futures;
-    for (int i = 0; i < args.cpu_threads_arg; i++) {
-      auto f = folly::via(
-          this_thread.cpuThreadPool.get(),
-          [thread_id, num_inferences, batch_size, &this_thread]() {
-            return this_thread.dlrm_ranker->infer(
-                thread_id, num_inferences, batch_size);
-          });
-      futures.push_back(std::move(f));
-    }
-    auto fs = folly::collect(futures).get();
-    result = std::accumulate(fs.begin(), fs.end(), 0);
+    result = dlrmInferenceServerSideDataGeneration(
+        this_thread, *request.num_inferences());
   }
 
   // Generate response (same as PageRankRequestHandler)
@@ -679,23 +687,8 @@ void PageRankRequestHandler(
   }
 #ifdef FEEDSIM_USE_DLRM
   else if (g_workload_type == WorkloadType::DLRM) {
-    // DLRM workload
-    int thread_id = thread.get_thread_num();
-    int num_inferences = args.dlrm_inferences_per_request_arg;
-    int batch_size = args.dlrm_batch_size_arg;
-
-    std::vector<folly::Future<int>> futures;
-    for (int i = 0; i < args.cpu_threads_arg; i++) {
-      auto f = folly::via(
-          this_thread.cpuThreadPool.get(),
-          [thread_id, num_inferences, batch_size, &this_thread]() {
-            return this_thread.dlrm_ranker->infer(
-                thread_id, num_inferences, batch_size);
-          });
-      futures.push_back(std::move(f));
-    }
-    auto fs = folly::collect(futures).get();
-    result = std::accumulate(fs.begin(), fs.end(), 0);
+    result = dlrmInferenceServerSideDataGeneration(
+        this_thread, args.dlrm_inferences_per_request_arg);
   }
 #endif
 
@@ -903,7 +896,7 @@ int main(int argc, char** argv) {
     std::cout << "Warming up DLRM model..." << std::endl;
     const int warmup_iterations = 10;  // Run enough iterations to JIT compile all paths
     for (int i = 0; i < warmup_iterations; i++) {
-      shared_dlrm_ranker->infer(0, 1, args.dlrm_batch_size_arg);
+      shared_dlrm_ranker->infer(1, args.dlrm_batch_size_arg);
     }
     std::cout << "DLRM warmup complete (" << warmup_iterations << " iterations)" << std::endl;
   }

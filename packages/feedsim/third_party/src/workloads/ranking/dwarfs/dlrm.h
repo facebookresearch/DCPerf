@@ -90,12 +90,11 @@ class DLRM {
    *
    * This method signature mirrors PageRank::rank() for easy integration.
    *
-   * @param thread_id Thread identifier for thread-local state
    * @param num_inferences Number of inference calls to make
    * @param batch_size Batch size per inference call
    * @return Total number of predictions made
    */
-  int infer(int thread_id, int num_inferences, int batch_size);
+  int infer(int num_inferences, int batch_size);
 
   /**
    * Run DLRM inference with client-provided features (Phase 7).
@@ -103,7 +102,6 @@ class DLRM {
    * This method accepts pre-generated features from the client instead of
    * generating them server-side. Used for client-side feature generation.
    *
-   * @param thread_id Thread identifier for thread-local state
    * @param dense_features Pointer to dense feature array (batch_size * num_dense_features)
    * @param sparse_features Pointer to sparse feature array (batch_size * num_sparse_features)
    * @param batch_size Batch size
@@ -111,7 +109,6 @@ class DLRM {
    * @return Total number of predictions made
    */
   int inferWithFeatures(
-      int thread_id,
       const float* dense_features,
       const int64_t* sparse_features,
       int batch_size,

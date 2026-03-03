@@ -15,7 +15,11 @@
 
 #include <chrono>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
+#include <vector>
+
+#include <folly/ScopeGuard.h>
 
 namespace ranking {
 namespace dwarfs {
@@ -33,6 +37,9 @@ struct DLRM::Impl {
   };
   std::vector<std::unique_ptr<ThreadState>> thread_states;
 
+  alignas(64) std::mutex thread_id_lifo_mutex;
+  std::vector<int> thread_id_lifo;
+
   void loadModel(const std::string& model_path) {
     model = torch::jit::load(model_path);
     model.eval();
@@ -47,6 +54,7 @@ struct DLRM::Impl {
       int num_sparse_features) {
     thread_states.resize(num_threads);
 
+    std::lock_guard<std::mutex> lock(thread_id_lifo_mutex);
     for (int i = 0; i < num_threads; ++i) {
       auto state = std::make_unique<ThreadState>();
 
@@ -69,6 +77,7 @@ struct DLRM::Impl {
       state->sparse_buffer.resize(batch_size * num_sparse_features);
 
       thread_states[i] = std::move(state);
+      thread_id_lifo.push_back(i);
     }
   }
 
@@ -121,6 +130,21 @@ struct DLRM::Impl {
         {static_cast<int64_t>(batch_size), num_sparse_features},
         torch::kInt64);
   }
+
+  int get_avail_thread_id() {
+    std::lock_guard<std::mutex> lock(thread_id_lifo_mutex);
+    if (thread_id_lifo.empty()) {
+      throw std::runtime_error("More parallelism than allocated threads in DLRM");
+    }
+    int thread_id = thread_id_lifo.back();
+    thread_id_lifo.pop_back();
+    return thread_id;
+  }
+
+  void put_avail_thread_id(int thread_id) {
+    std::lock_guard<std::mutex> lock(thread_id_lifo_mutex);
+    thread_id_lifo.push_back(thread_id);
+  }
 };
 
 DLRM::DLRM(const DLRMParams& params, int num_thread_instances, unsigned seed)
@@ -161,10 +185,13 @@ DLRM::DLRM(const DLRMParams& params, int num_thread_instances, unsigned seed)
 
 DLRM::~DLRM() = default;
 
-int DLRM::infer(int thread_id, int num_inferences, int batch_size) {
+int DLRM::infer(int num_inferences, int batch_size) {
   if (!model_loaded_) {
     throw std::runtime_error("Model not loaded");
   }
+
+  int thread_id = pimpl_->get_avail_thread_id();
+  SCOPE_EXIT { pimpl_->put_avail_thread_id(thread_id); };
 
   if (thread_id < 0 ||
       thread_id >= static_cast<int>(pimpl_->thread_states.size())) {
@@ -199,18 +226,12 @@ int DLRM::infer(int thread_id, int num_inferences, int batch_size) {
 }
 
 int DLRM::inferWithFeatures(
-    int thread_id,
     const float* dense_features,
     const int64_t* sparse_features,
     int batch_size,
     int num_inferences) {
   if (!model_loaded_) {
     throw std::runtime_error("Model not loaded");
-  }
-
-  if (thread_id < 0 ||
-      thread_id >= static_cast<int>(pimpl_->thread_states.size())) {
-    throw std::out_of_range("Invalid thread_id: " + std::to_string(thread_id));
   }
 
   int total_predictions = 0;
@@ -254,7 +275,7 @@ void DLRM::warmup(int num_iterations) {
 
   // Use thread 0 for warmup
   for (int i = 0; i < num_iterations; ++i) {
-    infer(0, 1, params_.batch_size);
+    infer(1, params_.batch_size);
   }
 
   std::cout << "DLRM warmup complete." << std::endl;

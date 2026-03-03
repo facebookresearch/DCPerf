@@ -84,8 +84,8 @@ Usage: ${0##*/} [OPTION]...
     --workload Workload type: 'pagerank' (default) or 'dlrm'. Requires DLRM-enabled build.
     --dlrm-model Path to DLRM TorchScript model file (.pt). Required when --workload=dlrm is used.
     --dlrm-batch-size DLRM batch size for inference. Default: 256
-    --dlrm-inferences Number of DLRM inference calls per request. Default: 1
-    --dlrm-threads Number of LibTorch threads for DLRM inference. Default: 8
+    --dlrm-inferences Number of DLRM inference calls per request. Default: 64
+    --dlrm-threads Number of LibTorch threads for DLRM inference. Default: 1
     --async-io Enable async (non-blocking) I/O mode. Eliminates thread starvation on high-core CPUs.
     --io-dist I/O latency distribution: 'fixed' (default), 'exponential', or 'lognormal'.
     --io-mean Mean I/O latency in milliseconds. Default: 200
@@ -197,10 +197,10 @@ main() {
     dlrm_batch_size="256"
 
     local dlrm_inferences_per_request
-    dlrm_inferences_per_request="1"
+    dlrm_inferences_per_request="64"
 
     local dlrm_threads
-    dlrm_threads="8"
+    dlrm_threads="1"
 
     # Phase 3: Async I/O options
     local async_io
