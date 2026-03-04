@@ -11,6 +11,7 @@ import os
 import sys
 import traceback
 
+from benchpress.lib import open_source
 from benchpress.lib.hook import Hook
 
 from .perf_monitors import (
@@ -24,6 +25,9 @@ from .perf_monitors import (
     topdown,
     vmstat,
 )
+
+if not open_source:
+    from .perf_monitors.fb_power import monitor as fb_power
 
 BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
 
@@ -45,6 +49,9 @@ DEFAULT_OPTIONS = {
     "vmstat": {"interval": 5},
 }
 
+if not open_source:
+    DEFAULT_OPTIONS["fb_power"] = {"interval": 1}
+
 AVAIL_MONITORS = {
     "mpstat": mpstat.MPStat,
     "cpufreq_scaling": cpufreq_scaling.CPUFreq,
@@ -56,6 +63,9 @@ AVAIL_MONITORS = {
     "power": power.Power,
     "vmstat": vmstat.VMStat,
 }
+
+if not open_source:
+    AVAIL_MONITORS["fb_power"] = fb_power.FBPower
 
 logger = logging.getLogger(__name__)
 
