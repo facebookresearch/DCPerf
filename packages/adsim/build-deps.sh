@@ -60,6 +60,9 @@ FB303_VERSION=v2025.06.23.00
 # fast_float v8.0.0+ is required for folly's allow_leading_plus feature
 FAST_FLOAT_VERSION=v8.0.0
 
+# fmt 11.x for compatibility with modern compilers (Clang 21+) and folly v2025+
+FMT_VERSION=11.0.2
+
 # Boost 1.83.0+ is required for folly (system packages often have older versions)
 BOOST_VERSION=1.83.0
 BOOST_VERSION_UNDERSCORE=1_83_0
@@ -130,7 +133,7 @@ build_dependency() {
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
         -DCMAKE_CXX_STANDARD=20 \
         -DCMAKE_C_FLAGS="-g1" \
-        -DCMAKE_CXX_FLAGS="-g1" \
+        -DCMAKE_CXX_FLAGS="-g1 ${CXXFLAGS:-}" \
         -DBUILD_TESTS=OFF \
         $extra_cmake_args \
         "${cmake_source_path}"
@@ -178,7 +181,23 @@ echo "Dependencies directory: ${ADSIM_DEPS_DIR}"
 echo ""
 
 # Build prerequisite dependencies first (following build_proxygen.sh order)
-build_dependency "fmt" "https://github.com/fmtlib/fmt.git" "" "." "-DFMT_DOC=OFF -DFMT_TEST=OFF"
+# Clone fmt first to apply patches before building
+FMT_DIR="${ADSIM_DEPS_DIR}/fmt"
+if [ ! -d "$FMT_DIR" ]; then
+    git clone "https://github.com/fmtlib/fmt.git" "$FMT_DIR"
+    cd "$FMT_DIR" && git fetch --tags && git checkout "${FMT_VERSION}"
+    cd "${ADSIM_PROJ_ROOT}" || exit
+fi
+
+# Patch fmt base.h to disable consteval for Clang 21+ compatibility
+# The header redefines FMT_USE_CONSTEVAL, so we must patch the source
+FMT_BASE_H="${FMT_DIR}/include/fmt/base.h"
+if [ -f "$FMT_BASE_H" ] && grep -q "#  define FMT_USE_CONSTEVAL 1" "$FMT_BASE_H"; then
+    echo -e "${COLOR_GREEN}Patching fmt base.h to disable consteval for Clang 21+ compatibility${COLOR_OFF}"
+    sed -i 's/#  define FMT_USE_CONSTEVAL 1/#  define FMT_USE_CONSTEVAL 0/g' "$FMT_BASE_H"
+fi
+
+build_dependency "fmt" "https://github.com/fmtlib/fmt.git" "${FMT_VERSION}" "." "-DFMT_DOC=OFF -DFMT_TEST=OFF"
 
 # Build glog from source (system package lacks CMake config files needed by folly)
 # Note: v0.6.0 is used for compatibility with folly
@@ -236,6 +255,21 @@ echo -e "${COLOR_GREEN}Boost ${BOOST_VERSION} is installed${COLOR_OFF}"
 cd "${ADSIM_PROJ_ROOT}" || exit
 
 # Build core Facebook C++ libraries: async runtime, RPC framework, monitoring
+# Clone folly first to apply patches before building
+FOLLY_DIR="${ADSIM_DEPS_DIR}/folly"
+if [ ! -d "$FOLLY_DIR" ]; then
+    git clone "https://github.com/facebook/folly.git" "$FOLLY_DIR"
+    cd "$FOLLY_DIR" && git fetch --tags && git checkout "${FOLLY_VERSION}"
+    cd "${ADSIM_PROJ_ROOT}" || exit
+fi
+
+# Patch folly Exception.h for newer compilers that require explicit <cstring> include
+FOLLY_EXCEPTION_H="${FOLLY_DIR}/folly/lang/Exception.h"
+if [ -f "$FOLLY_EXCEPTION_H" ] && ! grep -q "#include <cstring>" "$FOLLY_EXCEPTION_H"; then
+    echo -e "${COLOR_GREEN}Patching folly Exception.h for std::memcpy/std::memset${COLOR_OFF}"
+    sed -i '/#include <exception>/a #include <cstring>' "$FOLLY_EXCEPTION_H"
+fi
+
 build_dependency "folly" "https://github.com/facebook/folly.git" "${FOLLY_VERSION}"
 build_dependency "fizz" "https://github.com/facebookincubator/fizz.git" "${FIZZ_VERSION}" "fizz"
 build_dependency "wangle" "https://github.com/facebook/wangle.git" "${WANGLE_VERSION}" "wangle"
