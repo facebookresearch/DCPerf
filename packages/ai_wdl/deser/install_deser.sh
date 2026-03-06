@@ -142,7 +142,7 @@ build_folly() {
   # Clone specific version of Folly with all submodules
   git clone -b $FOLLY_VERSION --recursive https://github.com/facebook/folly.git folly-${FOLLY_VERSION}
 
-  pushd folly-${FOLLY_VERSION}
+  pushd folly-${FOLLY_VERSION} || exit 1
   # Install system dependencies required by Folly
   sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive
   # Build Folly with system packages allowed and using our build directory

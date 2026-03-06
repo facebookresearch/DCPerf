@@ -6,7 +6,7 @@
 set -Eeuo pipefail
 
 ##################### SYS CONFIG AND DEPS #########################
-BPKGS_TYPE_CONVERSION_ROOT="$(pwd)/packages/ai_wdl/type_conversion"
+BPKGS_TYPE_CONVERSION_ROOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd -P)"
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_TYPE_CONVERSION_ROOT/../../..")"
 BENCHMARK_ROOT="${BENCHPRESS_ROOT}/benchmarks"
 

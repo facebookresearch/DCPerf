@@ -6,7 +6,7 @@
 set -Eeuo pipefail
 
 ##################### SYS CONFIG AND DEPS #########################
-BPKGS_REBATCH_ROOT="$(pwd)/packages/ai_wdl/rebatch"
+BPKGS_REBATCH_ROOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd -P)"
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_REBATCH_ROOT/../../..")"
 BENCHMARK_ROOT="${BENCHPRESS_ROOT}/benchmarks"
 

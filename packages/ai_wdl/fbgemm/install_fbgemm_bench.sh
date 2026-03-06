@@ -815,7 +815,7 @@ setup_directories() {
   # Change the current directory to the build directory
   # pushd saves the current directory on a stack so we can return to it later with popd
   echo "[SETUP] Changing to build directory..."
-  pushd build || exist
+  pushd build || exit 1
 
   echo "[SETUP] Directory setup complete."
 }
@@ -915,7 +915,7 @@ clone_fbgemm_repo() {
   echo "#!/bin/bash" > fbgemm_${FBGEMM_VERSION}/.github/scripts/fbgemm_gpu_postbuild.bash
 
   # Change the current directory to the FBGEMM GPU directory
-  pushd fbgemm_${FBGEMM_VERSION}/fbgemm_gpu || exist
+  pushd fbgemm_${FBGEMM_VERSION}/fbgemm_gpu || exit 1
 
   echo "[SETUP] FBGEMM repository setup complete."
 }
@@ -1034,7 +1034,7 @@ install_fbgemm() {
   # Return to the previous directory (outside of fbgemm_gpu)
   # This restores the directory we were in before entering fbgemm_gpu
   echo "[BUILD] Returning to previous directory..."
-  cd .. || exist
+  cd .. || exit 1
 
   echo "[BUILD] FBGEMM installation complete."
 }
@@ -1045,7 +1045,7 @@ cleanup() {
 
   # This restores the directory we were in before entering the build directory
   echo "[CLEANUP] Returning to original directory..."
-  popd || exist
+  popd || exit 1
 
   # Remove the build directory to clean up after the build process
   # This saves disk space by removing intermediate build files
