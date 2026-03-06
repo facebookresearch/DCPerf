@@ -49,6 +49,10 @@ void deserialize(UcacheBenchRequestCommon& self, carbon::CarbonProtocolReader& r
   reader.readStructEnd();
 }
 
+void UcacheBenchRequestCommon::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
 void deserialize(UcacheBenchReplyCommon& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
@@ -72,6 +76,10 @@ void deserialize(UcacheBenchReplyCommon& self, carbon::CarbonProtocolReader& rea
     }
   }
   reader.readStructEnd();
+}
+
+void UcacheBenchReplyCommon::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
 }
 
 void deserialize(UcbGetRequest& self, carbon::CarbonProtocolReader& reader) {
@@ -105,6 +113,10 @@ void deserialize(UcbGetRequest& self, carbon::CarbonProtocolReader& reader) {
     }
   }
   reader.readStructEnd();
+}
+
+void UcbGetRequest::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
 }
 
 void deserialize(UcbGetReply& self, carbon::CarbonProtocolReader& reader) {
@@ -156,6 +168,10 @@ void deserialize(UcbGetReply& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructEnd();
 }
 
+void UcbGetReply::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
 void deserialize(UcbSetRequest& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
@@ -195,6 +211,10 @@ void deserialize(UcbSetRequest& self, carbon::CarbonProtocolReader& reader) {
     }
   }
   reader.readStructEnd();
+}
+
+void UcbSetRequest::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
 }
 
 void deserialize(UcbSetReply& self, carbon::CarbonProtocolReader& reader) {
@@ -242,6 +262,10 @@ void deserialize(UcbSetReply& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructEnd();
 }
 
+void UcbSetReply::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
+}
+
 void deserialize(UcbDeleteRequest& self, carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
@@ -273,6 +297,10 @@ void deserialize(UcbDeleteRequest& self, carbon::CarbonProtocolReader& reader) {
     }
   }
   reader.readStructEnd();
+}
+
+void UcbDeleteRequest::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
 }
 
 void deserialize(UcbDeleteReply& self, carbon::CarbonProtocolReader& reader) {
@@ -314,6 +342,10 @@ void deserialize(UcbDeleteReply& self, carbon::CarbonProtocolReader& reader) {
     }
   }
   reader.readStructEnd();
+}
+
+void UcbDeleteReply::deserialize(carbon::CarbonProtocolReader& reader) {
+  facebook::ucachebench::thrift::deserialize(*this, reader);
 }
 } // namespace thrift
 } // namespace ucachebench
