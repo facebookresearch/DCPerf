@@ -322,7 +322,7 @@ def gflops(grouped_df):
     fp_fixed_series.index = duration_series.index
 
     flop_sum_series = fp_fixed_series + fp_scale_series
-    gflops_series = flop_sum_series.div(duration_series / 10**9) / 10**9
+    gflops_series = flop_sum_series.div(duration_series) / 10**9
     return {
         "name": "GFLOPS (any precision incl SVE)",
         "series": gflops_series,
@@ -336,7 +336,7 @@ def sve_gflops(grouped_df):
 
     fp_scale_series.index = duration_series.index
 
-    sve_gflops_series = fp_scale_series.div(duration_series / 10**9) / 10**9
+    sve_gflops_series = fp_scale_series.div(duration_series) / 10**9
     return {
         "name": "SVE GFLOPS (any precision)",
         "series": sve_gflops_series,
