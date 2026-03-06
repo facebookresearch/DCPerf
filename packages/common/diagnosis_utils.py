@@ -136,6 +136,7 @@ class DiagnosisRecorder:
                 # Double-check locking pattern
                 if cls._instance is None:
                     # Check environment variable for cross-process file sharing
+                    env_file_path = None
                     if not shared_file_path:
                         env_file_path = os.environ.get("DIAGNOSIS_FILE_PATH")
                         if env_file_path:

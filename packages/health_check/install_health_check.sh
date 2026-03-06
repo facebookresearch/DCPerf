@@ -7,8 +7,8 @@ set -Eeuo pipefail
 
 ##################### SYS CONFIG AND DEPS #########################
 
-BPKGS_HEATH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
-BENCHPRESS_ROOT="$(readlink -f "$BPKGS_HEATH_ROOT/../..")"
+BPKGS_HEALTH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
+BENCHPRESS_ROOT="$(readlink -f "$BPKGS_HEALTH_ROOT/../..")"
 HEALTH_ROOT="${BENCHPRESS_ROOT}/benchmarks/health_check"
 
 # Determine OS version

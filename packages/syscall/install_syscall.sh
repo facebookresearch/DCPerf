@@ -20,4 +20,5 @@ fi
 
 # Syscall system microbenchmarks
 pushd "$PKG_SYSCALL_ROOT"
-make
+make -j"$(nproc)"
+popd
