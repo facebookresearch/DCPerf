@@ -22,10 +22,14 @@ namespace cpp2 facebook.ucachebench.thrift
 namespace py3 facebook.ucachebench.thrift
 
 service UcacheBench {
-  UcacheBench_UcbDeleteReply ucbDelete(1: UcacheBench_UcbDeleteRequest request) throws (1: Common.CarbonResultBusy carbonResultBusy, 2: Common.CarbonResultRemoteError carbonResultRemoteError) (thread = "eb")
-  UcacheBench_UcbGetReply ucbGet(1: UcacheBench_UcbGetRequest request) throws (1: Common.CarbonResultBusy carbonResultBusy, 2: Common.CarbonResultRemoteError carbonResultRemoteError) (thread = "eb")
-  UcacheBench_UcbSetReply ucbSet(1: UcacheBench_UcbSetRequest request) throws (1: Common.CarbonResultBusy carbonResultBusy, 2: Common.CarbonResultRemoteError carbonResultRemoteError) (thread = "eb")
-  Common_McVersionReply mcVersion(1: Common_McVersionRequest request) (thread = "eb")
+  @cpp.ProcessInEbThreadUnsafe
+  UcacheBench_UcbDeleteReply ucbDelete(1: UcacheBench_UcbDeleteRequest request) throws (1: Common.CarbonResultBusy carbonResultBusy, 2: Common.CarbonResultRemoteError carbonResultRemoteError)
+  @cpp.ProcessInEbThreadUnsafe
+  UcacheBench_UcbGetReply ucbGet(1: UcacheBench_UcbGetRequest request) throws (1: Common.CarbonResultBusy carbonResultBusy, 2: Common.CarbonResultRemoteError carbonResultRemoteError)
+  @cpp.ProcessInEbThreadUnsafe
+  UcacheBench_UcbSetReply ucbSet(1: UcacheBench_UcbSetRequest request) throws (1: Common.CarbonResultBusy carbonResultBusy, 2: Common.CarbonResultRemoteError carbonResultRemoteError)
+  @cpp.ProcessInEbThreadUnsafe
+  Common_McVersionReply mcVersion(1: Common_McVersionRequest request)
 }
 
 @cpp.Type{name = "facebook::ucachebench::UcbDeleteReply"}
