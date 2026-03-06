@@ -38,7 +38,7 @@ git clone "$SIEGE_GIT_REPO"
 cd siege/
 git checkout "$SIEGE_GIT_RELEASE_TAG"
 ./utils/bootstrap
-./configure
+./configure --prefix="${SIEGE_INSTALLATION_PREFIX}"
 make -j4
 make install
 cd ../../
