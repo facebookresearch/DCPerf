@@ -192,7 +192,7 @@ build_folly()
 {
     lib='folly'
     pushd "${WDL_SOURCE}"
-    clone "$lib" || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
 
     # execute the build in a subshell with a new conda build environment
@@ -223,7 +223,7 @@ build_fbthrift()
 {
     lib='fbthrift'
     pushd "${WDL_SOURCE}"
-    clone "$lib" || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
 
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
@@ -244,7 +244,7 @@ build_lzbench()
 {
     lib='lzbench'
     pushd "${WDL_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     make BUILD_STATIC=1 -j "$(nproc)"
     cp ./lzbench "${WDL_ROOT}/" || exit
@@ -263,7 +263,7 @@ build_openssl()
 {
     lib='openssl'
     pushd "${WDL_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     ./Configure no-docs no-shared --prefix="${WDL_BUILD}/openssl" --openssldir="${WDL_BUILD}/openssl"
     make -j "$(nproc)"
@@ -277,7 +277,7 @@ build_vdso()
 {
     lib='vdso'
     pushd "${WDL_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib/vdso_bench" || exit
     make -j "$(nproc)"
     cp ./vdso_bench "${WDL_ROOT}/" || exit
@@ -289,7 +289,7 @@ build_libaegis()
 {
     lib='libaegis'
     pushd "${WDL_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     if [ "$ARCH" = "aarch64" ]; then
         zig_arch="aarch64"
     else
@@ -310,7 +310,7 @@ build_xxhash()
 {
     lib='xxhash'
     pushd "${WDL_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     make -C ./tests/bench/ -j "$(nproc)"
     cp ./tests/bench/benchHash "${WDL_ROOT}/xxhash_benchmark" || exit
@@ -356,7 +356,7 @@ build_glibc()
         /usr/bin/rpmbuild -bp "./$lib-rpm/SPECS/glibc.spec" --define "_topdir ${WDL_SOURCE}/$lib-rpm"
         mv "${WDL_SOURCE}/$lib-rpm/BUILD/$lib-${GLIBC_VERSION}" "${WDL_SOURCE}/$lib"
     else
-        clone $lib || echo "Failed to clone $lib"
+        clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     fi
 
     pushd "${WDL_BUILD}"
@@ -373,11 +373,11 @@ build_isa_l()
 {
     lib='isa-l'
     pushd "${WDL_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     ./autogen.sh
     ./configure
-    make perfs -j
+    make perfs -j"$(nproc)"
     cp ./erasure_code/erasure_code_perf "${WDL_ROOT}/" || exit
     cp -r ./erasure_code/.libs "${WDL_ROOT}/" || exit
 
@@ -388,7 +388,7 @@ build_sleef()
 {
     lib='sleef'
     pushd "${WDL_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     # Please do not change tabs in the following patch to spaces because git apply
     # is very sensitive to tabs and spaces.
@@ -441,7 +441,7 @@ build_gemm()
     pushd "$WDL_BUILD"
     source /etc/profile.d/modules.sh
     if [ "$ARCH" = "aarch64" ]; then
-        clone acl || echo "Failed to clone acl"
+        clone "acl" || { echo "ERROR: Failed to clone acl"; exit 1; }
         cd acl || exit
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DARM_COMPUTE_BUILD_SHARED_LIB=ON -DARM_COMPUTE_ENABLE_OPENMP=ON -DACL_MULTI_ISA=ON -DACL_BUILD_SVE=ON -DACL_BUILD_SVE2=ON -DACL_BUILD_SME2=ON -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/acl" && cmake --build build --config release --target install -- -j"$(nproc)"
         cd .. || exit
@@ -468,7 +468,7 @@ build_gemm()
         bash -c "onemkl/modulefiles-setup.sh --output-dir=onemkl/modulefiles"
         module use onemkl/modulefiles
         module load mkl/latest
-        clone aocl || echo "Failed to clone aocl"
+        clone "aocl" || { echo "ERROR: Failed to clone aocl"; exit 1; }
         cd aocl || exit
         # execute the build in a subshell with a new conda build environment
         (
@@ -496,7 +496,7 @@ build_gemm()
         fi
     fi
     cmake -S "$BPKGS_WDL_ROOT/$gemm_lib" -B "$gemm_lib-build-openblas" -DCMAKE_BUILD_TYPE=Release -DUSE_OPENBLAS=ON && cmake --build "$gemm_lib-build-openblas"
-    clone onednn || echo "Failed to clone onednn"
+    clone "onednn" || { echo "ERROR: Failed to clone onednn"; exit 1; }
     cd onednn || exit
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${WDL_BUILD}/onednn" && cmake --build build --config release --target install -- -j"$(nproc)"
     cd .. || exit

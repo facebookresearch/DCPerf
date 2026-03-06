@@ -54,7 +54,7 @@ run_allcore()
     done
 
     python3 ./aggregate_result.py "$1"
-    rm output_file_*
+    rm -f output_file_*
 
 
 }
