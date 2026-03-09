@@ -13,8 +13,9 @@ import subprocess
 
 import numpy as np
 import pandas as pd
+from benchpress.lib.util import BENCHPRESS_ROOT, get_artifacts_dir
 
-from . import BP_BASEPATH, logger, Monitor
+from . import logger, Monitor
 
 
 def get_cpuinfo():
@@ -149,14 +150,18 @@ class IntelPerfSpect(Monitor):
         super(IntelPerfSpect, self).__init__(interval, "perfspect", job_uuid)
         self.mux_interval_msecs = mux_interval_msecs
         if perfspect_path is None:
-            self.perfspect_path = os.path.join(BP_BASEPATH, "perfspect")
+            self.perfspect_path = os.path.join(BENCHPRESS_ROOT, "perfspect")
         else:
             self.perfspect_path = perfspect_path
         self.collect_output_path = os.path.join(
-            BP_BASEPATH, "benchmark_metrics_" + self.job_uuid, "perf-collect.csv"
+            get_artifacts_dir(),
+            "benchmark_metrics_" + self.job_uuid,
+            "perf-collect.csv",
         )
         self.postprocess_output_path = os.path.join(
-            BP_BASEPATH, "benchmark_metrics_" + self.job_uuid, "topdown-intel.csv"
+            get_artifacts_dir(),
+            "benchmark_metrics_" + self.job_uuid,
+            "topdown-intel.csv",
         )
         if os.path.exists(
             os.path.join(self.perfspect_path, "perf-collect")
@@ -227,14 +232,16 @@ class IntelPerfSpect3(Monitor):
         super(IntelPerfSpect3, self).__init__(interval, "perfspect3", job_uuid)
         self.mux_interval_msecs = mux_interval_msecs
         if perfspect_path is None:
-            self.perfspect_path = os.path.join(BP_BASEPATH, "perfspect")
+            self.perfspect_path = os.path.join(BENCHPRESS_ROOT, "perfspect")
         else:
             self.perfspect_path = perfspect_path
         self.collect_output_path = os.path.join(
-            BP_BASEPATH, "benchmark_metrics_" + self.job_uuid
+            get_artifacts_dir(), "benchmark_metrics_" + self.job_uuid
         )
         self.postprocess_output_path = os.path.join(
-            BP_BASEPATH, "benchmark_metrics_" + self.job_uuid, "topdown-intel.sys.csv"
+            get_artifacts_dir(),
+            "benchmark_metrics_" + self.job_uuid,
+            "topdown-intel.sys.csv",
         )
         if os.path.exists(os.path.join(self.perfspect_path, "perfspect")):
             self.supported = True
@@ -293,7 +300,7 @@ class BasePerfUtil(Monitor):
     ):
         super(BasePerfUtil, self).__init__(interval, name, job_uuid)
         if perfutils_path is None:
-            self.perfutils_path = os.path.join(BP_BASEPATH, "perfutils")
+            self.perfutils_path = os.path.join(BENCHPRESS_ROOT, "perfutils")
         else:
             self.perfutil_path = perfutils_path
         self.perf_collect_script_name = perf_collect_script_name
@@ -302,10 +309,14 @@ class BasePerfUtil(Monitor):
             list(perf_postproc_args) if perf_postproc_args else []
         )
         self.postprocess_timeseries_output_path = os.path.join(
-            BP_BASEPATH, "benchmark_metrics_" + self.job_uuid, f"{name}-timeseries.csv"
+            get_artifacts_dir(),
+            "benchmark_metrics_" + self.job_uuid,
+            f"{name}-timeseries.csv",
         )
         self.postprocess_summary_output_path = os.path.join(
-            BP_BASEPATH, "benchmark_metrics_" + self.job_uuid, f"{name}-summary.csv"
+            get_artifacts_dir(),
+            "benchmark_metrics_" + self.job_uuid,
+            f"{name}-summary.csv",
         )
 
     def run(self):
@@ -631,7 +642,7 @@ class DummyPerfUtil:
 
 
 def choose_perfspect():
-    perfspect_dir = os.path.join(BP_BASEPATH, "perfspect")
+    perfspect_dir = os.path.join(BENCHPRESS_ROOT, "perfspect")
     perfspect3_bin = os.path.join(perfspect_dir, "perfspect")
     perfspect1_bin1 = os.path.join(perfspect_dir, "perf-collect")
     perfspect1_bin2 = os.path.join(perfspect_dir, "perf-postprocess")

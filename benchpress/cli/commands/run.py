@@ -19,7 +19,7 @@ from benchpress.lib.history import History
 from benchpress.lib.hook_factory import HookFactory
 from benchpress.lib.job import get_target_jobs
 from benchpress.lib.reporter_factory import ReporterFactory
-from benchpress.lib.util import verify_install
+from benchpress.lib.util import get_artifacts_dir, verify_install
 
 from .command import BenchpressCommand
 
@@ -224,11 +224,16 @@ class RunCommand(BenchpressCommand):
                 logger.warning("Hooks globally disabled as requested")
             else:
                 job.start_hooks()
-            metrics_dir = f"benchmark_metrics_{job.uuid}"
+            metrics_dir = os.path.join(
+                get_artifacts_dir(), f"benchmark_metrics_{job.uuid}"
+            )
             now = datetime.now()
             date = now.strftime("%Y%m%d_%H%M")
             symlink = job.name + "_timestamp:" + date + "_" + job.uuid
-            os.symlink(metrics_dir, f"benchmark_metrics_{symlink}")
+            symlink_path = os.path.join(
+                get_artifacts_dir(), f"benchmark_metrics_{symlink}"
+            )
+            os.symlink(metrics_dir, symlink_path)
             sys_specs_dict["run_id"] = job.uuid
             sys_specs_dict["timestamp"] = job.timestamp
 

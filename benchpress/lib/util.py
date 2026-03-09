@@ -26,8 +26,32 @@ BENCHMARKS_ROOT = "benchmarks"
 # This is used to resolve relative paths for scripts and tracking files
 BENCHPRESS_ROOT = os.path.dirname(os.path.realpath(sys.argv[0]))
 
-# Path to the benchmark installs tracking file
-BENCHMARK_INSTALLS_FILE = os.path.join(BENCHPRESS_ROOT, "benchmark_installs.txt")
+# Alternative base path for writing artifacts (benchmark_metrics, logs, etc.)
+# When set, all writable artifacts are redirected to this directory instead of
+# BENCHPRESS_ROOT. This is necessary for read-only installations (e.g. fbpkg
+# mounted in TW containers).
+_artifacts_dir: typing.Optional[str] = None
+
+
+def get_artifacts_dir() -> str:
+    """Return the directory for writing artifacts.
+
+    Defaults to BENCHPRESS_ROOT if not explicitly set via set_artifacts_dir().
+    """
+    return _artifacts_dir if _artifacts_dir is not None else BENCHPRESS_ROOT
+
+
+def set_artifacts_dir(path: str) -> None:
+    """Set the artifacts output directory. Creates it if it doesn't exist."""
+    global _artifacts_dir
+    abs_path = os.path.abspath(path)
+    os.makedirs(abs_path, exist_ok=True)
+    _artifacts_dir = abs_path
+
+
+def get_benchmark_installs_file() -> str:
+    """Return the path to the benchmark installs tracking file."""
+    return os.path.join(get_artifacts_dir(), "benchmark_installs.txt")
 
 
 def resolve_script_path(script_path: str) -> str:
@@ -80,8 +104,9 @@ def issue_background_command(cmd, stdout, stderr, env=None):
 def install_list_contains(installer_name: str) -> bool:
     if not installer_name:
         return True
-    if os.path.exists(BENCHMARK_INSTALLS_FILE):
-        with open(BENCHMARK_INSTALLS_FILE, "r") as benchmark_installs:
+    installs_file = get_benchmark_installs_file()
+    if os.path.exists(installs_file):
+        with open(installs_file, "r") as benchmark_installs:
             for benchmark_install in benchmark_installs:
                 if installer_name.strip() == benchmark_install.strip():
                     return True
@@ -90,16 +115,17 @@ def install_list_contains(installer_name: str) -> bool:
 
 def install_list_append(installer_name: str):
     if not install_list_contains(installer_name):
-        with open(BENCHMARK_INSTALLS_FILE, "a") as installs_file:
+        with open(get_benchmark_installs_file(), "a") as installs_file:
             # Note: we could os.path.expandvars() to match the echo approach
             installs_file.write(installer_name + "\n")
 
 
 def install_list_remove(installer_name: str):
-    if os.path.exists(BENCHMARK_INSTALLS_FILE):
-        with open(BENCHMARK_INSTALLS_FILE, "r") as benchmark_installs_fp:
+    installs_file = get_benchmark_installs_file()
+    if os.path.exists(installs_file):
+        with open(installs_file, "r") as benchmark_installs_fp:
             lines = benchmark_installs_fp.readlines()
-        with open(BENCHMARK_INSTALLS_FILE, "w") as benchmark_installs_fp:
+        with open(installs_file, "w") as benchmark_installs_fp:
             for line in lines:
                 if line.strip() != installer_name.strip():
                     benchmark_installs_fp.write(line)
@@ -110,7 +136,7 @@ def verify_install(job) -> bool:
     If the yaml file provided install markers, any marker being missing will
     lead to this function returning False. Assuming no markers are provided,
     this function checks installed.txt for a record of the install script
-    being run. The actual binary is allways checked for existance.
+    being run. The actual binary is allways checked for existence.
 
     Arguments
         - job is a Benchpress Job. Class is defined in lib/job.py
@@ -189,7 +215,9 @@ def install_tool(tool_name):
 
 
 def create_benchmark_metrics_dir(run_id):
-    benchmark_metrics_dir = "benchmark_metrics_{}".format(run_id)
+    benchmark_metrics_dir = os.path.join(
+        get_artifacts_dir(), "benchmark_metrics_{}".format(run_id)
+    )
     try:
         os.mkdir(benchmark_metrics_dir)
     except OSError as exc:
@@ -206,14 +234,14 @@ def clean_benchmark(clean_script, install_script):
     clean_benchmark_proc = subprocess.Popen(clean_benchmark_cmd, shell=False)
     clean_benchmark_proc.wait()
     if clean_benchmark_proc.returncode == 0:
-        if os.path.exists(BENCHMARK_INSTALLS_FILE):
-            with open(BENCHMARK_INSTALLS_FILE, "r") as benchmark_installs_fp:
+        installs_file = get_benchmark_installs_file()
+        if os.path.exists(installs_file):
+            with open(installs_file, "r") as benchmark_installs_fp:
                 lines = benchmark_installs_fp.readlines()
-            with open(BENCHMARK_INSTALLS_FILE, "w") as benchmark_installs_fp:
+            with open(installs_file, "w") as benchmark_installs_fp:
                 for line in lines:
                     if line.strip("\n") != install_script:
                         benchmark_installs_fp.write(line)
-                benchmark_installs_fp.close()
 
 
 def clean_tool(tool_name):

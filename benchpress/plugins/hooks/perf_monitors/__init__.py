@@ -11,18 +11,19 @@ import logging
 import os
 import signal
 import subprocess
-import sys
 import threading
+
+from benchpress.lib.util import get_artifacts_dir
 
 
 logger = logging.getLogger(__name__)
-# Path to directory of benchpress_cli.py
-BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
 class Monitor:
     def gen_path(self, filename):
-        return BP_BASEPATH + f"/benchmark_metrics_{self.job_uuid}/{filename}"
+        return os.path.join(
+            get_artifacts_dir(), f"benchmark_metrics_{self.job_uuid}", filename
+        )
 
     def __init__(self, interval, name, job_uuid):
         """Initialize some common parameters and storage variables"""

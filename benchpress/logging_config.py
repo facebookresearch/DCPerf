@@ -31,3 +31,15 @@ def create_logger():
     root.addHandler(handler)
     root.addHandler(stream_handler)
     return root
+
+
+def reconfigure_log_path(artifacts_dir: str):
+    """Reconfigure the file handler to write benchpress.log to the artifacts directory."""
+    global handler
+    new_path = os.path.join(artifacts_dir, "benchpress.log")
+    new_handler = logging.handlers.WatchedFileHandler(new_path)
+    new_handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.removeHandler(handler)
+    root.addHandler(new_handler)
+    handler = new_handler

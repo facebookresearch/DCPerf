@@ -8,11 +8,11 @@
 
 import logging
 import os
-import sys
 import traceback
 
 from benchpress.lib import open_source
 from benchpress.lib.hook import Hook
+from benchpress.lib.util import get_artifacts_dir
 
 from .perf_monitors import (
     cpufreq_cpuinfo,
@@ -28,8 +28,6 @@ from .perf_monitors import (
 
 if not open_source:
     from .perf_monitors.fb_power import monitor as fb_power
-
-BP_BASEPATH = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 DEFAULT_OPTIONS = {
     "mpstat": {
@@ -79,7 +77,9 @@ class Perf(Hook):
             if key in opts:
                 self.opts[key].update(opts[key])
 
-        self.benchmark_metrics_dir = BP_BASEPATH + f"/benchmark_metrics_{job.uuid}"
+        self.benchmark_metrics_dir = os.path.join(
+            get_artifacts_dir(), f"benchmark_metrics_{job.uuid}"
+        )
         if not os.path.isdir(self.benchmark_metrics_dir):
             os.mkdir(self.benchmark_metrics_dir)
 

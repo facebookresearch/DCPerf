@@ -12,6 +12,7 @@ import os
 import click
 from benchpress.lib.job import get_target_jobs
 from benchpress.lib.util import (
+    get_artifacts_dir,
     initialize_env_vars,
     install_benchmark,
     install_tool,
@@ -46,7 +47,8 @@ class InstallCommand(BenchpressCommand):
 
     def run(self, args, jobs):
         jobs = get_target_jobs(jobs, args.jobs)
-        install_log = open("install.log", "w")
+        install_log_path = os.path.join(get_artifacts_dir(), "install.log")
+        install_log = open(install_log_path, "w")
         for job in jobs.values():
             if not job.install_script:
                 msg = "{} does not have install script, try running without install it"

@@ -10,9 +10,9 @@ import glob
 import logging
 import os
 import shutil
-import sys
 
 from benchpress.lib.hook import Hook
+from benchpress.lib.util import get_artifacts_dir
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +23,6 @@ class CopyMoveHook(Hook):
     Options are a dictionary of 'before' and 'after' lists with a string for
     each paths to copy.
     """
-
-    def __init__(self):
-        # Path to directory of benchpress_cli.py
-        self.basepath = os.path.dirname(os.path.abspath(sys.argv[0]))
 
     @staticmethod
     def do_copy_or_move(sources, dest, move=False):
@@ -50,13 +46,13 @@ class CopyMoveHook(Hook):
                 logger.warning(f"Could not copy {src}.")
 
     def before_job(self, opts, job):
-        destdir = self.basepath + "/benchmark_metrics_" + job.uuid
+        destdir = os.path.join(get_artifacts_dir(), "benchmark_metrics_" + job.uuid)
         is_move = True if "is_move" in opts and opts["is_move"] else False
         if "before" in opts:
             self.do_copy_or_move(opts["before"], destdir, is_move)
 
     def after_job(self, opts, job):
-        destdir = self.basepath + "/benchmark_metrics_" + job.uuid
+        destdir = os.path.join(get_artifacts_dir(), "benchmark_metrics_" + job.uuid)
         is_move = True if "is_move" in opts and opts["is_move"] else False
         if "after" in opts:
             self.do_copy_or_move(opts["after"], destdir, is_move)

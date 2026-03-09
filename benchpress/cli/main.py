@@ -25,7 +25,7 @@ from benchpress.lib.job import Job, JobSuiteBuilder
 from benchpress.lib.job_listing import create_job_listing
 from benchpress.lib.reporter import JSONFileReporter, ScoreReporter, StdoutReporter
 from benchpress.lib.reporter_factory import ReporterFactory
-from benchpress.lib.util import generate_run_id, generate_timestamp
+from benchpress.lib.util import generate_run_id, generate_timestamp, set_artifacts_dir
 from benchpress.plugins.hooks import user_script
 
 from .commands.clean import CleanCommand
@@ -222,6 +222,15 @@ def setup_parser():
         default="./results",
         help="directory to load/store results",
     )
+    parser.add_argument(
+        "--artifacts-dir",
+        type=str,
+        default=None,
+        dest="artifacts_dir",
+        help="Directory to write artifacts (benchmark_metrics, logs, etc.). "
+        "Defaults to BENCHPRESS_ROOT. Useful for read-only installations. "
+        "Can also be set via BENCHPRESS_ARTIFACTS_DIR env var.",
+    )
     parser.add_argument("--verbose", "-v", action="count", default=0)
     parser.add_argument("--version", action="version", version=f"{PROJECT} {VERSION}")
 
@@ -351,6 +360,16 @@ def main(args=sys.argv[1:]):
 
     parser = setup_parser()
     args = parser.parse_args(args)
+
+    # Set up artifacts directory from CLI flag or environment variable
+    artifacts_dir = args.artifacts_dir or os.environ.get("BENCHPRESS_ARTIFACTS_DIR")
+    if artifacts_dir:
+        set_artifacts_dir(artifacts_dir)
+        logging_config.reconfigure_log_path(artifacts_dir)
+
+    # If results path is relative, resolve it relative to artifacts dir
+    if artifacts_dir and not os.path.isabs(args.results):
+        args.results = os.path.join(os.path.abspath(artifacts_dir), args.results)
 
     conf = load_config(args)
 
