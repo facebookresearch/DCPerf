@@ -153,6 +153,7 @@ set(PROTOCOL_HEADERS
     gen/UcacheBenchMessages-inl.h
     gen/UcacheBenchRouteHandleIf.h
     gen/UcacheBenchRouterInfo.h
+    gen/UcacheBenchRouterInfoFwd.h
     gen/UcacheBenchRouterStats.h
     gen/UcacheBenchRoutingGroups.h
     gen/UcacheBenchServer.h

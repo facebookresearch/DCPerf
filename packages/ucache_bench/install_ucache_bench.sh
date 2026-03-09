@@ -557,6 +557,22 @@ export DEPS_DIR="$DEPS_DIR"
 # These files have internal fbcode paths that need to be fixed for OSS builds
 echo "  Fixing include paths in generated protocol files..."
 PROTOCOL_GEN_DIR="$SCRIPT_DIR/protocol/gen"
+
+# OSS compatibility: use pre-D94292034 protocol files for old mcrouter
+# D94292034 removed member functions (visitFields, serialize, deserialize) from carbon
+# codegen, but the pinned OSS mcrouter still calls them as member functions
+# (e.g., req.visitFields(v) instead of visitFields(req, v)).
+# The gen-oss/ directory contains pre-D94292034 versions of the affected files
+# that include both the free functions and the member function wrappers.
+# This must run BEFORE the include-path fixups below so the copied files get fixed too.
+PROTOCOL_GEN_OSS_DIR="$SCRIPT_DIR/protocol/gen-oss"
+if [ -d "$PROTOCOL_GEN_OSS_DIR" ]; then
+    echo "  Applying OSS compatibility protocol files..."
+    cp "$PROTOCOL_GEN_OSS_DIR/UcacheBench.thrift" "$PROTOCOL_GEN_DIR/UcacheBench.thrift"
+    cp "$PROTOCOL_GEN_OSS_DIR/UcacheBenchMessages-inl.h" "$PROTOCOL_GEN_DIR/UcacheBenchMessages-inl.h"
+    cp "$PROTOCOL_GEN_OSS_DIR/UcacheBenchMessagesThrift.cpp" "$PROTOCOL_GEN_DIR/UcacheBenchMessagesThrift.cpp"
+fi
+
 for f in "$PROTOCOL_GEN_DIR"/*.cpp "$PROTOCOL_GEN_DIR"/*.h "$PROTOCOL_GEN_DIR"/*.thrift; do
     if [ -f "$f" ]; then
         # Fix internal fbcode paths to relative paths
