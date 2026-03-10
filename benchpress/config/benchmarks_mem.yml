@@ -1,0 +1,13 @@
+xsbench:
+  parser: xsbench
+  path: ./benchmarks/xsbench/XSBench
+  metrics:
+    - result:
+      - Runtime
+      - Lookups
+      - Lookups/s
+    - config:
+      - Gridpoints
+      - Threads
+      - Est. Memory Usage (MB)
+      - Total XS Lookups

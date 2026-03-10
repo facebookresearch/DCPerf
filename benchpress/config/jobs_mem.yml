@@ -1,0 +1,13 @@
+- benchmark: xsbench # (required) Name of the benchmark, matches name in benchmarks.yml
+  name: xsbench # https://github.com/ANL-CESAR/XSBench
+  description: XSBench is a mini-app representing a key computational kernel of the Monte Carlo neutron transport algorithm. # (required) Description of configuration
+  args: # (dictionary format) arguments to be passed as CLI options to the benchmmark as --<key> <value>
+    - '-t {thread_cnt}'
+    - '-p {history}'
+    #- '-s {size}'
+    #- '-g {gridpoints}'
+  vars:
+    - "thread_cnt=16"
+    - "history=500000"
+    #- "size=Large" # XL 120GB, XXL 225GB
+    #- "gridpoints=11303"
