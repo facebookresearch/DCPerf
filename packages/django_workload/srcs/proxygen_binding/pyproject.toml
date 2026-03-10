@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "pybind11>=2.6.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proxygen_binding"
+version = "0.1.0"
+description = "Python bindings for Proxygen HTTP server"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Meta Platforms, Inc."}
+]
+dependencies = [
+    "pybind11>=2.6.0",
+]
+
+[project.optional-dependencies]
+django = ["django>=3.0"]

@@ -235,6 +235,7 @@ setup(
         "django_asgi_adapter",
         "example_server",
         "django_server",
+        "event_loop_manager",
     ],
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
