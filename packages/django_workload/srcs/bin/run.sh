@@ -10,7 +10,7 @@ SCRIPT_ROOT="$(dirname "$(readlink -f "$0")")"
 BENCHPRESS_ROOT="$(readlink -f "${SCRIPT_ROOT}/../../..")"
 DJANGO_PKG_SRC_ROOT="${BENCHPRESS_ROOT}/packages/django_workload/srcs"
 DJANGO_SERVER_ROOT="$(readlink -f "${SCRIPT_ROOT}/../django-workload/django-workload")"
-CPYTHON_PATH="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build"
+CPYTHON_PATH="${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build"
 CINDER_PATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
 MEMCACHED_PID=
 CASSANDRA_PID=
@@ -515,15 +515,12 @@ start_django_server() {
   # Export FBTHRIFT_PREFIX for thrift Python bindings
   export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
 
-  # Enable JIT if requested (Cinder on x86 only)
-  if [ "${use_jit}" -gt 0 ] && [ "${interpreter}" = "cinder" ]; then
-    echo "Enabling Cinder JIT..."
-    export PYTHONJIT=1
-    export PYTHONJITWRITEPROFILE=/tmp/cinder-jit.profile
-    export PYTHONJITPROFILEINTERP=1
-    export PYTHONJITPROFILEINTERPPERIOD=10
-    #export PYTHONJITDUMPSTATS=1
-    export PYTHONJITALLSTATICFUNCTIONS=1
+  # Enable JIT if requested (Cinder only)
+  if [ "${use_jit}" -ge 0 ] && [ "${interpreter}" = "cinder" ]; then
+    echo "Enabling Cinder JIT (CinderX)..."
+    export PYTHONJITALL=1
+    export PYTHONJITLOGFILE=/tmp/cinder-jit.log
+    export PYTHONJITDUMPSTATS=1
   fi
 
   # Export FBTHRIFT_PREFIX for thrift Python bindings
