@@ -5,8 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 set -Eeuo pipefail
-# trap cleanup SIGINT SIGTERM ERR EXIT
-
 # Constants
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
@@ -17,10 +15,6 @@ DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/dow
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
 
 source "${BENCHPRESS_ROOT}/packages/common/os-distro.sh"
-
-cleanup() {
-  trap - SIGINT SIGTERM ERR EXIT
-}
 
 msg() {
   echo >&2 -e "${1-}"
@@ -86,13 +80,15 @@ fi
 
 export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-4.0.3/staging/bin:${PATH}"
 
-git clone https://github.com/fastfloat/fast_float.git
-cd fast_float
-mkdir build && cd build
-cmake ..
-make
-make install
-cd ../
+if ! [ -d "fast_float" ]; then
+    git clone https://github.com/fastfloat/fast_float.git
+    cd fast_float
+    mkdir build && cd build
+    cmake ..
+    make
+    make install
+    cd ../../
+fi
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
@@ -165,7 +161,7 @@ else
 fi
 
 # Installing libevent
-if ! [ -d "libevent-2.1.11-stable" ]; then
+if ! [ -d "libevent-2.1.12-stable" ]; then
     wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
     tar -xzf "libevent-2.1.12-stable.tar.gz"
     cd "libevent-2.1.12-stable"
@@ -185,10 +181,6 @@ cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 ARCH="$(uname -m)"
 if [ "$ARCH" = "x86_64" ]; then
-    LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
-elif [ "$ARCH" = "aarch64" ]; then
-    msg "WARNING: Pre-built LibTorch for ARM64 may not be available."
-    msg "Attempting to download CPU version..."
     LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
 else
     die "Unsupported architecture: ${ARCH}"
@@ -233,11 +225,15 @@ do
     REPO="$(echo "$submod" | cut -d ' ' -f 1)"
     COMMIT="$(echo "$submod" | cut -d ' ' -f 2)"
     SUBMOD_DIR="$(echo "$submod" | cut -d ' ' -f 3)"
-    mkdir -p "${SUBMOD_DIR}"
-    git clone "${REPO}" "${SUBMOD_DIR}"
-    pushd "${SUBMOD_DIR}"
-    git checkout "${COMMIT}"
-    popd
+    if ! [ -d "${SUBMOD_DIR}" ]; then
+        mkdir -p "${SUBMOD_DIR}"
+        git clone "${REPO}" "${SUBMOD_DIR}"
+        pushd "${SUBMOD_DIR}"
+        git checkout "${COMMIT}"
+        popd
+    else
+        msg "[SKIPPED] ${SUBMOD_DIR}"
+    fi
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
 # Patch fizz for OpenSSL 3.0 compatibility

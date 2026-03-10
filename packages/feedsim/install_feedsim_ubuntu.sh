@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 set -Eeuo pipefail
-# trap cleanup SIGINT SIGTERM ERR EXIT
 
 # Constants
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
@@ -15,11 +14,6 @@ FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
 LIBTORCH_VERSION="2.8.0"
 DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-dlrm/dlrm_small.tar.gz"
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
-
-cleanup() {
-  trap - SIGINT SIGTERM ERR EXIT
-}
-
 
 msg() {
   echo >&2 -e "${1-}"
@@ -32,10 +26,6 @@ die() {
   exit "$code"
 }
 
-#dnf install -y cmake ninja-build flex bison git texinfo binutils-devel \
-#    libunwind-devel bzip2-devel libsodium-devel double-conversion-devel \
-#    libzstd-devel lz4-devel xz-devel snappy-devel libtool openssl-devel \
-#    zlib-devel libdwarf-devel libaio-devel libatomic patch perl
 apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
@@ -80,13 +70,15 @@ fi
 
 export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-4.0.3/staging/bin:${PATH}"
 
-git clone https://github.com/fastfloat/fast_float.git
-cd fast_float
-mkdir build && cd build
-cmake ..
-make
-make install
-cd ../
+if ! [ -d "fast_float" ]; then
+    git clone https://github.com/fastfloat/fast_float.git
+    cd fast_float
+    mkdir build && cd build
+    cmake ..
+    make
+    make install
+    cd ../../
+fi
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
@@ -162,7 +154,7 @@ else
 fi
 
 # Installing libevent
-if ! [ -d "libevent-2.1.11-stable" ]; then
+if ! [ -d "libevent-2.1.12-stable" ]; then
     wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
     tar -xzf "libevent-2.1.12-stable.tar.gz"
     cd "libevent-2.1.12-stable"
@@ -182,10 +174,6 @@ cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 ARCH="$(uname -m)"
 if [ "$ARCH" = "x86_64" ]; then
-    LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
-elif [ "$ARCH" = "aarch64" ]; then
-    msg "WARNING: Pre-built LibTorch for ARM64 may not be available."
-    msg "Attempting to download CPU version..."
     LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
 else
     die "Unsupported architecture: ${ARCH}"
@@ -230,11 +218,15 @@ do
     REPO="$(echo "$submod" | cut -d ' ' -f 1)"
     COMMIT="$(echo "$submod" | cut -d ' ' -f 2)"
     SUBMOD_DIR="$(echo "$submod" | cut -d ' ' -f 3)"
-    mkdir -p "${SUBMOD_DIR}"
-    git clone "${REPO}" "${SUBMOD_DIR}"
-    pushd "${SUBMOD_DIR}"
-    git checkout "${COMMIT}"
-    popd
+    if ! [ -d "${SUBMOD_DIR}" ]; then
+        mkdir -p "${SUBMOD_DIR}"
+        git clone "${REPO}" "${SUBMOD_DIR}"
+        pushd "${SUBMOD_DIR}"
+        git checkout "${COMMIT}"
+        popd
+    else
+        msg "[SKIPPED] ${SUBMOD_DIR}"
+    fi
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
 # Patch fizz for OpenSSL 3.0 compatibility
@@ -250,8 +242,8 @@ FS_CFLAGS="${BP_CFLAGS:--O3 -DNDEBUG}"
 FS_CXXFLAGS="${BP_CXXFLAGS:--O3 -DNDEBUG }"
 FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic"
 
-BP_CC=gcc
-BP_CXX=g++
+BP_CC="${BP_CC:-gcc}"
+BP_CXX="${BP_CXX:-g++}"
 
 cmake -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \

@@ -154,7 +154,7 @@ else
 fi
 
 # Installing libevent
-if ! [ -d "libevent-2.1.11-stable" ]; then
+if ! [ -d "libevent-2.1.12-stable" ]; then
     wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
     tar -xzf "libevent-2.1.12-stable.tar.gz"
     cd "libevent-2.1.12-stable"
@@ -276,8 +276,8 @@ FS_CFLAGS="${BP_CFLAGS:--O3 -DNDEBUG}"
 FS_CXXFLAGS="${BP_CXXFLAGS:--O3 -DNDEBUG -Wno-deprecated-declarations}"
 FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic -L${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib -Wl,-rpath,${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib"
 
-BP_CC=gcc
-BP_CXX=g++
+BP_CC="${BP_CC:-gcc}"
+BP_CXX="${BP_CXX:-g++}"
 
 # Use system OpenSSL
 
