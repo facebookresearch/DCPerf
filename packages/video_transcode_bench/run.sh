@@ -80,6 +80,12 @@ main() {
     local sampling_seed
     sampling_seed=1000
 
+    local lp
+    lp=1
+
+    local procs
+    procs=-1
+
     sleep_before_perf=60
 
     # Create a backup of generate_commands_all.py before making any changes, to restore it later and avoid replicating changes for susequent runs
@@ -242,10 +248,6 @@ main() {
 
     # Use the Python script to modify generate_commands_all.py
     python3 ./modify_generate_commands_all.py --sample-rate ${sample_rate} --sampling-seed ${sampling_seed} --lp-number "${lp_number}" --num-pool "${num_pool}" --range "${range}" --encoder $encoder
-    if [ $? -ne 0 ]; then
-        benchreps_tell_state "Error configuring script!"
-        exit 1
-    fi
     # create a copy of generate_commands_all.py to generate_commands_all.debug.py for debugging purposes
     cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.debug.py
     #generate commands

@@ -66,6 +66,10 @@ if ! [ -f "/usr/local/bin/cmake" ]; then
      ln -s /usr/bin/cmake /usr/local/bin/cmake
 fi
 
+# Source OOM-safe build parallelism helper
+source "$(dirname "$0")/../common/get_build_parallelism.sh"
+NUM_BUILD_JOBS=${NUM_BUILD_JOBS:-$(get_build_parallelism)}
+
 ##################### BUILD AND INSTALL FUNCTIONS #########################
 
 clone()
@@ -92,11 +96,11 @@ build_x264()
 {
     lib='x264'
     pushd "${FFMPEG_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     mkdir -p _build && cd _build || exit
     CC="clang" CXX="clang++" ../configure --prefix="${FFMPEG_BUILD}" --enable-static --extra-cflags="${platform_cc_flags}"
-    make -j "$(nproc)" && make install -j "$(nproc)"
+    make -j "${NUM_BUILD_JOBS}" && make install -j "${NUM_BUILD_JOBS}"
     popd || exit
 }
 
@@ -104,11 +108,11 @@ build_svtav1()
 {
     lib='SVT-AV1'
     pushd "${FFMPEG_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     mkdir -p _build && cd _build || exit
     CC="clang" CXX="clang++" cmake .. -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${FFMPEG_BUILD}" -DCMAKE_BUILD_TYPE=Release
-    make -j "$(nproc)" && make install -j "$(nproc)"
+    make -j "${NUM_BUILD_JOBS}" && make install -j "${NUM_BUILD_JOBS}"
     popd
 }
 
@@ -116,7 +120,7 @@ build_aom()
 {
     lib='aom'
     pushd "${FFMPEG_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     mkdir -p _build && cd _build || exit
     if [ "$ARCH" = "x86_64" ]; then
@@ -124,7 +128,7 @@ build_aom()
     else
         cmake .. -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${FFMPEG_BUILD}"  -DBUILD_SHARED_LIBS=off -DCMAKE_BUILD_TYPE=Release -DAOM_TARGET_CPU=arm64
     fi
-    make -j "$(nproc)" && make install -j "$(nproc)"
+    make -j "${NUM_BUILD_JOBS}" && make install -j "${NUM_BUILD_JOBS}"
     popd || exit
 }
 
@@ -132,10 +136,10 @@ build_vmaf()
 {
     lib='vmaf'
     pushd "${FFMPEG_SOURCE}"
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib/libvmaf" || exit
     meson setup _build --prefix="${FFMPEG_BUILD}" --default-library static --buildtype release
-    ninja -vC _build install -j "$(nproc)"
+    ninja -vC _build install -j "${NUM_BUILD_JOBS}"
     popd || exit
 }
 
@@ -143,7 +147,7 @@ build_ffmpeg()
 {
     pushd "${FFMPEG_SOURCE}"
     lib='ffmpeg'
-    clone $lib || echo "Failed to clone $lib"
+    clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
     git apply "${BPKGS_FFMPEG_ROOT}/0001-ffmpeg.patch"
     mkdir -p _build && cd _build || exit
@@ -183,7 +187,7 @@ build_ffmpeg()
 
     fi
 
-    make -j "$(nproc)" && make install -j "$(nproc)"
+    make -j "${NUM_BUILD_JOBS}" && make install -j "${NUM_BUILD_JOBS}"
     popd || exit
 }
 
