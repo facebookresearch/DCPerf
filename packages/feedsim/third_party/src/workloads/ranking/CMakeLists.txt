@@ -177,6 +177,7 @@ set(LEAF_NODE_RANK_LIBS
     icachebuster
     PointerChaser
     ${FOLLY_LIBRARIES}
+    ${FMT_LIBRARIES}
     ${IBERTY_LIBRARIES}
     ranking-cpp2
     rankingThriftDataGen
