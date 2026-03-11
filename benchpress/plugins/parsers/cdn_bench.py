@@ -680,8 +680,6 @@ class CDNBenchParser(Parser):
 
     def _parse_cpu_yaml(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
         """Parse stress-ng YAML output block delimited by markers."""
-        import yaml
-
         full_output = "\n".join(stdout)
 
         # Extract YAML block between markers
@@ -691,34 +689,73 @@ class CDNBenchParser(Parser):
         if yaml_start == -1 or yaml_end == -1:
             return
 
-        # Skip the marker line itself
         yaml_start = full_output.index("\n", yaml_start) + 1
-        yaml_str = full_output[yaml_start:yaml_end].strip()
+        yaml_block = full_output[yaml_start:yaml_end].strip()
 
-        if not yaml_str:
+        if not yaml_block:
             return
 
-        try:
-            data = yaml.safe_load(yaml_str)
-            if not isinstance(data, dict) or "stress-ng" not in data:
-                return
+        # --- system-info fields ---
+        for line in yaml_block.splitlines():
+            line_s = line.strip().lstrip("- ")
+            if line_s.startswith("stress-ng-version:"):
+                metrics["stress_ng_version"] = (
+                    line_s.split(":", 1)[1].strip().strip("'\"")
+                )
+            elif line_s.startswith("cpus-online:"):
+                try:
+                    metrics["yaml_cpus_online"] = int(line_s.split(":", 1)[1].strip())
+                except ValueError:
+                    pass
+            elif line_s.startswith("compiler:"):
+                metrics["compiler"] = line_s.split(":", 1)[1].strip().strip("'\"")
 
-            stress_data = data["stress-ng"]
+        # --- stressor metrics ---
+        yaml_metric_map = {
+            "bogo-ops": ("bogo_ops", int),
+            "bogo-ops-per-second-usr-sys-time": ("bogo_ops_per_sec_usr_sys", float),
+            "bogo-ops-per-second-real-time": ("bogo_ops_per_sec_real", float),
+            "wall-clock-time": ("wall_clock_time_secs", float),
+            "user-time": ("user_time_secs", float),
+            "system-time": ("system_time_secs", float),
+            "cpu-usage-per-instance": ("cpu_usage_per_instance_pct", float),
+        }
+        for line in yaml_block.splitlines():
+            line_s = line.strip().lstrip("- ")
+            if line_s.startswith("stressor:"):
+                metrics["yaml_stressor"] = line_s.split(":", 1)[1].strip().strip("'\"")
+            for yaml_key, (metric_name, converter) in yaml_metric_map.items():
+                if line_s.startswith(yaml_key + ":"):
+                    try:
+                        metrics[metric_name] = converter(
+                            line_s.split(":", 1)[1].strip()
+                        )
+                    except (ValueError, TypeError):
+                        pass
 
-            if "system-info" in stress_data:
-                self._extract_yaml_sysinfo(stress_data["system-info"], metrics)
-            if "metrics" in stress_data:
-                self._extract_yaml_stressor_metrics(stress_data["metrics"], metrics)
-            if "times" in stress_data and isinstance(stress_data["times"], dict):
-                if "run-time" in stress_data["times"]:
-                    metrics["yaml_run_time_secs"] = float(
-                        stress_data["times"]["run-time"]
-                    )
-
-        except yaml.YAMLError as e:
-            logger.warning(f"Failed to parse stress-ng YAML output: {e}")
-        except Exception as e:
-            logger.warning(f"Error parsing stress-ng YAML metrics: {e}")
+        # --- times ---
+        in_times = False
+        for line in yaml_block.splitlines():
+            line_s = line.strip()
+            if line_s.startswith("times:"):
+                in_times = True
+                continue
+            if in_times:
+                if line_s and not line_s.startswith("#") and ":" in line_s:
+                    if line_s.startswith("run-time:"):
+                        try:
+                            metrics["yaml_run_time_secs"] = float(
+                                line_s.split(":", 1)[1].strip()
+                            )
+                        except ValueError:
+                            pass
+                    elif line_s.startswith("available-cpu-time:"):
+                        try:
+                            metrics["available_cpu_time_secs"] = float(
+                                line_s.split(":", 1)[1].strip()
+                            )
+                        except ValueError:
+                            pass
 
     def _extract_yaml_sysinfo(
         self, sysinfo: Dict[str, Any], metrics: Dict[str, Any]
