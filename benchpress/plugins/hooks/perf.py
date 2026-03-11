@@ -27,7 +27,7 @@ from .perf_monitors import (
 )
 
 if not open_source:
-    from .perf_monitors.fb_power import monitor as fb_power
+    from .perf_monitors import fb_power
 
 DEFAULT_OPTIONS = {
     "mpstat": {
@@ -48,7 +48,7 @@ DEFAULT_OPTIONS = {
 }
 
 if not open_source:
-    DEFAULT_OPTIONS["fb_power"] = {"interval": 1}
+    DEFAULT_OPTIONS["fb_power"] = {"interval": 10, "post_process": True}
 
 AVAIL_MONITORS = {
     "mpstat": mpstat.MPStat,
