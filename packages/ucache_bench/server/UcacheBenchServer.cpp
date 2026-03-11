@@ -45,6 +45,11 @@ void UcacheBenchServer::setupCacheLib() {
   cacheConfig.setAccessConfig(
       {config_.hash_power, config_.hashtable_lock_power});
 
+  // Configure number of CacheLib shards if specified
+  if (config_.cachelib_num_shards > 0) {
+    cacheConfig.setNumShards(config_.cachelib_num_shards);
+  }
+
   // Generate alloc sizes (factor 1.25, min allocation size)
   // This provides a good distribution of allocation classes for cache items
   // Max alloc size increased to 64KB to support production traffic distribution
