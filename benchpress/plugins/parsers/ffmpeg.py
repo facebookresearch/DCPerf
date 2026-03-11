@@ -40,9 +40,10 @@ class FfmpegParser(Parser):
                 level_throughput = level + "_throughput_MBps"
                 time = line.split()[-1]
                 if "." in time:
+                    _frac = time.split(".")[1]
                     _sec = time.split(".")[0].split(":")[1]
                     _min = time.split(".")[0].split(":")[0]
-                    time = int(_sec) + int(_min) * 60
+                    time = int(_min) * 60 + int(_sec) + float("0." + _frac)
                 else:
                     _sec = time.split(":")[2]
                     _min = time.split(":")[1]
