@@ -524,12 +524,16 @@ void UcacheBenchServer::periodicStatsLoop(uint32_t intervalSec) {
       continue;
     }
 
-    // Reset snapshot on phase transition
+    // Reset snapshot on phase transition and skip this iteration.
+    // Without the continue, intervalElapsed would be nearly zero (since
+    // prevTime was just set) while totalOps could already have accumulated
+    // operations, producing an astronomically high intervalQps spike.
     if (phase != prevPhase) {
       prevTotalOps = 0;
       prevTime = std::chrono::steady_clock::now();
       phaseStartTime = prevTime;
       prevPhase = phase;
+      continue;
     }
 
     const PhaseMetrics& metrics =

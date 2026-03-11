@@ -138,13 +138,20 @@ class UcacheBenchParser(Parser):
         if total_ops_match:
             metrics["total_operations"] = int(total_ops_match.group(1))
 
-        # Parse QPS
-        qps_match = re.search(r"QPS:\s+([\d.]+)", output)
+        # Parse QPS from the "Performance:" section of the final results block.
+        # Must be anchored to "Performance:" to avoid matching periodic stats
+        # lines like "[Server BENCHMARK] ... | QPS: ... |" which appear earlier
+        # in the output and can contain transient spike values.
+        qps_match = re.search(r"Performance:\s*\n\s*QPS:\s+([\d.]+)", output, re.DOTALL)
         if qps_match:
             metrics["qps"] = float(qps_match.group(1))
 
-        # Parse hit ratio
-        hit_ratio_match = re.search(r"Hit Ratio:\s+([\d.]+)%", output)
+        # Parse hit ratio from the "Performance:" section for the same reason
+        hit_ratio_match = re.search(
+            r"Performance:\s*\n\s*QPS:\s+[\d.]+\s*\n\s*Hit Ratio:\s+([\d.]+)%",
+            output,
+            re.DOTALL,
+        )
         if hit_ratio_match:
             metrics["hit_ratio_percent"] = float(hit_ratio_match.group(1))
 
