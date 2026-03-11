@@ -1457,6 +1457,49 @@
       args:
         - '-r client'
 
+- benchmark: health_check
+  name: mm_mem
+  description: Standalone run for mm-mem memory latency and bandwidth benchmark
+  args:
+    - '-b mm-mem'
+    - '--'
+    - '{extra_args}'
+  vars:
+    - 'extra_args='
+
+- benchmark: health_check
+  name: mm_mem_peak_bw
+  description: Run mm-mem peak bandwidth and memcpy benchmark
+  args:
+    - '-b mm-mem'
+    - '--'
+    - '--test bandwidth'
+    - '{extra_args}'
+  vars:
+    - 'extra_args='
+
+- benchmark: health_check
+  name: mm_mem_idle_latency
+  description: Run mm-mem idle latency benchmark
+  args:
+    - '-b mm-mem'
+    - '--'
+    - '--test idle_latency'
+    - '{extra_args}'
+  vars:
+    - 'extra_args='
+
+- benchmark: health_check
+  name: mm_mem_loaded_latency
+  description: Run mm-mem loaded latency benchmark
+  args:
+    - '-b mm-mem'
+    - '--'
+    - '--test loaded_latency'
+    - '{extra_args}'
+  vars:
+    - 'extra_args='
+
 - benchmark: sleep
   name: sleep
   description: >

@@ -11,17 +11,21 @@ set -Eeo pipefail
 HEALTH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [-r server|client] [-c clients]
+Usage: ${0##*/} [-h] [-r server|client] [-c clients] [-b benchmark] [-- extra_args]
     -h, --help        Display this help and exit
     -r, --role        Specify role (server or client)
     -c, --clients     Specify clients
+    -b, --benchmark   Specify sub-benchmark to run (default: all)
+                      Options: all, mm-mem
+    Extra arguments after -- are passed to the sub-benchmark
 EOF
 }
 
 # Parse command-line options using getopt
-TEMP=$(getopt -o hr:c: --long help,role:,clients: -- "$@")
+TEMP=$(getopt -o hr:c:b: --long help,role:,clients:,benchmark: -- "$@")
 # Set positional parameters to parsed options
 eval set -- "$TEMP"
+benchmark="all"
 while true; do
   case "$1" in
     -h | --help)
@@ -36,12 +40,25 @@ while true; do
       clients="$2"
       shift 2
       ;;
+    -b | --benchmark)
+      benchmark="$2"
+      shift 2
+      ;;
     --)
       shift
       break
       ;;
   esac
 done
+# Remaining arguments after -- are passed through to the sub-benchmark
+extra_args="$*"
+
+# Run a specific sub-benchmark standalone (no role required)
+if [ "$benchmark" = "mm-mem" ]; then
+  # shellcheck disable=SC2086
+  python3 "$HEALTH_ROOT"/mm-mem/scripts/run_cpu_micro.py $extra_args
+  exit 0
+fi
 
 if [ "$role" = "client" ]; then
   iperf3 -s &
