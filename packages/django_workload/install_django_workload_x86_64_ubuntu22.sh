@@ -210,6 +210,9 @@ cp "${TEMPLATES_DIR}/jvm.options" "${CASSANDRA_ROOT}/conf/jvm.options" || exit 1
 mkdir -p /data/cassandra/{commitlog,data,saved_caches,hints}/
 chmod -R 0700 /data/cassandra
 
+# Create logs directory for Cassandra GC logs
+mkdir -p "${CASSANDRA_ROOT}/logs"
+
 # Copy configurations
 cp "${TEMPLATES_DIR}/cassandra.yaml" "${CASSANDRA_ROOT}/conf/cassandra.yaml.template" || exit 1
 popd
@@ -228,6 +231,11 @@ pushd "${DJANGO_SERVER_ROOT}"
 
 # Ubuntu 22 comes with python3.10, so we use system python
 echo "Using system Python 3.10"
+
+
+# Create directory and symlink so the install marker check passes
+mkdir -p "${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build/bin"
+ln -sf /usr/bin/python3.10 "${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build/bin/python3.10"
 
 echo "CPython 3.10 ready"
 

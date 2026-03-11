@@ -542,6 +542,34 @@ function setup_wangle() {
   cd "$BWD" || exit
 }
 
+function setup_cares() {
+  CARES_DIR=$DEPS_DIR/c-ares
+  CARES_BUILD_DIR=$DEPS_DIR/c-ares/build/
+  CARES_TAG="v1.34.4"
+  if [ ! -d "$CARES_DIR" ] ; then
+    echo -e "${COLOR_GREEN}[ INFO ] Cloning c-ares repo ${COLOR_OFF}"
+    git clone https://github.com/c-ares/c-ares.git "$CARES_DIR"
+  fi
+  cd "$CARES_DIR"
+  git fetch --tags
+  git checkout "${CARES_TAG}"
+  echo -e "${COLOR_GREEN}Building c-ares ${COLOR_OFF}"
+  mkdir -p "$CARES_BUILD_DIR"
+  cd "$CARES_BUILD_DIR" || exit
+
+  cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo       \
+    -DCMAKE_PREFIX_PATH="$DEPS_DIR"             \
+    -DCMAKE_INSTALL_PREFIX="$DEPS_DIR"          \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON        \
+    -DCARES_BUILD_TESTS=OFF                     \
+    -DCARES_BUILD_TOOLS=OFF                     \
+    ..
+  make -j "$JOBS"
+  make install
+  echo -e "${COLOR_GREEN}c-ares is installed ${COLOR_OFF}"
+  cd "$BWD" || exit
+}
+
 function setup_mvfst() {
   MVFST_DIR=$DEPS_DIR/mvfst
   MVFST_BUILD_DIR=$DEPS_DIR/mvfst/build/
@@ -672,6 +700,7 @@ setup_libaegis
 setup_fizz
 setup_wangle
 setup_mvfst
+setup_cares
 
 MAYBE_BUILD_FUZZERS=""
 MAYBE_USE_STATIC_DEPS=""
