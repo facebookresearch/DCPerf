@@ -25,6 +25,7 @@ import argparse
 import os
 import pathlib
 import subprocess
+import threading
 from typing import List, Optional
 
 
@@ -144,6 +145,19 @@ def run_cmd(
         return ""
 
 
+def profile_server() -> None:
+    """Record a system-wide perf profile for 5 seconds.
+
+    Skips if perf.data already exists.
+    """
+    if os.path.exists("perf.data"):
+        return
+    print("DCPERF_PERF_RECORD=1, starting perf record...")
+    subprocess.run(
+        ["perf", "record", "-a", "-g", "-o", "perf.data", "--", "sleep", "5"]
+    )
+
+
 def run_server(args: argparse.Namespace) -> None:
     """Run the UcacheBench server.
 
@@ -255,8 +269,17 @@ def run_server(args: argparse.Namespace) -> None:
     if args.verbose:
         server_cmd.append("--verbose=true")
 
+    if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
+        delay = args.perf_record_delay
+        print(f"DCPERF_PERF_RECORD=1, will start perf record after {delay}s delay")
+        t_prof = threading.Timer(delay, profile_server)
+        t_prof.start()
+
     stdout = run_cmd(server_cmd, timeout=None, for_real=args.real)
     print(stdout)
+
+    if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
+        t_prof.cancel()
 
 
 def run_client(args: argparse.Namespace) -> None:
@@ -539,6 +562,15 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=600,
         help="Timeout in seconds for waiting for clients (0 = no timeout)",
+    )
+
+    # Profiling configuration
+    server_parser.add_argument(
+        "--perf-record-delay",
+        type=int,
+        default=120,
+        help="Delay in seconds before starting perf record (when DCPERF_PERF_RECORD=1). "
+        "Should account for client startup and warmup time.",
     )
 
     server_parser.add_argument(
