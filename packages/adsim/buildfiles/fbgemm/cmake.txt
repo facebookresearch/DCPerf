@@ -39,6 +39,9 @@ cp libfbgemm.so* "${ADSIM_STAGING_DIR}/lib/" 2>/dev/null || true
 # Copy headers from source
 cp -r ../include/fbgemm "${ADSIM_STAGING_DIR}/include/" 2>/dev/null || true
 
+# Copy asmjit headers (new dependency in FBGEMM v1.4.0)
+cp -r ../external/asmjit/src/asmjit "${ADSIM_STAGING_DIR}/include/"
+
 echo "[BUILD] FBGEMM files copied to staging directory"
 
 # Try make install but don't fail if it errors

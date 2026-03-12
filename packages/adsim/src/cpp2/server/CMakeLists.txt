@@ -9,8 +9,14 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
 endif()
 
 target_compile_definitions(folly_memcpy_obj PRIVATE FOLLY_MEMCPY_IS_MEMCPY)
-target_compile_options(folly_memcpy_obj PRIVATE
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    target_compile_options(folly_memcpy_obj PRIVATE
     -mavx2 -march=haswell)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    target_compile_options(folly_memcpy_obj PRIVATE
+    -march=armv8.5-a+sve2
+    -mcpu=native)
+endif()
 
 # Data objects library
 add_library(data_objects DataObjects.cpp)
@@ -61,13 +67,18 @@ target_link_libraries(adsim_server
         Atomic::Atomic
         ${FMT_LIBRARIES}
         ${JEMALLOC_LIB}
-        $<LINK_LIBRARY:WHOLE_ARCHIVE,folly_memcpy_obj>
 )
 
+# Link folly_memcpy_obj only on x86 — on ARM the custom memmove causes
+# R_AARCH64_CALL26 relocation overflows and is a no-op anyway
+# (FOLLY_MEMCPY_IS_MEMCPY is defined).
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    target_link_libraries(adsim_server
+        PUBLIC $<LINK_LIBRARY:WHOLE_ARCHIVE,folly_memcpy_obj>)
+    target_compile_options(adsim_server PRIVATE
+        -fno-builtin-mempcpy
+        -fno-builtin-memmove)
+endif()
 
 # Linker and compiler options
 target_link_options(adsim_server PRIVATE "-Wl,--export-dynamic")
-target_compile_options(adsim_server PRIVATE
-    -fno-builtin-mempcpy
-    -fno-builtin-memmove
-)

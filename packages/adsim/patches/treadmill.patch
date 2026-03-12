@@ -1,7 +1,7 @@
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill-src/build.sh treadmill/build.sh
 --- treadmill-src/build.sh	1969-12-31 16:00:00.000000000 -0800
 +++ treadmill/build.sh	2025-08-04 15:44:21.731476550 -0700
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,47 @@
 +#!/bin/bash
 +
 +# Exit on error
@@ -15,7 +15,12 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +INSTALL=false
 +
 +
-+sudo dnf install -y numactl-devel
++if command -v dnf >/dev/null 2>&1; then
++    sudo dnf install -y numactl-devel
++elif command -v apt-get >/dev/null 2>&1; then
++    sudo apt-get update
++    sudo apt-get install -y libnuma-dev numactl
++fi
 +# Create build directory
 +mkdir -p build
 +cd build
@@ -6977,7 +6982,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill-src/src/Scheduler.cpp treadmill/src/Scheduler.cpp
 --- treadmill-src/src/Scheduler.cpp	1969-12-31 16:00:00.000000000 -0800
 +++ treadmill/src/Scheduler.cpp	2025-08-04 15:44:21.785297704 -0700
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,113 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
 + *  All rights reserved.
@@ -7039,8 +7044,14 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +     to avoid memory order violation, which greatly improves its performance.
 +     http://siyobik.info.gf/main/reference/instruction/PAUSE */
 +  for (auto start = nowNs(); nowNs() - start < ns;) {
-+    asm volatile("pause");
-+  }
++#if defined(__x86_64__) || defined(__i386__)
++          asm volatile("pause");
++#elif defined(__aarch64__) || defined(__arm64__)
++          asm volatile("yield" ::: "memory");
++#else
++          asm volatile("" ::: "memory");
++#endif
++}
 +}
 +
 +/**
