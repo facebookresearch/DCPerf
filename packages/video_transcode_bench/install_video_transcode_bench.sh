@@ -223,7 +223,20 @@ chmod +x modify_generate_commands_all.py
 mkdir -p tools
 ln -s "${FFMPEG_BUILD}/bin/ffmpeg" ./tools/ffmpeg
 ln -s "${FFMPEG_BUILD}/bin/ffmpeg" ./ffmpeg
-
+# Register ffmpeg shared libraries in the system linker cache so that ffmpeg
+# can find them at runtime (e.g., libSvtAv1Enc.so). Without this, the
+# downscaling step in generate_commands_all.py silently fails on machines
+# where the libraries are not already cached (e.g., fresh Ubuntu installs,
+# clean-slate machines), causing the benchmark to encode far less data and report
+# inflated scores.
+for lib_dir in "${FFMPEG_BUILD}/lib64" "${FFMPEG_BUILD}/lib"; do
+    if [ -d "${lib_dir}" ]; then
+        if ! grep -qxF "${lib_dir}" /etc/ld.so.conf.d/ffmpeg-bench.conf 2>/dev/null; then
+            echo "${lib_dir}" >> /etc/ld.so.conf.d/ffmpeg-bench.conf
+        fi
+    fi
+done
+ldconfig 2>/dev/null || true
 popd
 
 exit $?
