@@ -8,6 +8,21 @@ set -Eeuo pipefail
 BPKGS_TAO_BENCH_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_TAO_BENCH_ROOT/../..")"
 COMMON_DIR="${BENCHPRESS_ROOT}/packages/common"
+
+# Source the build parallelism utility and calculate optimal job count
+# This considers both CPU cores and memory limits (including cgroup constraints)
+# shellcheck source=../common/get_build_parallelism.sh
+source "${BENCHPRESS_ROOT}/packages/common/get_build_parallelism.sh"
+
+# Number of parallel build jobs - use environment variable if set, otherwise calculate optimal value
+if [ -n "${NUM_BUILD_JOBS:-}" ]; then
+    echo "Using user-specified NUM_BUILD_JOBS=${NUM_BUILD_JOBS}"
+else
+    NUM_BUILD_JOBS=$(get_build_parallelism)
+    echo "Calculated optimal NUM_BUILD_JOBS=${NUM_BUILD_JOBS} based on CPU and memory constraints"
+fi
+print_build_parallelism_info
+
 TAO_BENCH_ROOT="${BENCHPRESS_ROOT}/benchmarks/tao_bench"
 TAO_BENCH_DEPS="${TAO_BENCH_ROOT}/build-deps"
 FOLLY_BUILD_ROOT="${TAO_BENCH_ROOT}/build-folly"
@@ -28,7 +43,7 @@ if [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq 8 ]; then
 elif [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq 9 ]; then
     GLOG_NAME="glog-devel-0.3.5-15.el9"
 else
-    echo "Warning: unsupported platform ${LINUX_DIST_ID}-${LINUX_DIST_ID}"
+    echo "Warning: unsupported platform ${LINUX_DIST_ID}-${VERSION_ID}"
 fi
 
 if distro_is_like centos; then
@@ -64,7 +79,7 @@ if ! [ -d "openssl" ]; then
     git clone --branch "${OPENSSL_BRANCH}" --depth 1 https://github.com/openssl/openssl.git
     pushd openssl/
     ./config --prefix="${TAO_BENCH_DEPS}" --libdir=lib
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     popd
 else
@@ -78,7 +93,7 @@ if ! [ -d "libevent" ]; then
     ./autogen.sh
     ./configure --prefix="${TAO_BENCH_DEPS}" PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" \
         LDFLAGS="-L${TAO_BENCH_DEPS}/lib" CPPFLAGS="-I${TAO_BENCH_DEPS}/include"
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     popd
 else
@@ -112,7 +127,7 @@ popd
 
 # === Build and install memcached (tao_bench_server) ===
 rm -rf memcached-1.6.5
-curl http://www.memcached.org/files/memcached-1.6.5.tar.gz > memcached-1.6.5.tar.gz
+curl -fL https://www.memcached.org/files/memcached-1.6.5.tar.gz > memcached-1.6.5.tar.gz
 tar -zxf memcached-1.6.5.tar.gz
 pushd memcached-1.6.5
 # We'll need to run autogen.sh if config.h.in does not exist in memcached's source
@@ -134,11 +149,11 @@ FMT_INSTALLED_PATH="$(find "${FOLLY_BUILD_ROOT}/installed" -maxdepth 1 -name "fm
 if ! [ -d "${FOLLY_INSTALLED_PATH}/lib64" ]; then
     ln -s -f "${FOLLY_INSTALLED_PATH}/lib" "${FOLLY_INSTALLED_PATH}/lib64"
 fi
-if ! [ -d "${FMT_INSTALLED_PATH}/lib64" ]; then
-    ln -s -f "${FMT_INSTALLED_PATH}/lib" "${FMT_INSTALLED_PATH}/lib64"
-fi
 if ! [ -d "${FMT_INSTALLED_PATH}" ]; then
     echo "Cannot find path to fmt" && exit 1
+fi
+if ! [ -d "${FMT_INSTALLED_PATH}/lib64" ]; then
+    ln -s -f "${FMT_INSTALLED_PATH}/lib" "${FMT_INSTALLED_PATH}/lib64"
 fi
 
 # Build and install
@@ -152,7 +167,7 @@ fi
 ./configure --with-folly="${FOLLY_INSTALLED_PATH}" --with-fmt="${FMT_INSTALLED_PATH}" \
             --with-libssl="${TAO_BENCH_DEPS}" \
             --disable-coverage --enable-tls
-make -j"$(nproc)"
+make -j"${NUM_BUILD_JOBS}"
 
 if [ -L /usr/bin/aclocal-1.16 ]; then
     rm -f /usr/bin/aclocal-1.16
@@ -181,7 +196,7 @@ git apply --check "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_2023061
 # Build and install
 autoreconf --force --install
 PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" ./configure --enable-tls
-make -j"$(nproc)" || ( automake --add-missing && make -j"$(nproc)" )
+make -j"${NUM_BUILD_JOBS}" || ( automake --add-missing && make -j"${NUM_BUILD_JOBS}" )
 cp memtier_benchmark "${TAO_BENCH_ROOT}/tao_bench_client"
 popd # memtier_client
 popd # $TAO_BENCH_ROOT
