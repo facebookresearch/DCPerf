@@ -184,11 +184,11 @@ echo ""
 echo "[4/13] Downloading fmt..."
 clone_or_update "https://github.com/fmtlib/fmt.git" "$DEPS_DIR/fmt" "11.0.2"
 
-WDL_VERSION_TAG="v2025.12.01.00"
+WDL_VERSION_TAG="v2026.03.02.00"
 # 5. folly (Facebook Open-source Library)
 echo ""
 echo "[5/13] Downloading folly..."
-clone_or_update "https://github.com/facebook/folly.git" "$DEPS_DIR/folly" "main" "2de2c909323ea65ad0b0acbc398519608c647d20"
+clone_or_update "https://github.com/facebook/folly.git" "$DEPS_DIR/folly" "$WDL_VERSION_TAG"
 
 # 6. fizz (TLS 1.3 library)
 echo ""
@@ -213,14 +213,13 @@ clone_or_update "https://github.com/facebook/mvfst.git" "$DEPS_DIR/mvfst" "$WDL_
 # 10. mcrouter (Memcache router)
 echo ""
 echo "[10/13] Downloading mcrouter..."
-clone_or_update "https://github.com/facebook/mcrouter.git" "$DEPS_DIR/mcrouter" "main" "cbe0bae209cea65a518606ece7d4fd88d82fd5c9"
+clone_or_update "https://github.com/facebook/mcrouter.git" "$DEPS_DIR/mcrouter" "$WDL_VERSION_TAG"
 
 # 11. CacheLib (Facebook's caching engine)
 echo ""
 echo "[11/13] Downloading CacheLib..."
 # CacheLib's v2025.12.01.00 tag could not build in OSS, so use a specific commit (latest as of 2025-12-11)
-CACHELIB_VERSION="2812ee398471ff627b937702dd48d7b1b5553564"
-clone_or_update "https://github.com/facebook/CacheLib.git" "$DEPS_DIR/CacheLib" "main" "$CACHELIB_VERSION"
+clone_or_update "https://github.com/facebook/CacheLib.git" "$DEPS_DIR/CacheLib" "$WDL_VERSION_TAG"
 
 # 12. sparsemap (header-only library required by CacheLib)
 echo ""
@@ -450,7 +449,8 @@ if [ "$ARCH" = "aarch64" ]; then
     cmake_build "$DEPS_DIR/fizz/fizz" "$DEPS_DIR/fizz/build" \
         $COMMON_CMAKE_FLAGS \
         -DBUILD_TESTS=OFF \
-        -DBUILD_SHARED_LIBS=OFF
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_EXAMPLES=OFF
 else
     # On x86_64, libaegis is not available. We need to explicitly disable finding aegis to prevent CMake from finding stale
     #    aegis installations elsewhere on the system
@@ -458,7 +458,8 @@ else
         $COMMON_CMAKE_FLAGS \
         -DBUILD_TESTS=OFF \
         -DBUILD_SHARED_LIBS=OFF \
-        -DCMAKE_DISABLE_FIND_PACKAGE_aegis=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_aegis=ON \
+        -DBUILD_EXAMPLES=OFF
 fi
 
 # 3.9 Build wangle
