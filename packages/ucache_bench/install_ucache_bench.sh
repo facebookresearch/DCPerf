@@ -179,9 +179,19 @@ echo ""
 echo "[3/13] Downloading xxhash..."
 clone_or_update "https://github.com/Cyan4973/xxHash.git" "$DEPS_DIR/xxhash" "v0.8.2"
 
-# 4. fmt (formatting library)
+# 4. gflags (command-line flags library, required by glog)
 echo ""
-echo "[4/13] Downloading fmt..."
+echo "[4/15] Downloading gflags..."
+clone_or_update "https://github.com/gflags/gflags.git" "$DEPS_DIR/gflags" "v2.2.2"
+
+# 4b. glog (Google logging library, required by folly and many FB OSS projects)
+echo ""
+echo "[4b/15] Downloading glog..."
+clone_or_update "https://github.com/google/glog.git" "$DEPS_DIR/glog" "v0.6.0"
+
+# 5. fmt (formatting library)
+echo ""
+echo "[5/15] Downloading fmt..."
 clone_or_update "https://github.com/fmtlib/fmt.git" "$DEPS_DIR/fmt" "11.0.2"
 
 WDL_VERSION_TAG="v2026.03.02.00"
@@ -412,9 +422,28 @@ XXHASH_CMAKE_EOF
 
 echo "  Created XxhashConfig.cmake for CMake compatibility"
 
-# 3.4 Build googletest (required by mcrouter)
+# 3.4 Build gflags (required by glog)
 echo ""
-echo "[4/12] Building googletest..."
+echo "[4/14] Building gflags..."
+cmake_build "$DEPS_DIR/gflags" "$DEPS_DIR/gflags/build" \
+    $COMMON_CMAKE_FLAGS \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DBUILD_TESTING=OFF \
+    -DBUILD_gflags_LIB=ON
+
+# 3.4b Build glog (required by folly and many FB OSS projects)
+echo ""
+echo "[4b/14] Building glog..."
+cmake_build "$DEPS_DIR/glog" "$DEPS_DIR/glog/build" \
+    $COMMON_CMAKE_FLAGS \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DBUILD_TESTING=OFF \
+    -DWITH_GFLAGS=ON \
+    -DWITH_UNWIND=ON
+
+# 3.5 Build googletest (required by mcrouter)
+echo ""
+echo "[5/14] Building googletest..."
 cmake_build "$DEPS_DIR/googletest" "$DEPS_DIR/googletest/build" \
     $COMMON_CMAKE_FLAGS \
     -DBUILD_SHARED_LIBS=OFF \
@@ -557,6 +586,56 @@ if [ -f "$CACHELIB_COMBINED_ENTRY_H" ] && ! grep -q "format_as(CombinedEntryStat
     sed -i '/enum class CombinedEntryStatus/,/^};/{/^};/a\
 inline auto format_as(CombinedEntryStatus s) { return static_cast<uint8_t>(s); }
 }' "$CACHELIB_COMBINED_ENTRY_H"
+fi
+
+# Patch CacheLib navy/CMakeLists.txt to include CombinedEntryBlock.cpp.
+# The GitHub release at v2026.03.02.00 ships the source file but the
+# CMakeLists.txt was not updated to compile it. FixedSizeIndex.cpp references
+# CombinedEntryBlock::peekIndexEntry and addIndexEntry, causing linker errors.
+CACHELIB_NAVY_CMAKE="$DEPS_DIR/CacheLib/cachelib/navy/CMakeLists.txt"
+if [ -f "$CACHELIB_NAVY_CMAKE" ] && ! grep -q "CombinedEntryBlock.cpp" "$CACHELIB_NAVY_CMAKE"; then
+    echo "  Patching CacheLib navy/CMakeLists.txt to include CombinedEntryBlock.cpp..."
+    sed -i 's|block_cache/BlockCache.cpp|block_cache/BlockCache.cpp\n  block_cache/CombinedEntryBlock.cpp|' "$CACHELIB_NAVY_CMAKE"
+fi
+
+# Patch CacheLib cachebench/CMakeLists.txt to include missing source files.
+# The GitHub release is missing:
+# - ../interface/Stats.cpp (provides detail::shouldSample, used by RAMCacheComponent)
+# - cache/components/Components.cpp (provides createCacheComponent factory)
+# - cache/components/RAMComponent.cpp (provides createRAMCacheComponent)
+# NOTE: FlashComponent.cpp is intentionally excluded — it triggers an
+# internal compiler error (ICE / segfault) in GCC during template instantiation
+# of allocateGeneric(). The benchmark only uses RAM cache mode, so flash cache
+# support is not needed. Components.cpp is patched below to stub out the
+# flash cache path.
+CACHELIB_CACHEBENCH_CMAKE="$DEPS_DIR/CacheLib/cachelib/cachebench/CMakeLists.txt"
+if [ -f "$CACHELIB_CACHEBENCH_CMAKE" ] && ! grep -q "interface/Stats.cpp" "$CACHELIB_CACHEBENCH_CMAKE"; then
+    echo "  Patching CacheLib cachebench/CMakeLists.txt to include Stats.cpp..."
+    sed -i 's|../interface/Handle.cpp|../interface/Handle.cpp\n  ../interface/Stats.cpp|' "$CACHELIB_CACHEBENCH_CMAKE"
+fi
+if [ -f "$CACHELIB_CACHEBENCH_CMAKE" ] && ! grep -q "cache/components/Components.cpp" "$CACHELIB_CACHEBENCH_CMAKE"; then
+    echo "  Patching CacheLib cachebench/CMakeLists.txt to include Components.cpp and RAMComponent.cpp..."
+    sed -i 's|./cache/Cache.cpp|./cache/components/Components.cpp\n  ./cache/components/RAMComponent.cpp\n  ./cache/Cache.cpp|' "$CACHELIB_CACHEBENCH_CMAKE"
+fi
+
+# Patch Components.cpp to stub out the flash cache path.
+# FlashComponent.cpp cannot be compiled (GCC ICE on allocateGeneric template),
+# so we replace the extern declaration and call to createFlashCacheComponent
+# with an inline stub that fatally asserts if flash mode is requested.
+CACHELIB_COMPONENTS_CPP="$DEPS_DIR/CacheLib/cachelib/cachebench/cache/components/Components.cpp"
+if [ -f "$CACHELIB_COMPONENTS_CPP" ] && grep -q "extern.*createFlashCacheComponent" "$CACHELIB_COMPONENTS_CPP"; then
+    echo "  Patching Components.cpp to stub out flash cache support..."
+    # Remove the extern declaration lines for flash cache
+    sed -i '/extern.*createFlashCacheComponent/,/config);/{/createFlashCacheComponent/d; /config);/d}' "$CACHELIB_COMPONENTS_CPP"
+    # Add the stub function before createCacheComponent
+    sed -i '/^std::unique_ptr.*createCacheComponent/i\
+// FlashComponent.cpp excluded (GCC ICE). Stub provided instead.\
+std::unique_ptr<CacheComponent> createFlashCacheComponent(\
+    const CacheConfig\&) {\
+  XCHECK(false) << "Flash cache mode is not supported in this build";\
+  return nullptr;\
+}\
+' "$CACHELIB_COMPONENTS_CPP"
 fi
 
 # Patch CacheLib to remove Folly::folly_exception_counter link dependency.
