@@ -83,37 +83,13 @@ if(NOT FBThrift_FOUND)
   endif()
 endif()
 
-# MCRouter
-find_package(mcrouter CONFIG)
-if(NOT mcrouter_FOUND)
-  find_path(MCROUTER_INCLUDE_DIR mcrouter/CarbonRouterInstance.h
-    PATHS ${STAGING_DIR}/include
-  )
-  find_library(MCROUTER_LIBRARY NAMES mcrouter
-    PATHS ${STAGING_DIR}/lib ${STAGING_DIR}/lib64
-  )
-  if(MCROUTER_INCLUDE_DIR AND MCROUTER_LIBRARY)
-    message(STATUS "Found MCRouter manually: ${MCROUTER_LIBRARY}")
-    add_library(mcrouter::mcrouter UNKNOWN IMPORTED)
-    set_target_properties(mcrouter::mcrouter PROPERTIES
-      IMPORTED_LOCATION "${MCROUTER_LIBRARY}"
-      INTERFACE_INCLUDE_DIRECTORIES "${MCROUTER_INCLUDE_DIR}"
-    )
-    set(mcrouter_FOUND TRUE)
-  endif()
-endif()
+# MCRouter (built with CMake, provides proper config files)
+find_package(mcrouter CONFIG REQUIRED)
 
 # Include directories
 include_directories(${STAGING_DIR}/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/protocol/gen)
-
-# Add mcrouter source directory for headers (mcrouter uses autotools and
-# doesn't install headers properly)
-include_directories(${DEPS_DIR}/mcrouter)
-
-# Add library directories for mcrouter
-link_directories(${DEPS_DIR}/mcrouter/mcrouter/lib/.libs)
 
 # Add OSS_BUILD compile definition for open source build
 add_compile_definitions(OSS_BUILD)

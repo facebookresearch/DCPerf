@@ -184,11 +184,11 @@ echo ""
 echo "[4/13] Downloading fmt..."
 clone_or_update "https://github.com/fmtlib/fmt.git" "$DEPS_DIR/fmt" "11.0.2"
 
-WDL_VERSION_TAG="v2025.12.01.00"
+WDL_VERSION_TAG="v2026.03.02.00"
 # 5. folly (Facebook Open-source Library)
 echo ""
 echo "[5/13] Downloading folly..."
-clone_or_update "https://github.com/facebook/folly.git" "$DEPS_DIR/folly" "main" "2de2c909323ea65ad0b0acbc398519608c647d20"
+clone_or_update "https://github.com/facebook/folly.git" "$DEPS_DIR/folly" "$WDL_VERSION_TAG"
 
 # 6. fizz (TLS 1.3 library)
 echo ""
@@ -213,19 +213,22 @@ clone_or_update "https://github.com/facebook/mvfst.git" "$DEPS_DIR/mvfst" "$WDL_
 # 10. mcrouter (Memcache router)
 echo ""
 echo "[10/13] Downloading mcrouter..."
-clone_or_update "https://github.com/facebook/mcrouter.git" "$DEPS_DIR/mcrouter" "main" "cbe0bae209cea65a518606ece7d4fd88d82fd5c9"
+clone_or_update "https://github.com/facebook/mcrouter.git" "$DEPS_DIR/mcrouter" "$WDL_VERSION_TAG"
 
 # 11. CacheLib (Facebook's caching engine)
 echo ""
 echo "[11/13] Downloading CacheLib..."
-# CacheLib's v2025.12.01.00 tag could not build in OSS, so use a specific commit (latest as of 2025-12-11)
-CACHELIB_VERSION="2812ee398471ff627b937702dd48d7b1b5553564"
-clone_or_update "https://github.com/facebook/CacheLib.git" "$DEPS_DIR/CacheLib" "main" "$CACHELIB_VERSION"
+clone_or_update "https://github.com/facebook/CacheLib.git" "$DEPS_DIR/CacheLib" "$WDL_VERSION_TAG"
 
 # 12. sparsemap (header-only library required by CacheLib)
 echo ""
 echo "[12/13] Downloading sparsemap..."
 clone_or_update "https://github.com/Tessil/sparse-map.git" "$DEPS_DIR/sparsemap" "v0.7.0"
+
+# 12b. magic_enum (header-only library required by CacheLib)
+echo ""
+echo "[12b/13] Downloading magic_enum..."
+clone_or_update "https://github.com/Neargye/magic_enum.git" "$DEPS_DIR/magic_enum" "v0.9.7"
 
 # 13. googletest (required by mcrouter and CacheLib)
 echo ""
@@ -450,7 +453,8 @@ if [ "$ARCH" = "aarch64" ]; then
     cmake_build "$DEPS_DIR/fizz/fizz" "$DEPS_DIR/fizz/build" \
         $COMMON_CMAKE_FLAGS \
         -DBUILD_TESTS=OFF \
-        -DBUILD_SHARED_LIBS=OFF
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_EXAMPLES=OFF
 else
     # On x86_64, libaegis is not available. We need to explicitly disable finding aegis to prevent CMake from finding stale
     #    aegis installations elsewhere on the system
@@ -458,7 +462,8 @@ else
         $COMMON_CMAKE_FLAGS \
         -DBUILD_TESTS=OFF \
         -DBUILD_SHARED_LIBS=OFF \
-        -DCMAKE_DISABLE_FIND_PACKAGE_aegis=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_aegis=ON \
+        -DBUILD_EXAMPLES=OFF
 fi
 
 # 3.9 Build wangle
@@ -489,35 +494,35 @@ if ! [ -f "$STAGING_DIR/bin/thrift1" ]; then
         -Dthriftpy3=OFF
 fi
 
-# 3.12 Build mcrouter
+# 3.12 Build mcrouter (using CMake)
 echo ""
 echo "[12/13] Building mcrouter..."
-cd "$DEPS_DIR/mcrouter"
 
-# Add staging bin to PATH so configure can find thrift1 compiler
+# Add staging bin to PATH so CMake can find thrift1 compiler
 export PATH="$STAGING_DIR/bin:$PATH"
 export PKG_CONFIG_PATH="$STAGING_DIR/lib/pkgconfig:$STAGING_DIR/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
 
-# mcrouter uses autotools
-cd "$DEPS_DIR/mcrouter/mcrouter"
+# mcrouter's GitHub repo root contains CMakeLists.txt (from public_tld/)
+# with source in mcrouter/ subdirectory.
+# mcrouter's CMakeLists.txt expects fbcode_builder CMake modules at
+# build/fbcode_builder/CMake/ (Shipit-transformed layout). When cloning
+# from GitHub directly with --depth 1, this directory may not exist,
+# so copy them from a dependency repo (fbthrift/folly) which also has them.
+MCROUTER_FBCMAKE_DIR="$DEPS_DIR/mcrouter/build/fbcode_builder/CMake"
+if [ ! -f "$MCROUTER_FBCMAKE_DIR/FBBuildOptions.cmake" ]; then
+    echo "  Installing fbcode_builder CMake modules for mcrouter..."
+    mkdir -p "$MCROUTER_FBCMAKE_DIR"
+    cp "$DEPS_DIR/fbthrift/build/fbcode_builder/CMake/"*.cmake "$MCROUTER_FBCMAKE_DIR/" 2>/dev/null || \
+    cp "$DEPS_DIR/folly/build/fbcode_builder/CMake/"*.cmake "$MCROUTER_FBCMAKE_DIR/" 2>/dev/null || \
+    echo "  WARNING: Could not find fbcode_builder CMake modules in dependency repos"
+fi
 
-autoreconf -ivf
-./configure \
-    --prefix="$STAGING_DIR" \
-    --enable-shared=no \
-    --with-pic \
-    CXXFLAGS="-I$STAGING_DIR/include" \
-    LIBS="-luring" \
-    LDFLAGS="-L$STAGING_DIR/lib -L$STAGING_DIR/lib64 -Wl,-rpath,$STAGING_DIR/lib -Wl,-rpath,$STAGING_DIR/lib64" \
-    FBTHRIFT_BIN="$STAGING_DIR/bin" \
-    PKG_CONFIG_PATH="$STAGING_DIR/lib/pkgconfig:$STAGING_DIR/lib64/pkgconfig:${PKG_CONFIG_PATH:-}" \
-    PYTHON="/usr/bin/python3" \
-    INSTALL_DIR="$STAGING_DIR"
-make -j"$NPROC"
-make install
-
-# Note: mcrouter headers will be included from source directory during UCacheBench build
-# We'll pass MCROUTER_DIR to CMake when building UCacheBench
+# Use _build instead of build/ as the CMake output directory to avoid
+# conflicting with the source tree's build/fbcode_builder/ directory
+cmake_build "$DEPS_DIR/mcrouter" "$DEPS_DIR/mcrouter/_build" \
+    $COMMON_CMAKE_FLAGS \
+    -DBUILD_TESTS=OFF \
+    -DBUILD_SHARED_LIBS=OFF
 
 # 3.12 Build CacheLib
 echo ""
@@ -528,9 +533,49 @@ echo "  Installing sparsemap headers..."
 mkdir -p "$STAGING_DIR/include"
 cp -r "$DEPS_DIR/sparsemap/include/"* "$STAGING_DIR/include/"
 
+# Build and install magic_enum (header-only, but uses CMake for installation)
+echo "  Building magic_enum..."
+cmake_build "$DEPS_DIR/magic_enum" "$DEPS_DIR/magic_enum/build" \
+    $COMMON_CMAKE_FLAGS \
+    -DMAGIC_ENUM_OPT_BUILD_EXAMPLES=OFF \
+    -DMAGIC_ENUM_OPT_BUILD_TESTS=OFF \
+    -DMAGIC_ENUM_OPT_INSTALL=ON
+
+# Patch CacheLib to fix fmt v11 compatibility for CombinedEntryStatus enum.
+# fmt v10 and earlier implicitly formatted enum class types as integers, but
+# fmt v11 removed this — enum class types now require an explicit format_as()
+# function. CacheLib already uses this pattern for other enums (see
+# navy/common/Types.h), but CombinedEntryStatus was missed. This only affects
+# how the enum prints in log/error messages; no logic or data flow changes.
+# We patch here rather than downgrading fmt because all Facebook OSS libs
+# (folly, fbthrift, fizz, wangle, mvfst, mcrouter, CacheLib) are released in
+# lockstep and expect matching versions — mixing versions causes cascading
+# build failures across the dependency chain.
+CACHELIB_COMBINED_ENTRY_H="$DEPS_DIR/CacheLib/cachelib/navy/block_cache/CombinedEntryBlock.h"
+if [ -f "$CACHELIB_COMBINED_ENTRY_H" ] && ! grep -q "format_as(CombinedEntryStatus" "$CACHELIB_COMBINED_ENTRY_H"; then
+    echo "  Patching CacheLib to add format_as(CombinedEntryStatus) for fmt v11..."
+    sed -i '/enum class CombinedEntryStatus/,/^};/{/^};/a\
+inline auto format_as(CombinedEntryStatus s) { return static_cast<uint8_t>(s); }
+}' "$CACHELIB_COMBINED_ENTRY_H"
+fi
+
+# Patch CacheLib to remove Folly::folly_exception_counter link dependency.
+# folly_exception_counter was a debug/observability library that tracked
+# exception throw/catch counts. Newer folly versions removed or made this
+# CMake target conditional, so it's no longer exported. CacheLib still
+# references it, causing a "target not found" CMake error. Removing the link
+# has no functional impact — exceptions still work normally, we just lose the
+# debug counters (irrelevant for benchmarking). We patch rather than
+# downgrading folly because all Facebook OSS libs are version-locked; an older
+# folly would break fbthrift, fizz, wangle, etc. at v2026.03.02.00.
+CACHELIB_COMMON_CMAKE="$DEPS_DIR/CacheLib/cachelib/common/CMakeLists.txt"
+if grep -q "folly_exception_counter" "$CACHELIB_COMMON_CMAKE"; then
+    echo "  Patching CacheLib to remove folly_exception_counter dependency..."
+    sed -i '/Folly::folly_exception_counter/d' "$CACHELIB_COMMON_CMAKE"
+fi
+
 # Apply CacheLib patch to fix missing GenericPiecesBase.cpp in CMakeLists.txt
 # This is a known issue where GenericPiecesBase.cpp is not included in cachelib_common library
-CACHELIB_COMMON_CMAKE="$DEPS_DIR/CacheLib/cachelib/common/CMakeLists.txt"
 if ! grep -q "GenericPiecesBase.cpp" "$CACHELIB_COMMON_CMAKE"; then
     echo "  Patching CacheLib to include GenericPiecesBase.cpp..."
     sed -i 's|piecewise/GenericPieces.cpp|piecewise/GenericPieces.cpp\n  piecewise/GenericPiecesBase.cpp|' "$CACHELIB_COMMON_CMAKE"
@@ -557,21 +602,6 @@ export DEPS_DIR="$DEPS_DIR"
 # These files have internal fbcode paths that need to be fixed for OSS builds
 echo "  Fixing include paths in generated protocol files..."
 PROTOCOL_GEN_DIR="$SCRIPT_DIR/protocol/gen"
-
-# OSS compatibility: use pre-D94292034 protocol files for old mcrouter
-# D94292034 removed member functions (visitFields, serialize, deserialize) from carbon
-# codegen, but the pinned OSS mcrouter still calls them as member functions
-# (e.g., req.visitFields(v) instead of visitFields(req, v)).
-# The gen-oss/ directory contains pre-D94292034 versions of the affected files
-# that include both the free functions and the member function wrappers.
-# This must run BEFORE the include-path fixups below so the copied files get fixed too.
-PROTOCOL_GEN_OSS_DIR="$SCRIPT_DIR/protocol/gen-oss"
-if [ -d "$PROTOCOL_GEN_OSS_DIR" ]; then
-    echo "  Applying OSS compatibility protocol files..."
-    cp "$PROTOCOL_GEN_OSS_DIR/UcacheBench.thrift" "$PROTOCOL_GEN_DIR/UcacheBench.thrift"
-    cp "$PROTOCOL_GEN_OSS_DIR/UcacheBenchMessages-inl.h" "$PROTOCOL_GEN_DIR/UcacheBenchMessages-inl.h"
-    cp "$PROTOCOL_GEN_OSS_DIR/UcacheBenchMessagesThrift.cpp" "$PROTOCOL_GEN_DIR/UcacheBenchMessagesThrift.cpp"
-fi
 
 for f in "$PROTOCOL_GEN_DIR"/*.cpp "$PROTOCOL_GEN_DIR"/*.h "$PROTOCOL_GEN_DIR"/*.thrift; do
     if [ -f "$f" ]; then
@@ -601,9 +631,14 @@ if ! grep -q "mcrouter/lib/carbon/RoutingGroups.h" "$PROTOCOL_GEN_DIR/UcacheBenc
 #include <mcrouter/lib/carbon/RoutingGroups.h>' "$PROTOCOL_GEN_DIR/UcacheBenchRoutingGroups.h"
 fi
 
+# fbcode_builder CMake modules (FindLibEvent, FindSodium, etc.) are needed
+# by mcrouter's config file when resolving transitive dependencies
+FBCMAKE_MODULE_DIR="$DEPS_DIR/mcrouter/build/fbcode_builder/CMake"
+
 cmake "$SCRIPT_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$STAGING_DIR" \
+    -DCMAKE_MODULE_PATH="$FBCMAKE_MODULE_DIR" \
     -DBUILD_SERVER=ON \
     -DBUILD_CLIENT=ON
 

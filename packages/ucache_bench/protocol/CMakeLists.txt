@@ -133,18 +133,10 @@ set(PROTOCOL_SOURCES
     gen/UcacheBenchRouterInfo-BuildExtraProvider.cpp
 )
 
-# MCRouter thrift metadata sources
-# The UcacheBench service depends on types from mcrouter's Common.thrift
-# and carbon.thrift. These metadata files are NOT compiled into libmcrouter.a,
-# so we need to compile them here.
-# They provide metadata implementations for:
-# - CarbonResultBusy, CarbonResultRemoteError (exceptions)
-# - McVersionRequest, McVersionReply (structs)
-# - carbon::Result (enum)
-set(MCROUTER_THRIFT_SOURCES
-    ${DEPS_DIR}/mcrouter/mcrouter/lib/network/gen/gen-cpp2/Common_metadata.cpp
-    ${DEPS_DIR}/mcrouter/mcrouter/lib/carbon/gen-cpp2/carbon_result_metadata.cpp
-)
+# MCRouter thrift metadata sources are now compiled into mcrouter's thrift
+# library targets (mcrouter_common_thrift, mcrouter_carbon_result_thrift)
+# which are linked transitively via mcrouter::mcrouter_lib.
+set(MCROUTER_THRIFT_SOURCES)
 
 set(PROTOCOL_HEADERS
     gen/UcacheBench.h
@@ -188,34 +180,14 @@ target_include_directories(ucachebench_protocol PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gen/gen-cpp2
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${STAGING_DIR}/include
-    # MCRouter include paths - needed for carbon headers
-    ${DEPS_DIR}/mcrouter
 )
 
+# mcrouter::mcrouter_lib transitively brings in FBThrift::thriftcpp2,
+# folly, and all other needed dependencies
 target_link_libraries(ucachebench_protocol PUBLIC
-    Folly::folly
+    mcrouter::mcrouter_lib
     fmt::fmt
 )
-
-# Link MCRouter libraries directly since find_package doesn't work
-# MCRouter uses autotools and doesn't provide CMake config files
-if(EXISTS "${DEPS_DIR}/mcrouter/mcrouter/lib/libmcrouter.a")
-    target_link_libraries(ucachebench_protocol PUBLIC
-        ${DEPS_DIR}/mcrouter/mcrouter/lib/libmcrouter.a
-    )
-    message(STATUS "Linking mcrouter library from: ${DEPS_DIR}/mcrouter")
-endif()
-
-# Link FBThrift if available
-if(FBThrift_FOUND)
-    if(TARGET FBThrift::thriftcpp2)
-        target_link_libraries(ucachebench_protocol PUBLIC FBThrift::thriftcpp2)
-    else()
-        target_link_libraries(ucachebench_protocol PUBLIC ${FBTHRIFT_LIBRARY})
-        target_include_directories(ucachebench_protocol PUBLIC
-            ${FBTHRIFT_INCLUDE_DIR})
-    endif()
-endif()
 
 # Install target
 install(TARGETS ucachebench_protocol
