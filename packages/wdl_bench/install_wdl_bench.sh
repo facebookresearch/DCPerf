@@ -205,7 +205,7 @@ build_folly()
         python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
         echo "Building folly with $(get_march_for_host)"
         MARCH="$(get_march_for_host)"
-        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s"}' "$MARCH" "$MARCH")
+        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE"}' "$MARCH" "$MARCH")
         python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES"
         conda deactivate
         conda env remove -n "$FBENV" -y
@@ -229,7 +229,7 @@ build_fbthrift()
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
     echo "Building fbthrift with $(get_march_for_host)"
     MARCH="$(get_march_for_host)"
-    EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s"}' "$MARCH" "$MARCH")
+    EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE"}' "$MARCH" "$MARCH")
     python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES" --only-deps --no-tests
     python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES" --no-deps
     for benchmark in $fbthrift_benchmark_list; do
