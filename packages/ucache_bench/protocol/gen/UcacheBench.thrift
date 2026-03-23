@@ -29,6 +29,7 @@ struct UcacheBenchRequestCommon {
   2: optional string bucketId
 }
 struct UcacheBenchReplyCommon {
+  @cpp.DeprecatedTerseWrite
   1: carbon.ui32 replySourceBitMask
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
@@ -39,7 +40,9 @@ struct UcacheBenchReplyCommon {
 struct UcbGetRequest {
   @thrift.Mixin
   -1: UcacheBenchRequestCommon ucacheBenchRequestCommon
+  @cpp.DeprecatedTerseWrite
   1: carbon.IOBufKey key
+  @cpp.DeprecatedTerseWrite
   2: carbon.ui64 flags
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
@@ -50,10 +53,14 @@ struct UcbGetRequest {
 struct UcbGetReply {
   @thrift.Mixin
   -1: UcacheBenchReplyCommon ucacheBenchReplyCommon
+  @cpp.DeprecatedTerseWrite
   1: carbon_result.Result result
   2: optional carbon.IOBuf value
+  @cpp.DeprecatedTerseWrite
   3: carbon.ui64 flags
+  @cpp.DeprecatedTerseWrite
   4: string message
+  @cpp.DeprecatedTerseWrite
   5: i16 appSpecificErrorCode
   6: optional i32 exptime
 }
@@ -65,9 +72,13 @@ struct UcbGetReply {
 struct UcbSetRequest {
   @thrift.Mixin
   -1: UcacheBenchRequestCommon ucacheBenchRequestCommon
+  @cpp.DeprecatedTerseWrite
   1: carbon.IOBufKey key
+  @cpp.DeprecatedTerseWrite
   2: i32 exptime
+  @cpp.DeprecatedTerseWrite
   3: carbon.ui64 flags
+  @cpp.DeprecatedTerseWrite
   4: carbon.IOBuf value
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
@@ -78,10 +89,15 @@ struct UcbSetRequest {
 struct UcbSetReply {
   @thrift.Mixin
   -1: UcacheBenchReplyCommon ucacheBenchReplyCommon
+  @cpp.DeprecatedTerseWrite
   1: carbon_result.Result result
+  @cpp.DeprecatedTerseWrite
   2: carbon.ui64 flags
+  @cpp.DeprecatedTerseWrite
   3: carbon.IOBuf value
+  @cpp.DeprecatedTerseWrite
   4: string message
+  @cpp.DeprecatedTerseWrite
   5: i16 appSpecificErrorCode
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
@@ -92,7 +108,9 @@ struct UcbSetReply {
 struct UcbDeleteRequest {
   @thrift.Mixin
   -1: UcacheBenchRequestCommon ucacheBenchRequestCommon
+  @cpp.DeprecatedTerseWrite
   1: carbon.IOBufKey key
+  @cpp.DeprecatedTerseWrite
   2: carbon.ui64 flags
 }
 @thrift.DeprecatedUnvalidatedAnnotations{
@@ -103,9 +121,13 @@ struct UcbDeleteRequest {
 struct UcbDeleteReply {
   @thrift.Mixin
   -1: UcacheBenchReplyCommon ucacheBenchReplyCommon
+  @cpp.DeprecatedTerseWrite
   1: carbon_result.Result result
+  @cpp.DeprecatedTerseWrite
   2: carbon.ui64 flags
+  @cpp.DeprecatedTerseWrite
   3: string message
+  @cpp.DeprecatedTerseWrite
   4: i16 appSpecificErrorCode
 }
 
