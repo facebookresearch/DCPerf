@@ -117,6 +117,9 @@ install_hhvm (){
   else
   wget https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary-ubuntu.tar.xz
   tar -Jxf hhvm-3.30-multplatform-binary-ubuntu.tar.xz
+  apt-get update
+  apt-get install -y libpcre3 libunwind8
+
   fi
   cd hhvm || return 1
   bash -x ./pour-hhvm.sh

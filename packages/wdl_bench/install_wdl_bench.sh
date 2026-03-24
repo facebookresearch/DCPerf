@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 # This source code is licensed under the MIT license found in the
@@ -121,6 +121,7 @@ elif [ "$LINUX_DIST_ID" = "centos" ]; then
 
 fi
 
+gcc --version
 mkdir -p "${WDL_SOURCE}"
 mkdir -p "${WDL_BUILD}"
 mkdir -p "${WDL_DATASETS}"
@@ -203,6 +204,25 @@ build_folly()
         env $(get_conda_proxy_args) conda create --override-channels -y -c conda-forge --force -n "$FBENV" "python=3.12" "numpy<2"
         conda activate "$FBENV"
         python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
+
+        # On Ubuntu 24.04, the conda-installed gmock/gtest (1.11) are too old
+        # to handle C++20 std::span (missing const_iterator, added in C++23).
+        # Remove both headers AND libraries so getdeps.py builds a compatible
+        # googletest from source; leaving the .so files behind causes linker
+        # errors (undefined FormatMatcherDescription) due to ABI mismatch.
+        if [[ "$LINUX_DIST_ID" = "ubuntu" ]]; then
+            _ubuntu_ver="$(awk -F '=' '/^VERSION_ID=/{print $2}' /etc/os-release | tr -d '"')"
+            if [[ "$_ubuntu_ver" == "24.04" ]]; then
+                _conda_base=$(conda info --base 2>/dev/null)
+                rm -rf "${_conda_base}/include/gmock" "${_conda_base}/include/gtest"
+                rm -rf "${CONDA_PREFIX}/include/gmock" "${CONDA_PREFIX}/include/gtest"
+                rm -f "${_conda_base}"/lib/libgmock* "${_conda_base}"/lib/libgtest*
+                rm -f "${CONDA_PREFIX}"/lib/libgmock* "${CONDA_PREFIX}"/lib/libgtest*
+                rm -rf "${_conda_base}/lib/cmake/GTest" "${_conda_base}/lib/cmake/GMock"
+                rm -rf "${CONDA_PREFIX}/lib/cmake/GTest" "${CONDA_PREFIX}/lib/cmake/GMock"
+            fi
+        fi
+
         echo "Building folly with $(get_march_for_host)"
         MARCH="$(get_march_for_host)"
         EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE"}' "$MARCH" "$MARCH")

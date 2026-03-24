@@ -48,6 +48,8 @@ jobs:
         host-machine: [
           { arch: x86, instance: "ubuntu-latest", container: "ubuntu:22.04", type: "ubuntu" },
           { arch: aarch64, instance: "ubuntu-24.04-arm", container: "ubuntu:22.04", type: "ubuntu" },
+          { arch: aarch64, instance: "ubuntu-24.04-arm", container: "ubuntu:24.04", type: "ubuntu" },
+
         ]
         python-version: [ "3.12" ]
     steps:
