@@ -9,6 +9,7 @@ import os
 import pathlib
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -62,6 +63,7 @@ def run_cmd(
     cmd: List[str],
     timeout=None,
     for_real=True,
+    graceful_signal=None,
 ) -> str:
     print(" ".join(cmd))
     if for_real:
@@ -72,18 +74,40 @@ def run_cmd(
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            print(f"Process timeout expired, terminating process {proc.pid}...")
-            proc.terminate()
-            try:
-                # Give the process 5 seconds to terminate gracefully
-                proc.wait(timeout=5)
-                print(f"Process {proc.pid} terminated gracefully")
-            except subprocess.TimeoutExpired:
-                # If it still doesn't terminate, force kill it
-                print(f"Process {proc.pid} didn't respond to SIGTERM, force killing...")
-                proc.kill()
-                proc.wait()
-                print(f"Process {proc.pid} killed successfully")
+            if graceful_signal is not None:
+                print(
+                    f"Process timeout expired, sending graceful signal "
+                    f"{graceful_signal} to process {proc.pid}..."
+                )
+                os.kill(proc.pid, graceful_signal)
+                try:
+                    proc.wait(timeout=15)
+                    print(f"Process {proc.pid} exited after graceful signal")
+                    return
+                except subprocess.TimeoutExpired:
+                    print(
+                        f"Process {proc.pid} didn't exit after graceful signal, "
+                        f"force killing..."
+                    )
+                    proc.kill()
+                    proc.wait()
+                    print(f"Process {proc.pid} killed successfully")
+            else:
+                print(f"Process timeout expired, terminating process {proc.pid}...")
+                proc.terminate()
+                try:
+                    # Give the process 5 seconds to terminate gracefully
+                    proc.wait(timeout=5)
+                    print(f"Process {proc.pid} terminated gracefully")
+                except subprocess.TimeoutExpired:
+                    # If it still doesn't terminate, force kill it
+                    print(
+                        f"Process {proc.pid} didn't respond to SIGTERM, "
+                        f"force killing..."
+                    )
+                    proc.kill()
+                    proc.wait()
+                    print(f"Process {proc.pid} killed successfully")
 
 
 def profile_server():
@@ -221,6 +245,9 @@ def run_server(args):
         "-o",
         ",".join(extended_options),
     ]
+    if args.memory_file:
+        server_cmd += ["-e", args.memory_file]
+
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         profiler_wait_time = (
             args.warmup_time + args.timeout_buffer + SERVER_PROFILING_DELAY
@@ -236,7 +263,8 @@ def run_server(args):
         os.environ["LD_LIBRARY_PATH"] = os.path.join(TAO_BENCH_DIR, "build-deps/lib")
 
     timeout = args.warmup_time + args.test_time + args.timeout_buffer
-    run_cmd(server_cmd, timeout, args.real)
+    graceful_sig = signal.SIGUSR1 if args.memory_file else None
+    run_cmd(server_cmd, timeout, args.real, graceful_signal=graceful_sig)
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         t_prof.cancel()

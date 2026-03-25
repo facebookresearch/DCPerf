@@ -1045,6 +1045,7 @@
         - '--timeout-buffer={timeout_buffer}'
         - '--disable-tls={disable_tls}'
         - '--smart-nanosleep={smart_nanosleep}'
+        - '--memory-file={memory_file}'
         - '--real'
       vars:
         - 'interface_name=eth0'
@@ -1056,6 +1057,7 @@
         - 'timeout_buffer=120'
         - 'disable_tls=0'
         - 'smart_nanosleep=0'
+        - 'memory_file='
     client:
       args:
         - 'client'
@@ -1123,6 +1125,7 @@
     - '--client-wait-after-warmup={client_wait_after_warmup}'
     - '--disable-tls={disable_tls}'
     - '--smart-nanosleep={smart_nanosleep}'
+    - '--memory-file={memory_file}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -1144,6 +1147,7 @@
     - 'client_wait_after_warmup=5'
     - 'disable_tls=0'
     - 'smart_nanosleep=0'
+    - 'memory_file='
   hooks:
     - hook: tao_instruction
     - hook: copymove
@@ -1179,6 +1183,7 @@
     - '--num-slow-threads={num_slow_threads}'
     - '--num-fast-threads={num_fast_threads}'
     - '--num-client-threads={num_client_threads}'
+    - '--memory-file={memory_file}'
   vars:
     - 'num_servers=0'
     - 'memsize=0'
@@ -1196,6 +1201,7 @@
     - 'num_slow_threads=0'
     - 'num_fast_threads=0'
     - 'num_client_threads=0'
+    - 'memory_file='
   hooks:
     - hook: copymove
       options:
@@ -1233,6 +1239,7 @@
     - '--test-timeout-buffer={test_timeout_buffer}'
     - '--postprocessing-timeout-buffer={postprocessing_timeout_buffer}'
     - '--poll-interval={poll_interval}'
+    - '--memory-file={memory_file}'
   vars:
     - 'num_servers=0'
     - 'memsize=0.5'
@@ -1254,6 +1261,7 @@
     - 'test_timeout_buffer=0'
     - 'postprocessing_timeout_buffer=60'
     - 'poll_interval=0.2'
+    - 'memory_file='
   hooks:
     - hook: copymove
       options:
@@ -1290,6 +1298,7 @@
     - '--conns-per-server-core={conns_per_server_core}'
     - '--stats-interval={stats_interval}'
     - '--disable-tls={disable_tls}'
+    - '--memory-file={memory_file}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -1308,6 +1317,7 @@
     - 'conns_per_server_core=85'
     - 'stats_interval=5000'
     - 'disable_tls=0'
+    - 'memory_file='
   hooks:
     - hook: tao_instruction
     - hook: copymove

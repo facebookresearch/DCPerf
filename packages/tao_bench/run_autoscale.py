@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -73,12 +74,16 @@ def check_nodes_of_cpu_range(cpu_ranges, numa_nodes):
 SERVER_CMD_OPTIONS = []  # To be initialized in init_parser()
 
 
-def compose_server_cmd(args, cpu_core_range, memsize, port_number):
+def compose_server_cmd(args, cpu_core_range, memsize, port_number, instance_index=0):
     server_args = {
         optstr: getattr(args, argkey) for optstr, argkey in SERVER_CMD_OPTIONS
     }
     server_args["--memsize"] = memsize
     server_args["--port-number"] = port_number
+
+    # Per-instance memory file: append instance index suffix
+    if args.memory_file:
+        server_args["--memory-file"] = f"{args.memory_file}.{instance_index}"
 
     # Add custom thread parameters if specified
     if hasattr(args, "num_fast_threads") and args.num_fast_threads > 0:
@@ -97,7 +102,7 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number):
         if isinstance(argval, bool):
             if argval:
                 cmd.append(argname)
-        elif argval is not None and argval != 0:
+        elif argval is not None and argval != 0 and argval != "":
             cmd += [argname, str(argval)]
 
     if len(NUMA_NODES) > 1 and (args.bind_cpu > 0 or args.bind_mem > 0):
@@ -282,9 +287,72 @@ def distribute_cores(n_parts):
     return core_ranges
 
 
+def ensure_shm_capacity(required_gb):
+    """Expand /dev/shm if it is smaller than required_gb.
+
+    Memory files are stored in /dev/shm (tmpfs). The default tmpfs size is
+    typically 50% of system RAM, which may be too small when multiple server
+    instances each need large memory files. This function remounts /dev/shm
+    with a larger size if needed.
+    """
+    shm_path = "/dev/shm"
+    try:
+        stat = os.statvfs(shm_path)
+        shm_total_gb = (stat.f_blocks * stat.f_frsize) / (1024**3)
+        if shm_total_gb >= required_gb:
+            return
+        target_gb = int(required_gb * 1.1)  # 10% headroom
+        print(
+            f"/dev/shm is {shm_total_gb:.0f}GB, need {required_gb:.0f}GB. "
+            f"Expanding to {target_gb}GB..."
+        )
+        ret = subprocess.run(
+            ["mount", "-o", f"remount,size={target_gb}G", shm_path],
+            capture_output=True,
+        )
+        if ret.returncode != 0:
+            print(f"WARNING: Failed to expand /dev/shm: {ret.stderr.decode().strip()}")
+        else:
+            print(f"/dev/shm expanded to {target_gb}GB")
+    except OSError as e:
+        print(f"WARNING: Could not check /dev/shm capacity: {e}")
+
+
+def graceful_kill_pg(pid, use_sigusr1=False, grace_period=60):
+    """Kill a process group, optionally sending SIGUSR1 first for graceful shutdown."""
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, PermissionError):
+        return
+    if use_sigusr1:
+        try:
+            os.killpg(pgid, signal.SIGUSR1)
+            # Wait for graceful shutdown
+            deadline = time.time() + grace_period
+            while time.time() < deadline:
+                try:
+                    os.kill(pid, 0)  # Check if still alive
+                    time.sleep(0.5)
+                except ProcessLookupError:
+                    return  # Process exited
+            # Still alive after grace period, force kill
+            print(f"Process group {pgid} didn't exit after SIGUSR1, force killing...")
+        except (ProcessLookupError, PermissionError):
+            return
+    try:
+        os.killpg(pgid, 9)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def run_server(args):
     # Create DiagnosisRecorder instance (automatically manages env var for subprocesses)
     recorder = DiagnosisRecorder.get_instance(root_dir=str(BENCHPRESS_ROOT))
+
+    # If memory file is on /dev/shm, ensure tmpfs is large enough
+    if args.memory_file and args.memory_file.startswith("/dev/shm"):
+        required_gb = float(args.memsize) * args_utils.MEM_USAGE_FACTOR
+        ensure_shm_capacity(required_gb)
 
     core_ranges = distribute_cores(args.num_servers)
     # memory size - split evenly for each server
@@ -298,7 +366,11 @@ def run_server(args):
         servers.append(
             [
                 compose_server_cmd(
-                    args, core_ranges[i], mem_per_inst, args.port_number_start + i
+                    args,
+                    core_ranges[i],
+                    mem_per_inst,
+                    args.port_number_start + i,
+                    instance_index=i,
                 ),
                 open(logpath, "w"),
                 logpath,
@@ -402,10 +474,7 @@ def run_server(args):
             )
             for p in procs:
                 if p.poll() is None:  # Process still running
-                    try:
-                        os.killpg(os.getpgid(p.pid), 9)
-                    except (ProcessLookupError, PermissionError):
-                        pass
+                    graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
 
         # Ensure all processes are collected and output is flushed
         for p in procs:
@@ -424,10 +493,7 @@ def run_server(args):
 
         # Final cleanup to ensure process groups are terminated
         for p in procs:
-            try:
-                os.killpg(os.getpgid(p.pid), 9)
-            except (ProcessLookupError, PermissionError):
-                pass  # Process already terminated or we don't have permission
+            graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
     else:
         # Original behavior with fixed timeout
         timeout = (
@@ -441,18 +507,11 @@ def run_server(args):
             try:
                 (out, err) = p.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
-                # Kill the entire process group
-                try:
-                    os.killpg(os.getpgid(p.pid), 9)
-                except ProcessLookupError:
-                    pass  # Process already terminated
+                graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
                 (out, err) = p.communicate()
             finally:
                 # Ensure cleanup even if process completed successfully
-                try:
-                    os.killpg(os.getpgid(p.pid), 9)
-                except (ProcessLookupError, PermissionError):
-                    pass  # Process already terminated or we don't have permission
+                graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
     for server in servers:
         server[1].close()
 

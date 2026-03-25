@@ -186,6 +186,10 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
     if hasattr(args, "poll_interval") and args.poll_interval > 0:
         script_args["--poll-interval"] = args.poll_interval
 
+    # Pass through memory file if specified
+    if hasattr(args, "memory_file") and args.memory_file:
+        script_args["--memory-file"] = args.memory_file
+
     cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
 
     for argname, argval in script_args.items():
