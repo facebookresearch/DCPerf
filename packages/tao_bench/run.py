@@ -17,6 +17,7 @@ import time
 from typing import List
 
 import args_utils
+from warmup_monitor import poll_control_port
 
 
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "common"))
@@ -81,7 +82,7 @@ def run_cmd(
                 )
                 os.kill(proc.pid, graceful_signal)
                 try:
-                    proc.wait(timeout=15)
+                    proc.wait(timeout=60)
                     print(f"Process {proc.pid} exited after graceful signal")
                     return
                 except subprocess.TimeoutExpired:
@@ -350,10 +351,47 @@ def run_client(args):
         breakdown_utils.log_preprocessing_warmup_start(TAO_BENCH_DIR, "")
 
     print("warm up phase ...")
-    cmd = get_client_cmd(args, n_seconds=args.warmup_time)
-    run_cmd(
-        cmd, timeout=args.warmup_time + args.warmup_timeout_buffer, for_real=args.real
-    )
+    if args.control_port > 0 and args.warmup_time > 0:
+        # Auto-warmup: poll control port and terminate warmup early when server
+        # reports READY
+        cmd = get_client_cmd(args, n_seconds=args.warmup_time)
+        print(" ".join(cmd))
+        if args.real:
+            warmup_proc = subprocess.Popen(cmd, stderr=subprocess.STDOUT)
+            warmup_deadline = (
+                time.time() + args.warmup_time + args.warmup_timeout_buffer
+            )
+            poll_interval = 5
+            while time.time() < warmup_deadline:
+                if warmup_proc.poll() is not None:
+                    # Warmup process exited on its own
+                    break
+                if poll_control_port(args.server_hostname, args.control_port):
+                    print("[AutoWarmup] Server reports READY, stopping warmup early")
+                    warmup_proc.terminate()
+                    try:
+                        warmup_proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        warmup_proc.kill()
+                        warmup_proc.wait()
+                    break
+                time.sleep(poll_interval)
+            else:
+                # Timeout reached
+                print("[AutoWarmup] Max warmup time reached, proceeding to test")
+                warmup_proc.terminate()
+                try:
+                    warmup_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    warmup_proc.kill()
+                    warmup_proc.wait()
+    else:
+        cmd = get_client_cmd(args, n_seconds=args.warmup_time)
+        run_cmd(
+            cmd,
+            timeout=args.warmup_time + args.warmup_timeout_buffer,
+            for_real=args.real,
+        )
     if args.real and args.wait_after_warmup > 0:
         time.sleep(args.wait_after_warmup)
 

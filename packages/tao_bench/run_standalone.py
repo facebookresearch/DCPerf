@@ -190,6 +190,12 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
     if hasattr(args, "memory_file") and args.memory_file:
         script_args["--memory-file"] = args.memory_file
 
+    # Pass through auto-warmup if specified
+    if hasattr(args, "auto_warmup") and args.auto_warmup > 0:
+        script_args["--auto-warmup"] = args.auto_warmup
+    if hasattr(args, "target_hit_ratio") and args.target_hit_ratio != 0.9:
+        script_args["--target-hit-ratio"] = args.target_hit_ratio
+
     cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
 
     for argname, argval in script_args.items():

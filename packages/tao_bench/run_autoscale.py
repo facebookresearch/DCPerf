@@ -19,6 +19,7 @@ from datetime import datetime
 from parser import TaoBenchParser
 
 import args_utils
+from warmup_monitor import LogTailer, WarmupControlServer, WarmupMonitor
 
 # Add parent directory to path to import diagnosis_utils
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "common"))
@@ -182,6 +183,8 @@ def gen_client_instructions(args, to_file=True):
                 client_args["disable_tls"] = 1
             if hasattr(args, "num_client_threads") and args.num_client_threads > 0:
                 client_args["num_threads"] = args.num_client_threads
+            if hasattr(args, "auto_warmup") and args.auto_warmup > 0:
+                client_args["control_port"] = args.port_number_start + 1000
             clients[c] += (
                 " ".join(
                     [
@@ -218,6 +221,8 @@ def gen_client_instructions(args, to_file=True):
                 client_args["disable_tls"] = 1
             if hasattr(args, "num_client_threads") and args.num_client_threads > 0:
                 client_args["num_threads"] = args.num_client_threads
+            if hasattr(args, "auto_warmup") and args.auto_warmup > 0:
+                client_args["control_port"] = args.port_number_start + 1000
             clients[i] += (
                 " ".join(
                     [
@@ -393,6 +398,18 @@ def run_server(args):
         if match:
             latency = match.group(1)
 
+    # Set up warmup monitoring if auto-warmup is enabled
+    warmup_monitors = []
+    log_tailers = []
+    control_server = None
+    if args.auto_warmup > 0:
+        control_port = args.port_number_start + 1000
+        for i in range(args.num_servers):
+            monitor = WarmupMonitor(target_hit_ratio=args.target_hit_ratio)
+            warmup_monitors.append(monitor)
+        control_server = WarmupControlServer(control_port, warmup_monitors)
+        control_server.start()
+
     # let's spawn servers
     procs = []
     for server in servers:
@@ -405,14 +422,83 @@ def run_server(args):
             start_new_session=True,  # Create new process group
         )
         procs.append(p)
+
+    # Start log tailers for warmup monitoring
+    if args.auto_warmup > 0:
+        for i in range(args.num_servers):
+            tailer = LogTailer(servers[i][2], warmup_monitors[i], instance_id=i)
+            tailer.start()
+            log_tailers.append(tailer)
+
     # wait for servers to finish - add extra time to make sure
     # post-processing will finish
-    if args.poll_interval > 0:
+    max_warmup_time = args_utils.get_warmup_time(args)
+
+    # When auto-warmup is enabled, wait for warmup completion instead of
+    # fixed warmup_time. This allows the server to finish earlier on warm
+    # restarts where the cache is already pre-loaded.
+    if args.auto_warmup > 0 and warmup_monitors:
+        warmup_start = time.time()
+        print(
+            f"Auto-warmup enabled: waiting up to {max_warmup_time}s for "
+            f"warmup completion..."
+        )
+        while time.time() - warmup_start < max_warmup_time:
+            if all(m.is_warmed_up for m in warmup_monitors):
+                actual_warmup = time.time() - warmup_start
+                print(
+                    f"Auto-warmup: all instances warmed up after "
+                    f"{actual_warmup:.0f}s (max was {max_warmup_time}s)"
+                )
+                break
+            time.sleep(5)
+        else:
+            print(
+                f"Auto-warmup: max warmup time {max_warmup_time}s reached, "
+                f"proceeding to test phase"
+            )
+        remaining = args.test_time
+        print(f"Waiting {remaining}s for test phase...")
+        time.sleep(remaining)
+
+        # Send SIGUSR1 to all process groups in parallel, then wait
+        if args.memory_file:
+            for p in procs:
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGUSR1)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            # Wait up to 60s for all to exit
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                if all(p.poll() is not None for p in procs):
+                    break
+                time.sleep(1)
+
+        # Force kill any remaining
+        for p in procs:
+            if p.poll() is None:
+                try:
+                    os.killpg(os.getpgid(p.pid), 9)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+        # Collect processes and flush output
+        for p in procs:
+            try:
+                p.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+        for server in servers:
+            try:
+                server[1].flush()
+                os.fsync(server[1].fileno())
+            except (OSError, ValueError):
+                pass
+    elif args.poll_interval > 0:
         # Use intelligent process polling instead of fixed timeout
         # First wait for base timeout (warmup + test + timeout_buffer)
-        base_timeout = (
-            args_utils.get_warmup_time(args) + args.test_time + args.timeout_buffer
-        )
+        base_timeout = max_warmup_time + args.test_time + args.timeout_buffer
 
         print(f"Waiting {base_timeout}s for processes to complete normally...")
         time.sleep(base_timeout)
@@ -514,6 +600,12 @@ def run_server(args):
                 graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
     for server in servers:
         server[1].close()
+
+    # Clean up warmup monitoring
+    for tailer in log_tailers:
+        tailer.stop()
+    if control_server:
+        control_server.stop()
 
     # Initialize diagnosis recorder for detailed logging
     recorder = DiagnosisRecorder.get_instance(root_dir=str(BENCHPRESS_ROOT))

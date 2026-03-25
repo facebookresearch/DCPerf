@@ -1075,6 +1075,7 @@
         - '--wait-after-warmup={wait_after_warmup}'
         - '--disable-tls={disable_tls}'
         - '--client-id={client_id}'
+        - '--control-port={control_port}'
         - '--real'
       vars:
         - 'server_hostname'
@@ -1089,6 +1090,7 @@
         - 'sanity=0'
         - 'disable_tls=0'
         - 'client_id=0'
+        - 'control_port=0'
   hooks:
     - hook: copymove
       options:
@@ -1126,6 +1128,7 @@
     - '--disable-tls={disable_tls}'
     - '--smart-nanosleep={smart_nanosleep}'
     - '--memory-file={memory_file}'
+    - '--auto-warmup={auto_warmup}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -1148,6 +1151,7 @@
     - 'disable_tls=0'
     - 'smart_nanosleep=0'
     - 'memory_file='
+    - 'auto_warmup=0'
   hooks:
     - hook: tao_instruction
     - hook: copymove
@@ -1184,6 +1188,7 @@
     - '--num-fast-threads={num_fast_threads}'
     - '--num-client-threads={num_client_threads}'
     - '--memory-file={memory_file}'
+    - '--auto-warmup={auto_warmup}'
   vars:
     - 'num_servers=0'
     - 'memsize=0'
@@ -1202,6 +1207,7 @@
     - 'num_fast_threads=0'
     - 'num_client_threads=0'
     - 'memory_file='
+    - 'auto_warmup=0'
   hooks:
     - hook: copymove
       options:
@@ -1299,6 +1305,7 @@
     - '--stats-interval={stats_interval}'
     - '--disable-tls={disable_tls}'
     - '--memory-file={memory_file}'
+    - '--auto-warmup={auto_warmup}'
     - '--real'
   vars:
     - 'num_servers=0'
@@ -1318,6 +1325,7 @@
     - 'stats_interval=5000'
     - 'disable_tls=0'
     - 'memory_file='
+    - 'auto_warmup=1'
   hooks:
     - hook: tao_instruction
     - hook: copymove

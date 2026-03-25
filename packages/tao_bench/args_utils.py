@@ -176,6 +176,22 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
         + "Enables persistent memory backing via mmap. On graceful shutdown (SIGUSR1), "
         + "memcached saves state to this file for fast warm restart on subsequent runs.",
     )
+    server_parser.add_argument(
+        "--auto-warmup",
+        type=int,
+        default=0,
+        help="enable auto-warmup detection. When enabled, monitors server stats "
+        + "to detect when warmup is complete (hit ratio and QPS stability) and "
+        + "signals clients via TCP control port to stop warmup early. "
+        + "warmup_time becomes the maximum warmup duration.",
+    )
+    server_parser.add_argument(
+        "--target-hit-ratio",
+        type=float,
+        default=0.9,
+        help="target hit ratio for auto-warmup detection. Warmup is considered "
+        + "complete when hit ratio reaches 95%% of this value.",
+    )
     server_parser.add_argument("--real", action="store_true", help="for real")
 
     return get_opt_strings(server_parser)
@@ -259,6 +275,14 @@ def add_common_client_args(client_parser: ArgumentParser) -> List[Tuple[str, str
         type=int,
         default=30,
         help="extra time buffer for test phase timeout in seconds",
+    )
+    client_parser.add_argument(
+        "--control-port",
+        type=int,
+        default=0,
+        help="TCP port to poll on server for warmup completion signal. "
+        + "When > 0, client polls this port during warmup and stops early "
+        + "when server reports warmed up. 0 = disabled (use full warmup time).",
     )
     client_parser.add_argument("--real", action="store_true", help="for real")
 
