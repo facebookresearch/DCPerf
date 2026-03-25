@@ -313,6 +313,96 @@ the guide for the `tao_bench_autoscale` job. Just replace the job name.
 A good run of this workload should have about 75~80% of CPU utilization in the steady
 state, of which 25~30% should be in userspace.
 
+## Memory file for fast warm restart
+
+TaoBench supports a memory file option that allows the server to persist its
+cache state across runs. On the first run, TaoBench fills the cache from scratch
+(cold start). On subsequent runs with the same memory file, the server reloads
+the pre-filled cache instantly, skipping the lengthy warmup phase.
+
+This uses memcached's native `-e` flag, which mmaps a file for slab storage.
+On graceful shutdown (SIGUSR1), memcached saves a `.meta` restart file. On the
+next startup with the same memory file, memcached restores all cached items
+from the file.
+
+### Usage
+
+Specify the `memory_file` parameter pointing to a path on a tmpfs filesystem
+(e.g. `/dev/shm`):
+
+```bash
+./benchpress_cli.py run tao_bench_autoscale -i '{"memory_file": "/dev/shm/tao_bench_mem"}'
+```
+
+On the first run, TaoBench will create per-instance memory files at
+`/dev/shm/tao_bench_mem.0`, `/dev/shm/tao_bench_mem.1`, etc. When the run
+completes, the server is shut down with SIGUSR1 which saves the restart
+metadata (a small `.meta` file alongside each memory file).
+
+On subsequent runs with the same `memory_file` path, the server loads all
+cached items from the memory files, drastically reducing warmup time.
+
+### /dev/shm sizing
+
+The memory files are stored in `/dev/shm` (tmpfs), which defaults to 50% of
+system RAM. When using large `memsize` values, `/dev/shm` may be too small.
+TaoBench automatically expands `/dev/shm` when needed (requires root), but
+you can also do it manually:
+
+```bash
+mount -o remount,size=800G /dev/shm
+```
+
+### Parameters
+
+  - `memory_file`: Path prefix for memory files. Each server instance gets a
+  suffixed file (e.g. `/dev/shm/tao_bench_mem.0`). Default is empty (disabled).
+
+## Auto-warmup detection
+
+When enabled, TaoBench monitors server statistics during the warmup phase and
+automatically signals clients to stop warmup early once the server reaches a
+warmed-up state. The `warmup_time` parameter becomes the maximum warmup
+duration rather than a fixed duration.
+
+### How it works
+
+The server opens a TCP control port (`port_number_start + 1000`, default 12211)
+and monitors the server log output in real time. Warmup is considered complete
+when:
+
+1. Hit ratio reaches >= 95% of `target_hit_ratio` (default 0.9, threshold 0.855)
+2. QPS stabilizes (coefficient of variation < 5%) over a 2-minute rolling window
+
+When both conditions are met for all server instances, the control port responds
+`READY` to client polls. Clients poll the control port every 5 seconds during
+warmup, and terminate the warmup phase early when the server reports `READY`.
+
+### Usage
+
+Set `auto_warmup` to 1:
+
+```bash
+./benchpress_cli.py run tao_bench_autoscale -i '{"auto_warmup": 1}'
+```
+
+This is most useful combined with the memory file option:
+
+```bash
+# Second run with pre-warmed cache + auto-warmup detection
+./benchpress_cli.py run tao_bench_autoscale -i '{"memory_file": "/dev/shm/tao_bench_mem", "auto_warmup": 1}'
+```
+
+The generated client instructions will automatically include the `control_port`
+parameter so clients can poll the server's warmup status.
+
+### Parameters
+
+  - `auto_warmup`: Set to 1 to enable auto-warmup detection. Default is 0 (disabled)
+  for `tao_bench_autoscale`, 1 (enabled) for `tao_bench_autoscale_v2_beta`.
+  - `target_hit_ratio`: Target hit ratio for warmup completion detection. Default
+  is 0.9. Warmup is considered complete when hit ratio reaches 95% of this value.
+
 ## Advanced job: `tao_bench_custom`
 
 **NOTE**: We recommend using `tao_bench_autoscale` to start the server as this job

@@ -166,6 +166,16 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
         help="poll interval in seconds for process completion detection; "
         + "if > 0, use polling mechanism instead of fixed timeout",
     )
+    server_parser.add_argument(
+        "--memory-file",
+        type=str,
+        nargs="?",
+        const="",
+        default="",
+        help="path to memory file for memcached -e flag. "
+        + "Enables persistent memory backing via mmap. On graceful shutdown (SIGUSR1), "
+        + "memcached saves state to this file for fast warm restart on subsequent runs.",
+    )
     server_parser.add_argument("--real", action="store_true", help="for real")
 
     return get_opt_strings(server_parser)
