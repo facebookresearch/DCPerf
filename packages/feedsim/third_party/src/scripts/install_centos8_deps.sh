@@ -11,7 +11,7 @@ dnf install -y cmake ninja-build flex bison git texinfo \
 
 
 # gengetopt
-curl $(fwdproxy-config curl) -O https://ftp.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz
+curl $(fwdproxy-config curl) -O https://ftpmirror.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz
 tar -xf gengetopt-2.23.tar.xz
 cd gengetopt-2.23
 ./configure
