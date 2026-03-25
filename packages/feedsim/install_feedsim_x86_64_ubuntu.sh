@@ -79,7 +79,7 @@ export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-3.14.5/staging/bin:${PATH}"
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
-    wget "https://ftp.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz"
+    wget "https://ftpmirror.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz"
     tar -xf "gengetopt-2.23.tar.xz"
     cd "gengetopt-2.23"
     ./configure
