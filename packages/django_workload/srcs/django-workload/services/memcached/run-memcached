@@ -15,4 +15,12 @@ PORT="${PORT:-11811}"
 # User to run under
 USER="${USER:-memcache}"
 
-/usr/bin/memcached -u "$USER" -m "$MEMORY" -l "$LISTEN" -p "$PORT" -t 16
+# Scale threads to match uWSGI worker count (1 worker = 1 connection).
+# V2 architecture uses per-worker ports, so each worker has an independent
+# memcached connection. Default memcached -t 16 is insufficient when
+# num_workers >> 16 (e.g., 176 on T1_BGM).
+NPROC=$(nproc)
+THREADS=$((NPROC > 16 ? NPROC / 2 : 16))
+MAXCONNS=$((NPROC * 8))
+
+/usr/bin/memcached -u "$USER" -m "$MEMORY" -l "$LISTEN" -p "$PORT" -t "$THREADS" -c "$MAXCONNS"

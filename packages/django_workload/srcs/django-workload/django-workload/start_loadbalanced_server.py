@@ -121,6 +121,12 @@ class UWSGIManager:
         env["PROXYGEN_THREADS"] = str(self.threads_per_worker)
         env["PYTHONUNBUFFERED"] = "1"
 
+        # Ensure LD_LIBRARY_PATH is set for Python 3.14 shared library
+        # This is critical for uWSGI workers to find libpython3.14.so
+        if "LD_LIBRARY_PATH" in os.environ:
+            env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]
+            logger.info(f"Using LD_LIBRARY_PATH: {env['LD_LIBRARY_PATH']}")
+
         # Start uWSGI with config overrides
         # Use --set to override config variables (standard uWSGI way)
         self.uwsgi_process = subprocess.Popen(
@@ -774,6 +780,12 @@ listen stats
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"  # Disable output buffering
+
+        # Ensure LD_LIBRARY_PATH is set for Python 3.14 shared library
+        # This is critical for uWSGI workers to find libpython3.14.so
+        if "LD_LIBRARY_PATH" in os.environ:
+            env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]
+            logger.info(f"Using LD_LIBRARY_PATH: {env['LD_LIBRARY_PATH']}")
 
         # Start worker process
         process = subprocess.Popen(

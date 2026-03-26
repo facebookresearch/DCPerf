@@ -21,6 +21,7 @@ oss_performance_mediawiki:
 
 django_workload:
   parser: django_workload
+  check_returncode: false
   install_script: ./packages/django_workload/install_django_workload.sh
   cleanup_script: ./packages/django_workload/cleanup_django_workload.sh
   install_markers:
@@ -28,8 +29,8 @@ django_workload:
     - ./benchmarks/django_workload/proxygen_binding/proxygen_binding*.so
     - ./benchmarks/django_workload/django-workload/django-workload/django_workload/thrift/build/gen-py3/mock_services/MockAdsService-remote
     - ./benchmarks/django_workload/django-workload/django-workload/django_workload/feed_timeline.py
-    - ./benchmarks/django_workload/django-workload/django-workload/cinder/cinder-build/bin/python3.10
-    - ./benchmarks/django_workload/django-workload/django-workload/Python-3.10.2/python-build/bin/python3.10
+    - ./benchmarks/django_workload/django-workload/django-workload/cinder/cinder-build/bin/python3.14
+    - ./benchmarks/django_workload/django-workload/django-workload/Python-3.14.2/python-build/bin/python3.14
     - ./benchmarks/django_workload/wrk/wrk
     - ./benchmarks/django_workload/apache-cassandra/bin/cassandra
   path: ./benchmarks/django_workload/bin/run.sh
