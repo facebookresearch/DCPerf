@@ -20,13 +20,15 @@ class TaoBenchAutoscaleParser(Parser):
         metrics = {}
         jsontext = ""
         met_json = False
+        brace_depth = 0
         for line in stdout:
-            if line.strip() == "{":
+            if line.strip() == "{" and not met_json:
                 met_json = True
             if met_json:
                 jsontext += line
-            if line.strip() == "}":
-                break
+                brace_depth += line.count("{") - line.count("}")
+                if brace_depth == 0:
+                    break
         try:
             metrics = json.loads(jsontext)
             if "total_qps" in metrics:

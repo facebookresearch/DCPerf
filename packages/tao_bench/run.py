@@ -9,12 +9,20 @@ import os
 import pathlib
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
 from typing import List
+
+# Force line-buffered stdout so output is written to log files immediately,
+# even when stdout is redirected to a file. Without this, output stays in
+# a 4096-byte C buffer and is lost if the process is killed (SIGKILL).
+if not sys.stdout.isatty():
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
 
 import args_utils
 from warmup_monitor import poll_control_port
@@ -240,6 +248,8 @@ def run_server(args):
         "-I",
         "16m",
     ]
+    if args.ipv4:
+        server_cmd += ["-l", "0.0.0.0"]
     if not args.disable_tls:
         server_cmd.append("-Z")
     server_cmd += [
@@ -262,6 +272,13 @@ def run_server(args):
     # tried letting it link to the one in benchmarks/tao_bench/build-deps/lib
     if is_ubuntu():
         os.environ["LD_LIBRARY_PATH"] = os.path.join(TAO_BENCH_DIR, "build-deps/lib")
+
+    # Force line-buffered stdout on the C server binary so stats output is
+    # flushed to the log file immediately. Without this, output stays in a
+    # 4096-byte buffer and is lost if the process is killed before flushing,
+    # which causes empty log files and zero scores on low core counts.
+    if shutil.which("stdbuf"):
+        server_cmd = ["stdbuf", "-oL"] + server_cmd
 
     timeout = args.warmup_time + args.test_time + args.timeout_buffer
     graceful_sig = signal.SIGUSR1 if args.memory_file else None
@@ -328,6 +345,8 @@ def get_client_cmd(args, n_seconds):
         "--key-bytes=220",
         f"--test-time={n_seconds}",
     ]
+    if args.ipv4:
+        client_cmd.append("-4")
     if not args.disable_tls:
         client_cmd += [
             f"--cert={s_cert}",

@@ -23,7 +23,7 @@ from warmup_monitor import LogTailer, WarmupControlServer, WarmupMonitor
 
 # Add parent directory to path to import diagnosis_utils
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "common"))
-from diagnosis_utils import DiagnosisRecorder
+from diagnosis_utils import check_ipv6_hostname, DiagnosisRecorder
 
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
@@ -185,6 +185,8 @@ def gen_client_instructions(args, to_file=True):
                 client_args["num_threads"] = args.num_client_threads
             if hasattr(args, "auto_warmup") and args.auto_warmup > 0:
                 client_args["control_port"] = args.port_number_start + 1000
+            if hasattr(args, "ipv4") and args.ipv4 != 0:
+                client_args["ipv4"] = 1
             clients[c] += (
                 " ".join(
                     [
@@ -223,6 +225,8 @@ def gen_client_instructions(args, to_file=True):
                 client_args["num_threads"] = args.num_client_threads
             if hasattr(args, "auto_warmup") and args.auto_warmup > 0:
                 client_args["control_port"] = args.port_number_start + 1000
+            if hasattr(args, "ipv4") and args.ipv4 != 0:
+                client_args["ipv4"] = 1
             clients[i] += (
                 " ".join(
                     [
@@ -358,6 +362,22 @@ def run_server(args):
     if args.memory_file and args.memory_file.startswith("/dev/shm"):
         required_gb = float(args.memsize) * args_utils.MEM_USAGE_FACTOR
         ensure_shm_capacity(required_gb)
+
+    # Check if hostname resolves to IPv6 and warn if --ipv4 may be needed
+    if not args.ipv4:
+        server_hostname = (
+            args.server_hostname if args.server_hostname else socket.gethostname()
+        )
+        resolves_ipv6 = check_ipv6_hostname(
+            hostname=server_hostname,
+            benchmark="tao_bench",
+            root_dir=str(BENCHPRESS_ROOT),
+        )
+        if resolves_ipv6:
+            print(
+                f"WARNING: Hostname '{server_hostname}' resolves to an IPv6 address. "
+                f"If clients fail to connect, re-run with --ipv4=1"
+            )
 
     core_ranges = distribute_cores(args.num_servers)
     # memory size - split evenly for each server
@@ -672,7 +692,8 @@ def run_server(args):
             for line in preview_lines:
                 print(f"  {line}")
 
-            parser = TaoBenchParser(f"server_{i}.csv")
+            skip_check = getattr(args, "skip_hit_rate_check", 0) != 0
+            parser = TaoBenchParser(f"server_{i}.csv", skip_hit_rate_check=skip_check)
             res = parser.parse(log, None, returncode)
 
             # Diagnose parser results
@@ -826,6 +847,15 @@ def init_parser():
         type=int,
         default=0,
         help="number of slow threads for the server. If not specified, will use default calculation (fast_threads * slow_to_fast_ratio).",
+    )
+
+    parser.add_argument(
+        "--skip-hit-rate-check",
+        type=int,
+        default=0,
+        help="set to 1 to skip the hit rate threshold check when computing "
+        + "server QPS. Useful on low core counts where the cache cannot reach "
+        + "the 88%% hit rate within a short test.",
     )
 
     # Add custom thread parameters to SERVER_CMD_OPTIONS

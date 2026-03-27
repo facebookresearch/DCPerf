@@ -8,10 +8,15 @@ import argparse
 import os
 import pathlib
 import re
+import resource
 import subprocess
+import sys
 import threading
 
 import args_utils
+
+sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "common"))
+from diagnosis_utils import DiagnosisRecorder
 from run_autoscale import gen_client_instructions
 
 BENCHPRESS_ROOT = pathlib.Path(os.path.abspath(__file__)).parents[2]
@@ -148,6 +153,28 @@ def init_parser():
         default=0,
         help="number of slow threads for the server. If not specified, will use default calculation (fast_threads * slow_to_fast_ratio).",
     )
+    parser.add_argument(
+        "--auto-fix-ports",
+        type=int,
+        default=0,
+        help="automatically reduce clients_per_thread if total connections would exceed "
+        + "the ephemeral port range. Set to non-zero to enable.",
+    )
+    parser.add_argument(
+        "--skip-hit-rate-check",
+        type=int,
+        default=0,
+        help="set to 1 to skip the hit rate threshold check when computing "
+        + "server QPS. Useful on low core counts where the cache cannot reach "
+        + "the 88%% hit rate within a short test.",
+    )
+    parser.add_argument(
+        "--auto-fix-ulimit",
+        type=int,
+        default=0,
+        help="automatically raise the file descriptor soft limit if it is too "
+        + "low for the number of connections. Set to non-zero to enable.",
+    )
     return parser
 
 
@@ -170,7 +197,6 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
     }
     script_args["--interface-name"] = "lo"
     script_args["--client-wait-after-warmup"] = 0
-    script_args["--timeout-buffer"] = 0
     if port_number_start > 0:
         script_args["--port-number-start"] = port_number_start
     script_args["--bind-cpu"] = bind_cpu
@@ -195,6 +221,10 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
         script_args["--auto-warmup"] = args.auto_warmup
     if hasattr(args, "target_hit_ratio") and args.target_hit_ratio != 0.9:
         script_args["--target-hit-ratio"] = args.target_hit_ratio
+
+    # Pass skip-hit-rate-check if specified
+    if hasattr(args, "skip_hit_rate_check") and args.skip_hit_rate_check:
+        script_args["--skip-hit-rate-check"] = args.skip_hit_rate_check
 
     cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
 
@@ -240,7 +270,176 @@ if __name__ == "__main__":
         args.memsize = args_utils.get_system_memsize_gb() * 0.75
     args.warmup_time = args_utils.get_warmup_time(args)
     args.server_memsize = args.memsize
-    args.server_hostname = "localhost"
+    args.server_hostname = "127.0.0.1" if args.ipv4 else "localhost"
+
+    # Initialize DiagnosisRecorder so subprocesses share the same diagnosis file
+    recorder = DiagnosisRecorder.get_instance(root_dir=str(BENCHPRESS_ROOT))
+
+    # In standalone mode, all client connections go through loopback and share
+    # the same ephemeral port pool. Check if total connections would exceed
+    # the available ephemeral ports.
+    n_cores = len(os.sched_getaffinity(0))
+    if args.num_client_threads > 0:
+        threads_per_client = args.num_client_threads
+    else:
+        threads_per_client = max(1, n_cores - 6, int(n_cores * 0.8))
+    if args.clients_per_thread <= 0:
+        args.clients_per_thread = args_utils.sanitize_clients_per_thread(380)
+
+    port_low, port_high = "32768", "60999"
+    available_ports = 28231  # default: 60999 - 32768
+    try:
+        with open("/proc/sys/net/ipv4/ip_local_port_range") as f:
+            port_low, port_high = f.read().split()
+            available_ports = int(port_high) - int(port_low)
+    except (OSError, ValueError):
+        pass
+
+    max_conns = int(available_ports * 0.8)  # leave 20% margin
+    total_conns = args.num_clients * threads_per_client * args.clients_per_thread
+
+    if total_conns > max_conns:
+        if args.auto_fix_ports:
+            original_cpt = args.clients_per_thread
+            args.clients_per_thread = max(
+                1, max_conns // (args.num_clients * threads_per_client)
+            )
+            new_total = args.num_clients * threads_per_client * args.clients_per_thread
+            recorder.record_auto_fix(
+                benchmark="tao_bench",
+                fix_type="ephemeral_port_cap",
+                description=(
+                    f"Reduced clients_per_thread from {original_cpt} to "
+                    f"{args.clients_per_thread} because total connections "
+                    f"({total_conns}) would exceed the ephemeral port range "
+                    f"({available_ports} ports). All connections in standalone "
+                    f"mode go through loopback and share the same port pool."
+                ),
+                original_value=original_cpt,
+                fixed_value=args.clients_per_thread,
+                score_impact=(
+                    "Fewer client connections may reduce load on the server, "
+                    "potentially resulting in a lower QPS score compared to "
+                    "systems with a wider ephemeral port range."
+                ),
+                metadata={
+                    "num_clients": args.num_clients,
+                    "threads_per_client": threads_per_client,
+                    "original_total_conns": total_conns,
+                    "fixed_total_conns": new_total,
+                    "available_ports": available_ports,
+                    "port_range": f"{port_low}-{port_high}",
+                },
+            )
+            total_conns = new_total
+        else:
+            error_msg = (
+                f"Total client connections ({total_conns}) exceeds the available "
+                f"ephemeral port range ({available_ports} ports, "
+                f"net.ipv4.ip_local_port_range = {port_low} {port_high}). "
+                f"Clients will fail with 'Cannot assign requested address'."
+            )
+            recorder.record_failure(
+                benchmark="tao_bench",
+                error_type="ephemeral_port_exhaustion",
+                reason=error_msg,
+                solutions=[
+                    "Expand port range: sudo sysctl -w net.ipv4.ip_local_port_range='1024 65535'",
+                    f"Reduce clients_per_thread: --clients-per-thread="
+                    f"{max(1, max_conns // (args.num_clients * threads_per_client))}",
+                    "Enable auto-fix: --auto-fix-ports=1",
+                ],
+                metadata={
+                    "num_clients": args.num_clients,
+                    "threads_per_client": threads_per_client,
+                    "clients_per_thread": args.clients_per_thread,
+                    "total_connections": total_conns,
+                    "available_ports": available_ports,
+                    "port_range": f"{port_low}-{port_high}",
+                },
+            )
+
+    # Check if the file descriptor limit is high enough for all connections.
+    # Each connection uses a socket (file descriptor). The server uses -c 180000
+    # max connections, and each client opens threads_per_client * clients_per_thread
+    # connections. Add overhead for log files, threads, etc.
+    fd_overhead = 1000
+    required_fds = total_conns + fd_overhead
+    soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+
+    if soft_limit < required_fds:
+        if args.auto_fix_ulimit:
+            new_limit = max(required_fds, 100000)
+            try:
+                if hard_limit < new_limit:
+                    # Raising hard limit requires root
+                    resource.setrlimit(resource.RLIMIT_NOFILE, (new_limit, new_limit))
+                else:
+                    resource.setrlimit(resource.RLIMIT_NOFILE, (new_limit, hard_limit))
+                actual_soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+                recorder.record_auto_fix(
+                    benchmark="tao_bench",
+                    fix_type="file_descriptor_limit",
+                    description=(
+                        f"Raised file descriptor soft limit from {soft_limit} to "
+                        f"{actual_soft} because {total_conns} connections plus "
+                        f"overhead require at least {required_fds} file descriptors."
+                    ),
+                    original_value=soft_limit,
+                    fixed_value=actual_soft,
+                    score_impact="None — raising the file descriptor limit has no performance impact.",
+                    metadata={
+                        "original_soft_limit": soft_limit,
+                        "original_hard_limit": hard_limit,
+                        "new_soft_limit": actual_soft,
+                        "required_fds": required_fds,
+                        "total_connections": total_conns,
+                    },
+                )
+            except (ValueError, OSError) as e:
+                error_msg = (
+                    f"File descriptor soft limit ({soft_limit}) is too low for "
+                    f"{total_conns} connections (need at least {required_fds}). "
+                    f"Auto-fix failed: {e}"
+                )
+                recorder.record_failure(
+                    benchmark="tao_bench",
+                    error_type="file_descriptor_limit_low",
+                    reason=error_msg,
+                    solutions=[
+                        f"Run with higher ulimit: sudo bash -c 'ulimit -n {max(required_fds, 100000)} && ./benchpress_cli.py run ...'",
+                        "Set system-wide limit in /etc/security/limits.conf",
+                    ],
+                    metadata={
+                        "soft_limit": soft_limit,
+                        "hard_limit": hard_limit,
+                        "required_fds": required_fds,
+                        "total_connections": total_conns,
+                        "auto_fix_error": str(e),
+                    },
+                )
+        else:
+            error_msg = (
+                f"File descriptor soft limit ({soft_limit}) is too low for "
+                f"{total_conns} connections (need at least {required_fds}). "
+                f"Server and clients may fail with 'Too many open files'."
+            )
+            recorder.record_failure(
+                benchmark="tao_bench",
+                error_type="file_descriptor_limit_low",
+                reason=error_msg,
+                solutions=[
+                    "Enable auto-fix: --auto-fix-ulimit=1",
+                    f"Run with higher ulimit: sudo bash -c 'ulimit -n {max(required_fds, 100000)} && ./benchpress_cli.py run ...'",
+                    "Set system-wide limit in /etc/security/limits.conf",
+                ],
+                metadata={
+                    "soft_limit": soft_limit,
+                    "hard_limit": hard_limit,
+                    "required_fds": required_fds,
+                    "total_connections": total_conns,
+                },
+            )
 
     t_server = threading.Thread(
         target=launch_server,

@@ -45,8 +45,9 @@ class TaoBenchParser:
     # result qps calculation
     MIN_HIT_RATE = 0.88
 
-    def __init__(self, server_csv_name="server.csv"):
+    def __init__(self, server_csv_name="server.csv", skip_hit_rate_check=False):
         self.server_csv_name = server_csv_name
+        self.skip_hit_rate_check = skip_hit_rate_check
 
     def parse(self, stdout, stderr, returncode):
         """Extracts TAO bench results from stdout."""
@@ -109,9 +110,9 @@ class TaoBenchParser:
             if not snapshot.valid:
                 continue
             # Also filter out data points with low hit rate
-            if (
-                snapshot.get("fast_qps") > 1
-                and snapshot.get("hit_rate") >= self.MIN_HIT_RATE
+            if snapshot.get("fast_qps") > 1 and (
+                self.skip_hit_rate_check
+                or snapshot.get("hit_rate") >= self.MIN_HIT_RATE
             ):
                 counter += 1
             else:

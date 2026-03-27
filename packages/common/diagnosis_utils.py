@@ -188,10 +188,49 @@ class DiagnosisRecorder:
         """
         entry = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
+            "category": "failure",
             "benchmark": benchmark,
             "error_type": error_type,
             "reason": reason,
             "solutions": solutions or [],
+            "metadata": metadata or {},
+        }
+
+        self._append_to_file(entry)
+
+    def record_auto_fix(
+        self,
+        benchmark: str,
+        fix_type: str,
+        description: str,
+        original_value: Any = None,
+        fixed_value: Any = None,
+        score_impact: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Record a notable auto-fix that was applied and may affect the benchmark score.
+
+        Args:
+            benchmark: Name of the benchmark (e.g., "tao_bench")
+            fix_type: Type of fix (e.g., "ephemeral_port_cap")
+            description: Human-readable description of what was fixed and why
+            original_value: The original value before the fix
+            fixed_value: The value after the fix was applied
+            score_impact: Description of how this fix may affect the score
+            metadata: Additional metadata
+        """
+        print(f"AUTO-FIX ({fix_type}): {description}")
+
+        entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "category": "auto_fix",
+            "benchmark": benchmark,
+            "fix_type": fix_type,
+            "description": description,
+            "original_value": original_value,
+            "fixed_value": fixed_value,
+            "score_impact": score_impact,
             "metadata": metadata or {},
         }
 
@@ -305,13 +344,15 @@ class DiagnosisRecorder:
             results_dict: Dictionary to merge failure information into
 
         Modifies:
-            results_dict is updated with a "failures" key containing a list of all
-            diagnosis records, or an empty list if no records are found.
+            results_dict is updated with a "failures" key containing a list of
+            failure records, and a "notable_auto_fixes" key containing a list of
+            auto-fix records, or empty lists if no records are found.
         """
         try:
             # Read from the singleton instance's diagnosis file
             if not os.path.exists(self.diagnosis_file_path):
                 results_dict["failures"] = []
+                results_dict["notable_auto_fixes"] = []
                 return
 
             with open(self.diagnosis_file_path, "r") as f:
@@ -320,11 +361,106 @@ class DiagnosisRecorder:
                 if not isinstance(records, list):
                     records = [records]
 
-                # Add all failure records to results
-                results_dict["failures"] = records
+                # Separate failures from auto-fixes
+                results_dict["failures"] = [
+                    r for r in records if r.get("category") != "auto_fix"
+                ]
+                results_dict["notable_auto_fixes"] = [
+                    r for r in records if r.get("category") == "auto_fix"
+                ]
         except Exception as e:
             results_dict["failures"] = []
+            results_dict["notable_auto_fixes"] = []
             results_dict["failure_read_error"] = f"Failed to read diagnosis file: {e}"
+
+
+def check_ipv6_hostname(
+    hostname: str,
+    benchmark: str = "unknown",
+    root_dir: Optional[str] = None,
+) -> bool:
+    """
+    Check if a hostname resolves to an IPv6 address and warn if --ipv4 may be needed.
+
+    When a hostname resolves to IPv6 but IPv6 connectivity is broken or misconfigured,
+    clients will fail to connect to the server. This is a common issue on systems where
+    the hostname is registered with an IPv6 address (e.g., in /etc/hosts or DNS) but
+    IPv6 networking is not fully functional.
+
+    Args:
+        hostname: The server hostname to check
+        benchmark: Name of the benchmark calling this function
+        root_dir: Root directory for diagnosis file
+
+    Returns:
+        True if the hostname resolves to IPv6 (meaning --ipv4 may be needed),
+        False if it resolves to IPv4 only.
+    """
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+
+    has_ipv6 = any(info[0] == socket.AF_INET6 for info in addr_infos)
+    has_ipv4 = any(info[0] == socket.AF_INET for info in addr_infos)
+
+    if not has_ipv6:
+        return False
+
+    # Hostname resolves to IPv6. Check if IPv6 connectivity actually works.
+    ipv6_works = False
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        # Try binding to the IPv6 loopback to verify basic IPv6 support
+        sock.bind(("::1", 0))
+        sock.close()
+        ipv6_works = True
+    except OSError as e:
+        ipv6_works = False
+        ipv6_errno = e.errno
+        ipv6_error_msg = str(e)
+
+    # Only record a failure if IPv6 is actually broken.
+    # If IPv6 works (even without IPv4 fallback), there is no problem.
+    if not ipv6_works:
+        first_ipv6 = next(
+            (info[4][0] for info in addr_infos if info[0] == socket.AF_INET6),
+            None,
+        )
+        recorder = DiagnosisRecorder.get_instance(root_dir=root_dir)
+        reason = (
+            f"Hostname '{hostname}' resolves to IPv6 address ({first_ipv6}) "
+            f"but IPv6 networking is not functional on this system "
+            f"(errno={ipv6_errno}: {ipv6_error_msg}). "
+            f"Clients will fail to connect to the server."
+        )
+        recorder.record_failure(
+            benchmark=benchmark,
+            error_type="ipv6_hostname_resolution",
+            reason=reason,
+            solutions=[
+                "Force IPv4: --ipv4=1 (or add ipv4=1 to job input)",
+                f"Add IPv4 entry for hostname: "
+                f"echo '127.0.0.1 {hostname}' >> /etc/hosts",
+                "Ensure IPv6 networking is properly configured on this system",
+            ],
+            metadata={
+                "hostname": hostname,
+                "ipv6_address": first_ipv6,
+                "has_ipv4": has_ipv4,
+                "ipv6_works": ipv6_works,
+                "resolved_addresses": [
+                    {
+                        "family": ("IPv6" if info[0] == socket.AF_INET6 else "IPv4"),
+                        "address": info[4][0],
+                    }
+                    for info in addr_infos
+                ],
+            },
+        )
+
+    return True
 
 
 def check_port_available(

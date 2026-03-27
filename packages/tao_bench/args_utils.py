@@ -192,6 +192,12 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
         help="target hit ratio for auto-warmup detection. Warmup is considered "
         + "complete when hit ratio reaches 95%% of this value.",
     )
+    server_parser.add_argument(
+        "--ipv4",
+        type=int,
+        default=0,
+        help="set to 1 to force IPv4 protocol instead of IPv6",
+    )
     server_parser.add_argument("--real", action="store_true", help="for real")
 
     return get_opt_strings(server_parser)
@@ -283,6 +289,12 @@ def add_common_client_args(client_parser: ArgumentParser) -> List[Tuple[str, str
         help="TCP port to poll on server for warmup completion signal. "
         + "When > 0, client polls this port during warmup and stops early "
         + "when server reports warmed up. 0 = disabled (use full warmup time).",
+    )
+    client_parser.add_argument(
+        "--ipv4",
+        type=int,
+        default=0,
+        help="set to 1 to force IPv4 protocol instead of IPv6",
     )
     client_parser.add_argument("--real", action="store_true", help="for real")
 
