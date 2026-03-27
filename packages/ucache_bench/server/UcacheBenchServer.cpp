@@ -238,24 +238,23 @@ void UcacheBenchServer::setupCacheLib() {
 folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
     const UcbGetRequest& req) {
   UcbGetReply reply;
-  reply.result_ref() = carbon::Result::NOTFOUND;
+  reply.result() = carbon::Result::NOTFOUND;
 
   try {
     // Extract key from Carbon Keys type - convert to string
-    std::string keyStr = req.key_ref()->fullKey().str();
+    std::string keyStr = req.key()->fullKey().str();
 
     auto item = cache_->find(keyStr);
     if (item) {
       // Cache hit
-      reply.result_ref() = carbon::Result::FOUND;
+      reply.result() = carbon::Result::FOUND;
 
       // Set the value as IOBuf
       auto valueView = item->getMemory();
-      reply.value_ref() = *folly::IOBuf::copyBuffer(
+      reply.value() = *folly::IOBuf::copyBuffer(
           reinterpret_cast<const char*>(valueView), item->getSize());
 
-      reply.flags_ref() =
-          req.flags_ref().has_value() ? req.flags_ref().value() : 0;
+      reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
 
       recordGet(true /* hit */);
 
@@ -264,7 +263,7 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
       }
     } else {
       // Cache miss
-      reply.result_ref() = carbon::Result::NOTFOUND;
+      reply.result() = carbon::Result::NOTFOUND;
       recordGet(false /* miss */);
 
       if (config_.verbose) {
@@ -273,8 +272,8 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
     }
   } catch (const std::exception& ex) {
     printf("Error processing get request: %s\n", ex.what());
-    reply.result_ref() = carbon::Result::REMOTE_ERROR;
-    reply.message_ref() = ex.what();
+    reply.result() = carbon::Result::REMOTE_ERROR;
+    reply.message() = ex.what();
   }
 
   return folly::makeSemiFuture(std::move(reply));
@@ -283,14 +282,14 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
 folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
     const UcbSetRequest& req) {
   UcbSetReply reply;
-  reply.result_ref() = carbon::Result::NOTSTORED;
+  reply.result() = carbon::Result::NOTSTORED;
 
   try {
     // Extract key from Carbon Keys type - convert to string
-    std::string keyStr = req.key_ref()->fullKey().str();
+    std::string keyStr = req.key()->fullKey().str();
 
     // Extract value from IOBuf (need to work with the const IOBuf)
-    const auto& valueIoBuf = req.value_ref();
+    const auto& valueIoBuf = req.value();
     auto valueStr = valueIoBuf->to<std::string>();
 
     // Create item
@@ -303,9 +302,8 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
       // It returns the old item handle (if replaced) or null (if new insertion)
       cache_->insertOrReplace(item);
 
-      reply.result_ref() = carbon::Result::STORED;
-      reply.flags_ref() =
-          req.flags_ref().has_value() ? req.flags_ref().value() : 0;
+      reply.result() = carbon::Result::STORED;
+      reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
 
       recordSet();
 
@@ -320,13 +318,13 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
             valueStr.size(),
             static_cast<uint32_t>(poolId_));
       }
-      reply.result_ref() = carbon::Result::NOTSTORED;
-      reply.message_ref() = "allocate failed";
+      reply.result() = carbon::Result::NOTSTORED;
+      reply.message() = "allocate failed";
     }
   } catch (const std::exception& ex) {
     printf("Error processing set request: %s\n", ex.what());
-    reply.result_ref() = carbon::Result::REMOTE_ERROR;
-    reply.message_ref() = ex.what();
+    reply.result() = carbon::Result::REMOTE_ERROR;
+    reply.message() = ex.what();
   }
 
   return folly::makeSemiFuture(std::move(reply));
@@ -335,18 +333,17 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
 folly::SemiFuture<UcbDeleteReply> UcacheBenchServer::processUcbDelete(
     const UcbDeleteRequest& req) {
   UcbDeleteReply reply;
-  reply.result_ref() = carbon::Result::NOTFOUND;
+  reply.result() = carbon::Result::NOTFOUND;
 
   try {
     // Extract key from Carbon Keys type - convert to string
-    std::string keyStr = req.key_ref()->fullKey().str();
+    std::string keyStr = req.key()->fullKey().str();
 
     // Try to remove from cache
     auto removeResult = cache_->remove(keyStr);
     if (removeResult == CacheAllocator::RemoveRes::kSuccess) {
-      reply.result_ref() = carbon::Result::DELETED;
-      reply.flags_ref() =
-          req.flags_ref().has_value() ? req.flags_ref().value() : 0;
+      reply.result() = carbon::Result::DELETED;
+      reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
 
       recordDelete();
 
@@ -354,15 +351,15 @@ folly::SemiFuture<UcbDeleteReply> UcacheBenchServer::processUcbDelete(
         printf("Deleted key: %s\n", keyStr.c_str());
       }
     } else {
-      reply.result_ref() = carbon::Result::NOTFOUND;
+      reply.result() = carbon::Result::NOTFOUND;
       if (config_.verbose) {
         printf("Key not found for deletion: %s\n", keyStr.c_str());
       }
     }
   } catch (const std::exception& ex) {
     printf("Error processing delete request: %s\n", ex.what());
-    reply.result_ref() = carbon::Result::REMOTE_ERROR;
-    reply.message_ref() = ex.what();
+    reply.result() = carbon::Result::REMOTE_ERROR;
+    reply.message() = ex.what();
   }
 
   return folly::makeSemiFuture(std::move(reply));

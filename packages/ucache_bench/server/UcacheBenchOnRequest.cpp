@@ -27,8 +27,8 @@ void UcacheBenchOnRequest::onRequestThrift(
           cb->result(std::move(reply));
         } catch (const std::exception& ex) {
           UcbGetReply reply;
-          reply.result_ref() = carbon::Result::REMOTE_ERROR;
-          reply.message_ref() = ex.what();
+          reply.result() = carbon::Result::REMOTE_ERROR;
+          reply.message() = ex.what();
           cb->result(std::move(reply));
         }
       });
@@ -44,8 +44,8 @@ void UcacheBenchOnRequest::onRequestThrift(
           cb->result(std::move(reply));
         } catch (const std::exception& ex) {
           UcbSetReply reply;
-          reply.result_ref() = carbon::Result::REMOTE_ERROR;
-          reply.message_ref() = ex.what();
+          reply.result() = carbon::Result::REMOTE_ERROR;
+          reply.message() = ex.what();
           cb->result(std::move(reply));
         }
       });
@@ -61,8 +61,8 @@ void UcacheBenchOnRequest::onRequestThrift(
           cb->result(std::move(reply));
         } catch (const std::exception& ex) {
           UcbDeleteReply reply;
-          reply.result_ref() = carbon::Result::REMOTE_ERROR;
-          reply.message_ref() = ex.what();
+          reply.result() = carbon::Result::REMOTE_ERROR;
+          reply.message() = ex.what();
           cb->result(std::move(reply));
         }
       });
@@ -75,8 +75,8 @@ void UcacheBenchOnRequest::onRequestThrift(
   ucacheBenchOnRequestCommon(
       std::move(callback), std::move(request), [](auto&& cb, auto&& /* req */) {
         facebook::memcache::McVersionReply reply;
-        reply.result_ref() = carbon::Result::FOUND;
-        reply.value_ref() =
+        reply.result() = carbon::Result::FOUND;
+        reply.value() =
             *folly::IOBuf::copyBuffer("UcacheBench 1.0 (with Fiber support)");
         cb->result(std::move(reply));
       });

@@ -716,10 +716,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       std::string value = generateValue();
 
       UcbSetRequest request;
-      request.key_ref() =
+      request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
-      request.value_ref() = *folly::IOBuf::copyBuffer(value);
-      request.exptime_ref() = 3600;
+      request.value() = *folly::IOBuf::copyBuffer(value);
+      request.exptime() = 3600;
 
       if (FLAGS_enable_random_source_ip) {
         uint8_t randomOctet = folly::Random::rand32(1, 255);
@@ -744,7 +744,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       UcbSetReply result = co_await std::move(future);
 
       localOps++;
-      if (*result.result_ref() == carbon::Result::STORED) {
+      if (*result.result() == carbon::Result::STORED) {
         localSuccesses++;
       } else {
         localErrors++;
@@ -1050,7 +1050,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       std::string key = generateKey();
 
       UcbGetRequest request;
-      request.key_ref() =
+      request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
 
       if (FLAGS_enable_random_source_ip) {
@@ -1088,9 +1088,9 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       workerTotalOps[workerId]->fetch_add(1);
       workerGetOps[workerId]->fetch_add(1);
 
-      if (*result.result_ref() == carbon::Result::FOUND) {
+      if (*result.result() == carbon::Result::FOUND) {
         workerGetHits[workerId]->fetch_add(1);
-      } else if (*result.result_ref() == carbon::Result::NOTFOUND) {
+      } else if (*result.result() == carbon::Result::NOTFOUND) {
         workerGetMisses[workerId]->fetch_add(1);
 
         // SET on GET miss to simulate real cache warming behavior
@@ -1098,10 +1098,10 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         std::string value = generateValue();
 
         UcbSetRequest setRequest;
-        setRequest.key_ref() = carbon::Keys<folly::IOBuf>(
+        setRequest.key() = carbon::Keys<folly::IOBuf>(
             std::move(*folly::IOBuf::copyBuffer(key)));
-        setRequest.value_ref() = *folly::IOBuf::copyBuffer(value);
-        setRequest.exptime_ref() = 3600;
+        setRequest.value() = *folly::IOBuf::copyBuffer(value);
+        setRequest.exptime() = 3600;
 
         if (FLAGS_enable_random_source_ip) {
           uint8_t randomOctet = folly::Random::rand32(1, 255);
@@ -1126,7 +1126,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         UcbSetReply setResult = co_await std::move(setFuture);
 
         workerSetOps[workerId]->fetch_add(1);
-        if (*setResult.result_ref() == carbon::Result::STORED) {
+        if (*setResult.result() == carbon::Result::STORED) {
           workerSetSuccesses[workerId]->fetch_add(1);
         } else {
           workerSetErrors[workerId]->fetch_add(1);
@@ -1145,10 +1145,10 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       std::string value = generateValue();
 
       UcbSetRequest request;
-      request.key_ref() =
+      request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
-      request.value_ref() = *folly::IOBuf::copyBuffer(value);
-      request.exptime_ref() = 3600;
+      request.value() = *folly::IOBuf::copyBuffer(value);
+      request.exptime() = 3600;
 
       if (FLAGS_enable_random_source_ip) {
         uint8_t randomOctet = folly::Random::rand32(1, 255);
@@ -1185,7 +1185,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       workerTotalOps[workerId]->fetch_add(1);
       workerSetOps[workerId]->fetch_add(1);
 
-      if (*result.result_ref() == carbon::Result::STORED) {
+      if (*result.result() == carbon::Result::STORED) {
         workerSetSuccesses[workerId]->fetch_add(1);
       } else {
         workerSetErrors[workerId]->fetch_add(1);
@@ -1430,7 +1430,7 @@ void UcacheBenchClient::sendUcbGetRequestSync(
     const std::string& key,
     const std::function<void(UcbGetReply&&)>& callback) {
   UcbGetRequest request;
-  request.key_ref() =
+  request.key() =
       carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
 
   // Set random source IP if enabled for connection fanout
@@ -1463,7 +1463,7 @@ void UcacheBenchClient::sendUcbGetRequestSync(
 
   if (!success) {
     // Failed to send - populate error message (result defaults to UNKNOWN)
-    result.message_ref() = "Failed to send GET request to mcrouter";
+    result.message() = "Failed to send GET request to mcrouter";
     callback(std::move(result));
     return;
   }
@@ -1480,10 +1480,10 @@ void UcacheBenchClient::sendUcbSetRequestSync(
     const std::string& value,
     const std::function<void(UcbSetReply&&)>& callback) {
   UcbSetRequest request;
-  request.key_ref() =
+  request.key() =
       carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
-  request.value_ref() = *folly::IOBuf::copyBuffer(value);
-  request.exptime_ref() = 3600; // 1 hour default TTL
+  request.value() = *folly::IOBuf::copyBuffer(value);
+  request.exptime() = 3600; // 1 hour default TTL
 
   // Set random source IP if enabled for connection fanout
   if (FLAGS_enable_random_source_ip) {
@@ -1514,7 +1514,7 @@ void UcacheBenchClient::sendUcbSetRequestSync(
 
   if (!success) {
     // Failed to send - populate error message (result defaults to UNKNOWN)
-    result.message_ref() = "Failed to send SET request to mcrouter";
+    result.message() = "Failed to send SET request to mcrouter";
     callback(std::move(result));
     return;
   }
