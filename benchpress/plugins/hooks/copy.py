@@ -12,7 +12,7 @@ import os
 import shutil
 
 from benchpress.lib.hook import Hook
-from benchpress.lib.util import get_artifacts_dir
+from benchpress.lib.util import BENCHPRESS_ROOT, get_artifacts_dir
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,8 @@ class CopyMoveHook(Hook):
     def do_copy_or_move(sources, dest, move=False):
         expanded_sources = []
         for src in sources:
+            if not os.path.isabs(src):
+                src = os.path.join(BENCHPRESS_ROOT, src)
             expanded_sources.extend(glob.glob(src))
         if not os.path.isdir(dest):
             os.mkdir(dest)
