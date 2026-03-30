@@ -10,6 +10,20 @@ project(foss_revproxy CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Add fbcode_builder CMake modules to the search path BEFORE find_package calls.
+# Transitive dependencies (e.g. proxygen -> mvfst -> fizz -> Sodium) need
+# FindSodium.cmake which is shipped by folly/fizz/wangle, not the system.
+foreach(_dep folly fizz wangle mvfst)
+  set(_cmake_dir "${CMAKE_PREFIX_PATH}/${_dep}/build/fbcode_builder/CMake")
+  if(EXISTS "${_cmake_dir}")
+    list(APPEND CMAKE_MODULE_PATH "${_cmake_dir}")
+  endif()
+endforeach()
+
+if(NOT proxygen_DIR AND EXISTS "${CMAKE_PREFIX_PATH}/lib/cmake/proxygen")
+  set(proxygen_DIR "${CMAKE_PREFIX_PATH}/lib/cmake/proxygen")
+endif()
+
 find_package(proxygen REQUIRED)
 find_package(folly REQUIRED)
 find_package(gflags REQUIRED)
