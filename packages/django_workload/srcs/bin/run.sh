@@ -562,7 +562,10 @@ start_django_server() {
   # Create database schema
   export PYTHONPATH="${SCRIPT_ROOT}/../django-workload/django-workload/"
   export LD_LIBRARY_PATH=${SCRIPT_ROOT}/../django-workload/django-workload/:\
-${python_libs}:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+${SCRIPT_ROOT}/../proxygen/staging/lib:\
+${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps/lib:\
+${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps/lib64:\
+${python_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
   echo "Setting LD_LIBRARY_PATH to '${LD_LIBRARY_PATH}'"
     if [ "$load_a_snapshot" = true ]; then
       #DJANGO_SETTINGS_MODULE=cluster_settings ./${venv_dir}/bin/django-admin flush

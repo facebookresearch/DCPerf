@@ -15,7 +15,13 @@ DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 source "${BENCHPRESS_ROOT}/packages/common/os-distro.sh"
 
 if distro_is_like ubuntu && [ "$(uname -m)" = "aarch64" ]; then
-    "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64_ubuntu22.sh
+    UBUNTU_VERSION="$(awk -F "=" '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '"')"
+    UBUNTU_MAJOR="${UBUNTU_VERSION%%.*}"
+    if [ "${UBUNTU_MAJOR}" -ge 24 ] 2>/dev/null; then
+        "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64_ubuntu24.sh
+    else
+        "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64_ubuntu22.sh
+    fi
     exit $?
 fi
 if distro_is_like ubuntu && [ "$(uname -m)" = "x86_64" ]; then
