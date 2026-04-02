@@ -1,0 +1,85 @@
+# benchmarks specific for edge hardware workloads
+
+# example:
+# oss_performance_mediawiki:
+#   parser: mediawiki
+#   install_script: ./packages/mediawiki/install_oss_performance_mediawiki.sh
+#   cleanup_script: ./packages/mediawiki/cleanup_oss_performance_mediawiki.sh
+#   path: ./packages/mediawiki/run.sh
+#   tags:
+#     scope:
+#       - app
+#       - web
+#     component:
+#       - cpu
+#   metrics: []
+
+cdn_bench:
+  parser: cdn_bench
+  install_script: ./packages/cdn_bench/install_cdn_bench.sh
+  cleanup_script: ./packages/cdn_bench/cleanup_cdn_bench.sh
+  path: ./packages/cdn_bench/run.sh
+  tags:
+    scope:
+      - app
+      - web
+  metrics: []
+
+micro_cpu:
+  parser : cdn_bench
+  install_script: ./packages/cdn_bench/micro_cpu/install_cpu_micro.sh
+  cleanup_script: ./packages/cdn_bench/micro_cpu/cleanup_cpu_micro.sh
+  path: ./packages/cdn_bench/micro_cpu/run.sh
+  tags:
+    scope:
+      - app
+      - kernel
+    component:
+      - cpu
+
+
+micro_mem:
+  parser: cdn_bench
+  install_script: ./packages/cdn_bench/micro_mem/install_mem_micro.sh
+  cleanup_script: ./packages/cdn_bench/micro_mem/cleanup_mem_micro.sh
+  path: ./packages/cdn_bench/micro_mem/run.sh
+  tags:
+    scope:
+      - app
+      - kernel
+      - cache
+    component:
+      - memory
+      - cpu
+
+micro_nic:
+  parser : cdn_bench
+  install_script: ./packages/cdn_bench/micro_nic/install_nic_micro.sh
+  cleanup_script: ./packages/cdn_bench/micro_nic/cleanup_nic_micro.sh
+  path: ./packages/cdn_bench/micro_nic/run.sh
+  roles:
+    - server
+    - client
+  tags:
+    scope:
+      - app
+      - kernel
+    component:
+      - nic
+
+micro_flash:
+  parser : cdn_bench
+  install_script: ./packages/cdn_bench/micro_flash/install_flash_micro.sh
+  cleanup_script: ./packages/cdn_bench/micro_flash/cleanup_flash_micro.sh
+  path: ./packages/cdn_bench/micro_flash/run.sh
+  tags:
+    scope:
+      - app
+      - kernel
+    component:
+      - nic
+
+sleep:
+  path: /usr/bin/sleep
+  parser: returncode
+  metrics: []

@@ -1,0 +1,227 @@
+- benchmark: cdn_bench
+  name: cdn_bench
+  description: >
+    Benchmark of cdn workload, can be used to leverage Benchpress's Perf
+    Monitoring Hook for system performance metrics.
+
+- benchmark: micro_cpu
+  name: micro_cpu
+  description: >
+    CPU microbenchmarking using stress-ng. Supports various stressor types
+    (cpu, cache, matrix, vecmath) for HPC CPU qualification and metrics collection.
+  args:
+    - '--stressor={stressor}'
+    - '--workers={workers}'
+    - '--timeout={timeout}'
+    - '--cpu-method={cpu_method}'
+    - '--matrix-size={matrix_size}'
+    - '--vm-bytes={vm_bytes}'
+    - '--governor={governor}'
+    - '--taskset={taskset}'
+    - '--verify={verify}'
+    - '--aggressive={aggressive}'
+  vars:
+    - 'stressor=cpu'
+    - 'workers=0'
+    - 'timeout=60'
+    - 'cpu_method=all'
+    - 'matrix_size=128'
+    - 'vm_bytes=256M'
+    - 'governor=performance'
+    - 'taskset='
+    - 'verify=0'
+    - 'aggressive=0'
+  hooks:
+    - hook: perf
+      options:
+        perfstat:
+          interval: 1
+          additional_events:
+            - 'instructions'
+            - 'cycles'
+            - 'cache-references'
+            - 'cache-misses'
+            - 'branch-instructions'
+            - 'branch-misses'
+        mpstat:
+          interval: 1
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'packages/cdn_bench/micro_cpu/cpu_run.log'
+
+- name: micro_mem
+  benchmark: micro_mem
+  description: >
+    STREAM libraries and functions. Memory intensive load plus metrics collection
+  args:
+    - '{STREAM_ARRAY_SIZE}'
+    - '{NTIMES}'
+  vars:
+    - 'STREAM_ARRAY_SIZE=100000000'
+    - 'NTIMES=100'
+  hooks:
+    - hook: perf
+      options:
+        perfstat:
+          interval: 1
+          additional_events:
+            - 'cache-references'
+            - 'cache-misses'
+            - 'LLC-load-misses'
+            - 'LLC-store-misses'
+        memstat:
+          interval: 1
+          additional_counters:
+            - 'Cached'
+            - 'Buffers'
+            - 'Dirty'
+        mpstat:
+          interval: 1
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'packages/cdn_bench/micro_mem/stream_run.log'
+
+- name: micro_nic
+  benchmark: micro_nic
+  description: >
+    IPerf3 utility with high parallelization and CCD/NUMA support for NIC saturation.
+  roles:
+    server:
+      args:
+        - '-m server'
+        - '-p {port}'
+        - '-i {interval}'
+        - '{extra_args}'
+      vars:
+        - 'port=5201'
+        - 'interval=1'
+        - 'extra_args='
+    client:
+      args:
+        - '-m client'
+        - '-s {server_ip}'
+        - '-p {port}'
+        - '-t {duration}'
+        - '-P {parallel}'
+        - '-i {interval}'
+        - '{extra_args}'
+      vars:
+        - 'server_ip='
+        - 'port=5201'
+        - 'duration=60'
+        - 'parallel=1'
+        - 'interval=1'
+        - 'extra_args='
+  hooks:
+    - hook: perf
+      options:
+        netstat:
+          interval: 1
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'packages/cdn_bench/micro_nic/nic_run.log'
+
+- name: micro_flash
+  benchmark: micro_flash
+  description: >
+    Flash/Storage sustained read/write microbenchmark using FIO.
+    Supports various I/O patterns, block sizes, and concurrency settings.
+  args:
+    - '--filename={filename}'
+    - '--directory={directory}'
+    - '--size={size}'
+    - '--filesize={filesize}'
+    - '--nrfiles={nrfiles}'
+    - '--offset={offset}'
+    - '--offset_increment={offset_increment}'
+    - '--direct={direct}'
+    - '--rw={rw}'
+    - '--rwmixread={rwmixread}'
+    - '--bs={bs}'
+    - '--bsrange={bsrange}'
+    - '--random_distribution={random_distribution}'
+    - '--numjobs={numjobs}'
+    - '--iodepth={iodepth}'
+    - '--thread={thread}'
+    - '--group_reporting={group_reporting}'
+    - '--runtime={runtime}'
+    - '--time_based={time_based}'
+    - '--ramp_time={ramp_time}'
+    - '--timeout={timeout}'
+    - '--loops={loops}'
+    - '--ioengine={ioengine}'
+    - '--sync={sync}'
+    - '--hipri={hipri}'
+    - '--rate={rate}'
+    - '--rate_iops={rate_iops}'
+    - '--rate_process={rate_process}'
+    - '--cpus_allowed={cpus_allowed}'
+    - '--cpus_allowed_policy={cpus_allowed_policy}'
+    - '--numa_cpu_nodes={numa_cpu_nodes}'
+    - '--numa_mem_policy={numa_mem_policy}'
+  vars:
+    - 'filename=/dev/nvme0n1'
+    - 'directory=/mnt/test'
+    - 'size=10G'
+    - 'filesize=1G'
+    - 'nrfiles=4'
+    - 'offset=0'
+    - 'offset_increment=1G'
+    - 'direct=1'
+    - 'rw=randread'
+    - 'rwmixread=70'
+    - 'bs=4k'
+    - 'bsrange=4k-64k'
+    - 'random_distribution=random'
+    - 'numjobs=8'
+    - 'iodepth=32'
+    - 'thread=1'
+    - 'group_reporting=1'
+    - 'runtime=300'
+    - 'time_based=1'
+    - 'ramp_time=30'
+    - 'timeout=600'
+    - 'loops=1'
+    - 'ioengine=libaio'
+    - 'sync=0'
+    - 'hipri=0'
+    - 'rate='
+    - 'rate_iops='
+    - 'rate_process=0'
+    - 'cpus_allowed='
+    - 'cpus_allowed_policy=shared'
+    - 'numa_cpu_nodes='
+    - 'numa_mem_policy=default'
+  hooks:
+    - hook: perf
+      options:
+        iostat:
+          interval: 1
+        perfstat:
+          interval: 1
+          additional_events:
+            - 'cache-references'
+            - 'cache-misses'
+        mpstat:
+          interval: 1
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'packages/cdn_bench/micro_flash/fio_run.log'
+
+- benchmark: sleep
+  name: sleep
+  description: >
+    Sleep for a period of time. Can be used to leverage Benchpress's Perf
+    Monitoring Hook to monitor some external workloads.
+  args:
+    - '{duration}'
+  vars:
+    - 'duration'
