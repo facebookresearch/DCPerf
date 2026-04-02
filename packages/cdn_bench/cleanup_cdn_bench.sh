@@ -41,6 +41,9 @@ if [ -d "${BUILD_DIR}" ]; then
   rm -rf "${BUILD_DIR}"
 fi
 
+# Remove temp stderr files from benchmark runs
+rm -f "${CDN_PACKAGE_DIR}/.content_stderr" "${CDN_PACKAGE_DIR}/.proxy_stderr" "${CDN_PACKAGE_DIR}/.client_stderr"
+
 # Remove log file
 if [ -f "${CDN_PACKAGE_DIR}/cdn_bench_run.log" ]; then
   rm -f "${CDN_PACKAGE_DIR}/cdn_bench_run.log"

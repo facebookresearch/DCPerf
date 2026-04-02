@@ -9,13 +9,13 @@
 # Internal (Meta):  Binaries available by packaging in BUCK path_actions
 # External (OSS):   Builds proxygen and foss_revproxy from source.
 #
-# Binaries are installed to benchmarks/cdn_bench/ relative to BENCHPRESS_ROOT.
+# Binaries are installed to packages/cdn_bench/binaries/ relative to BENCHPRESS_ROOT.
 
 set -Eeuo pipefail
 
 CDN_PACKAGE_DIR="$(dirname "$(readlink -f "$0")")"
 BENCHPRESS_ROOT="$(readlink -f "${CDN_PACKAGE_DIR}/../../")"
-INSTALL_DIR="${BENCHPRESS_ROOT}/benchmarks/cdn_bench"
+INSTALL_DIR="${BENCHPRESS_ROOT}/packages/cdn_bench/binaries"
 BUILD_DIR="${CDN_PACKAGE_DIR}/_build"
 
 # Pinned proxygen version for reproducible builds
@@ -42,7 +42,7 @@ is_meta_internal() {
 ##############################################################################
 install_internal() {
   echo -e "${COLOR_GREEN}[ INFO ] Meta internal — using pre-bundled binaries from benchpress fbpkg${COLOR_OFF}"
-  # The binaries are placed at benchmarks/cdn_bench/ by the fbpkg path_actions.
+  # The binaries are placed at packages/cdn_bench/binaries/ by the fbpkg path_actions.
   for bin in traffic_client proxy_server content_server; do
     if [ ! -f "${INSTALL_DIR}/${bin}" ]; then
       echo -e "${COLOR_RED}[ ERROR ] Expected pre-bundled binary not found: ${INSTALL_DIR}/${bin}${COLOR_OFF}"
@@ -137,6 +137,32 @@ DEPS_DIR="${BUILD_DIR}/deps"
   cp -f "${FOSS_BUILD_DIR}/proxy_server" "${INSTALL_DIR}/"
   cp -f "${FOSS_BUILD_DIR}/content_server" "${INSTALL_DIR}/"
   chmod +x "${INSTALL_DIR}/traffic_client" "${INSTALL_DIR}/proxy_server" "${INSTALL_DIR}/content_server"
+
+##############################################################################
+  # Step 5: Bundle shared library dependencies
+  #
+  # The build links against libraries in _build/deps (e.g. libglog, libfolly)
+  # that may not be present on the target host. Copy them into lib/ next to the
+  # binaries and rewrite RPATH so the binaries find them via $ORIGIN/lib.
+##############################################################################
+  LIB_DIR="${INSTALL_DIR}/lib"
+  mkdir -p "${LIB_DIR}"
+
+  for lib_search_path in "${DEPS_DIR}/lib64" "${DEPS_DIR}/lib"; do
+    if [ -d "${lib_search_path}" ]; then
+      echo -e "${COLOR_GREEN}[ INFO ] Bundling shared libraries from ${lib_search_path}${COLOR_OFF}"
+      find "${lib_search_path}" -maxdepth 1 -name '*.so*' -exec cp -aL {} "${LIB_DIR}/" \;
+    fi
+  done
+
+  if command -v patchelf &>/dev/null; then
+    echo -e "${COLOR_GREEN}[ INFO ] Setting RPATH to \$ORIGIN/lib${COLOR_OFF}"
+    for bin in traffic_client proxy_server content_server; do
+      patchelf --set-rpath '$ORIGIN/lib' "${INSTALL_DIR}/${bin}"
+    done
+  else
+    echo -e "${COLOR_GREEN}[ INFO ] patchelf not found — binaries will rely on LD_LIBRARY_PATH at runtime${COLOR_OFF}"
+  fi
 }
 
 ##############################################################################
