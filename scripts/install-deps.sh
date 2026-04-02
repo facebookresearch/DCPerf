@@ -64,6 +64,16 @@ ubuntu22() {
     $SUDO apt install -y libssl-dev
 }
 
+ubuntu24() {
+    echo "Installing dependencies for Ubuntu 24.04"
+
+    $SUDO apt update
+    $SUDO apt install -y python3-pip git lshw sysstat dmidecode numactl
+    $SUDO pip3 install --break-system-packages click pyyaml tabulate pandas packaging
+
+    $SUDO apt install -y libssl-dev
+}
+
 if [ -f /etc/os-release ]; then
     . /etc/os-release
 else
@@ -81,7 +91,9 @@ if [ "$ID" == "centos" ]; then
         exit 1
     fi
 elif [ "$ID" == "ubuntu" ]; then
-    if [ "$VERSION_ID" == "22.04" ]; then
+    if [ "$VERSION_ID" == "24.04" ]; then
+        ubuntu24
+    elif [ "$VERSION_ID" == "22.04" ]; then
         ubuntu22
     else
         echo "Unsupported Ubuntu version: $VERSION_ID"
