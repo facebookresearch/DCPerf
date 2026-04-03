@@ -1,20 +1,45 @@
 - benchmark: cdn_bench
   name: cdn_bench
   description: >
-    CDN reverse proxy benchmark using foss_revproxy. Runs content_server,
-    proxy_server, and traffic_client on localhost with HTTP/2 cleartext.
-  args:
-    - '-d {duration}'
-    - '-r {target_rps}'
-    - '-c {num_connections}'
-    - '-S {streams_per_connection}'
-    - '-p {protocol}'
-  vars:
-    - 'duration=60'
-    - 'target_rps=1000'
-    - 'num_connections=4'
-    - 'streams_per_connection=100'
-    - 'protocol=h2'
+    Distributed CDN benchmark. Run server, proxy, and client roles on
+    separate hosts. Supports multiple instances of each role for scaling.
+  roles:
+    server:
+      args:
+        - '-m server'
+        - '-P {ports}'
+        - '-p {protocol}'
+      vars:
+        - 'ports=8082'
+        - 'protocol=h2'
+    proxy:
+      args:
+        - '-m proxy'
+        - '-B {backend_hosts}'
+        - '-b {backend_ports}'
+        - '-P {ports}'
+        - '-p {protocol}'
+      vars:
+        - 'backend_hosts='
+        - 'backend_ports='
+        - 'ports=8081'
+        - 'protocol=h2'
+    client:
+      args:
+        - '-m client'
+        - '-T {proxy_targets}'
+        - '-d {duration}'
+        - '-r {target_rps}'
+        - '-c {num_connections}'
+        - '-S {streams_per_connection}'
+        - '-p {protocol}'
+      vars:
+        - 'proxy_targets='
+        - 'duration=60'
+        - 'target_rps=1000'
+        - 'num_connections=4'
+        - 'streams_per_connection=100'
+        - 'protocol=h2'
   hooks:
     - hook: perf
       options:

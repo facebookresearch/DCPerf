@@ -5,8 +5,16 @@
 # LICENSE file in the root directory of this source tree.
 
 # CDN Benchmark run script using foss_revproxy.
+#
+# Modes:
+#   server           — run content_server(s) only
+#   proxy            — run proxy_server(s) only
+#   client           — run traffic_client(s) only
+
 # Usage:
-#   ./run.sh -d 60 -r 1000 -c 4 -S 100 -p h2
+#   Server role:   ./run.sh -m server -P 8082,8083,8084
+#   Proxy role:    ./run.sh -m proxy -B "server1,server1" -b "8082,8083" -P 8081
+#   Client role:   ./run.sh -m client -T "proxy1:8081" -d 60 -r 1000
 
 set -Eeuo pipefail
 
@@ -26,6 +34,7 @@ echo "CDN"
 ###############################################################################
 # Default parameters
 ###############################################################################
+MODE="server"
 DURATION=60
 TARGET_RPS=1000
 NUM_CONNECTIONS=4
@@ -34,6 +43,12 @@ PROTOCOL="h2"
 CONTENT_PORT=8082
 PROXY_PORT=8081
 
+# Multi-host parameters
+LISTEN_PORTS=""         # -P: comma-separated ports for server/proxy instances
+BACKEND_HOSTS=""        # -B: comma-separated backend hosts for proxy
+BACKEND_PORTS=""        # -b: comma-separated backend ports for proxy
+PROXY_TARGETS=""        # -T: comma-separated host:port pairs for client targets
+
 ###############################################################################
 # Parse arguments
 ###############################################################################
@@ -41,28 +56,42 @@ usage() {
     cat << EOF
 Usage: $0 [options]
 
-Options:
-    -d <seconds>     Test duration in seconds (default: $DURATION)
-    -r <rps>         Target requests per second (default: $TARGET_RPS)
-    -c <connections> Number of concurrent connections (default: $NUM_CONNECTIONS)
-    -S <streams>     Max concurrent streams per connection (default: $STREAMS_PER_CONNECTION)
-    -p <protocol>    Protocol: h1 or h2 (default: $PROTOCOL)
+Modes:
+    -m <mode>        Mode: server, proxy, client (default: server)
+
+Multi-host options:
+    -P <ports>       Comma-separated listen ports for server/proxy instances
+    -B <backends>    Comma-separated backend hosts for proxy
+    -b <ports>       Comma-separated backend ports for proxy
+    -T <targets>     Comma-separated host:port pairs for client targets
+
     -h               Show this help
 EOF
     exit 1
 }
 
-while getopts "d:r:c:S:p:h" opt; do
+while getopts "m:d:r:c:S:p:P:B:b:T:h" opt; do
   case $opt in
+    m) MODE="$OPTARG" ;;
     d) DURATION="$OPTARG" ;;
     r) TARGET_RPS="$OPTARG" ;;
     c) NUM_CONNECTIONS="$OPTARG" ;;
     S) STREAMS_PER_CONNECTION="$OPTARG" ;;
     p) PROTOCOL="$OPTARG" ;;
+    P) LISTEN_PORTS="$OPTARG" ;;
+    B) BACKEND_HOSTS="$OPTARG" ;;
+    b) BACKEND_PORTS="$OPTARG" ;;
+    T) PROXY_TARGETS="$OPTARG" ;;
     h) usage ;;
     *) usage ;;
   esac
 done
+
+# Validate mode
+case "$MODE" in
+  server|proxy|client) ;;
+  *) echo "ERROR: Invalid mode '$MODE'. Must be server, proxy, or client."; exit 1 ;;
+esac
 
 # Validate protocol
 case "$PROTOCOL" in
@@ -85,15 +114,22 @@ if [ -d "${BIN_DIR}/lib" ]; then
 fi
 
 ###############################################################################
-# Verify binaries exist and can execute
+# Verify binaries exist (only check binaries needed for this mode)
 ###############################################################################
-for binary in traffic_client proxy_server content_server; do
+check_binary() {
+  local binary="$1"
   if [ ! -x "${BIN_DIR}/${binary}" ]; then
     echo "ERROR: ${binary} not found at ${BIN_DIR}/${binary}"
     echo "Run: ./benchpress -b ehw install cdn_bench"
     exit 1
   fi
-done
+}
+
+case "$MODE" in
+  server) check_binary content_server ;;
+  proxy)  check_binary proxy_server ;;
+  client) check_binary traffic_client ;;
+esac
 
 ###############################################################################
 # Kill stale processes from previous runs
@@ -114,222 +150,353 @@ done
 ###############################################################################
 # Process management
 ###############################################################################
-CONTENT_PID=""
-PROXY_PID=""
+declare -a BG_PIDS=()
 
 cleanup() {
   echo ""
   echo "Cleaning up processes..."
-  if [ -n "$PROXY_PID" ] && kill -0 "$PROXY_PID" 2>/dev/null; then
-    kill "$PROXY_PID" 2>/dev/null || true
-    wait "$PROXY_PID" 2>/dev/null || true
-  fi
-  if [ -n "$CONTENT_PID" ] && kill -0 "$CONTENT_PID" 2>/dev/null; then
-    kill "$CONTENT_PID" 2>/dev/null || true
-    wait "$CONTENT_PID" 2>/dev/null || true
-  fi
+  for pid in "${BG_PIDS[@]}"; do
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+  # Remove temp files matching our pattern
+  rm -f "${SCRIPT_DIR}"/.content_stderr* "${SCRIPT_DIR}"/.proxy_stderr* "${SCRIPT_DIR}"/.client_stderr*
 }
 
 trap cleanup EXIT ERR
 
 ###############################################################################
-# Print header
+# Helper: wait for port to be listening
 ###############################################################################
-echo "====================================================================="
-echo "CDN Benchmark Execution"
-echo "====================================================================="
-echo ""
-echo "Configuration"
-echo "  Protocol: ${PROTOCOL}"
-echo "  Duration: ${DURATION}"
-echo "  Target RPS: ${TARGET_RPS}"
-echo "  Connections: ${NUM_CONNECTIONS}"
-echo "  Streams Per Connection: ${STREAMS_PER_CONNECTION}"
-echo "  Content Server Port: ${CONTENT_PORT}"
-echo "  Proxy Server Port: ${PROXY_PORT}"
-echo ""
-
-###############################################################################
-# Start content_server
-###############################################################################
-echo "Starting content_server on port ${CONTENT_PORT}..."
-CONTENT_ARGS=(
-  --port="${CONTENT_PORT}"
-)
-if [ -n "$PLAINTEXT_PROTO" ]; then
-  CONTENT_ARGS+=(--plaintext_proto="${PLAINTEXT_PROTO}")
-fi
-
-"${BIN_DIR}/content_server" "${CONTENT_ARGS[@]}" \
-  2>"${SCRIPT_DIR}/.content_stderr" &
-CONTENT_PID=$!
-echo "  content_server PID: ${CONTENT_PID}"
-
-###############################################################################
-# Start proxy_server
-###############################################################################
-echo "Starting proxy_server on port ${PROXY_PORT}..."
-PROXY_ARGS=(
-  --port="${PROXY_PORT}"
-  --backend_servers="::1"
-  --backend_ports="${CONTENT_PORT}"
-  --metrics_summary
-  --metrics_interval=0
-)
-if [ -n "$PLAINTEXT_PROTO" ]; then
-  PROXY_ARGS+=(--plaintext_proto="${PLAINTEXT_PROTO}")
-  PROXY_ARGS+=(--backend_h2)
-fi
-
-"${BIN_DIR}/proxy_server" "${PROXY_ARGS[@]}" \
-  2>"${SCRIPT_DIR}/.proxy_stderr" &
-PROXY_PID=$!
-echo "  proxy_server PID: ${PROXY_PID}"
-
-###############################################################################
-# Wait for servers to be ready
-###############################################################################
-echo ""
-echo "Waiting for servers to start..."
-MAX_WAIT=30
-for port in "${CONTENT_PORT}" "${PROXY_PORT}"; do
-  if [ "$port" = "${CONTENT_PORT}" ]; then
-    SERVER_PID="$CONTENT_PID"
-    SERVER_NAME="content_server"
-    SERVER_STDERR="${SCRIPT_DIR}/.content_stderr"
-  else
-    SERVER_PID="$PROXY_PID"
-    SERVER_NAME="proxy_server"
-    SERVER_STDERR="${SCRIPT_DIR}/.proxy_stderr"
-  fi
-
-  waited=0
-  while ! ss -tlnp 2>/dev/null | grep -q ":${port}\b" ; do
-    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-      echo "ERROR: ${SERVER_NAME} (PID ${SERVER_PID}) exited before listening on port ${port}"
-      if [ -s "$SERVER_STDERR" ]; then
-        echo "--- ${SERVER_NAME} stderr ---"
-        cat "$SERVER_STDERR"
-        echo "--- end stderr ---"
-      fi
-      exit 1
-    fi
+wait_for_port() {
+  local port="$1"
+  local max_wait="${2:-30}"
+  local waited=0
+  while ! ss -tlnp 2>/dev/null | grep -q ":${port} " ; do
     sleep 1
     waited=$((waited + 1))
-    if [ "$waited" -ge "$MAX_WAIT" ]; then
-      echo "ERROR: ${SERVER_NAME} on port ${port} did not start within ${MAX_WAIT}s"
-      if [ -s "$SERVER_STDERR" ]; then
-        echo "--- ${SERVER_NAME} stderr ---"
-        cat "$SERVER_STDERR"
-        echo "--- end stderr ---"
-      fi
+    if [ "$waited" -ge "$max_wait" ]; then
+      echo "ERROR: Server on port ${port} did not start within ${max_wait}s"
       exit 1
     fi
   done
   echo "  Port ${port} is listening (waited ${waited}s)"
-done
-echo ""
+}
 
 ###############################################################################
-# Run traffic_client
+# Helper: start content_server instance
 ###############################################################################
-echo "Starting traffic_client..."
-echo "  Target: ::1:${PROXY_PORT}"
-echo "  Duration: ${DURATION}s, RPS: ${TARGET_RPS}, Connections: ${NUM_CONNECTIONS}"
-echo ""
-
-CLIENT_EXIT_CODE=0
-"${BIN_DIR}/traffic_client" \
-  --target_host="::1" \
-  --target_port="${PROXY_PORT}" \
-  --target_rps="${TARGET_RPS}" \
-  --duration_sec="${DURATION}" \
-  --num_connections="${NUM_CONNECTIONS}" \
-  --streams_per_connection="${STREAMS_PER_CONNECTION}" \
-  2>"${SCRIPT_DIR}/.client_stderr" || CLIENT_EXIT_CODE=$?
-
-echo ""
+start_content_server() {
+  local port="$1"
+  local stderr_file="$2"
+  local args=(
+    --port="${port}"
+  )
+  if [ -n "$PLAINTEXT_PROTO" ]; then
+    args+=(--plaintext_proto="${PLAINTEXT_PROTO}")
+  fi
+  "${BIN_DIR}/content_server" "${args[@]}" 2>"${stderr_file}" &
+  local pid=$!
+  BG_PIDS+=("$pid")
+  echo "  content_server PID: ${pid} (port ${port})"
+}
 
 ###############################################################################
-# Stop servers gracefully
+# Helper: start proxy_server instance
 ###############################################################################
-echo "Stopping servers..."
-cleanup
-
-# Clear PIDs so trap doesn't try to kill again
-PROXY_PID=""
-CONTENT_PID=""
+start_proxy_server() {
+  local port="$1"
+  local backend_servers="$2"
+  local backend_ports="$3"
+  local stderr_file="$4"
+  local args=(
+    --port="${port}"
+    --backend_servers="${backend_servers}"
+    --backend_ports="${backend_ports}"
+    --metrics_summary
+    --metrics_interval=0
+  )
+  if [ -n "$PLAINTEXT_PROTO" ]; then
+    args+=(--backend_h2)
+  fi
+  "${BIN_DIR}/proxy_server" "${args[@]}" 2>"${stderr_file}" &
+  local pid=$!
+  BG_PIDS+=("$pid")
+  echo "  proxy_server PID: ${pid} (port ${port})"
+}
 
 ###############################################################################
-# Parse and output metrics from XLOG stderr
+# Helper: run traffic_client instance
 ###############################################################################
-echo ""
-echo "Client Results"
+run_traffic_client() {
+  local target_host="$1"
+  local target_port="$2"
+  local stderr_file="$3"
+  local exit_code=0
+  "${BIN_DIR}/traffic_client" \
+    --target_host="${target_host}" \
+    --target_port="${target_port}" \
+    --target_rps="${TARGET_RPS}" \
+    --duration_sec="${DURATION}" \
+    --num_connections="${NUM_CONNECTIONS}" \
+    --streams_per_connection="${STREAMS_PER_CONNECTION}" \
+    2>"${stderr_file}" || exit_code=$?
+  return "$exit_code"
+}
 
-# Parse traffic_client stderr for final statistics
-CLIENT_STDERR="${SCRIPT_DIR}/.client_stderr"
-if [ -f "$CLIENT_STDERR" ]; then
-  REQUESTS_SENT=$(grep -oP 'Requests sent: \K[0-9]+' "$CLIENT_STDERR" | tail -1 || echo "0")
-  RESPONSES_RECEIVED=$(grep -oP 'Responses received: \K[0-9]+' "$CLIENT_STDERR" | tail -1 || echo "0")
-  CLIENT_ERRORS=$(grep -oP 'Errors: \K[0-9]+' "$CLIENT_STDERR" | tail -1 || echo "0")
-  CLIENT_RESETS=$(grep -oP 'Resets: \K[0-9]+' "$CLIENT_STDERR" | tail -1 || echo "0")
-  ELAPSED_MS=$(grep -oP 'Elapsed time: \K[0-9]+' "$CLIENT_STDERR" | tail -1 || echo "0")
-  CLIENT_ACTUAL_RPS=$(grep -oP 'Actual RPS: \K[0-9.]+' "$CLIENT_STDERR" | tail -1 || echo "0")
-else
-  REQUESTS_SENT=0
-  RESPONSES_RECEIVED=0
-  CLIENT_ERRORS=0
-  CLIENT_RESETS=0
-  ELAPSED_MS=0
-  CLIENT_ACTUAL_RPS=0
-fi
+###############################################################################
+# Helper: parse client stderr
+###############################################################################
+parse_client_stderr() {
+  local stderr_file="$1"
+  local prefix="${2:-}"
+  if [ -f "$stderr_file" ]; then
+    local requests_sent responses_received errors resets elapsed_ms actual_rps
+    requests_sent=$(grep -oP 'Requests sent: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    responses_received=$(grep -oP 'Responses received: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    errors=$(grep -oP 'Errors: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    resets=$(grep -oP 'Resets: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    elapsed_ms=$(grep -oP 'Elapsed time: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    actual_rps=$(grep -oP 'Actual RPS: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
+    echo "  ${prefix}Requests Sent: ${requests_sent}"
+    echo "  ${prefix}Responses Received: ${responses_received}"
+    echo "  ${prefix}Errors: ${errors}"
+    echo "  ${prefix}Resets: ${resets}"
+    echo "  ${prefix}Elapsed Time ms: ${elapsed_ms}"
+    echo "  ${prefix}Actual RPS: ${actual_rps}"
+  fi
+}
 
-echo "  Requests Sent: ${REQUESTS_SENT}"
-echo "  Responses Received: ${RESPONSES_RECEIVED}"
-echo "  Errors: ${CLIENT_ERRORS}"
-echo "  Resets: ${CLIENT_RESETS}"
-echo "  Elapsed Time ms: ${ELAPSED_MS}"
-echo "  Actual RPS: ${CLIENT_ACTUAL_RPS}"
+###############################################################################
+# Helper: parse proxy stderr
+###############################################################################
+parse_proxy_stderr() {
+  local stderr_file="$1"
+  local prefix="${2:-}"
+  if [ -f "$stderr_file" ]; then
+    local req_recv req_succ req_fail success_rate actual_rps avg_latency backend_latency retries_attempted retries_succeeded
+    req_recv=$(grep -oP 'Requests Received: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    req_succ=$(grep -oP 'Requests Succeeded: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    req_fail=$(grep -oP 'Requests Failed: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    success_rate=$(grep -oP 'Success Rate: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
+    actual_rps=$(grep -oP 'Actual RPS: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
+    avg_latency=$(grep -oP 'Avg Total Latency: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
+    backend_latency=$(grep -oP 'Avg Backend Latency: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
+    retries_attempted=$(grep -oP 'Retries Attempted: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    retries_succeeded=$(grep -oP 'Retries Succeeded: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
+    echo "  ${prefix}Requests Received: ${req_recv}"
+    echo "  ${prefix}Requests Succeeded: ${req_succ}"
+    echo "  ${prefix}Requests Failed: ${req_fail}"
+    echo "  ${prefix}Success Rate: ${success_rate}%"
+    echo "  ${prefix}Actual RPS: ${actual_rps}"
+    echo "  ${prefix}Avg Total Latency ms: ${avg_latency}"
+    echo "  ${prefix}Avg Backend Latency ms: ${backend_latency}"
+    echo "  ${prefix}Retries Attempted: ${retries_attempted}"
+    echo "  ${prefix}Retries Succeeded: ${retries_succeeded}"
+  fi
+}
 
-echo ""
-echo "Proxy Results"
 
-# Parse proxy_server stderr for final statistics
-PROXY_STDERR="${SCRIPT_DIR}/.proxy_stderr"
-if [ -f "$PROXY_STDERR" ]; then
-  PROXY_REQUESTS_RECEIVED=$(grep -oP 'Requests Received: \K[0-9]+' "$PROXY_STDERR" | tail -1 || echo "0")
-  PROXY_REQUESTS_SUCCEEDED=$(grep -oP 'Requests Succeeded: \K[0-9]+' "$PROXY_STDERR" | tail -1 || echo "0")
-  PROXY_REQUESTS_FAILED=$(grep -oP 'Requests Failed: \K[0-9]+' "$PROXY_STDERR" | tail -1 || echo "0")
-  PROXY_SUCCESS_RATE=$(grep -oP 'Success Rate: \K[0-9.]+' "$PROXY_STDERR" | tail -1 || echo "0")
-  PROXY_ACTUAL_RPS=$(grep -oP 'Actual RPS: \K[0-9.]+' "$PROXY_STDERR" | tail -1 || echo "0")
-  PROXY_AVG_LATENCY=$(grep -oP 'Avg Total Latency: \K[0-9.]+' "$PROXY_STDERR" | tail -1 || echo "0")
-  PROXY_BACKEND_LATENCY=$(grep -oP 'Avg Backend Latency: \K[0-9.]+' "$PROXY_STDERR" | tail -1 || echo "0")
-  PROXY_RETRIES_ATTEMPTED=$(grep -oP 'Retries Attempted: \K[0-9]+' "$PROXY_STDERR" | tail -1 || echo "0")
-  PROXY_RETRIES_SUCCEEDED=$(grep -oP 'Retries Succeeded: \K[0-9]+' "$PROXY_STDERR" | tail -1 || echo "0")
-else
-  PROXY_REQUESTS_RECEIVED=0
-  PROXY_REQUESTS_SUCCEEDED=0
-  PROXY_REQUESTS_FAILED=0
-  PROXY_SUCCESS_RATE=0
-  PROXY_ACTUAL_RPS=0
-  PROXY_AVG_LATENCY=0
-  PROXY_BACKEND_LATENCY=0
-  PROXY_RETRIES_ATTEMPTED=0
-  PROXY_RETRIES_SUCCEEDED=0
-fi
+###############################################################################
+# MODE: server — run content_server instance(s)
+###############################################################################
+run_server() {
+  local ports="${LISTEN_PORTS:-${CONTENT_PORT}}"
 
-echo "  Requests Received: ${PROXY_REQUESTS_RECEIVED}"
-echo "  Requests Succeeded: ${PROXY_REQUESTS_SUCCEEDED}"
-echo "  Requests Failed: ${PROXY_REQUESTS_FAILED}"
-echo "  Success Rate: ${PROXY_SUCCESS_RATE}%"
-echo "  Actual RPS: ${PROXY_ACTUAL_RPS}"
-echo "  Avg Total Latency ms: ${PROXY_AVG_LATENCY}"
-echo "  Avg Backend Latency ms: ${PROXY_BACKEND_LATENCY}"
-echo "  Retries Attempted: ${PROXY_RETRIES_ATTEMPTED}"
-echo "  Retries Succeeded: ${PROXY_RETRIES_SUCCEEDED}"
+  echo "====================================================================="
+  echo "CDN Benchmark — Server Role"
+  echo "====================================================================="
+  echo ""
+  echo "Configuration"
+  echo "  Mode: server"
+  echo "  Protocol: ${PROTOCOL}"
+  echo "  Ports: ${ports}"
+  echo ""
 
-echo ""
-echo "Benchmark Execution Complete"
-echo "Exit Code: ${CLIENT_EXIT_CODE}"
+  IFS=',' read -ra PORT_ARRAY <<< "$ports"
+  local idx=0
+  for port in "${PORT_ARRAY[@]}"; do
+    port="$(echo "$port" | tr -d ' ')"
+    echo "Starting content_server instance ${idx} on port ${port}..."
+    start_content_server "${port}" "${SCRIPT_DIR}/.content_stderr_${idx}"
+    idx=$((idx + 1))
+  done
 
-exit "${CLIENT_EXIT_CODE}"
+  echo ""
+  echo "Waiting for servers to start..."
+  for port in "${PORT_ARRAY[@]}"; do
+    port="$(echo "$port" | tr -d ' ')"
+    wait_for_port "${port}"
+  done
+
+  echo ""
+  echo "All content_server instances running. Waiting for termination signal..."
+  echo "Send SIGTERM or SIGINT to stop."
+
+  # Wait for any background process to exit (or signal)
+  wait
+}
+
+###############################################################################
+# MODE: proxy — run proxy_server instance(s)
+###############################################################################
+run_proxy() {
+  local ports="${LISTEN_PORTS:-${PROXY_PORT}}"
+
+  if [ -z "$BACKEND_HOSTS" ]; then
+    echo "ERROR: Proxy mode requires -B <backend_hosts> (comma-separated backend hosts)"
+    exit 1
+  fi
+  if [ -z "$BACKEND_PORTS" ]; then
+    echo "ERROR: Proxy mode requires -b <backend_ports> (comma-separated backend ports)"
+    exit 1
+  fi
+
+  local backend_servers="$BACKEND_HOSTS"
+  local backend_ports="$BACKEND_PORTS"
+
+  echo "====================================================================="
+  echo "CDN Benchmark — Proxy Role"
+  echo "====================================================================="
+  echo ""
+  echo "Configuration"
+  echo "  Mode: proxy"
+  echo "  Protocol: ${PROTOCOL}"
+  echo "  Listen Ports: ${ports}"
+  echo "  Backend Servers: ${backend_servers}"
+  echo "  Backend Ports: ${backend_ports}"
+  echo ""
+
+  IFS=',' read -ra PORT_ARRAY <<< "$ports"
+  local idx=0
+  for port in "${PORT_ARRAY[@]}"; do
+    port="$(echo "$port" | tr -d ' ')"
+    echo "Starting proxy_server instance ${idx} on port ${port}..."
+    start_proxy_server "${port}" "${backend_servers}" "${backend_ports}" \
+      "${SCRIPT_DIR}/.proxy_stderr_${idx}"
+    idx=$((idx + 1))
+  done
+
+  echo ""
+  echo "Waiting for proxy servers to start..."
+  for port in "${PORT_ARRAY[@]}"; do
+    port="$(echo "$port" | tr -d ' ')"
+    wait_for_port "${port}"
+  done
+
+  echo ""
+  echo "All proxy_server instances running. Waiting for termination signal..."
+  echo "Send SIGTERM or SIGINT to stop."
+
+  # Wait for any background process to exit (or signal)
+  wait || true
+
+  # Output proxy metrics for all instances
+  echo ""
+  idx=0
+  for port in "${PORT_ARRAY[@]}"; do
+    echo "Proxy Results (instance ${idx}, port $(echo "$port" | tr -d ' '))"
+    parse_proxy_stderr "${SCRIPT_DIR}/.proxy_stderr_${idx}"
+    echo ""
+    idx=$((idx + 1))
+  done
+
+  echo "Proxy Role Complete"
+}
+
+###############################################################################
+# MODE: client — run traffic_client instance(s)
+###############################################################################
+run_client() {
+  if [ -z "$PROXY_TARGETS" ]; then
+    echo "ERROR: Client mode requires -T <proxy_targets> (comma-separated host:port pairs)"
+    exit 1
+  fi
+
+  echo "====================================================================="
+  echo "CDN Benchmark — Client Role"
+  echo "====================================================================="
+  echo ""
+  echo "Configuration"
+  echo "  Mode: client"
+  echo "  Protocol: ${PROTOCOL}"
+  echo "  Duration: ${DURATION}"
+  echo "  Target RPS: ${TARGET_RPS}"
+  echo "  Connections: ${NUM_CONNECTIONS}"
+  echo "  Streams Per Connection: ${STREAMS_PER_CONNECTION}"
+  echo "  Proxy Targets: ${PROXY_TARGETS}"
+  echo ""
+
+  IFS=',' read -ra TARGET_ARRAY <<< "$PROXY_TARGETS"
+  local num_targets=${#TARGET_ARRAY[@]}
+
+  if [ "$num_targets" -eq 1 ]; then
+    # Single target: run in foreground
+    local entry="${TARGET_ARRAY[0]}"
+    entry="$(echo "$entry" | tr -d ' ')"
+    local host="${entry%:*}"
+    local port="${entry##*:}"
+
+    echo "Starting traffic_client..."
+    echo "  Target: ${host}:${port}"
+    echo "  Duration: ${DURATION}s, RPS: ${TARGET_RPS}, Connections: ${NUM_CONNECTIONS}"
+    echo ""
+
+    CLIENT_EXIT_CODE=0
+    run_traffic_client "${host}" "${port}" "${SCRIPT_DIR}/.client_stderr_0" || CLIENT_EXIT_CODE=$?
+
+    echo ""
+    echo "Client Results"
+    parse_client_stderr "${SCRIPT_DIR}/.client_stderr_0"
+  else
+    # Multiple targets: run each in background, wait for all
+    local idx=0
+    declare -a CLIENT_PIDS=()
+    for entry in "${TARGET_ARRAY[@]}"; do
+      entry="$(echo "$entry" | tr -d ' ')"
+      local host="${entry%:*}"
+      local port="${entry##*:}"
+
+      echo "Starting traffic_client instance ${idx} targeting ${host}:${port}..."
+      run_traffic_client "${host}" "${port}" "${SCRIPT_DIR}/.client_stderr_${idx}" &
+      CLIENT_PIDS+=($!)
+      idx=$((idx + 1))
+    done
+
+    echo ""
+    echo "Waiting for ${num_targets} client instances to complete..."
+
+    CLIENT_EXIT_CODE=0
+    for pid in "${CLIENT_PIDS[@]}"; do
+      wait "$pid" || CLIENT_EXIT_CODE=$?
+    done
+
+    echo ""
+    idx=0
+    for entry in "${TARGET_ARRAY[@]}"; do
+      entry="$(echo "$entry" | tr -d ' ')"
+      echo "Client Results (instance ${idx}, target ${entry})"
+      parse_client_stderr "${SCRIPT_DIR}/.client_stderr_${idx}"
+      echo ""
+      idx=$((idx + 1))
+    done
+  fi
+
+  echo ""
+  echo "Benchmark Execution Complete"
+  echo "Exit Code: ${CLIENT_EXIT_CODE}"
+
+  rm -f "${SCRIPT_DIR}"/.client_stderr*
+  return "$CLIENT_EXIT_CODE"
+}
+
+###############################################################################
+# Dispatch to mode
+###############################################################################
+case "$MODE" in
+  server) run_server ;;
+  proxy)  run_proxy ;;
+  client) run_client ;;
+esac

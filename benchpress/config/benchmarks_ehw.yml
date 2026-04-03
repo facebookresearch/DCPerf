@@ -19,6 +19,10 @@ cdn_bench:
   install_script: ./packages/cdn_bench/install_cdn_bench.sh
   cleanup_script: ./packages/cdn_bench/cleanup_cdn_bench.sh
   path: ./packages/cdn_bench/run.sh
+  roles:
+    - server
+    - proxy
+    - client
   tags:
     scope:
       - app
@@ -28,6 +32,7 @@ cdn_bench:
       - nic
       - memory
       - storage
+
 
 micro_cpu:
   parser : cdn_bench
