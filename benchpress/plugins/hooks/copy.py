@@ -34,6 +34,12 @@ class CopyMoveHook(Hook):
         if not os.path.isdir(dest):
             os.mkdir(dest)
         for src in expanded_sources:
+            dest_path = os.path.join(dest, os.path.basename(src))
+            if os.path.exists(dest_path):
+                if os.path.isdir(dest_path):
+                    shutil.rmtree(dest_path)
+                else:
+                    os.remove(dest_path)
             if os.path.isfile(src) or os.path.islink(src):
                 if move:
                     shutil.move(src, dest)
@@ -43,7 +49,7 @@ class CopyMoveHook(Hook):
                 if move:
                     shutil.move(src, dest)
                 else:
-                    shutil.copytree(src, dest)
+                    shutil.copytree(src, dest_path)
             else:
                 logger.warning(f"Could not copy {src}.")
 

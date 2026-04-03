@@ -139,6 +139,18 @@ class DjangoWorkloadParser(Parser):
                 has_url_hit_percentages = True
                 continue
 
+            # Stop parsing metrics when we reach the end-of-output markers
+            if has_url_hit_percentages and (
+                "Full wrk output" in dw_line or "Full Siege output" in dw_line
+            ):
+                has_url_hit_percentages = False
+                continue
+
+            # Parse the Interpreter line regardless of section
+            if "Interpreter:" in dw_line and ":" in dw_line:
+                self.parse_dw_key_val(dw_line, dw_metrics)
+                continue
+
             if has_url_hit_percentages and ":" in dw_line:
                 self.parse_dw_key_val(dw_line, dw_metrics)
 

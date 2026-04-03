@@ -8,7 +8,7 @@ import optparse
 import os
 import subprocess
 import re
-import numpy as np
+import statistics
 
 # Concurrent worker count
 WORKERS = 185
@@ -347,22 +347,22 @@ def parse_wrk_output(wrk_file):
                     metrics["Shortest transaction"] = float(match.group(1))
 
             elif line.startswith("P50:"):
-                match = re.search(r'([\d.]+)', line)
+                match = re.search(r':\s*([\d.]+)', line)
                 if match:
                     metrics["P50"] = float(match.group(1))
 
             elif line.startswith("P90:"):
-                match = re.search(r'([\d.]+)', line)
+                match = re.search(r':\s*([\d.]+)', line)
                 if match:
                     metrics["P90"] = float(match.group(1))
 
             elif line.startswith("P95:"):
-                match = re.search(r'([\d.]+)', line)
+                match = re.search(r':\s*([\d.]+)', line)
                 if match:
                     metrics["P95"] = float(match.group(1))
 
             elif line.startswith("P99:"):
-                match = re.search(r'([\d.]+)', line)
+                match = re.search(r':\s*([\d.]+)', line)
                 if match:
                     metrics["P99"] = float(match.group(1))
 
@@ -482,8 +482,8 @@ def parse_results(iterations, url_dict, url_target):
         if iterations > 1:
             del base_url_dict[url][second_idx]
             del base_url_dict[url][first_idx]
-        arr = np.array(base_url_dict[url])
-        arr_mean = np.mean(arr) * 100
+        arr = base_url_dict[url]
+        arr_mean = statistics.mean(arr) * 100 if arr else 0
         expected_perc = (base_url_target[url] / total_expected_weight) * 100
         print(padding(url, 3), end="")
         print(str(arr_mean) + "%, expected " + str(expected_perc) + "%")
@@ -497,13 +497,13 @@ def parse_results(iterations, url_dict, url_target):
 
         print(padding(metric, 5), end="")
 
-        arr = np.array(results[metric])
-        arr_mean = np.mean(arr)
+        arr = results[metric]
+        arr_mean = statistics.mean(arr) if arr else -1
         if arr_mean >= 0:
-            if arr_mean == 0:
+            if arr_mean == 0 or len(arr) < 2:
                 arr_rsd = 0
             else:
-                arr_rsd = np.std(arr) / arr_mean
+                arr_rsd = statistics.stdev(arr) / arr_mean
             print(str(arr_mean) + " " + unit_measures[metric], end="")
             print(" ---- RSD " + str(arr_rsd))
         else:

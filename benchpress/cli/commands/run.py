@@ -227,6 +227,10 @@ class RunCommand(BenchpressCommand):
             metrics_dir = os.path.join(
                 get_artifacts_dir(), f"benchmark_metrics_{job.uuid}"
             )
+            # Export metrics dir so benchmark scripts (e.g., run.sh) can write
+            # breakdown.csv directly there, avoiding race conditions when
+            # multiple runs share the same benchmarks/ directory.
+            os.environ["BENCHPRESS_METRICS_DIR"] = metrics_dir
             now = datetime.now()
             date = now.strftime("%Y%m%d_%H%M")
             symlink = job.name + "_timestamp:" + date + "_" + job.uuid

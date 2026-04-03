@@ -10,7 +10,7 @@ SCRIPT_ROOT="$(dirname "$(readlink -f "$0")")"
 BENCHPRESS_ROOT="$(readlink -f "${SCRIPT_ROOT}/../../..")"
 DJANGO_PKG_SRC_ROOT="${BENCHPRESS_ROOT}/packages/django_workload/srcs"
 DJANGO_SERVER_ROOT="$(readlink -f "${SCRIPT_ROOT}/../django-workload/django-workload")"
-CPYTHON_PATH="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build"
+CPYTHON_PATH="${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build"
 CINDER_PATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
 MEMCACHED_PID=
 CASSANDRA_PID=
@@ -142,8 +142,27 @@ cleanup() {
   #   echo "$HAPROXY_PIDS" | xargs -r kill -9 2>/dev/null || true
   # fi
 
-  # Stop memcached
-  [ -n "$MEMCACHED_PID" ] && { echo "Stopping memcached"; kill "$MEMCACHED_PID" 2>/dev/null || true; }
+  # Stop memcached using PID file
+  if [ -f memcached.pid ]; then
+    MEMCACHED_PID="$(cat memcached.pid)"
+    echo "Stopping memcached (PID: $MEMCACHED_PID)"
+    kill "$MEMCACHED_PID" 2>/dev/null || true
+
+    # Wait briefly for graceful shutdown
+    sleep 1
+
+    # Force kill if still running
+    if kill -0 "$MEMCACHED_PID" 2>/dev/null; then
+      echo "Force killing memcached (PID: $MEMCACHED_PID)"
+      kill -9 "$MEMCACHED_PID" 2>/dev/null || true
+    fi
+
+    rm -f memcached.pid
+  elif [ -n "$MEMCACHED_PID" ]; then
+    # Fallback to variable if PID file doesn't exist
+    echo "Stopping memcached (PID: $MEMCACHED_PID)"
+    kill "$MEMCACHED_PID" 2>/dev/null || true
+  fi
 
   # Stop Cassandra using PID file
   if [ -f cassandra.pid ]; then
@@ -185,36 +204,18 @@ check_port_available() {
   local port=$1
   local port_name=$2
 
-  # Check for LISTENING sockets only (TIME_WAIT won't appear here)
-  # With SO_REUSEADDR enabled, TIME_WAIT sockets won't prevent binding
-  if ss -tan | grep -q ":${port} "; then
+  # Only check for LISTENING sockets — use ss -tln (not ss -tan which
+  # also matches TIME_WAIT/CLOSE_WAIT sockets that don't block binding).
+  # With SO_REUSEADDR, TIME_WAIT sockets won't prevent binding.
+  local pid=$(ss -tlnp | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1)
+
+  if [ -n "$pid" ]; then
     echo "ERROR: Port ${port} (${port_name}) has an active LISTENING socket!"
-
-    # Check if there's a process associated with this port
-    local pid=$(ss -tlnp | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1)
-
-    if [ -n "$pid" ]; then
-      echo "ERROR: Process with PID ${pid} is actively listening on port ${port}"
-      echo "Process details:"
-      ps -p "$pid" -o pid,cmd 2>/dev/null || echo "  (Process information unavailable)"
-      echo ""
-      echo "To fix this issue:"
-      echo "  1. Kill the process: kill ${pid}"
-      echo "  2. Or choose a different port using -P (base port) or -T (stats port) options"
-    else
-      echo "WARNING: Port ${port} appears to be listening but no process ID found."
-      echo "This is unusual and may indicate a kernel-level issue."
-      echo ""
-      echo "To fix this issue:"
-      echo "  1. Try running the benchmark anyway (SO_REUSEADDR may allow binding)"
-      echo "  2. Or choose a different port using -P (base port) or -T (stats port) options"
-      echo "  3. Or check for zombie processes: ps aux | grep defunct"
-    fi
+    echo "ERROR: Process with PID ${pid} is actively listening on port ${port}"
+    ps -p "$pid" -o pid,cmd 2>/dev/null || true
     return 1
   fi
 
-  # With SO_REUSEADDR enabled, we don't need to check for TIME_WAIT sockets
-  # The kernel will allow us to bind even if old connections are in TIME_WAIT
   return 0
 }
 
@@ -515,15 +516,12 @@ start_django_server() {
   # Export FBTHRIFT_PREFIX for thrift Python bindings
   export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
 
-  # Enable JIT if requested (Cinder on x86 only)
-  if [ "${use_jit}" -gt 0 ] && [ "${interpreter}" = "cinder" ]; then
-    echo "Enabling Cinder JIT..."
-    export PYTHONJIT=1
-    export PYTHONJITWRITEPROFILE=/tmp/cinder-jit.profile
-    export PYTHONJITPROFILEINTERP=1
-    export PYTHONJITPROFILEINTERPPERIOD=10
-    #export PYTHONJITDUMPSTATS=1
-    export PYTHONJITALLSTATICFUNCTIONS=1
+  # Enable JIT if requested (Cinder only)
+  if [ "${use_jit}" -ge 1 ] && [ "${interpreter}" = "cinder" ]; then
+    echo "Enabling Cinder JIT (CinderX)..."
+    export PYTHONJITALL=1
+    export PYTHONJITLOGFILE=/tmp/cinder-jit.log
+    export PYTHONJITDUMPSTATS=1
   fi
 
   # Export FBTHRIFT_PREFIX for thrift Python bindings
@@ -534,6 +532,8 @@ start_django_server() {
   ./django-workload/services/memcached/run-memcached > memcached.log 2>&1 &
 
   MEMCACHED_PID=$!
+  echo "$MEMCACHED_PID" > memcached.pid
+  echo "Started memcached with PID: $MEMCACHED_PID"
 
   # Start django-workload
   # Set the cassandra ip in django config file
@@ -627,6 +627,7 @@ start_client() {
   local server_addr=$5
   local iterations="$6"
   local reps="$7"
+  local server_pid="${8:-}"
 
   # Replace the host in url template to the actual server addr
   CLIENTS_DIR="${SCRIPT_ROOT}/../django-workload/client"
@@ -694,7 +695,15 @@ start_client() {
   echo "Brief warmup delay before starting benchmark..."
   sleep 2
 
+  if [ -n "$server_pid" ]; then
+    log_main_benchmark_start "$BREAKDOWN_FOLDER" "$server_pid"
+  fi
+
   run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "${iterations}" "${reps}"
+
+  if [ -n "$server_pid" ]; then
+    log_main_benchmark_end "$BREAKDOWN_FOLDER" "$server_pid"
+  fi
 }
 
 start_clientserver() {
@@ -742,17 +751,27 @@ start_clientserver() {
   django_server_pid="$server_pid"
 
   log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
-  log_main_benchmark_start "$BREAKDOWN_FOLDER" "$django_server_pid"
 
-  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "127.0.0.1" "${iterations}" "${reps}"
+  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "127.0.0.1" "${iterations}" "${reps}" "${django_server_pid}"
 
-  log_main_benchmark_end "$BREAKDOWN_FOLDER" "$django_server_pid"
   log_postprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
   # Report interpreter type
   echo "Interpreter: ${interpreter}"
 
   log_postprocessing_end "$BREAKDOWN_FOLDER" "$$"
+
+  # Copy breakdown.csv directly to the metrics directory to avoid race
+  # conditions when multiple runs share the same benchmarks/ directory.
+  # BENCHPRESS_METRICS_DIR is set by benchpress before launching run.sh.
+  if [ -n "${BENCHPRESS_METRICS_DIR:-}" ]; then
+    local breakdown_src="${BREAKDOWN_FOLDER}/breakdown.csv"
+    if [ -f "$breakdown_src" ]; then
+      mkdir -p "$BENCHPRESS_METRICS_DIR"
+      cp "$breakdown_src" "$BENCHPRESS_METRICS_DIR/"
+      echo "Copied breakdown.csv to ${BENCHPRESS_METRICS_DIR}/"
+    fi
+  fi
 }
 
 main() {
