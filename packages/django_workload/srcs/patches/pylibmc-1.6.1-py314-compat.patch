@@ -1,0 +1,99 @@
+diff --git a/setup.py b/setup.py
+index 9bea257..84b3aeb 100644
+--- a/setup.py
++++ b/setup.py
+@@ -1,11 +1,6 @@
+-from __future__ import print_function
+ import os
+ import sys
+-from distutils.core import setup, Extension
+-
+-# Need an 'open' function that supports the 'encoding' argument:
+-if sys.version_info[0] < 3:
+-    from codecs import open
++from setuptools import setup, Extension
+ 
+ ## Command-line argument parsing
+ 
+@@ -95,9 +90,9 @@ if cmd == "gen-setup":
+         s.write(line + "\n")
+     sys.exit(0)
+ 
+-with open("README.rst", "U", encoding="utf-8") as r:
++with open("README.rst", encoding="utf-8") as r:
+     readme_text = r.read()
+-with open("src/pylibmc-version.h", "U", encoding="utf-8") as r:
++with open("src/pylibmc-version.h", encoding="utf-8") as r:
+     version = r.read().strip().split("\"")[1]
+ 
+ setup(
+diff --git a/src/_pylibmcmodule.c b/src/_pylibmcmodule.c
+index 5324d1d..077f6e2 100644
+--- a/src/_pylibmcmodule.c
++++ b/src/_pylibmcmodule.c
+@@ -1714,7 +1714,7 @@ memcached_return pylibmc_memcached_fetch_multi(memcached_st *mc, pylibmc_mget_re
+ 
+     /* Allocate as much as could possibly be needed, and an extra because of
+      * how libmemcached signals EOF. */
+-    *req.results = PyMem_New(memcached_result_st, req.nkeys + 1);
++    *req.results = PyMem_RawNew(memcached_result_st, req.nkeys + 1);
+ 
+     /* Note that nresults will not be off by one with this because the loops
+      * runs a half pass after the last key has been fetched, thus bumping the
+@@ -1742,7 +1742,7 @@ memcached_return pylibmc_memcached_fetch_multi(memcached_st *mc, pylibmc_mget_re
+                 memcached_result_free(*req.results + *req.nresults);
+             } while ((*req.nresults)--);
+ 
+-            PyMem_Free(*req.results);
++            PyMem_RawDel(*req.results);
+             *req.results = NULL;
+             *req.nresults = 0;
+ 
+@@ -1942,7 +1942,7 @@ memory_cleanup:
+         for (i = 0; i < nresults && results != NULL; i++) {
+             memcached_result_free(results + i);
+         }
+-        PyMem_Free(results);
++        PyMem_RawDel(results);
+     }
+ 
+     /* Not INCREFing because the only two outcomes are NULL and a new dict.
+@@ -2167,7 +2167,7 @@ static PyObject *PylibMC_Client_set_behaviors(PylibMC_Client *self,
+     char *key;
+ 
+     for (b = PylibMC_behaviors; b->name != NULL; b++) {
+-        if (!PyMapping_HasKeyString(behaviors, b->name)) {
++        if (behaviors == Py_None || !PyMapping_HasKeyString(behaviors, b->name)) {
+             continue;
+         } else if ((py_v = PyMapping_GetItemString(behaviors, b->name)) == NULL) {
+             goto error;
+@@ -2197,7 +2197,7 @@ static PyObject *PylibMC_Client_set_behaviors(PylibMC_Client *self,
+     }
+ 
+     for (b = PylibMC_callbacks; b->name != NULL; b++) {
+-        if (!PyMapping_HasKeyString(behaviors, b->name)) {
++        if (behaviors == Py_None || !PyMapping_HasKeyString(behaviors, b->name)) {
+             continue;
+         } else if ((py_v = PyMapping_GetItemString(behaviors, b->name)) == NULL) {
+             goto error;
+diff --git a/src/_pylibmcmodule.h b/src/_pylibmcmodule.h
+index cee9772..d28dec6 100644
+--- a/src/_pylibmcmodule.h
++++ b/src/_pylibmcmodule.h
+@@ -52,6 +52,16 @@
+ typedef ssize_t Py_ssize_t;
+ #endif
+ 
++/* Python 3.4+ PyMem_New/PyMem_Free require the GIL. Use Raw variants for
++ * allocations in GIL-free sections (e.g. inside Py_BEGIN_ALLOW_THREADS). */
++#if PY_VERSION_HEX >= 0x03040000
++#  define PyMem_RawNew(type, nelem) ((type *)PyMem_RawMalloc((nelem)*sizeof(type)))
++#  define PyMem_RawDel(ptr) PyMem_RawFree(ptr)
++#else
++#  define PyMem_RawNew PyMem_New
++#  define PyMem_RawDel(ptr) PyMem_Del(ptr)
++#endif
++
+ /* Server types. */
+ #define PYLIBMC_SERVER_TCP   (1 << 0)
+ #define PYLIBMC_SERVER_UDP   (1 << 1)

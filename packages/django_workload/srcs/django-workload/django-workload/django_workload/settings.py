@@ -140,9 +140,12 @@ STATSD_MAXUDPSIZE = 512
 STATSD_IPV6 = False
 
 # Cache configuration
+# Uses ThreadSafePyLibMCCache — one shared pylibmc.Client per worker process,
+# created lazily post-fork via os.getpid(), with a threading.Lock for ASGI
+# thread safety. This avoids both per-thread OOM and pre-fork connection issues.
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.memcached.PyLibMCCache",
+        "BACKEND": "django_workload.cache_backend.FaultTolerantPyLibMCCache",
         "LOCATION": "127.0.0.1:11811",
     }
 }
