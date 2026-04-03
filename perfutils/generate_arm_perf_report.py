@@ -877,6 +877,7 @@ def main(
     df = read_csv(perf_csv_file)
     grouped_df = df.groupby("event_name")
     metrics = [
+        timestamp(grouped_df),
         mips(grouped_df),
         muopps(grouped_df),
         ipc(grouped_df),
