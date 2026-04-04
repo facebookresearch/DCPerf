@@ -795,11 +795,17 @@ def nvidia_scf_mem_read_bw_MBps(grouped_df):
     duration_series = grouped_df.get_group(
         "nvidia_scf_pmu_0/cmem_rd_data/"
     ).counter_runtime
+    pcnt_running_series = grouped_df.get_group("nvidia_scf_pmu_0/cmem_rd_data/").mux
 
     cmem_rd_data_series.index = duration_series.index
+    pcnt_running_series.index = duration_series.index
 
+    # Scale runtime by mux to get full measurement interval duration.
+    # Counter values are auto-scaled by perf stat, but counter_runtime
+    # reflects only the fraction of time the PMU was active.
+    dt_series = duration_series * (100.0 / pcnt_running_series)
     local_mem_read_series = cmem_rd_data_series * 32
-    local_mem_bw_read_series = local_mem_read_series.div(duration_series)
+    local_mem_bw_read_series = local_mem_read_series.div(dt_series)
     return {
         "name": "SCF Local Memory Read Bandwidth (MBps)",
         "series": local_mem_bw_read_series,
@@ -815,10 +821,15 @@ def nvidia_scf_mem_write_bw_MBps(grouped_df):
     duration_series = grouped_df.get_group(
         "nvidia_scf_pmu_0/cmem_wr_total_bytes/"
     ).counter_runtime
+    pcnt_running_series = grouped_df.get_group(
+        "nvidia_scf_pmu_0/cmem_wr_total_bytes/"
+    ).mux
 
     cmem_wr_bytes_series.index = duration_series.index
+    pcnt_running_series.index = duration_series.index
 
-    local_mem_bw_write_series = cmem_wr_bytes_series.div(duration_series)
+    dt_series = duration_series * (100.0 / pcnt_running_series)
+    local_mem_bw_write_series = cmem_wr_bytes_series.div(dt_series)
     return {
         "name": "SCF Local Memory Write Bandwidth (MBps)",
         "series": local_mem_bw_write_series,
@@ -838,14 +849,19 @@ def nvidia_scf_mem_latency_ns(grouped_df):
     duration_series = grouped_df.get_group(
         "nvidia_scf_pmu_0/cmem_rd_outstanding/"
     ).counter_runtime
+    pcnt_running_series = grouped_df.get_group(
+        "nvidia_scf_pmu_0/cmem_rd_outstanding/"
+    ).mux
 
     cmem_rd_outstanding_series.index = sfc_cycles_series.index
     cmem_rd_access_series.index = sfc_cycles_series.index
     duration_series.index = sfc_cycles_series.index
+    pcnt_running_series.index = sfc_cycles_series.index
 
+    dt_series = duration_series * (100.0 / pcnt_running_series)
     local_mem_read_lat_ns_series = (
         cmem_rd_outstanding_series.div(cmem_rd_access_series)
-    ) / (sfc_cycles_series.div(duration_series))
+    ) / (sfc_cycles_series.div(dt_series))
     return {
         "name": "SCF Local Memory Read Latency (nsecs)",
         "series": local_mem_read_lat_ns_series,
