@@ -39,7 +39,20 @@ echo "====================================================================="
 apt install -y memcached libmemcached-dev zlib1g-dev screen \
     python3 python3.10-dev python3.10-venv rpm libffi-dev \
     libssl-dev libcrypt-dev haproxy libxxhash-dev \
-    perl liburing-dev ninja-build clang libev4 libev-dev
+    perl liburing-dev ninja-build libev4 libev-dev cmake \
+    software-properties-common
+
+# Install Clang 17 for CinderX compatibility
+# CinderX requires GCC 13+ or Clang 15+ for C23 attribute support ([[clang::always_inline]])
+# Ubuntu 22.04's default Clang 14 doesn't support this, so we install Clang 17 from LLVM repos
+wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+add-apt-repository -y "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-17 main"
+apt update
+apt install -y clang-17
+
+# Set Clang 17 as the default clang
+update-alternatives --install /usr/bin/clang clang /usr/bin/clang-17 100
+update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-17 100
 
 echo "System dependencies installed successfully"
 
