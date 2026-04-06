@@ -31,6 +31,8 @@ class CDNBenchParser(Parser):
             self._parse_flash_metrics(stdout, metrics)
         elif stdout[0].strip() == "CPU":
             self._parse_cpu_metrics(stdout, metrics)
+        elif stdout[0].strip() == "CDN":
+            self._parse_cdn_metrics(stdout, metrics)
         return metrics
 
     def _parse_mem_metrics(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
@@ -832,3 +834,159 @@ class CDNBenchParser(Parser):
                 match = re.search(r"(\d+)\s+stressors started", line_stripped)
                 if match:
                     metrics["stressors_started"] = int(match.group(1))
+
+    def _parse_cdn_metrics(self, stdout: List[str], metrics: Dict[str, Any]) -> None:
+        """Parse CDN benchmark (foss_revproxy) output.
+
+        Expects structured key-value output from the cdn_bench run.sh script
+        with sections: Configuration, Client Results, Proxy Results.
+
+        Args:
+            stdout: stdout lines from benchmark execution
+            metrics: dictionary to store metrics
+        """
+        current_section: str = ""
+
+        for line in stdout:
+            line = line.strip()
+
+            # Track sections
+            if line == "Configuration":
+                current_section = "config"
+            elif line == "Client Results":
+                current_section = "client"
+            elif line == "Proxy Results":
+                current_section = "proxy"
+            elif line.startswith("Benchmark Execution Complete"):
+                current_section = ""
+
+            # Parse configuration
+            if current_section == "config":
+                if line.startswith("Protocol:"):
+                    metrics["protocol"] = line.split(":", 1)[-1].strip()
+                elif line.startswith("Duration:"):
+                    try:
+                        metrics["duration_sec"] = int(line.split(":", 1)[-1].strip())
+                    except ValueError:
+                        pass
+                elif line.startswith("Target RPS:"):
+                    try:
+                        metrics["target_rps"] = int(line.split(":", 1)[-1].strip())
+                    except ValueError:
+                        pass
+                elif line.startswith("Connections:"):
+                    try:
+                        metrics["num_connections"] = int(line.split(":", 1)[-1].strip())
+                    except ValueError:
+                        pass
+                elif line.startswith("Streams Per Connection:"):
+                    try:
+                        metrics["streams_per_connection"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+
+            # Parse client results
+            elif current_section == "client":
+                if line.startswith("Requests Sent:"):
+                    try:
+                        metrics["client_requests_sent"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Responses Received:"):
+                    try:
+                        metrics["client_responses_received"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Errors:"):
+                    try:
+                        metrics["client_errors"] = int(line.split(":", 1)[-1].strip())
+                    except ValueError:
+                        pass
+                elif line.startswith("Resets:"):
+                    try:
+                        metrics["client_resets"] = int(line.split(":", 1)[-1].strip())
+                    except ValueError:
+                        pass
+                elif line.startswith("Elapsed Time ms:"):
+                    try:
+                        metrics["client_elapsed_ms"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Actual RPS:"):
+                    try:
+                        metrics["client_actual_rps"] = float(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+
+            # Parse proxy results
+            elif current_section == "proxy":
+                if line.startswith("Requests Received:"):
+                    try:
+                        metrics["proxy_requests_received"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Requests Succeeded:"):
+                    try:
+                        metrics["proxy_requests_succeeded"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Requests Failed:"):
+                    try:
+                        metrics["proxy_requests_failed"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Success Rate:"):
+                    match = re.search(r"([\d.]+)", line.split(":", 1)[-1])
+                    if match:
+                        metrics["proxy_success_rate_pct"] = float(match.group(1))
+                elif line.startswith("Actual RPS:"):
+                    try:
+                        metrics["proxy_actual_rps"] = float(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Avg Total Latency ms:"):
+                    try:
+                        metrics["proxy_avg_latency_ms"] = float(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Avg Backend Latency ms:"):
+                    try:
+                        metrics["proxy_avg_backend_latency_ms"] = float(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Retries Attempted:"):
+                    try:
+                        metrics["proxy_retries_attempted"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
+                elif line.startswith("Retries Succeeded:"):
+                    try:
+                        metrics["proxy_retries_succeeded"] = int(
+                            line.split(":", 1)[-1].strip()
+                        )
+                    except ValueError:
+                        pass
