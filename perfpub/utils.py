@@ -29,6 +29,7 @@ TIMESTAMP_COLUMN_MAP = {
     "amd-zen4-perf-collector-timeseries.csv": ("Timestamp_Secs", "relative_secs"),
     "amd-zen5-perf-collector-timeseries.csv": ("Timestamp_Secs", "relative_secs"),
     "nv-perf-collector-timeseries.csv": ("Timestamp_Secs", "relative_secs"),
+    "nv3-perf-collector-timeseries.csv": ("Timestamp_Secs", "relative_secs"),
     "arm-perf-collector-transposed.csv": ("time", "relative_secs"),
     "topdown-intel.sys.csv": ("TS", "epoch_secs"),
 }
@@ -575,6 +576,21 @@ def read_arm_perf_collector(
     )
 
 
+def read_neoversev3_perf_collector(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None, bm_epoch=None
+):
+    return sample_avg_from_csv(
+        "nv3-perf-collector-timeseries.csv",
+        interval,
+        last_secs,
+        skip_last_secs,
+        exclude_columns=("index", "Timestamp_Secs"),
+        start_time=start_time,
+        end_time=end_time,
+        bm_epoch=bm_epoch,
+    )
+
+
 def read_intel_perfspect(
     interval, last_secs, skip_last_secs, start_time=None, end_time=None, bm_epoch=None
 ):
@@ -817,6 +833,10 @@ def process_metrics(
         "metric_TMA_Retiring(%)": "retiring",
         "Topdown Level 1/Bad Speculation": "bad_speculation",
         "metric_TMA_Bad_Speculation(%)": "bad_speculation",
+        "TopDown bad Speculation %": "bad_speculation",
+        "TopDown Bad Speculation %": "bad_speculation",
+        "L1 iCache MPKI": "L1_icache_mpki",
+        "L1 dCache MPKI": "L1_dcache_mpki",
         "L2 Code MPKI": "L2_code_mpki",
         "metric_L2 demand code MPI": "L2_code_mpki",
         "L2 Data MPKI": "L2_data_mpki",
@@ -890,6 +910,19 @@ def process_metrics(
         if key in Map:
             db_fields[f"{Map[key]}"] = value
     res += arm_perf_collector
+    nv3_perf_collector = read_neoversev3_perf_collector(
+        args.interval,
+        args.last_secs,
+        args.skip_last_secs,
+        start_time,
+        end_time,
+        bm_epoch,
+    )
+    for line in nv3_perf_collector.splitlines():
+        key, value = line.split(",")
+        if key in Map:
+            db_fields[f"{Map[key]}"] = value
+    res += nv3_perf_collector
     intel_perfspect = read_intel_perfspect(
         args.interval,
         args.last_secs,

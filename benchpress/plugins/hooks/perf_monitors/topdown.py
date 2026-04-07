@@ -624,6 +624,20 @@ class NVPerfUtil(BasePerfUtil):
         super(NVPerfUtil, self).run()
 
 
+class NeoVerseV3PerfUtil(BasePerfUtil):
+    def __init__(self, interval, job_uuid, **kwargs):
+        super(NeoVerseV3PerfUtil, self).__init__(
+            interval,
+            job_uuid,
+            "nv3-perf-collector",
+            perf_collect_script_name="collect_neoversev3_perf_counters.sh",
+            perf_postproc_script_name="generate_arm_neoversev3_perf_report.py",
+        )
+
+    def run(self):
+        super(NeoVerseV3PerfUtil, self).run()
+
+
 class DummyPerfUtil:
     def __init__(self, interval, job_uuid, **kwargs):
         pass
@@ -662,6 +676,24 @@ def choose_perfspect():
         return DummyPerfUtil
 
 
+def is_neoversev3():
+    """Detect ARM Neoverse V3 platforms via DMI system-family or system-version."""
+    for dmi_field in ("system-family", "system-version"):
+        try:
+            p = subprocess.Popen(
+                ["dmidecode", "-s", dmi_field],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding="utf-8",
+            )
+            out, _ = p.communicate()
+            if "neoverse-v3" in out.lower() or "neoverse_v3" in out.lower():
+                return True
+        except Exception:
+            pass
+    return False
+
+
 cpuinfo = get_cpuinfo()
 cpu_vendor = get_cpu_vendor(cpuinfo)
 if cpu_vendor == "intel":
@@ -672,6 +704,8 @@ elif cpu_vendor == "arm":
     vendor2 = get_cpu_vendor_from_dmi()
     if vendor2 == "nvidia":
         TopDown = NVPerfUtil
+    elif is_neoversev3():
+        TopDown = NeoVerseV3PerfUtil
     else:
         TopDown = ARMPerfUtil
 else:
