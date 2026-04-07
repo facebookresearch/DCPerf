@@ -11,6 +11,7 @@ BASELINES = {
     "mediawiki": 1280.0,
     "sparkbench": 4.0,
     "video_transcode_svt": 11.2,
+    "video_transcode_svt_mpx": 86.12,
 }
 
 JOB_TO_BM = {
@@ -25,6 +26,8 @@ JOB_TO_BM = {
     "tao_bench_custom": "taobench",
     "tao_bench_autoscale": "taobench",
     "video_transcode_bench_svt": "video_transcode_svt",
+    "video_transcode_bench_svt_timed": "video_transcode_svt_mpx",
+    "video_transcode_bench_svt_timed_mini": "video_transcode_svt_mpx",
 }
 
 
@@ -47,6 +50,8 @@ def get_raw_perf_metric(job_name, metrics):
             return 3600.0 / float(metrics["execution_time_test_93586"])
         elif JOB_TO_BM[job_name] == "video_transcode_svt":
             return float(metrics["throughput_all_levels_hmean_MBps"])
+        elif JOB_TO_BM[job_name] == "video_transcode_svt_mpx":
+            return float(metrics["throughput_all_levels_hmean_MPxps"])
         else:
             return None
     except KeyError:

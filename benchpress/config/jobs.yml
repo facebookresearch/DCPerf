@@ -1375,6 +1375,7 @@
     - '--runtime {runtime}'
     - '--parallelism {parallelism}'
     - '--procs {procs}'
+    - '--max-time {max_time}'
   vars:
     - 'encoder=svt'
     - 'levels=0:0'
@@ -1382,6 +1383,50 @@
     - 'runtime=medium'
     - 'parallelism=1'
     - 'procs=-1'
+    - 'max_time=0'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'   # utilization
+          - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+          - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
+
+- name: video_transcode_bench_svt_timed
+  benchmark: video_transcode_bench
+  description: >
+    Time-based SVT-AV1 video encoding workload. Runs encoding for a fixed
+    duration rather than a fixed amount of work, ensuring core saturation
+    regardless of core count.
+  args:
+    - '--encoder {encoder}'
+    - '--levels {levels}'
+    - '--output {output}'
+    - '--runtime {runtime}'
+    - '--parallelism {parallelism}'
+    - '--procs {procs}'
+    - '--sample-rate {sample_rate}'
+    - '--sampling-seed {sampling_seed}'
+    - '--max-time {max_time}'
+    - '--score-mode {score_mode}'
+    - '--fast-jobs-first'
+  vars:
+    - 'encoder=svt'
+    - 'levels=0:0'
+    - 'output=video_transcode_bench_results.txt'
+    - 'runtime=medium'
+    - 'parallelism=1'
+    - 'procs=-1'
+    - 'sample_rate=1.0'
+    - 'sampling_seed=1000'
+    - 'max_time=600'
+    - 'score_mode=megapixel'
   hooks:
     - hook: cpu-mpstat
       options:
@@ -1430,6 +1475,47 @@
           - 'benchmarks/video_transcode_bench/perf.data'
           - 'benchmarks/video_transcode_bench/breakdown.csv'
 
+
+- name: video_transcode_bench_svt_timed_mini
+  benchmark: video_transcode_bench
+  description: >
+    Time-based mini SVT-AV1 video encoding workload. Uses sampling to reduce
+    the dataset and a time limit to ensure consistent runtime regardless of
+    core count. Suitable for quick validation on high core count machines.
+  execute_cmd_from_file: true
+  args:
+    - '--encoder {encoder}'
+    - '--levels {levels}'
+    - '--output {output}'
+    - '--runtime {runtime}'
+    - '--parallelism {parallelism}'
+    - '--procs {procs}'
+    - '--sample-rate {sample_rate}'
+    - '--sampling-seed {sampling_seed}'
+    - '--sleep-before-perf {sleep_before_perf}'
+    - '--max-time {max_time}'
+    - '--score-mode {score_mode}'
+    - '--fast-jobs-first'
+  vars:
+    - 'encoder=svt'
+    - 'levels=0:0'
+    - 'output=video_transcode_bench_results.txt'
+    - 'runtime=medium'
+    - 'parallelism=1'
+    - 'procs=-1'
+    - 'sample_rate=1'
+    - 'sampling_seed=1000'
+    - 'sleep_before_perf=0'
+    - 'max_time=15'
+    - 'score_mode=megapixel'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+          - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
 
 - name: video_transcode_bench_aom
   benchmark: video_transcode_bench

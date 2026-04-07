@@ -665,7 +665,14 @@ def process_metrics(
             print("No known db metrics found for spark_standalone_remote")
 
     elif "video_transcode_bench" in bm_name:
-        db_fields["metrics"] = bm_metrics["metrics"]["throughput_all_levels_hmean_MBps"]
+        if "throughput_all_levels_hmean_MPxps" in bm_metrics["metrics"]:
+            db_fields["metrics"] = bm_metrics["metrics"][
+                "throughput_all_levels_hmean_MPxps"
+            ]
+        else:
+            db_fields["metrics"] = bm_metrics["metrics"][
+                "throughput_all_levels_hmean_MBps"
+            ]
     db_fields["others"] = f"'{json.dumps(bm_metrics['metrics'])}'"
 
     # This is assigning value to res variable
