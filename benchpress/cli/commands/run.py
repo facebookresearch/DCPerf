@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 from os import path
 
@@ -20,6 +21,17 @@ from benchpress.lib.hook_factory import HookFactory
 from benchpress.lib.job import get_target_jobs
 from benchpress.lib.reporter_factory import ReporterFactory
 from benchpress.lib.util import get_artifacts_dir, verify_install
+
+try:
+    from diagnosis_utils import DiagnosisRecorder  # pyre-ignore[21]
+except ImportError:
+    # When running from source (not via BUCK), diagnosis_utils is under
+    # packages/common/ which isn't on sys.path by default.
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "common"),
+    )
+    from diagnosis_utils import DiagnosisRecorder  # pyre-ignore[21]
 
 from .command import BenchpressCommand
 
@@ -263,6 +275,18 @@ class RunCommand(BenchpressCommand):
                 # Make sure hooks are stopped, even if job failed
                 if not args.disable_hooks:
                     job.stop_hooks()
+
+            # Merge diagnosis records (failures, auto-fixes) into metrics.
+            # Works for all benchmarks that use DiagnosisRecorder.
+            diagnosis_path = os.environ.get("DIAGNOSIS_FILE_PATH", "")
+            if diagnosis_path and os.path.exists(diagnosis_path):
+                try:
+                    recorder = DiagnosisRecorder.get_instance(
+                        shared_file_path=diagnosis_path
+                    )
+                    recorder.merge_failure_to_results(metrics)
+                except Exception as e:
+                    logger.warning("Failed to merge diagnosis records: %s", e)
 
             final_metrics["metrics"] = metrics
             stdout_reporter = ReporterFactory.create("stdout")

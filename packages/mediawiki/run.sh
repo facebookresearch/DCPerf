@@ -68,6 +68,7 @@ Proxy shell script to executes oss-performance benchmark
     -D          enable TC dump with vm-dump-tc
     -C          TC dump interval in seconds (default:600)
     -O          output directory for JIT monitoring files (default: /tmp/jit_study_output)
+    -U <0|1>    set to 1 to automatically raise file descriptor soft limit if too low
 
 Any other options that oss-performance perf.php script could accept can be
 passed in as extra arguments appending two hyphens '--' followed by the
@@ -251,6 +252,10 @@ function main() {
   local temp_dir
   temp_dir=""
 
+  # Pre-flight check options
+  local auto_fix_ulimit
+  auto_fix_ulimit=false
+
   # JIT monitoring options
   enable_jit_monitoring=false
   jit_monitor_port="localhost:9092"
@@ -259,7 +264,7 @@ function main() {
   tc_dump_interval=600
   jit_output_dir="/tmp/jit_study_output"
 
-  while getopts 'H:n:r:L:s:R:t:c:m:pT:jJ:DI:C:O:' OPTION "${@}"; do
+  while getopts 'H:n:r:L:s:R:t:c:m:pT:jJ:DI:C:O:U:' OPTION "${@}"; do
     case "$OPTION" in
       H)
         db_host="${OPTARG}"
@@ -338,6 +343,11 @@ function main() {
         # Make sure the directory exists
         mkdir -p "${jit_output_dir}"
         ;;
+      U)
+        if [[ "${OPTARG}" -ne 0 ]]; then
+          auto_fix_ulimit=true
+        fi
+        ;;
       ?)
         show_help >&2
         exit 1
@@ -359,12 +369,23 @@ function main() {
   readonly disable_perf_record
   readonly use_temp_dir
   readonly temp_dir
+  readonly auto_fix_ulimit
   readonly enable_jit_monitoring
   readonly jit_monitor_port
   readonly jit_monitor_interval
   readonly enable_tc_dump
   readonly tc_dump_interval
   readonly jit_output_dir
+
+  # Run pre-flight checks (FD limits, SELinux, IPv6 hostname)
+  local _preflight_args=(--benchmark mediawiki --benchpress-root "${OLD_CWD}")
+  if [[ "${auto_fix_ulimit}" == "true" ]]; then
+    _preflight_args+=(--auto-fix-ulimit)
+    # Also raise the ulimit in this shell so child processes (HHVM, nginx, wrk)
+    # inherit the higher limit. The Python auto-fix only affects its own process.
+    ulimit -n 100000 2>/dev/null || true
+  fi
+  python3 "${SCRIPT_DIR}/../common/preflight_checks.py" "${_preflight_args[@]}"
 
   # Check if dump_jit_size.py exists when JIT monitoring is enabled
   if [[ "${enable_jit_monitoring}" == "true" ]]; then

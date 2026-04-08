@@ -10,6 +10,7 @@
     - '-nnginx'
     - '-L {load_generator}'
     - '-s {lg_path}'
+    - '-U {auto_fix_ulimit}'
     - '--'
     - '--mediawiki'
     - '--client-duration={duration}'
@@ -22,6 +23,7 @@
     - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
     - 'duration=10m'
     - 'timeout=11m'
+    - 'auto_fix_ulimit=1'
     - 'extra_args='
   hooks:
     - hook: copymove
@@ -40,6 +42,7 @@
     - '-L {load_generator}'
     - '-s {lg_path}'
     - '-T {temp_dir}'
+    - '-U {auto_fix_ulimit}'
     - '-p'
     - '--'
     - '--mediawiki'
@@ -68,6 +71,7 @@
     - 'temp_dir=default_no_temp_dir'
     - 'num_multi_req_warmups=-1' # -1 means the warmup status will define the number of iterations
     - 'load_generator_seed=1000'
+    - 'auto_fix_ulimit=1'
     - 'extra_args='
   hooks:
     - hook: copymove
@@ -86,6 +90,7 @@
     - '-s {lg_path}'
     - '-R{scale_out}'
     - '-c{client_threads}'
+    - '-U {auto_fix_ulimit}'
     - '--'
     - '--mediawiki-mlp'
     - '--client-duration={duration}'
@@ -100,6 +105,7 @@
     - 'client_threads=0'
     - 'duration=10m'
     - 'timeout=11m'
+    - 'auto_fix_ulimit=1'
     - 'extra_args='
   hooks:
     - hook: copymove
@@ -118,6 +124,7 @@
     - '-s {lg_path}'
     - '-R{scale_out}'
     - '-c{client_threads}'
+    - '-U {auto_fix_ulimit}'
     - '--'
     - '--mediawiki-mlp'
     - '--client-duration={duration}'
@@ -133,6 +140,7 @@
     - 'client_threads=0'
     - 'duration=10m'
     - 'timeout=11m'
+    - 'auto_fix_ulimit=1'
     - 'extra_args='
   hooks:
     - hook: copymove
@@ -151,6 +159,7 @@
     - '-s {lg_path}'
     - '-R{scale_out}'
     - '-c{client_threads}'
+    - '-U {auto_fix_ulimit}'
     - '--'
     - '--mediawiki-mem'
     - '--client-duration={duration}'
@@ -165,6 +174,7 @@
     - 'client_threads=0'
     - 'duration=10m'
     - 'timeout=11m'
+    - 'auto_fix_ulimit=1'
     - 'extra_args='
   hooks:
     - hook: copymove

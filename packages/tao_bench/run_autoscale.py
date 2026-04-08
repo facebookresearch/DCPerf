@@ -733,10 +733,6 @@ def run_server(args):
                 # Valid server result
                 results.append(res)
                 print(f"Server {i}: Successfully parsed and added to results")
-    recorder.merge_failure_to_results(
-        results_dict=overall,
-    )
-
     for res in results:
         overall["fast_qps"] += res["fast_qps"]
         overall["slow_qps"] += res["slow_qps"]

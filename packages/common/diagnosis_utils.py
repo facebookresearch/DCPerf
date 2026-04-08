@@ -4,6 +4,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-unsafe
+
 """
 Reusable utilities for recording and reporting diagnosis information across benchmarks.
 
@@ -14,7 +16,9 @@ used by any benchmark in the benchpress suite.
 import fcntl
 import json
 import os
+import resource
 import socket
+import subprocess
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -212,8 +216,8 @@ class DiagnosisRecorder:
         Record a notable auto-fix that was applied and may affect the benchmark score.
 
         Args:
-            benchmark: Name of the benchmark (e.g., "tao_bench")
-            fix_type: Type of fix (e.g., "ephemeral_port_cap")
+            benchmark: Name of the benchmark (e.g., "tao_bench", "mediawiki")
+            fix_type: Type of fix (e.g., "ephemeral_port_cap", "file_descriptor_limit")
             description: Human-readable description of what was fixed and why
             original_value: The original value before the fix
             fixed_value: The value after the fix was applied
@@ -409,6 +413,8 @@ def check_ipv6_hostname(
 
     # Hostname resolves to IPv6. Check if IPv6 connectivity actually works.
     ipv6_works = False
+    ipv6_errno = None
+    ipv6_error_msg = "unknown error"
     try:
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         sock.settimeout(2)
@@ -499,7 +505,7 @@ def check_port_available(
         record_port_unavailable_error(
             port=port,
             benchmark=benchmark,
-            errno=e.errno,
+            errno=e.errno or 98,
             root_dir=root_dir,
         )
 
@@ -539,3 +545,194 @@ def record_port_unavailable_error(
     """
     recorder = DiagnosisRecorder.get_instance(root_dir=root_dir)
     recorder.record_port_unavailable_error(port=port, benchmark=benchmark, errno=errno)
+
+
+def check_file_descriptor_limit(
+    benchmark: str,
+    required_fds: int,
+    auto_fix: bool = False,
+    root_dir: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Check if the file descriptor soft limit is sufficient and optionally auto-fix.
+
+    This is useful for benchmarks that open many sockets, files, or database
+    connections (e.g., mediawiki with HHVM + nginx + wrk, or tao_bench with
+    many memtier client connections).
+
+    Args:
+        benchmark: Name of the benchmark (for diagnosis recording)
+        required_fds: Minimum number of file descriptors needed
+        auto_fix: If True, attempt to raise the soft limit automatically
+        root_dir: Root directory for diagnosis file
+        metadata: Additional metadata to include in diagnosis records
+
+    Returns:
+        True if the FD limit is sufficient (or was auto-fixed), False otherwise
+    """
+    soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+
+    if soft_limit >= required_fds:
+        print(f"File descriptor limit OK: soft={soft_limit}, need={required_fds}")
+        return True
+
+    recorder = DiagnosisRecorder.get_instance(root_dir=root_dir)
+    extra_meta = metadata or {}
+
+    if auto_fix:
+        try:
+            new_limit = required_fds
+            if hard_limit < new_limit:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (new_limit, new_limit))
+            else:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (new_limit, hard_limit))
+            actual_soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+            recorder.record_auto_fix(
+                benchmark=benchmark,
+                fix_type="file_descriptor_limit",
+                description=(
+                    f"Raised file descriptor soft limit from {soft_limit} to "
+                    f"{actual_soft} (need at least {required_fds})."
+                ),
+                original_value=soft_limit,
+                fixed_value=actual_soft,
+                score_impact=(
+                    "None \u2014 raising the file descriptor limit has no "
+                    "performance impact."
+                ),
+                metadata={
+                    "original_soft_limit": soft_limit,
+                    "original_hard_limit": hard_limit,
+                    "new_soft_limit": actual_soft,
+                    "required_fds": required_fds,
+                    **extra_meta,
+                },
+            )
+            return True
+        except (ValueError, OSError) as e:
+            error_msg = (
+                f"File descriptor soft limit ({soft_limit}) is too low "
+                f"(need at least {required_fds}). Auto-fix failed: {e}"
+            )
+            print(f"\nWARNING: {error_msg}\n", file=sys.stderr)
+            recorder.record_failure(
+                benchmark=benchmark,
+                error_type="file_descriptor_limit_low",
+                reason=error_msg,
+                solutions=[
+                    f"Run with higher ulimit: sudo bash -c 'ulimit -n "
+                    f"{required_fds} && ./benchpress_cli.py run ...'",
+                    "Set system-wide limit in /etc/security/limits.conf and reboot",
+                ],
+                metadata={
+                    "soft_limit": soft_limit,
+                    "hard_limit": hard_limit,
+                    "required_fds": required_fds,
+                    "auto_fix_error": str(e),
+                    **extra_meta,
+                },
+            )
+            return False
+
+    # No auto-fix \u2014 record failure and warn
+    error_msg = (
+        f"File descriptor soft limit ({soft_limit}) is too low "
+        f"(need at least {required_fds}). "
+        f"Processes may fail with 'Too many open files'."
+    )
+    print(
+        f"\n{'=' * 80}\n"
+        f"ERROR: File descriptor limit too low\n"
+        f"{'=' * 80}\n\n"
+        f"{error_msg}\n"
+        f"  Current: soft={soft_limit}, hard={hard_limit}\n\n"
+        f"SOLUTIONS:\n"
+        f"  1. Enable auto-fix: add auto_fix_ulimit=1 to job input\n"
+        f"  2. Run with higher ulimit: sudo bash -c 'ulimit -n "
+        f"{required_fds} && ./benchpress_cli.py run ...'\n"
+        f"  3. Set in /etc/security/limits.conf and reboot\n"
+        f"\n{'=' * 80}\n",
+        file=sys.stderr,
+    )
+    recorder.record_failure(
+        benchmark=benchmark,
+        error_type="file_descriptor_limit_low",
+        reason=error_msg,
+        solutions=[
+            "Enable auto-fix: add auto_fix_ulimit=1 to job input",
+            f"Run with higher ulimit: sudo bash -c 'ulimit -n "
+            f"{required_fds} && ./benchpress_cli.py run ...'",
+            "Set system-wide limit in /etc/security/limits.conf and reboot",
+        ],
+        metadata={
+            "soft_limit": soft_limit,
+            "hard_limit": hard_limit,
+            "required_fds": required_fds,
+            **extra_meta,
+        },
+    )
+    # Continue anyway so the diagnosis appears in the output JSON
+    return False
+
+
+def check_selinux(
+    benchmark: str,
+    root_dir: Optional[str] = None,
+) -> bool:
+    """
+    Check if SELinux is disabled or permissive.
+
+    SELinux in Enforcing mode can cause segfaults or permission denials for
+    benchmarks that use JIT compilation, custom memory allocators, or bind
+    to non-standard ports.
+
+    Args:
+        benchmark: Name of the benchmark (for diagnosis recording)
+        root_dir: Root directory for diagnosis file
+
+    Returns:
+        True if SELinux is disabled or permissive, False if Enforcing
+    """
+    try:
+        result = subprocess.run(
+            ["getenforce"], capture_output=True, text=True, timeout=5
+        )
+        status = result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # getenforce not found \u2014 SELinux likely not installed
+        print("SELinux check: getenforce not found, assuming SELinux is not installed")
+        return True
+
+    if status in ("Disabled", "Permissive"):
+        print(f"SELinux check OK: {status}")
+        return True
+
+    error_msg = (
+        f"SELinux is set to '{status}'. This may cause segfaults or "
+        f"permission errors during the {benchmark} benchmark."
+    )
+    print(
+        f"\n{'=' * 80}\n"
+        f"ERROR: SELinux is Enforcing\n"
+        f"{'=' * 80}\n\n"
+        f"{error_msg}\n\n"
+        f"SOLUTIONS:\n"
+        f"  1. Disable SELinux temporarily: sudo setenforce 0\n"
+        f"  2. Disable SELinux permanently: edit /etc/selinux/config\n"
+        f"\n{'=' * 80}\n",
+        file=sys.stderr,
+    )
+    recorder = DiagnosisRecorder.get_instance(root_dir=root_dir)
+    recorder.record_failure(
+        benchmark=benchmark,
+        error_type="selinux_enforcing",
+        reason=error_msg,
+        solutions=[
+            "Disable SELinux temporarily: sudo setenforce 0",
+            "Disable SELinux permanently: set SELINUX=disabled in "
+            "/etc/selinux/config and reboot",
+        ],
+        metadata={"selinux_status": status},
+    )
+    return False
