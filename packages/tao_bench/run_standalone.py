@@ -300,38 +300,119 @@ if __name__ == "__main__":
 
     if total_conns > max_conns:
         if args.auto_fix_ports:
-            original_cpt = args.clients_per_thread
-            args.clients_per_thread = max(
-                1, max_conns // (args.num_clients * threads_per_client)
-            )
-            new_total = args.num_clients * threads_per_client * args.clients_per_thread
-            recorder.record_auto_fix(
-                benchmark="tao_bench",
-                fix_type="ephemeral_port_cap",
-                description=(
-                    f"Reduced clients_per_thread from {original_cpt} to "
-                    f"{args.clients_per_thread} because total connections "
-                    f"({total_conns}) would exceed the ephemeral port range "
-                    f"({available_ports} ports). All connections in standalone "
-                    f"mode go through loopback and share the same port pool."
-                ),
-                original_value=original_cpt,
-                fixed_value=args.clients_per_thread,
-                score_impact=(
-                    "Fewer client connections may reduce load on the server, "
-                    "potentially resulting in a lower QPS score compared to "
-                    "systems with a wider ephemeral port range."
-                ),
-                metadata={
-                    "num_clients": args.num_clients,
-                    "threads_per_client": threads_per_client,
-                    "original_total_conns": total_conns,
-                    "fixed_total_conns": new_total,
-                    "available_ports": available_ports,
-                    "port_range": f"{port_low}-{port_high}",
-                },
-            )
-            total_conns = new_total
+            # Calculate the minimum port range needed to support all connections
+            # with a 20% safety margin: required_ports = total_conns / 0.8
+            required_ports = int(total_conns / 0.8)
+            new_port_low = max(1024, 65535 - required_ports)
+            new_port_high = 65535
+            new_range = f"{new_port_low} {new_port_high}"
+            sysctl_cmd = f"sysctl -w net.ipv4.ip_local_port_range='{new_range}'"
+            original_range = f"{port_low} {port_high}"
+
+            # Stage 1: Try to widen the ephemeral port range
+            port_range_widened = False
+            try:
+                subprocess.run(
+                    ["sysctl", "-w", f"net.ipv4.ip_local_port_range={new_range}"],
+                    check=True,
+                    capture_output=True,
+                )
+                port_range_widened = True
+                new_available = new_port_high - new_port_low
+                recorder.record_auto_fix(
+                    benchmark="tao_bench",
+                    fix_type="ephemeral_port_range_widened",
+                    description=(
+                        f"Widened ephemeral port range from '{original_range}' "
+                        f"({available_ports} ports) to '{new_range}' "
+                        f"({new_available} ports). "
+                        f"Total connections needed: {total_conns} "
+                        f"(num_clients={args.num_clients} * "
+                        f"threads_per_client={threads_per_client} * "
+                        f"clients_per_thread={args.clients_per_thread}). "
+                        f"Required ports with 20% margin: {required_ports}. "
+                        f"Command: {sysctl_cmd}"
+                    ),
+                    original_value=original_range,
+                    fixed_value=new_range,
+                    score_impact=(
+                        "Positive: widening the port range allows all "
+                        f"{total_conns} connections to succeed instead of "
+                        f"failing with 'Cannot assign requested address'. "
+                        "Without this fix, either connections would be "
+                        "reduced (lowering QPS) or connection failures "
+                        "would cause errors and lost throughput. With the "
+                        "fix, the benchmark runs at full capacity and the "
+                        "score reflects the system's true performance."
+                    ),
+                    metadata={
+                        "num_clients": args.num_clients,
+                        "threads_per_client": threads_per_client,
+                        "clients_per_thread": args.clients_per_thread,
+                        "total_connections": total_conns,
+                        "original_available_ports": available_ports,
+                        "new_available_ports": new_available,
+                        "original_port_range": original_range,
+                        "new_port_range": new_range,
+                        "sysctl_command": sysctl_cmd,
+                    },
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                widen_error = str(e)
+
+            # Stage 2: If widening failed, fall back to reducing connections
+            if not port_range_widened:
+                original_cpt = args.clients_per_thread
+                args.clients_per_thread = max(
+                    1, max_conns // (args.num_clients * threads_per_client)
+                )
+                new_total = (
+                    args.num_clients * threads_per_client * args.clients_per_thread
+                )
+                recorder.record_auto_fix(
+                    benchmark="tao_bench",
+                    fix_type="ephemeral_port_cap",
+                    description=(
+                        f"Could not widen ephemeral port range "
+                        f"(attempted: {sysctl_cmd}, error: {widen_error}). "
+                        f"Falling back to reducing clients_per_thread from "
+                        f"{original_cpt} to {args.clients_per_thread}. "
+                        f"Original port range: '{original_range}' "
+                        f"({available_ports} ports). "
+                        f"Needed range: '{new_range}' ({required_ports} "
+                        f"ports) to support {total_conns} connections "
+                        f"(num_clients={args.num_clients} * "
+                        f"threads_per_client={threads_per_client} * "
+                        f"clients_per_thread={original_cpt}). "
+                        f"Reduced connections: {new_total}."
+                    ),
+                    original_value=original_cpt,
+                    fixed_value=args.clients_per_thread,
+                    score_impact=(
+                        f"Negative: clients_per_thread was reduced from "
+                        f"{original_cpt} to {args.clients_per_thread} "
+                        f"({100 - int(args.clients_per_thread / original_cpt * 100)}% "
+                        f"fewer connections). This reduces load on the "
+                        f"server, resulting in a lower QPS score compared "
+                        f"to systems with a wider ephemeral port range. "
+                        f"To avoid this penalty, run as root so the port "
+                        f"range can be widened: sudo {sysctl_cmd}"
+                    ),
+                    metadata={
+                        "num_clients": args.num_clients,
+                        "threads_per_client": threads_per_client,
+                        "original_clients_per_thread": original_cpt,
+                        "fixed_clients_per_thread": args.clients_per_thread,
+                        "original_total_conns": total_conns,
+                        "fixed_total_conns": new_total,
+                        "original_available_ports": available_ports,
+                        "original_port_range": original_range,
+                        "attempted_port_range": new_range,
+                        "sysctl_command": sysctl_cmd,
+                        "widen_error": widen_error,
+                    },
+                )
+                total_conns = new_total
         else:
             error_msg = (
                 f"Total client connections ({total_conns}) exceeds the available "
