@@ -120,12 +120,16 @@ class Monitor:
             return ""
 
         csv_text = ""
-        headers = sorted(self.res[0].keys() - {"timestamp"})
+        all_keys = set()
+        for entry in self.res:
+            all_keys.update(entry.keys())
+        all_keys.discard("timestamp")
+        headers = sorted(all_keys)
         csv_text += "index,timestamp," + ",".join(headers) + "\n"
         for i in range(len(self.res)):
-            csv_text += f"{i},{self.res[i]['timestamp']},"
+            csv_text += f"{i},{self.res[i].get('timestamp', '')},"
             for key in headers:
-                csv_text += f"{self.res[i][key]},"
+                csv_text += f"{self.res[i].get(key, '')},"
             csv_text += "\n"
 
         return csv_text
