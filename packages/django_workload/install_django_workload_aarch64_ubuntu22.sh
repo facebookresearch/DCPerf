@@ -251,6 +251,11 @@ fi
 CPYTHON_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build"
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 
+# Register libpython system-wide so subprocesses spawned by
+# setuptools/pip can find it without LD_LIBRARY_PATH being set.
+echo "${CPYTHON_INSTALL_PREFIX}/lib" | tee /etc/ld.so.conf.d/python-bench.conf
+ldconfig
+
 echo "CPython 3.14 built successfully"
 
 # =====================================================================
@@ -451,7 +456,7 @@ fi
 
 # Install CinderX in Cinder virtual environment (already activated)
 cd "${DJANGO_SERVER_ROOT}/cinderx"
-python -m pip install -e .
+python -m pip install --no-build-isolation -e .
 
 # Validate CinderX installation
 echo "Validating CinderX installation..."
@@ -653,8 +658,8 @@ echo ""
 echo "Installing proxygen_binding in venv_cpython..."
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
-"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install pybind11
-"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install -e .
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install pybind11 wheel setuptools
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install --no-build-isolation -e .
 echo "proxygen_binding installed in venv_cpython"
 
 # Build and install in venv_cinder
@@ -662,8 +667,8 @@ echo ""
 echo "Installing proxygen_binding in venv_cinder..."
 export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
 cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
-"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install pybind11
-"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install -e .
+"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install pybind11 wheel setuptools
+"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install --no-build-isolation -e .
 echo "proxygen_binding installed in venv_cinder"
 
 # =====================================================================

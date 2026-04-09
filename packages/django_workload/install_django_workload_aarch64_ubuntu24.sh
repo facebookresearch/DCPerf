@@ -53,6 +53,50 @@ apt install -y memcached libmemcached-dev zlib1g-dev screen \
 
 echo "System dependencies installed successfully"
 
+# =====================================================================
+# Clean up stale libraries from /usr/local that other benchmarks may
+# have installed (e.g. FeedSim installs glog 0.4.0, gflags, libevent,
+# and jemalloc to /usr/local via "make install" without a prefix).
+#
+# These stale libraries cause ABI mismatches: proxygen_binding gets
+# compiled against old headers from /usr/local/include/ but links at
+# runtime against system libraries, resulting in undefined symbol errors
+# (e.g. google::kLogSiteUninitialized from glog, or
+# boost::match_results::maybe_assign from boost).
+#
+# We remove the stale shared libs, headers, cmake configs, and pkgconfig
+# files, then rebuild the linker cache so the system-installed versions
+# from /usr/lib/ and /usr/include/ are used instead.
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Cleaning stale /usr/local libraries from other benchmarks"
+echo "====================================================================="
+
+# glog (FeedSim installs 0.4.0, conflicts with system 0.6.0)
+rm -f /usr/local/lib/libglog.so* 2>/dev/null || true
+rm -rf /usr/local/include/glog 2>/dev/null || true
+rm -rf /usr/local/lib/cmake/glog 2>/dev/null || true
+
+# gflags (FeedSim installs 2.2.2)
+rm -f /usr/local/lib/libgflags*.so* 2>/dev/null || true
+rm -rf /usr/local/include/gflags 2>/dev/null || true
+rm -rf /usr/local/lib/cmake/gflags 2>/dev/null || true
+rm -f /usr/local/lib/pkgconfig/gflags.pc 2>/dev/null || true
+
+# libevent (FeedSim installs 2.1)
+rm -f /usr/local/lib/libevent*.so* /usr/local/lib/libevent*.a /usr/local/lib/libevent*.la 2>/dev/null || true
+rm -f /usr/local/lib/pkgconfig/libevent*.pc 2>/dev/null || true
+
+# jemalloc (FeedSim installs 5.2/5.3)
+rm -f /usr/local/lib/libjemalloc*.so* /usr/local/lib/libjemalloc*.a 2>/dev/null || true
+rm -f /usr/local/lib/pkgconfig/jemalloc.pc 2>/dev/null || true
+
+# Rebuild linker cache so system libraries are resolved correctly
+ldconfig
+
+echo "Stale library cleanup completed"
+
 # Copy django-workload from srcs directory instead of cloning from GitHub
 mkdir -p "${DJANGO_WORKLOAD_ROOT}"
 pushd "${DJANGO_WORKLOAD_ROOT}"
@@ -257,6 +301,11 @@ fi
 CPYTHON_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build"
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 
+# Register libpython3.10.so system-wide so subprocesses spawned by
+# setuptools/pip can find it without LD_LIBRARY_PATH being set.
+echo "${CPYTHON_INSTALL_PREFIX}/lib" | tee /etc/ld.so.conf.d/python310-bench.conf
+ldconfig
+
 echo "CPython 3.10 built successfully"
 
 # =====================================================================
@@ -273,6 +322,12 @@ echo "====================================================================="
 mkdir -p "${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin"
 ln -sf "${CPYTHON_INSTALL_PREFIX}/bin/python3.10" \
     "${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin/python3.10"
+# benchmarks.yml install_markers expect python3.14; create aliases so checks pass
+ln -sf "${CPYTHON_INSTALL_PREFIX}/bin/python3.10" \
+    "${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin/python3.14"
+mkdir -p "${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build/bin"
+ln -sf "${CPYTHON_INSTALL_PREFIX}/bin/python3.10" \
+    "${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build/bin/python3.14"
 
 echo "Cinder skipped (placeholder created for install marker)"
 
@@ -501,8 +556,8 @@ export PROXYGEN_INSTALL_DIR="${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
 echo ""
 echo "Installing proxygen_binding in venv_cpython..."
 cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
-"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install pybind11
-"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install -e .
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install pybind11 wheel setuptools
+"${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install --no-build-isolation -e .
 echo "proxygen_binding installed in venv_cpython"
 
 # =====================================================================

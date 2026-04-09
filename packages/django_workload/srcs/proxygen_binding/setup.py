@@ -162,7 +162,14 @@ print(f"Include directories: {include_dirs}")
 print(f"Library directories: {library_dirs}")
 
 # Prepare compile arguments
-compile_args = ["-std=c++17", "-fPIC", "-g"]
+# GCC searches /usr/local/include *before* /usr/include by default.  Other
+# benchmarks (e.g. FeedSim) may install incompatible library headers there
+# (glog 0.4.0 vs system glog 0.6.0), causing ABI mismatches and undefined-
+# symbol errors at runtime.  Proxygen uses system glog/gflags, so we must
+# ensure the system headers in /usr/include are found first.  Adding an
+# explicit -I/usr/include makes GCC search it before its built-in path list
+# which contains /usr/local/include.
+compile_args = ["-std=c++17", "-fPIC", "-g", "-I/usr/include"]
 if custom_args.enable_debug:
     print("DEBUG MODE ENABLED: Adding -DPROXYGEN_BINDING_DEBUG")
     compile_args.append("-DPROXYGEN_BINDING_DEBUG")
@@ -190,6 +197,7 @@ ext_modules = [
             "boost_filesystem",
             "boost_system",
             "boost_context",
+            "boost_regex",
             "double-conversion",
             "event",
             "ssl",
@@ -216,9 +224,11 @@ ext_modules = [
         extra_link_args=[
             f"-L{library_dirs[0]}",
             "-Wl,-rpath," + str(library_dirs[0]),
-            # Add rpath for Boost libraries from DEPS_DIR
+            # Add rpath for Boost and glog libraries from DEPS_DIR
             f"-L{deps_dir}/lib",
             "-Wl,-rpath," + str(deps_dir / "lib"),
+            f"-L{deps_dir}/lib64",
+            "-Wl,-rpath," + str(deps_dir / "lib64"),
         ],
     ),
 ]
