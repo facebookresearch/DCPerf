@@ -781,7 +781,7 @@ def bad_speculation(grouped_df):
     ) + (br_mis_pred_series * 4 / cycles_series)
 
     return {
-        "name": "TopDown bad Speculation %",
+        "name": "TopDown Bad Speculation %",
         "series": bad_speculation_series,
         "prefix": 100,
     }
