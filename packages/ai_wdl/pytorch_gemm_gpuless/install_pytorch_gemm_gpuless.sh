@@ -124,7 +124,8 @@ setup_miniconda() {
   fi
 
   mkdir -p "${MINICONDA_PREFIX}"
-  wget -q "https://repo.anaconda.com/miniconda/Miniconda3-latest-${PLATFORM_NAME}.sh" -O miniconda.sh
+  # Use curl (wget blocked on some test servers)
+  curl -fsSL "https://repo.anaconda.com/miniconda/Miniconda3-latest-${PLATFORM_NAME}.sh" -o miniconda.sh
   bash miniconda.sh -b -p "${MINICONDA_PREFIX}" -u
   rm -f miniconda.sh
 
@@ -157,10 +158,13 @@ setup_conda_environment() {
 install_pytorch() {
   if $HAS_CUDA_DRIVER; then
     log_info "Installing PyTorch with CUDA support from conda-forge..."
-    # Find the latest CUDA PyTorch build available for this platform
+    # Detect driver's max supported CUDA version via nvidia-smi
+    local driver_cuda
+    driver_cuda=$(nvidia-smi 2>/dev/null | grep "CUDA Version:" | awk '{print $9}' || echo "12.8")
+    log_info "Driver supports CUDA ${driver_cuda}"
     # CONDA_OVERRIDE_CUDA bypasses the __cuda virtual package check
-    CONDA_OVERRIDE_CUDA=13.0 exec_with_retries 3 conda install \
-      -n "${BUILD_ENV}" -c conda-forge -y "pytorch>=2.9=cuda*"
+    CONDA_OVERRIDE_CUDA="${driver_cuda}" exec_with_retries 3 conda install \
+      -n "${BUILD_ENV}" -c conda-forge -y "pytorch>=2.9=cuda*" "cuda-version=${driver_cuda}.*"
 
     log_info "Verifying PyTorch CUDA installation..."
     conda run -n "${BUILD_ENV}" python -c \
@@ -307,13 +311,13 @@ case "$STAGE" in
     exec python "${SCRIPT_DIR}/stage1_benchmark.py" "$@"
     ;;
   stage2)
-    # Check if CUDA driver is available
+    # Stage 2 needs libcuda.so.1 (from real driver or cuda-compat).
+    # On GPU-less machines, mock_cuda provides cuGetExportTable dummy tables
+    # that let cudart initialize without real GPU hardware.
     CUDA_SUPPORT="$(cat "${SCRIPT_DIR}/.cuda_support" 2>/dev/null || echo cpu)"
     if [ "$CUDA_SUPPORT" != "cuda" ]; then
-      echo "ERROR: Stage 2 requires CUDA drivers (libcuda.so.1)."
-      echo "This machine was installed without CUDA support."
-      echo "Stage 2 needs: NVIDIA driver userspace libs (cuda-compat package)."
-      echo "Use stage1 for CPU-only machines."
+      echo "ERROR: Stage 2 requires libcuda.so.1 (install cuda-compat package)."
+      echo "Use stage1 for machines without any CUDA libraries."
       exit 1
     fi
     exec python "${SCRIPT_DIR}/stage2_benchmark.py" "$@"

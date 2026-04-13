@@ -262,7 +262,8 @@ std::optional<void*> swapCallTarget(void* functionAddr, void* newTarget) {
 // --- Function list and mock implementations ---
 // Mirrors Monarch's FORALL_FUNCTIONS macro from D67496828.
 
-#define FORALL_FUNCTIONS(_)      \
+// Core functions — must be direct exports in libcuda.so.1.
+#define FORALL_CORE_FUNCTIONS(_) \
   _(cuGetProcAddress)            \
   _(cuInit)                      \
   _(cuDriverGetVersion)          \
@@ -290,13 +291,48 @@ std::optional<void*> swapCallTarget(void* functionAddr, void* newTarget) {
   _(cuMemUnmap)                  \
   _(cuMemAddressFree)            \
   _(cuMemRetainAllocationHandle) \
-  _(cuMemGetAddressRange)
+  _(cuMemGetAddressRange)        \
+  _(cuDeviceComputeCapability)   \
+  _(cuDeviceGetProperties)       \
+  _(cuGetExportTable)
+
+// Optional functions — may only be available through cuGetProcAddress.
+// Patched lazily when resolved via cuGetProcAddress, or eagerly if
+// found as direct exports.
+#define FORALL_OPTIONAL_FUNCTIONS(_) \
+  _(cuModuleLoadData)                \
+  _(cuModuleLoadDataEx)              \
+  _(cuModuleLoadFatBinary)           \
+  _(cuModuleGetFunction)             \
+  _(cuModuleUnload)                  \
+  _(cuCtxCreate_v2)                  \
+  _(cuCtxGetCurrent)                 \
+  _(cuCtxSetCurrent)                 \
+  _(cuCtxSynchronize)                \
+  _(cuCtxDestroy_v2)                 \
+  _(cuStreamCreate)                  \
+  _(cuStreamCreateWithFlags)         \
+  _(cuStreamCreateWithPriority)      \
+  _(cuStreamSynchronize)             \
+  _(cuStreamDestroy_v2)              \
+  _(cuStreamWaitEvent)               \
+  _(cuStreamGetCaptureInfo)          \
+  _(cuEventCreate)                   \
+  _(cuEventRecord)                   \
+  _(cuEventSynchronize)              \
+  _(cuEventDestroy_v2)               \
+  _(cuEventQuery)
+
+// All functions — used for mock definitions and cuGetProcAddress interception.
+#define FORALL_FUNCTIONS(_) \
+  FORALL_CORE_FUNCTIONS(_)  \
+  FORALL_OPTIONAL_FUNCTIONS(_)
 
 // Each function can have up to MAX_VERSIONS entries in the driver's function
 // table (different entries for different CUDA API versions returned by
 // cuGetProcAddress). We need a separate mock for each version so that
 // RETURN_REAL_IF_UNMOCKED can call back to the correct real function.
-constexpr int MAX_VERSIONS = 4;
+constexpr int MAX_VERSIONS = 8;
 
 #define CREATE_REALS(fn)                     \
   void* real_##fn[MAX_VERSIONS] = {nullptr}; \
@@ -312,10 +348,17 @@ using CUdevice = int;
 using CUmemGenericAllocationHandle = unsigned long long;
 using CUcontext = struct CUctx_st*;
 using CUfunction = struct CUfunc_st*;
+using CUmodule = struct CUmod_st*;
 using CUstream = struct CUstream_st*;
+using CUevent = struct CUevent_st*;
 struct CUlaunchConfig;
 struct CUmemAllocationProp;
 struct CUmemAccessDesc;
+
+// CUuuid — 16-byte GUID used by cuGetExportTable.
+struct CUuuid {
+  char bytes[16];
+};
 
 enum CUpointer_attribute {
   CU_POINTER_ATTRIBUTE_CONTEXT = 1,
@@ -354,9 +397,19 @@ thread_local std::atomic<bool> mockCudaEnabled = false;
 // Each is a template parameterized by version index N, so different
 // driver table entries can call back to the correct real function.
 
+// Tracks whether the real NVIDIA driver initialized successfully.
+// When true, mocked functions call through to the real driver for
+// consistency (GPU machine). When false, everything is fully faked
+// (GPU-less machine with only cuda-compat stub).
+std::atomic<bool> realDriverOK{false};
+
 // GPU-less init mocks: return success with fake device info
 template <int N>
 CUresult p_cuInit(unsigned int flags) {
+  fprintf(
+      stderr,
+      "[mock_cuda] cuInit ENTERED, mock=%d\n",
+      mockCudaEnabled.load() ? 1 : 0);
   RETURN_REAL_IF_UNMOCKED(cuInit, flags);
   return 0; // CUDA_SUCCESS
 }
@@ -364,13 +417,27 @@ CUresult p_cuInit(unsigned int flags) {
 template <int N>
 CUresult p_cuDriverGetVersion(int* version) {
   RETURN_REAL_IF_UNMOCKED(cuDriverGetVersion, version);
-  *version = 13500; // Report high driver version
+  fprintf(stderr, "[mock_cuda] cuDriverGetVersion called\n");
+  if (realDriverOK.load()) {
+    auto r = ((decltype(&p_cuDriverGetVersion<N>))real_cuDriverGetVersion[N])(
+        version);
+    if (r == 0)
+      return 0;
+  }
+  *version = 99999;
   return 0;
 }
 
 template <int N>
 CUresult p_cuDeviceGetCount(int* count) {
   RETURN_REAL_IF_UNMOCKED(cuDeviceGetCount, count);
+  fprintf(stderr, "[mock_cuda] cuDeviceGetCount called\n");
+  if (realDriverOK.load()) {
+    auto r =
+        ((decltype(&p_cuDeviceGetCount<N>))real_cuDeviceGetCount[N])(count);
+    if (r == 0 && *count > 0)
+      return 0;
+  }
   *count = 1;
   return 0;
 }
@@ -378,14 +445,35 @@ CUresult p_cuDeviceGetCount(int* count) {
 template <int N>
 CUresult p_cuDeviceGet(CUdevice* device, int ordinal) {
   RETURN_REAL_IF_UNMOCKED(cuDeviceGet, device, ordinal);
-  *device = 0;
+  if (realDriverOK.load()) {
+    auto r =
+        ((decltype(&p_cuDeviceGet<N>))real_cuDeviceGet[N])(device, ordinal);
+    if (r == 0)
+      return 0;
+  }
+  *device = ordinal;
   return 0;
 }
+
+// Target compute capability for the mock. Set to sm_90 which is widely
+// supported by CUDA 12.x builds. This override is applied even when mock
+// is NOT fully enabled, so that cudart caches sm_90 during CUDA init.
+// This prevents cudaErrorNoKernelImageForDevice on GPUs whose arch is
+// too new for the cuBLAS build (e.g. GB200 sm_100 with CUDA 12.4).
+constexpr int MOCK_CC_MAJOR = 9;
+constexpr int MOCK_CC_MINOR = 0;
 
 template <int N>
 CUresult p_cuDeviceGetAttribute(int* value, int attribute, CUdevice dev) {
   RETURN_REAL_IF_UNMOCKED(cuDeviceGetAttribute, value, attribute, dev);
-  // Return reasonable defaults for common attributes
+  if (realDriverOK.load()) {
+    auto r =
+        ((decltype(&p_cuDeviceGetAttribute<N>))real_cuDeviceGetAttribute[N])(
+            value, attribute, dev);
+    if (r == 0)
+      return 0;
+  }
+  // GPU-less fallback — return reasonable defaults
   switch (attribute) {
     case 1:
       *value = 1024;
@@ -394,19 +482,19 @@ CUresult p_cuDeviceGetAttribute(int* value, int attribute, CUdevice dev) {
       *value = 32;
       break; // WARP_SIZE
     case 21:
-      *value = 9;
+      *value = MOCK_CC_MAJOR;
       break; // COMPUTE_CAPABILITY_MAJOR
     case 22:
-      *value = 0;
+      *value = MOCK_CC_MINOR;
       break; // COMPUTE_CAPABILITY_MINOR
     case 30:
       *value = 132;
       break; // MULTIPROCESSOR_COUNT
     case 75:
-      *value = 9;
+      *value = MOCK_CC_MAJOR;
       break; // COMPUTE_CAPABILITY_MAJOR (alt)
     case 76:
-      *value = 0;
+      *value = MOCK_CC_MINOR;
       break; // COMPUTE_CAPABILITY_MINOR (alt)
     default:
       *value = 0;
@@ -415,9 +503,58 @@ CUresult p_cuDeviceGetAttribute(int* value, int attribute, CUdevice dev) {
   return 0;
 }
 
+// Deprecated function — cudart may use this instead of cuDeviceGetAttribute.
+template <int N>
+CUresult p_cuDeviceComputeCapability(int* major, int* minor, CUdevice dev) {
+  RETURN_REAL_IF_UNMOCKED(cuDeviceComputeCapability, major, minor, dev);
+  if (realDriverOK.load()) {
+    auto r = ((decltype(&p_cuDeviceComputeCapability<N>))
+                  real_cuDeviceComputeCapability[N])(major, minor, dev);
+    if (r == 0)
+      return 0;
+  }
+  *major = MOCK_CC_MAJOR;
+  *minor = MOCK_CC_MINOR;
+  return 0;
+}
+
+// CUdevprop is an old-style device properties struct.
+// We mock the compute capability fields but zero the rest.
+struct CUdevprop {
+  int maxThreadsPerBlock;
+  int maxThreadsDim[3];
+  int maxGridSize[3];
+  int sharedMemPerBlock;
+  int totalConstantMemory;
+  int SIMDWidth;
+  int memPitch;
+  int regsPerBlock;
+  int clockRate;
+  int textureAlign;
+};
+
+template <int N>
+CUresult p_cuDeviceGetProperties(CUdevprop* prop, CUdevice dev) {
+  if (!mockCudaEnabled.load()) {
+    return (
+        (decltype(&p_cuDeviceGetProperties<N>))real_cuDeviceGetProperties[N])(
+        prop, dev);
+  }
+  memset(prop, 0, sizeof(CUdevprop));
+  prop->maxThreadsPerBlock = 1024;
+  prop->SIMDWidth = 32;
+  return 0;
+}
+
 template <int N>
 CUresult p_cuDeviceGetName(char* name, int len, CUdevice dev) {
   RETURN_REAL_IF_UNMOCKED(cuDeviceGetName, name, len, dev);
+  if (realDriverOK.load()) {
+    auto r = ((decltype(&p_cuDeviceGetName<N>))real_cuDeviceGetName[N])(
+        name, len, dev);
+    if (r == 0)
+      return 0;
+  }
   snprintf(name, len, "Mock CUDA Device (GPU-less benchmark)");
   return 0;
 }
@@ -425,6 +562,12 @@ CUresult p_cuDeviceGetName(char* name, int len, CUdevice dev) {
 template <int N>
 CUresult p_cuDeviceTotalMem(size_t* bytes, CUdevice dev) {
   RETURN_REAL_IF_UNMOCKED(cuDeviceTotalMem, bytes, dev);
+  if (realDriverOK.load()) {
+    auto r = ((decltype(&p_cuDeviceTotalMem<N>))real_cuDeviceTotalMem[N])(
+        bytes, dev);
+    if (r == 0)
+      return 0;
+  }
   *bytes = 80ULL * 1024 * 1024 * 1024; // 80 GB
   return 0;
 }
@@ -670,6 +813,385 @@ p_cuMemGetAddressRange(CUdevice** pbase, size_t* psize, CUdevice* dptr) {
   }
 }
 
+// --- Module loading mocks (for cuBLAS/cuDNN init on unsupported GPUs) ---
+
+// Fake module/function handles — non-null sentinels cast from integers.
+static CUmodule fakeModule = reinterpret_cast<CUmodule>(0xDEAD0001);
+static CUfunction fakeFunc = reinterpret_cast<CUfunction>(0xDEAD0002);
+
+template <int N>
+CUresult p_cuModuleLoadData(CUmodule* module, const void* image) {
+  RETURN_REAL_IF_UNMOCKED(cuModuleLoadData, module, image);
+  *module = fakeModule;
+  return 0;
+}
+
+template <int N>
+CUresult p_cuModuleLoadDataEx(
+    CUmodule* module,
+    const void* image,
+    unsigned int numOptions,
+    void* options,
+    void** optionValues) {
+  RETURN_REAL_IF_UNMOCKED(
+      cuModuleLoadDataEx, module, image, numOptions, options, optionValues);
+  *module = fakeModule;
+  return 0;
+}
+
+template <int N>
+CUresult p_cuModuleLoadFatBinary(CUmodule* module, const void* fatCubin) {
+  RETURN_REAL_IF_UNMOCKED(cuModuleLoadFatBinary, module, fatCubin);
+  *module = fakeModule;
+  return 0;
+}
+
+template <int N>
+CUresult
+p_cuModuleGetFunction(CUfunction* hfunc, CUmodule hmod, const char* name) {
+  RETURN_REAL_IF_UNMOCKED(cuModuleGetFunction, hfunc, hmod, name);
+  *hfunc = fakeFunc;
+  return 0;
+}
+
+template <int N>
+CUresult p_cuModuleUnload(CUmodule hmod) {
+  RETURN_REAL_IF_UNMOCKED(cuModuleUnload, hmod);
+  return 0;
+}
+
+// --- Context and stream mocks ---
+// All try real driver first, fall back to fake values on failure.
+// This lets them work on both GPU and GPU-less machines.
+
+// Helper: try real driver function if driver is OK, return 0 if it succeeds.
+#define TRY_REAL(fn, ...)                                        \
+  if (realDriverOK.load() && real_##fn[N]) {                     \
+    auto _r = ((decltype(&p_##fn<N>))real_##fn[N])(__VA_ARGS__); \
+    if (_r == 0)                                                 \
+      return 0;                                                  \
+  }
+
+static CUcontext fakeCtx = reinterpret_cast<CUcontext>(0xDEAD0010);
+static std::atomic<uintptr_t> nextStream{0xDEAD1000};
+static std::atomic<uintptr_t> nextEvent{0xDEAD2000};
+
+template <int N>
+CUresult p_cuCtxCreate_v2(CUcontext* pctx, unsigned int flags, CUdevice dev) {
+  RETURN_REAL_IF_UNMOCKED(cuCtxCreate_v2, pctx, flags, dev);
+  TRY_REAL(cuCtxCreate_v2, pctx, flags, dev);
+  *pctx = fakeCtx;
+  return 0;
+}
+
+template <int N>
+CUresult p_cuCtxGetCurrent(CUcontext* pctx) {
+  RETURN_REAL_IF_UNMOCKED(cuCtxGetCurrent, pctx);
+  TRY_REAL(cuCtxGetCurrent, pctx);
+  *pctx = fakeCtx;
+  return 0;
+}
+
+template <int N>
+CUresult p_cuCtxSetCurrent(CUcontext ctx) {
+  RETURN_REAL_IF_UNMOCKED(cuCtxSetCurrent, ctx);
+  TRY_REAL(cuCtxSetCurrent, ctx);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuCtxSynchronize() {
+  RETURN_REAL_IF_UNMOCKED(cuCtxSynchronize);
+  TRY_REAL(cuCtxSynchronize);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuCtxDestroy_v2(CUcontext ctx) {
+  RETURN_REAL_IF_UNMOCKED(cuCtxDestroy_v2, ctx);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuStreamCreate(CUstream* phStream, unsigned int flags) {
+  RETURN_REAL_IF_UNMOCKED(cuStreamCreate, phStream, flags);
+  TRY_REAL(cuStreamCreate, phStream, flags);
+  *phStream = reinterpret_cast<CUstream>(nextStream.fetch_add(1));
+  return 0;
+}
+
+template <int N>
+CUresult p_cuStreamCreateWithFlags(CUstream* phStream, unsigned int flags) {
+  RETURN_REAL_IF_UNMOCKED(cuStreamCreateWithFlags, phStream, flags);
+  TRY_REAL(cuStreamCreateWithFlags, phStream, flags);
+  *phStream = reinterpret_cast<CUstream>(nextStream.fetch_add(1));
+  return 0;
+}
+
+template <int N>
+CUresult p_cuStreamCreateWithPriority(
+    CUstream* phStream,
+    unsigned int flags,
+    int priority) {
+  RETURN_REAL_IF_UNMOCKED(
+      cuStreamCreateWithPriority, phStream, flags, priority);
+  TRY_REAL(cuStreamCreateWithPriority, phStream, flags, priority);
+  *phStream = reinterpret_cast<CUstream>(nextStream.fetch_add(1));
+  return 0;
+}
+
+template <int N>
+CUresult p_cuStreamSynchronize(CUstream hStream) {
+  RETURN_REAL_IF_UNMOCKED(cuStreamSynchronize, hStream);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuStreamDestroy_v2(CUstream hStream) {
+  RETURN_REAL_IF_UNMOCKED(cuStreamDestroy_v2, hStream);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuStreamWaitEvent(CUstream hStream, CUevent hEvent, unsigned int f) {
+  RETURN_REAL_IF_UNMOCKED(cuStreamWaitEvent, hStream, hEvent, f);
+  return 0;
+}
+
+template <int N>
+CUresult
+p_cuStreamGetCaptureInfo(CUstream hStream, int* captureStatus, uint64_t* id) {
+  RETURN_REAL_IF_UNMOCKED(cuStreamGetCaptureInfo, hStream, captureStatus, id);
+  *captureStatus = 0; // CU_STREAM_CAPTURE_STATUS_NONE
+  if (id) {
+    *id = 0;
+  }
+  return 0;
+}
+
+template <int N>
+CUresult p_cuEventCreate(CUevent* phEvent, unsigned int flags) {
+  RETURN_REAL_IF_UNMOCKED(cuEventCreate, phEvent, flags);
+  *phEvent = reinterpret_cast<CUevent>(nextEvent.fetch_add(1));
+  return 0;
+}
+
+template <int N>
+CUresult p_cuEventRecord(CUevent hEvent, CUstream hStream) {
+  RETURN_REAL_IF_UNMOCKED(cuEventRecord, hEvent, hStream);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuEventSynchronize(CUevent hEvent) {
+  RETURN_REAL_IF_UNMOCKED(cuEventSynchronize, hEvent);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuEventDestroy_v2(CUevent hEvent) {
+  RETURN_REAL_IF_UNMOCKED(cuEventDestroy_v2, hEvent);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuEventQuery(CUevent hEvent) {
+  RETURN_REAL_IF_UNMOCKED(cuEventQuery, hEvent);
+  return 0;
+}
+
+// --- cuGetExportTable mock ---
+//
+// cuGetExportTable is called by cudart during initialization with
+// undocumented 16-byte GUIDs. It returns internal vtable-like structures
+// whose function pointers cudart uses for its own init.
+//
+// On GPU-less machines (or when mock is enabled before CUDA init), the
+// real cuGetExportTable fails. We provide a fallback: a dummy table
+// filled with no-op function stubs that return CUDA_SUCCESS. This lets
+// cudart's init sequence proceed without crashing.
+//
+// The table is sized generously (1024 entries) since we don't know how
+// many function pointers each GUID's table contains. Functions called
+// through the table will return 0 (success) and leave output parameters
+// unmodified.
+
+// Indexed no-op stubs for export table entries. Each stub logs its
+// table+index when called, helping us identify which entries cudart uses.
+// On aarch64, the first 8 args are in x0-x7 regardless of type.
+constexpr size_t EXPORT_TABLE_SIZE = 1024;
+
+static CUresult noop_export_fn(void) {
+  return 0; // CUDA_SUCCESS
+}
+
+// Per-entry logging stubs — each template instantiation is a unique function
+// pointer, so we can track which table entry gets called. The table ID (T)
+// identifies which GUID's table, and the entry index (I) identifies which
+// slot. We log via fprintf and return 0.
+template <int T, int I>
+static CUresult logged_export_fn(
+    void* a0 = nullptr,
+    void* a1 = nullptr,
+    void* a2 = nullptr,
+    void* a3 = nullptr) {
+  fprintf(
+      stderr,
+      "[mock_cuda] EXPORT CALL: table=%d entry=%d args=(%p, %p, %p, %p)\n",
+      T,
+      I,
+      a0,
+      a1,
+      a2,
+      a3);
+  return 0;
+}
+
+// Helper to fill a table with logged stubs for a specific table ID.
+template <int T>
+static void fillLoggedTable(void** table) {
+  // entry[0] is table size
+  table[0] = reinterpret_cast<void*>(static_cast<uintptr_t>(256));
+  // Fill entries 1-31 with unique logged stubs.
+  table[1] = reinterpret_cast<void*>(&logged_export_fn<T, 1>);
+  table[2] = reinterpret_cast<void*>(&logged_export_fn<T, 2>);
+  table[3] = reinterpret_cast<void*>(&logged_export_fn<T, 3>);
+  table[4] = reinterpret_cast<void*>(&logged_export_fn<T, 4>);
+  table[5] = reinterpret_cast<void*>(&logged_export_fn<T, 5>);
+  table[6] = reinterpret_cast<void*>(&logged_export_fn<T, 6>);
+  table[7] = reinterpret_cast<void*>(&logged_export_fn<T, 7>);
+  table[8] = reinterpret_cast<void*>(&logged_export_fn<T, 8>);
+  table[9] = reinterpret_cast<void*>(&logged_export_fn<T, 9>);
+  table[10] = reinterpret_cast<void*>(&logged_export_fn<T, 10>);
+  table[11] = reinterpret_cast<void*>(&logged_export_fn<T, 11>);
+  table[12] = reinterpret_cast<void*>(&logged_export_fn<T, 12>);
+  table[13] = reinterpret_cast<void*>(&logged_export_fn<T, 13>);
+  table[14] = reinterpret_cast<void*>(&logged_export_fn<T, 14>);
+  table[15] = reinterpret_cast<void*>(&logged_export_fn<T, 15>);
+  for (size_t i = 16; i < EXPORT_TABLE_SIZE; i++) {
+    table[i] = reinterpret_cast<void*>(&noop_export_fn);
+  }
+}
+
+// We need multiple no-op stubs with different signatures for functions
+// that cudart calls with output parameters. These return 0 and write
+// reasonable defaults.
+static CUresult noop_export_fn_1ptr(void** out) {
+  if (out) {
+    *out = nullptr;
+  }
+  return 0;
+}
+
+static CUresult noop_export_fn_1int(int* out) {
+  if (out) {
+    *out = 0;
+  }
+  return 0;
+}
+
+static CUresult noop_export_fn_1size(size_t* out) {
+  if (out) {
+    *out = 0;
+  }
+  return 0;
+}
+
+// Per-GUID export table cache.
+static std::mutex exportTableMutex;
+static std::unordered_map<std::string, void*> exportTableCache;
+
+static std::atomic<int> nextTableId{0};
+
+static void* getOrCreateExportTable(const CUuuid* pExportTableId) {
+  std::string key(pExportTableId->bytes, 16);
+  std::lock_guard<std::mutex> guard(exportTableMutex);
+  auto it = exportTableCache.find(key);
+  if (it != exportTableCache.end()) {
+    return it->second;
+  }
+  auto** table = static_cast<void**>(calloc(EXPORT_TABLE_SIZE, sizeof(void*)));
+  int tid = nextTableId.fetch_add(1);
+  // Fill with logged stubs based on table ID.
+  switch (tid) {
+    case 0:
+      fillLoggedTable<0>(table);
+      break;
+    case 1:
+      fillLoggedTable<1>(table);
+      break;
+    case 2:
+      fillLoggedTable<2>(table);
+      break;
+    case 3:
+      fillLoggedTable<3>(table);
+      break;
+    default:
+      // Fallback for additional tables.
+      table[0] = reinterpret_cast<void*>(static_cast<uintptr_t>(256));
+      for (size_t i = 1; i < EXPORT_TABLE_SIZE; i++) {
+        table[i] = reinterpret_cast<void*>(&noop_export_fn);
+      }
+      break;
+  }
+  exportTableCache[key] = static_cast<void*>(table);
+  return static_cast<void*>(table);
+}
+
+template <int N>
+CUresult p_cuGetExportTable(
+    const void** ppExportTable,
+    const CUuuid* pExportTableId) {
+  if (!mockCudaEnabled.load()) {
+    return ((decltype(&p_cuGetExportTable<N>))real_cuGetExportTable[N])(
+        ppExportTable, pExportTableId);
+  }
+  // Log the GUID for debugging.
+  const auto* b = reinterpret_cast<const unsigned char*>(pExportTableId->bytes);
+  fprintf(
+      stderr,
+      "[mock_cuda] cuGetExportTable GUID: "
+      "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x"
+      " realDriverOK=%d\n",
+      b[0],
+      b[1],
+      b[2],
+      b[3],
+      b[4],
+      b[5],
+      b[6],
+      b[7],
+      b[8],
+      b[9],
+      b[10],
+      b[11],
+      b[12],
+      b[13],
+      b[14],
+      b[15],
+      realDriverOK.load() ? 1 : 0);
+  // Try real driver first — if it succeeds, use real tables.
+  if (realDriverOK.load() && real_cuGetExportTable[N]) {
+    auto r = ((decltype(&p_cuGetExportTable<N>))real_cuGetExportTable[N])(
+        ppExportTable, pExportTableId);
+    fprintf(stderr, "[mock_cuda]   real cuGetExportTable returned %d\n", r);
+    if (r == 0) {
+      // Dump table entries for reverse-engineering.
+      auto** tbl = const_cast<void**>(
+          reinterpret_cast<const void* const*>(*ppExportTable));
+      fprintf(stderr, "[mock_cuda]   table at %p, entries:\n", *ppExportTable);
+      for (int i = 0; i < 32 && tbl[i]; i++) {
+        fprintf(stderr, "[mock_cuda]     [%2d] = %p\n", i, tbl[i]);
+      }
+      return 0;
+    }
+  }
+  // Real driver failed (GPU-less machine) — provide dummy table.
+  *ppExportTable = getOrCreateExportTable(pExportTableId);
+  fprintf(stderr, "[mock_cuda]   using DUMMY table at %p\n", *ppExportTable);
+  return 0;
+}
+
 // --- Patching infrastructure ---
 
 std::unordered_set<void*> patched;
@@ -745,17 +1267,27 @@ CUresult p_cuGetProcAddress(
 // Instantiate the 4 versioned patch arrays for each function.
 #define DEFINE_PATCHES(fn) \
   void* ps_##fn[] = {      \
-      (void*)p_##fn<0>, (void*)p_##fn<1>, (void*)p_##fn<2>, (void*)p_##fn<3>};
+      (void*)p_##fn<0>,    \
+      (void*)p_##fn<1>,    \
+      (void*)p_##fn<2>,    \
+      (void*)p_##fn<3>,    \
+      (void*)p_##fn<4>,    \
+      (void*)p_##fn<5>,    \
+      (void*)p_##fn<6>,    \
+      (void*)p_##fn<7>};
 
 FORALL_FUNCTIONS(DEFINE_PATCHES)
 
 void install() {
+  fprintf(stderr, "[mock_cuda] install() starting...\n");
   void* dl = dlopen("libcuda.so.1", RTLD_NOW);
   if (!dl) {
     throw std::runtime_error(
         std::string("Failed to load libcuda.so.1: ") + dlerror());
   }
+  fprintf(stderr, "[mock_cuda] libcuda.so.1 loaded at %p\n", dl);
 
+// Required functions — must be direct exports in libcuda.so.1.
 #define REDIRECT_FUNCTION(fn)                                            \
   {                                                                      \
     void* sym = dlsym(dl, #fn);                                          \
@@ -765,7 +1297,21 @@ void install() {
     doPatch(#fn, real_##fn, sym, ps_##fn);                               \
   }
 
-  FORALL_FUNCTIONS(REDIRECT_FUNCTION)
+  FORALL_CORE_FUNCTIONS(REDIRECT_FUNCTION)
+
+// Optional functions — may only be available through cuGetProcAddress.
+// If found as direct exports, patch them; otherwise they'll be patched
+// lazily when resolved via cuGetProcAddress.
+#define TRY_REDIRECT_FUNCTION(fn)            \
+  {                                          \
+    void* sym = dlsym(dl, #fn);              \
+    if (sym) {                               \
+      doPatch(#fn, real_##fn, sym, ps_##fn); \
+    }                                        \
+  }
+
+  FORALL_OPTIONAL_FUNCTIONS(TRY_REDIRECT_FUNCTION)
+  fprintf(stderr, "[mock_cuda] install() complete — all functions patched\n");
 }
 
 } // namespace

@@ -111,16 +111,19 @@ def run_benchmark(args: argparse.Namespace) -> None:
             delay_timer = nop_timer
 
     with mock_cuda_guard():
-        # Create CUDA tensors (backed by fake memory under mock)
-        a = torch.randn(m, k, dtype=dtype, device="cuda:0")
-        b = torch.randn(k, n, dtype=dtype, device="cuda:0")
+        # Create CUDA tensors (backed by fake memory under mock).
+        # Use empty() not randn() — randn launches a fill kernel which
+        # triggers cudart's arch check before our driver mock can intercept.
+        # Data content doesn't matter since no real computation occurs.
+        a = torch.empty(m, k, dtype=dtype, device="cuda:0")
+        b = torch.empty(k, n, dtype=dtype, device="cuda:0")
 
         # Warmup
         for _ in range(args.warmups):
             torch.mm(a, b)
             if do_sleep and delay_timer is not None:
                 delay_timer.delay_ns(simulated_latency_ns)
-        torch.cuda.synchronize()  # no-op under mock
+        pass  # torch.cuda.synchronize() omitted — no-op under mock
 
         # Measured phase
         activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
@@ -132,7 +135,7 @@ def run_benchmark(args: argparse.Namespace) -> None:
             torch.mm(a, b)
             if do_sleep and delay_timer is not None:
                 delay_timer.delay_ns(simulated_latency_ns)
-        torch.cuda.synchronize()  # no-op under mock
+        pass  # torch.cuda.synchronize() omitted — no-op under mock
         t1 = time.perf_counter()
         if prof_ctx is not None:
             prof_ctx.__exit__(None, None, None)

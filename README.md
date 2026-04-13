@@ -142,6 +142,12 @@ DCPerf includes specialized benchmarks focusing on AI/ML workloads commonly foun
    <td>Concurrent Data Structures, folly</td>
    <td>Concurrent HashMap Operations, Model Feature Lookup</td>
   </tr>
+  <tr>
+   <td><a href="packages/ai_wdl/pytorch_gemm_gpuless/README.md">PyTorch GEMM GPU-less</a> (AI_WDL) </td>
+   <td>C++, Python</td>
+   <td>PyTorch, cuBLAS, CUDA Driver API</td>
+   <td>Host-side torch.mm dispatch overhead measurement without GPU kernel execution</td>
+  </tr>
 </table>
 
 ### WDLBench
