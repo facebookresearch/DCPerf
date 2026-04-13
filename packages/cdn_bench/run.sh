@@ -157,9 +157,20 @@ cleanup() {
   echo "Cleaning up processes..."
   for pid in "${BG_PIDS[@]}"; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
+      # Send SIGINT first (graceful shutdown — lets proxy flush metrics)
+      kill -INT "$pid" 2>/dev/null || true
     fi
+  done
+  # Give processes time to flush metrics and exit gracefully
+  sleep 2
+  for pid in "${BG_PIDS[@]}"; do
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      # Force kill if still running
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+  for pid in "${BG_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
   done
   # Remove temp files matching our pattern
   rm -f "${SCRIPT_DIR}"/.content_stderr* "${SCRIPT_DIR}"/.proxy_stderr* "${SCRIPT_DIR}"/.client_stderr*
@@ -237,12 +248,12 @@ start_proxy_server() {
     --backend_servers="${backend_servers}"
     --backend_ports="${backend_ports}"
     --metrics_summary
-    --metrics_interval=0
+    --metrics_interval=5
   )
   if [ -n "$PLAINTEXT_PROTO" ]; then
     args+=(--backend_h2)
   fi
-  "${BIN_DIR}/proxy_server" "${args[@]}" 2>"${stderr_file}" &
+  "${BIN_DIR}/proxy_server" "${args[@]}" 2> >(tee -a "${stderr_file}" >&2) &
   local pid=$!
   BG_PIDS+=("$pid")
   echo "  proxy_server PID: ${pid} (port ${port})"
@@ -367,10 +378,19 @@ run_server() {
 
   echo ""
   echo "All content_server instances running. Waiting for termination signal..."
-  echo "Send SIGTERM or SIGINT to stop."
 
-  # Wait for any background process to exit (or signal)
-  wait
+  if [ -n "$DURATION" ] && [ "$DURATION" -gt 0 ] 2>/dev/null; then
+    local grace=20
+    local total=$((DURATION + grace))
+    echo "Auto-terminate in ${total}s (client duration ${DURATION}s + ${grace}s grace)."
+    sleep "$total"
+    echo ""
+    echo "Duration elapsed — terminating backend instances..."
+  else
+    echo "Send SIGTERM or SIGINT to stop."
+    # Wait for any background process to exit (or signal)
+    wait
+  fi
 }
 
 ###############################################################################
@@ -480,10 +500,36 @@ run_proxy() {
 
   echo ""
   echo "All proxy_server instances running. Waiting for termination signal..."
-  echo "Send SIGTERM or SIGINT to stop."
 
-  # Wait for any background process to exit (or signal)
-  wait || true
+  if [ -n "$DURATION" ] && [ "$DURATION" -gt 0 ] 2>/dev/null; then
+    local grace=10
+    local total=$((DURATION + grace))
+    echo "Auto-terminate in ${total}s (client duration ${DURATION}s + ${grace}s grace)."
+    sleep "$total"
+    echo ""
+    echo "Duration elapsed — stopping proxy instances gracefully..."
+    # Send SIGINT to proxy processes so they flush metrics summary
+    for pid in "${BG_PIDS[@]}"; do
+      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill -INT "$pid" 2>/dev/null || true
+      fi
+    done
+    sleep 2
+    for pid in "${BG_PIDS[@]}"; do
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      # Force kill if still running
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+    # Wait for them to exit
+    for pid in "${BG_PIDS[@]}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  else
+    echo "Send SIGTERM or SIGINT to stop."
+    # Wait for any background process to exit (or signal)
+    wait || true
+  fi
 
   # Output proxy metrics for all instances
   echo ""
@@ -524,13 +570,58 @@ run_client() {
   IFS=',' read -ra TARGET_ARRAY <<< "$PROXY_TARGETS"
   local num_targets=${#TARGET_ARRAY[@]}
 
+  # =========================================================================
+  # Sanity check: verify all proxy targets are reachable before sending traffic
+  # =========================================================================
+  echo "====================================================================="
+  echo "Proxy Reachability Check"
+  echo "====================================================================="
+  local all_proxies_ok=true
+  for entry in "${TARGET_ARRAY[@]}"; do
+    entry="$(echo "$entry" | tr -d ' ')"
+    local port="${entry##*:}"
+    local host="${entry%:"$port"}"
+    echo -n "  Checking proxy ${host}:${port} ... "
+    if curl -sf --connect-timeout 5 -o /dev/null "http://[${host}]:${port}/" 2>/dev/null; then
+      echo "-> reachable"
+    elif curl -sf --connect-timeout 5 -o /dev/null --http2-prior-knowledge "http://[${host}]:${port}/" 2>/dev/null; then
+      echo "-> reachable (h2)"
+    else
+      echo "-x-> UNREACHABLE"
+      all_proxies_ok=false
+    fi
+  done
+  echo ""
+
+  if [ "$all_proxies_ok" = false ]; then
+    echo "====================================================================="
+    echo "ERROR: One or more proxy targets are not reachable!"
+    echo "====================================================================="
+    echo ""
+    echo "  Ensure proxy_server is running on the proxy host:"
+    echo "    ./run.sh -m proxy -B <backend_hosts> -b <backend_ports> -P <ports> -p ${PROTOCOL}"
+    echo ""
+    echo "  Then verify from this host:"
+    for entry in "${TARGET_ARRAY[@]}"; do
+      entry="$(echo "$entry" | tr -d ' ')"
+      local port="${entry##*:}"
+      local host="${entry%:"$port"}"
+      echo "    curl -sf http://[${host}]:${port}/"
+    done
+    echo ""
+    echo "Aborting client startup."
+    exit 1
+  fi
+  echo "All proxy targets reachable"
+  echo ""
+
   if [ "$num_targets" -eq 1 ]; then
     # Single target: run in foreground
     local entry="${TARGET_ARRAY[0]}"
     entry="$(echo "$entry" | tr -d ' ')"
     # IPv6-safe host:port parsing — port is the last colon-separated field if numeric
     local port="${entry##*:}"
-    local host="${entry%:$port}"
+    local host="${entry%:"$port"}"
 
     echo "Starting traffic_client..."
     echo "  Target: ${host}:${port}"
@@ -551,7 +642,7 @@ run_client() {
       entry="$(echo "$entry" | tr -d ' ')"
       # IPv6-safe host:port parsing
       local port="${entry##*:}"
-      local host="${entry%:$port}"
+      local host="${entry%:"$port"}"
 
       echo "Starting traffic_client instance ${idx} targeting ${host}:${port}..."
       run_traffic_client "${host}" "${port}" "${SCRIPT_DIR}/.client_stderr_${idx}" &
