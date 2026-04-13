@@ -840,12 +840,24 @@ class CDNBenchParser(Parser):
 
         Expects structured key-value output from the cdn_bench run.sh script
         with sections: Configuration, Client Results, Proxy Results.
+        Accumulates metrics across multiple instances.
 
         Args:
             stdout: stdout lines from benchmark execution
             metrics: dictionary to store metrics
         """
         current_section: str = ""
+        client_instance: int = 0
+        proxy_instance: int = 0
+
+        # Accumulators for cross-instance totals
+        total_client_sent: int = 0
+        total_client_received: int = 0
+        total_client_errors: int = 0
+        total_client_resets: int = 0
+        total_proxy_received: int = 0
+        total_proxy_succeeded: int = 0
+        total_proxy_failed: int = 0
 
         for line in stdout:
             line = line.strip()
@@ -853,10 +865,12 @@ class CDNBenchParser(Parser):
             # Track sections
             if line == "Configuration":
                 current_section = "config"
-            elif line == "Client Results":
+            elif line.startswith("Client Results"):
                 current_section = "client"
-            elif line == "Proxy Results":
+                client_instance += 1
+            elif line.startswith("Proxy Results"):
                 current_section = "proxy"
+                proxy_instance += 1
             elif line.startswith("Benchmark Execution Complete"):
                 current_section = ""
 
@@ -891,39 +905,50 @@ class CDNBenchParser(Parser):
             elif current_section == "client":
                 if line.startswith("Requests Sent:"):
                     try:
-                        metrics["client_requests_sent"] = int(
-                            line.split(":", 1)[-1].strip()
-                        )
+                        val = int(line.split(":", 1)[-1].strip())
+                        metrics[f"client_{client_instance}_requests_sent"] = val
+                        total_client_sent += val
+                        metrics["client_requests_sent"] = total_client_sent
                     except ValueError:
                         pass
                 elif line.startswith("Responses Received:"):
                     try:
-                        metrics["client_responses_received"] = int(
-                            line.split(":", 1)[-1].strip()
-                        )
+                        val = int(line.split(":", 1)[-1].strip())
+                        metrics[f"client_{client_instance}_responses_received"] = val
+                        total_client_received += val
+                        metrics["client_responses_received"] = total_client_received
                     except ValueError:
                         pass
                 elif line.startswith("Errors:"):
                     try:
-                        metrics["client_errors"] = int(line.split(":", 1)[-1].strip())
+                        val = int(line.split(":", 1)[-1].strip())
+                        metrics[f"client_{client_instance}_errors"] = val
+                        total_client_errors += val
+                        metrics["client_errors"] = total_client_errors
                     except ValueError:
                         pass
                 elif line.startswith("Resets:"):
                     try:
-                        metrics["client_resets"] = int(line.split(":", 1)[-1].strip())
+                        val = int(line.split(":", 1)[-1].strip())
+                        metrics[f"client_{client_instance}_resets"] = val
+                        total_client_resets += val
+                        metrics["client_resets"] = total_client_resets
                     except ValueError:
                         pass
                 elif line.startswith("Elapsed Time ms:"):
                     try:
-                        metrics["client_elapsed_ms"] = int(
+                        metrics[f"client_{client_instance}_elapsed_ms"] = int(
                             line.split(":", 1)[-1].strip()
                         )
                     except ValueError:
                         pass
                 elif line.startswith("Actual RPS:"):
                     try:
-                        metrics["client_actual_rps"] = float(
-                            line.split(":", 1)[-1].strip()
+                        val = float(line.split(":", 1)[-1].strip())
+                        metrics[f"client_{client_instance}_actual_rps"] = val
+                        # Accumulate total RPS across instances
+                        metrics["client_actual_rps"] = (
+                            metrics.get("client_actual_rps", 0) + val
                         )
                     except ValueError:
                         pass
@@ -932,61 +957,82 @@ class CDNBenchParser(Parser):
             elif current_section == "proxy":
                 if line.startswith("Requests Received:"):
                     try:
-                        metrics["proxy_requests_received"] = int(
-                            line.split(":", 1)[-1].strip()
-                        )
+                        val = int(line.split(":", 1)[-1].strip())
+                        metrics[f"proxy_{proxy_instance}_requests_received"] = val
+                        total_proxy_received += val
+                        metrics["proxy_requests_received"] = total_proxy_received
                     except ValueError:
                         pass
                 elif line.startswith("Requests Succeeded:"):
                     try:
-                        metrics["proxy_requests_succeeded"] = int(
-                            line.split(":", 1)[-1].strip()
-                        )
+                        val = int(line.split(":", 1)[-1].strip())
+                        metrics[f"proxy_{proxy_instance}_requests_succeeded"] = val
+                        total_proxy_succeeded += val
+                        metrics["proxy_requests_succeeded"] = total_proxy_succeeded
                     except ValueError:
                         pass
                 elif line.startswith("Requests Failed:"):
                     try:
-                        metrics["proxy_requests_failed"] = int(
-                            line.split(":", 1)[-1].strip()
-                        )
+                        val = int(line.split(":", 1)[-1].strip())
+                        metrics[f"proxy_{proxy_instance}_requests_failed"] = val
+                        total_proxy_failed += val
+                        metrics["proxy_requests_failed"] = total_proxy_failed
                     except ValueError:
                         pass
                 elif line.startswith("Success Rate:"):
                     match = re.search(r"([\d.]+)", line.split(":", 1)[-1])
                     if match:
-                        metrics["proxy_success_rate_pct"] = float(match.group(1))
+                        metrics[f"proxy_{proxy_instance}_success_rate_pct"] = float(
+                            match.group(1)
+                        )
                 elif line.startswith("Actual RPS:"):
                     try:
-                        metrics["proxy_actual_rps"] = float(
-                            line.split(":", 1)[-1].strip()
+                        val = float(line.split(":", 1)[-1].strip())
+                        metrics[f"proxy_{proxy_instance}_actual_rps"] = val
+                        metrics["proxy_actual_rps"] = (
+                            metrics.get("proxy_actual_rps", 0) + val
                         )
                     except ValueError:
                         pass
                 elif line.startswith("Avg Total Latency ms:"):
                     try:
-                        metrics["proxy_avg_latency_ms"] = float(
+                        metrics[f"proxy_{proxy_instance}_avg_latency_ms"] = float(
                             line.split(":", 1)[-1].strip()
                         )
                     except ValueError:
                         pass
                 elif line.startswith("Avg Backend Latency ms:"):
                     try:
-                        metrics["proxy_avg_backend_latency_ms"] = float(
-                            line.split(":", 1)[-1].strip()
+                        metrics[f"proxy_{proxy_instance}_avg_backend_latency_ms"] = (
+                            float(line.split(":", 1)[-1].strip())
                         )
                     except ValueError:
                         pass
                 elif line.startswith("Retries Attempted:"):
                     try:
-                        metrics["proxy_retries_attempted"] = int(
+                        metrics[f"proxy_{proxy_instance}_retries_attempted"] = int(
                             line.split(":", 1)[-1].strip()
                         )
                     except ValueError:
                         pass
                 elif line.startswith("Retries Succeeded:"):
                     try:
-                        metrics["proxy_retries_succeeded"] = int(
+                        metrics[f"proxy_{proxy_instance}_retries_succeeded"] = int(
                             line.split(":", 1)[-1].strip()
                         )
                     except ValueError:
                         pass
+
+        # Store instance counts
+        metrics["client_instances"] = client_instance
+        metrics["proxy_instances"] = proxy_instance
+
+        # Compute aggregate success rate
+        if total_proxy_received > 0:
+            metrics["proxy_success_rate_pct"] = (
+                total_proxy_succeeded / total_proxy_received * 100
+            )
+        if total_client_sent > 0:
+            metrics["client_error_rate_pct"] = (
+                total_client_errors / total_client_sent * 100
+            )

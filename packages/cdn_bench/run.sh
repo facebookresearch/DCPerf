@@ -291,7 +291,7 @@ parse_client_stderr() {
     errors=$(grep -oP 'Errors: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
     resets=$(grep -oP 'Resets: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
     elapsed_ms=$(grep -oP 'Elapsed time: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
-    actual_rps=$(grep -oP 'Actual RPS: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
+    actual_rps=$(grep -oP 'Actual RPS: \K[0-9.eE+\-]+' "$stderr_file" | tail -1 || echo "0")
     echo "  ${prefix}Requests Sent: ${requests_sent}"
     echo "  ${prefix}Responses Received: ${responses_received}"
     echo "  ${prefix}Errors: ${errors}"
@@ -312,17 +312,17 @@ parse_proxy_stderr() {
     req_recv=$(grep -oP 'Requests Received: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
     req_succ=$(grep -oP 'Requests Succeeded: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
     req_fail=$(grep -oP 'Requests Failed: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
-    success_rate=$(grep -oP 'Success Rate: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
-    actual_rps=$(grep -oP 'Actual RPS: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
-    avg_latency=$(grep -oP 'Avg Total Latency: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
-    backend_latency=$(grep -oP 'Avg Backend Latency: \K[0-9.]+' "$stderr_file" | tail -1 || echo "0")
+    success_rate=$(grep -oP 'Success Rate: \K[0-9.eE+\-]+' "$stderr_file" | tail -1 || echo "0")
+    actual_rps=$(grep -oP 'Actual RPS: \K[0-9.eE+\-]+' "$stderr_file" | tail -1 || echo "0")
+    avg_latency=$(grep -oP 'Avg Total Latency: \K[0-9.eE+\-]+' "$stderr_file" | tail -1 || echo "0")
+    backend_latency=$(grep -oP 'Avg Backend Latency: \K[0-9.eE+\-]+' "$stderr_file" | tail -1 || echo "0")
     retries_attempted=$(grep -oP 'Retries Attempted: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
     retries_succeeded=$(grep -oP 'Retries Succeeded: \K[0-9]+' "$stderr_file" | tail -1 || echo "0")
     echo "  ${prefix}Requests Received: ${req_recv}"
     echo "  ${prefix}Requests Succeeded: ${req_succ}"
     echo "  ${prefix}Requests Failed: ${req_fail}"
-    echo "  ${prefix}Success Rate: ${success_rate}%"
-    echo "  ${prefix}Actual RPS: ${actual_rps}"
+    echo "  ${prefix}Success Rate: $(printf '%.2f' "$success_rate")%"
+    echo "  ${prefix}Actual RPS: $(printf '%.1f' "$actual_rps")"
     echo "  ${prefix}Avg Total Latency ms: ${avg_latency}"
     echo "  ${prefix}Avg Backend Latency ms: ${backend_latency}"
     echo "  ${prefix}Retries Attempted: ${retries_attempted}"
