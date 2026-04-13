@@ -42,6 +42,7 @@ from .multichase_pingpong import MultichasePingpongParser
 from .multichase_pointer import MultichasePointerParser
 from .nginx_wrk_bench import NginxWrkParser
 from .nnpi_net4 import NNPINet4Parser
+from .pytorch_gemm_gpuless import PytorchGemmGpulessParser
 from .rebatch import RebatchParser
 from .returncode import ReturncodeParser
 from .schbench import SchbenchParser
@@ -116,6 +117,7 @@ def register_parsers(factory):
     factory.register("adsim", AdSimParser)
     factory.register("cdn_bench", CDNBenchParser)
     factory.register("type_conversion", TypeConversionParser)
+    factory.register("pytorch_gemm_gpuless", PytorchGemmGpulessParser)
     factory.register("xsbench", XSBenchParser)
     if not open_source:
         factory.register("hackperf", HackperfParser)

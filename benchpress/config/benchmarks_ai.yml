@@ -65,6 +65,16 @@ adsim:
     - target_latency_msec
     - target_latency_percentile
 
+pytorch_gemm_gpuless:
+  parser: pytorch_gemm_gpuless
+  install_script: ./packages/ai_wdl/pytorch_gemm_gpuless/install_pytorch_gemm_gpuless.sh
+  cleanup_script: ./packages/ai_wdl/pytorch_gemm_gpuless/cleanup_pytorch_gemm_gpuless.sh
+  path: ./benchmarks/ai_wdl/pytorch_gemm_gpuless/run.sh
+  metrics:
+    - wall_time_per_call_us
+    - host_overhead_per_call_us
+    - simulated_tflops
+
 type_conversion:
   parser: type_conversion
   install_script: ./packages/ai_wdl/type_conversion/install_type_conversion.sh
