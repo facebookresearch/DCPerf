@@ -340,3 +340,75 @@
   description: Benchmark for common AI data type conversion
   args:
     - '--benchmark_format=json'
+
+- benchmark: pytorch_gemm_gpuless
+  name: pytorch_gemm_gpuless_stage1
+  description: GPU-less torch.mm dispatch overhead via TorchDispatchMode (no CUDA needed).
+  args:
+    - stage1
+    - '-m {m}'
+    - '-n {n}'
+    - '-k {k}'
+    - '-t {dtype}'
+    - '--steps {steps}'
+    - '--warmups {warmups}'
+    - '--gpu-model {gpu_model}'
+    - '--efficiency {efficiency}'
+    - '--no-sleep'
+  vars:
+    - 'm=1024'
+    - 'n=1024'
+    - 'k=1024'
+    - 'dtype=bfloat16'
+    - 'steps=1000000'
+    - 'warmups=10000'
+    - 'gpu_model=gb200'
+    - 'efficiency=0.5'
+
+- benchmark: pytorch_gemm_gpuless
+  name: pytorch_gemm_gpuless_stage2_nosleep
+  description: GPU-less torch.mm full host-side overhead via mock_cuda (requires libcuda.so.1).
+  args:
+    - stage2
+    - '-m {m}'
+    - '-n {n}'
+    - '-k {k}'
+    - '-t {dtype}'
+    - '--steps {steps}'
+    - '--warmups {warmups}'
+    - '--gpu-model {gpu_model}'
+    - '--efficiency {efficiency}'
+    - '--no-sleep'
+  vars:
+    - 'm=1024'
+    - 'n=1024'
+    - 'k=1024'
+    - 'dtype=bfloat16'
+    - 'steps=1000000'
+    - 'warmups=10000'
+    - 'gpu_model=gb200'
+    - 'efficiency=0.5'
+
+- benchmark: pytorch_gemm_gpuless
+  name: pytorch_gemm_gpuless_stage2_spin
+  description: GPU-less torch.mm with spin delay (simulates GPU latency via clock_gettime polling).
+  args:
+    - stage2
+    - '-m {m}'
+    - '-n {n}'
+    - '-k {k}'
+    - '-t {dtype}'
+    - '--steps {steps}'
+    - '--warmups {warmups}'
+    - '--gpu-model {gpu_model}'
+    - '--efficiency {efficiency}'
+    - '--delay-mode spin'
+  vars:
+    - 'm=1024'
+    - 'n=1024'
+    - 'k=1024'
+    - 'dtype=bfloat16'
+    - 'steps=1000000'
+    - 'warmups=10000'
+    - 'gpu_model=gb200'
+    - 'efficiency=0.5'
