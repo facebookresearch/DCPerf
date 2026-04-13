@@ -204,6 +204,27 @@ start_content_server() {
 }
 
 ###############################################################################
+# Helper: verify content_server is serving requests (not just listening)
+###############################################################################
+verify_content_server() {
+  local host="$1"
+  local port="$2"
+  echo -n "  Probing content_server at ${host}:${port} ... "
+  local http_code
+  http_code=$(curl -sf --connect-timeout 5 -o /dev/null -w "%{http_code}" "http://[${host}]:${port}/" 2>/dev/null || echo "000")
+  if [ "$http_code" = "000" ]; then
+    echo "-x> no response (connection refused or timeout)"
+    return 1
+  elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 400 ]; then
+    echo "-> HTTP ${http_code}"
+    return 0
+  else
+    echo "-x>  HTTP ${http_code} (server responded but with error)"
+    return 0
+  fi
+}
+
+###############################################################################
 # Helper: start proxy_server instance
 ###############################################################################
 start_proxy_server() {
@@ -331,6 +352,19 @@ run_server() {
     wait_for_port "${port}"
   done
 
+  # Verify content_servers are actually serving responses
+  echo ""
+  echo "====================================================================="
+  echo "Content Server Health Check"
+  echo "====================================================================="
+  local hostname_ip
+  hostname_ip=$(hostname -I | awk '{print $1}')
+  for port in "${PORT_ARRAY[@]}"; do
+    port="$(echo "$port" | tr -d ' ')"
+    verify_content_server "::1" "${port}" || verify_content_server "${hostname_ip}" "${port}" || true
+  done
+  echo ""
+
   echo ""
   echo "All content_server instances running. Waiting for termination signal..."
   echo "Send SIGTERM or SIGINT to stop."
@@ -367,6 +401,64 @@ run_proxy() {
   echo "  Listen Ports: ${ports}"
   echo "  Backend Servers: ${backend_servers}"
   echo "  Backend Ports: ${backend_ports}"
+  echo ""
+
+  # =========================================================================
+  # Sanity check: verify all backends are reachable before starting proxies
+  # =========================================================================
+  echo "====================================================================="
+  echo "Backend Reachability Check"
+  echo "====================================================================="
+  IFS=',' read -ra BHOST_ARRAY <<< "$backend_servers"
+  IFS=',' read -ra BPORT_ARRAY <<< "$backend_ports"
+  local all_backends_ok=true
+  local checked=()
+
+  for i in "${!BHOST_ARRAY[@]}"; do
+    local bhost="${BHOST_ARRAY[$i]}"
+    local bport="${BPORT_ARRAY[$i]:-${BPORT_ARRAY[0]}}"
+    bhost="$(echo "$bhost" | tr -d ' ')"
+    bport="$(echo "$bport" | tr -d ' ')"
+    local key="${bhost}:${bport}"
+
+    # Skip duplicates (same host:port may appear multiple times for load balancing)
+    local already_checked=false
+    for c in "${checked[@]:-}"; do
+      [ "$c" = "$key" ] && already_checked=true && break
+    done
+    "$already_checked" && continue
+    checked+=("$key")
+
+    echo -n "  Checking backend ${bhost}:${bport} ... "
+    if curl -sf --connect-timeout 5 -o /dev/null "http://[${bhost}]:${bport}/" 2>/dev/null; then
+      echo "-> reachable"
+    else
+      echo "-x-> UNREACHABLE"
+      all_backends_ok=false
+    fi
+  done
+
+  echo ""
+  if [ "$all_backends_ok" = false ]; then
+    echo "====================================================================="
+    echo "ERROR: One or more backends are not reachable!"
+    echo "====================================================================="
+    echo ""
+    echo "  Ensure content_server is running on the backend host(s):"
+    echo "    ./benchpress -b ehw run cdn_bench --role server -i 1 \\"
+    echo "      --role_input='{\"ports\":\"${backend_ports}\",\"protocol\":\"${PROTOCOL}\"}'"
+    echo ""
+    echo "  Then verify from this host:"
+    for c in "${checked[@]}"; do
+      local h="${c%:*}"
+      local p="${c##*:}"
+      echo "    curl -sf http://[${h}]:${p}/"
+    done
+    echo ""
+    echo "Aborting proxy startup."
+    exit 1
+  fi
+  echo "All backends reachable"
   echo ""
 
   IFS=',' read -ra PORT_ARRAY <<< "$ports"
@@ -436,8 +528,9 @@ run_client() {
     # Single target: run in foreground
     local entry="${TARGET_ARRAY[0]}"
     entry="$(echo "$entry" | tr -d ' ')"
-    local host="${entry%:*}"
+    # IPv6-safe host:port parsing — port is the last colon-separated field if numeric
     local port="${entry##*:}"
+    local host="${entry%:$port}"
 
     echo "Starting traffic_client..."
     echo "  Target: ${host}:${port}"
@@ -456,8 +549,9 @@ run_client() {
     declare -a CLIENT_PIDS=()
     for entry in "${TARGET_ARRAY[@]}"; do
       entry="$(echo "$entry" | tr -d ' ')"
-      local host="${entry%:*}"
+      # IPv6-safe host:port parsing
       local port="${entry##*:}"
+      local host="${entry%:$port}"
 
       echo "Starting traffic_client instance ${idx} targeting ${host}:${port}..."
       run_traffic_client "${host}" "${port}" "${SCRIPT_DIR}/.client_stderr_${idx}" &
