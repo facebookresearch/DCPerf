@@ -438,6 +438,10 @@ fi
 
 # Install CinderX in Cinder virtual environment (already activated)
 cd "${DJANGO_SERVER_ROOT}/cinderx"
+# Python 3.12+ venvs no longer include setuptools by default.
+# CinderX uses setuptools.build_meta as its build backend, so we must
+# install it explicitly before --no-build-isolation.
+python -m pip install setuptools wheel
 python -m pip install --no-build-isolation -e .
 
 # Validate CinderX installation
