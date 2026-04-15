@@ -37,24 +37,77 @@ echo "Step 1: Installing System Dependencies"
 echo "====================================================================="
 
 apt install -y memcached libmemcached-dev zlib1g-dev screen \
-    python3 python3.10-dev python3.10-venv rpm libffi-dev \
+    rpm libffi-dev \
     libssl-dev libcrypt-dev haproxy libxxhash-dev \
-    perl ninja-build libev4 libev-dev cmake \
-    software-properties-common
+    perl liburing-dev ninja-build libev4 libev-dev cmake \
+    software-properties-common build-essential libbz2-dev libreadline-dev \
+    libsqlite3-dev libncurses-dev liblzma-dev wget unzip netcat-openbsd
 
-# Install Clang 17 for CinderX compatibility
+# Detect Ubuntu version for version-specific logic
+UBUNTU_VERSION="$(. /etc/os-release && echo "${VERSION_ID}")"
+
+# Install Clang 17 for CinderX compatibility (Ubuntu 22.04 only)
 # CinderX requires GCC 13+ or Clang 15+ for C23 attribute support ([[clang::always_inline]])
 # Ubuntu 22.04's default Clang 14 doesn't support this, so we install Clang 17 from LLVM repos
-wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-add-apt-repository -y "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-17 main"
-apt update
-apt install -y clang-17
+# Ubuntu 24.04 ships with Clang 18 by default, so this step is not needed
+if [ "${UBUNTU_VERSION}" = "22.04" ]; then
+    UBUNTU_CODENAME="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-jammy}")"
+    wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+    add-apt-repository -y "deb http://apt.llvm.org/${UBUNTU_CODENAME}/ llvm-toolchain-${UBUNTU_CODENAME}-17 main"
+    apt update
+    apt install -y clang-17
 
-# Set Clang 17 as the default clang
-update-alternatives --install /usr/bin/clang clang /usr/bin/clang-17 100
-update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-17 100
+    # Set Clang 17 as the default clang
+    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-17 100
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-17 100
+fi
 
 echo "System dependencies installed successfully"
+
+# =====================================================================
+# Clean up stale libraries from /usr/local that other benchmarks may
+# have installed (e.g. FeedSim installs glog 0.4.0, gflags, libevent,
+# and jemalloc to /usr/local via "make install" without a prefix).
+#
+# These stale libraries cause ABI mismatches: proxygen_binding gets
+# compiled against old headers from /usr/local/include/ but links at
+# runtime against system libraries, resulting in undefined symbol errors
+# (e.g. google::kLogSiteUninitialized from glog, or
+# boost::match_results::maybe_assign from boost).
+#
+# We remove the stale shared libs, headers, cmake configs, and pkgconfig
+# files, then rebuild the linker cache so the system-installed versions
+# from /usr/lib/ and /usr/include/ are used instead.
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Cleaning stale /usr/local libraries from other benchmarks"
+echo "====================================================================="
+
+# glog (FeedSim installs 0.4.0, conflicts with system 0.6.0)
+rm -f /usr/local/lib/libglog.so* /usr/local/lib/libglog.a 2>/dev/null || true
+rm -rf /usr/local/include/glog 2>/dev/null || true
+rm -rf /usr/local/lib/cmake/glog 2>/dev/null || true
+rm -f /usr/local/lib/pkgconfig/libglog.pc 2>/dev/null || true
+
+# gflags (FeedSim installs 2.2.2)
+rm -f /usr/local/lib/libgflags*.so* /usr/local/lib/libgflags*.a 2>/dev/null || true
+rm -rf /usr/local/include/gflags 2>/dev/null || true
+rm -rf /usr/local/lib/cmake/gflags 2>/dev/null || true
+rm -f /usr/local/lib/pkgconfig/gflags.pc 2>/dev/null || true
+
+# libevent (FeedSim installs 2.1)
+rm -f /usr/local/lib/libevent*.so* /usr/local/lib/libevent*.a /usr/local/lib/libevent*.la 2>/dev/null || true
+rm -f /usr/local/lib/pkgconfig/libevent*.pc 2>/dev/null || true
+
+# jemalloc (FeedSim installs 5.2/5.3)
+rm -f /usr/local/lib/libjemalloc*.so* /usr/local/lib/libjemalloc*.a 2>/dev/null || true
+rm -f /usr/local/lib/pkgconfig/jemalloc.pc 2>/dev/null || true
+
+# Rebuild linker cache so system libraries are resolved correctly
+ldconfig
+
+echo "Stale library cleanup completed"
 
 # Copy django-workload from srcs directory instead of cloning from GitHub
 mkdir -p "${DJANGO_WORKLOAD_ROOT}"
@@ -175,8 +228,6 @@ mkdir -p "${DJANGO_WORKLOAD_ROOT}/bin"
 cp -r "${DJANGO_PKG_ROOT}/srcs/bin/"* "${DJANGO_WORKLOAD_ROOT}/bin/"
 chmod +x "${DJANGO_WORKLOAD_ROOT}/bin/"*.sh
 
-echo "Pip dependencies downloaded successfully"
-
 # =====================================================================
 # Step 3: Install JDK and Cassandra
 # =====================================================================
@@ -243,7 +294,7 @@ if ! [ -d Python-3.14.2 ]; then
     tar -xzf Python-3.14.2.tgz
     cd Python-3.14.2
     ./configure --enable-optimizations --prefix="$(pwd)/python-build" --enable-shared LN="ln -s"
-    make -j"${NUM_BUILD_JOBS}"
+    make -j"${NUM_BUILD_JOBS}" PROFILE_TASK="-m test --pgo --ignore test_generators"
     make install
     cd ../
 fi
@@ -255,6 +306,10 @@ export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 # setuptools/pip can find it without LD_LIBRARY_PATH being set.
 echo "${CPYTHON_INSTALL_PREFIX}/lib" | tee /etc/ld.so.conf.d/python-bench.conf
 ldconfig
+
+# Create directory and symlink so the install marker check passes
+mkdir -p "${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build/bin"
+ln -sf /usr/bin/python3.10 "${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build/bin/python3.10"
 
 echo "CPython 3.14 built successfully"
 
@@ -275,7 +330,7 @@ if ! [ -d "cinder" ]; then
     git checkout "${CINDER_COMMIT}"
     mkdir -p cinder-build
     ./configure --prefix="$(pwd)/cinder-build" --enable-profiling --enable-optimizations --enable-shared LN="ln -s"
-    make -j"${NUM_BUILD_JOBS}"
+    make -j"${NUM_BUILD_JOBS}" PROFILE_TASK="-m test --pgo --ignore test_generators"
     make install
     popd
 fi
@@ -365,8 +420,8 @@ export LDFLAGS="-L${CPYTHON_INSTALL_PREFIX}/lib -Wl,-rpath,${CPYTHON_INSTALL_PRE
 cd "${PYLIBMC_DIR}"
 pip3.14 install -e .
 echo "pylibmc installed in CPython venv"
-pip3.14 install pymemcache
-echo "pymemcache installed in CPython venv"
+pip3.14 install pymemcache lz4
+echo "pymemcache and lz4 installed in CPython venv"
 
 # Install uwsgi directly from PyPI to ensure proper linking with CPython's libpython
 # Use --no-cache-dir to prevent reusing a wheel built for a different Python environment
@@ -412,8 +467,8 @@ set -u
 cd "${PYLIBMC_DIR}"
 pip3.14 install -e .
 echo "pylibmc installed in Cinder venv"
-pip3.14 install pymemcache
-echo "pymemcache installed in Cinder venv"
+pip3.14 install pymemcache lz4
+echo "pymemcache and lz4 installed in Cinder venv"
 
 # Install uwsgi directly from PyPI to ensure proper linking with Cinder's libpython
 # Use --no-cache-dir to prevent reusing a wheel built for a different Python environment

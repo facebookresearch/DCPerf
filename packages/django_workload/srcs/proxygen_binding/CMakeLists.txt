@@ -84,7 +84,7 @@ message(STATUS "  Boost_NO_SYSTEM_PATHS=ON (ignoring system Boost)")
 message(STATUS "  Looking for Boost in: ${BOOST_ROOT}/lib and ${BOOST_ROOT}/include")
 
 # Find Boost with explicit version check
-find_package(Boost 1.75.0 REQUIRED COMPONENTS context filesystem system)
+find_package(Boost 1.75.0 REQUIRED COMPONENTS context filesystem regex system)
 if(Boost_FOUND)
     message(STATUS "Found Boost ${Boost_VERSION} at ${Boost_INCLUDE_DIRS}")
     message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
@@ -116,6 +116,7 @@ target_link_libraries(proxygen_binding PRIVATE
     boost_filesystem
     boost_system
     boost_context
+    boost_regex
     double-conversion
     event
     ssl

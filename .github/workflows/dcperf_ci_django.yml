@@ -50,12 +50,15 @@ jobs:
           { arch: aarch64, instance: "ubuntu-24.04-arm", container: "ubuntu:22.04", type: "ubuntu" },
           { arch: x86, instance: "ubuntu-latest", container: "quay.io/centos/centos:stream9", type: "centos" },
           { arch: aarch64, instance: "ubuntu-24.04-arm", container: "quay.io/centos/centos:stream9", type: "centos" },
+          { arch: x86, instance: "ubuntu-latest", container: "ubuntu:24.04", type: "ubuntu" },
+          { arch: aarch64, instance: "ubuntu-24.04-arm", container: "ubuntu:24.04", type: "ubuntu" },
+
         ]
         python-version: [ "3.12" ]
     steps:
     - name: Setup Build Container (ubuntu-based)
       if: ${{ matrix.host-machine.type == 'ubuntu' }}
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget libpython2-dev python3-dev
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget python3-dev
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}

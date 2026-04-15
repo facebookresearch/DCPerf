@@ -40,7 +40,7 @@ dnf groupinstall "Development Tools" -y --exclude="texlive*"
 dnf install -y memcached libmemcached-awesome-devel zlib-devel screen \
     openssl-devel bzip2-devel libffi-devel wget make xz-devel haproxy \
     xxhash-devel perl-FindBin perl-JSON perl-core liburing-devel \
-    ninja-build clang libev libev-devel
+    ninja-build clang libev libev-devel cmake
 
 echo "System dependencies installed successfully"
 

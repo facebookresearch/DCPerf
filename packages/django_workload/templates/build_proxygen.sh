@@ -389,6 +389,35 @@ function setup_liburing() {
   cd "$BWD" || exit
 }
 
+function setup_glog() {
+  GLOG_DIR=$DEPS_DIR/glog
+  GLOG_BUILD_DIR=$DEPS_DIR/glog/build/
+  GLOG_TAG="v0.6.0"
+  if [ ! -d "$GLOG_DIR" ] ; then
+    echo -e "${COLOR_GREEN}[ INFO ] Cloning glog repo ${COLOR_OFF}"
+    git clone https://github.com/google/glog.git "$GLOG_DIR"
+  fi
+  cd "$GLOG_DIR"
+  git fetch --tags
+  git checkout "${GLOG_TAG}"
+  echo -e "${COLOR_GREEN}Building glog ${COLOR_OFF}"
+  mkdir -p "$GLOG_BUILD_DIR"
+  cd "$GLOG_BUILD_DIR" || exit
+
+  cmake                                           \
+    -DCMAKE_PREFIX_PATH="$DEPS_DIR"               \
+    -DCMAKE_INSTALL_PREFIX="$DEPS_DIR"            \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo             \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON          \
+    -DBUILD_TESTING=OFF                           \
+    -DWITH_GTEST=OFF                              \
+    ..
+  make -j "$JOBS"
+  make install
+  echo -e "${COLOR_GREEN}glog is installed ${COLOR_OFF}"
+  cd "$BWD" || exit
+}
+
 function setup_folly() {
   FOLLY_DIR=$DEPS_DIR/folly
   FOLLY_BUILD_DIR=$DEPS_DIR/folly/build/
@@ -695,6 +724,7 @@ setup_zstd
 if [ "$DISTRO" = "ubuntu" ]; then
   setup_liburing
 fi
+setup_glog
 setup_folly
 setup_libaegis
 setup_fizz

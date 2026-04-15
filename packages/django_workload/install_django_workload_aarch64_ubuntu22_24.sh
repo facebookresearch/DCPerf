@@ -3,13 +3,6 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-#
-# Django workload install script for Ubuntu 24.04 on aarch64.
-#
-# Key differences from the Ubuntu 22.04 script:
-#   - Builds Python 3.10 from source (Ubuntu 24.04 ships Python 3.12)
-#   - Skips Cinder build (ARM jobs use interpreter=cpython, use_jit=0)
-#   - Uses source-built Python for venv creation and pip installs
 set -Eeuo pipefail
 
 DJANGO_PKG_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
@@ -43,13 +36,31 @@ echo "====================================================================="
 echo "Step 1: Installing System Dependencies"
 echo "====================================================================="
 
-# Ubuntu 24.04 does not have python3.10 in its default repos, so we
-# install build dependencies to compile Python 3.10 from source instead.
 apt install -y memcached libmemcached-dev zlib1g-dev screen \
-    python3 rpm libffi-dev \
+    rpm libffi-dev \
     libssl-dev libcrypt-dev haproxy libxxhash-dev \
-    perl ninja-build build-essential libbz2-dev libreadline-dev \
-    libsqlite3-dev libncurses-dev liblzma-dev wget
+    perl liburing-dev ninja-build libev4 libev-dev cmake \
+    software-properties-common build-essential libbz2-dev libreadline-dev \
+    libsqlite3-dev libncurses-dev liblzma-dev wget unzip netcat-openbsd
+
+# Detect Ubuntu version for version-specific logic
+UBUNTU_VERSION="$(. /etc/os-release && echo "${VERSION_ID}")"
+
+# Install Clang 17 for CinderX compatibility (Ubuntu 22.04 only)
+# CinderX requires GCC 13+ or Clang 15+ for C23 attribute support ([[clang::always_inline]])
+# Ubuntu 22.04's default Clang 14 doesn't support this, so we install Clang 17 from LLVM repos
+# Ubuntu 24.04 ships with Clang 18 by default, so this step is not needed
+if [ "${UBUNTU_VERSION}" = "22.04" ]; then
+    UBUNTU_CODENAME="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-jammy}")"
+    wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+    add-apt-repository -y "deb http://apt.llvm.org/${UBUNTU_CODENAME}/ llvm-toolchain-${UBUNTU_CODENAME}-17 main"
+    apt update
+    apt install -y clang-17
+
+    # Set Clang 17 as the default clang
+    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-17 100
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-17 100
+fi
 
 echo "System dependencies installed successfully"
 
@@ -74,12 +85,13 @@ echo "Cleaning stale /usr/local libraries from other benchmarks"
 echo "====================================================================="
 
 # glog (FeedSim installs 0.4.0, conflicts with system 0.6.0)
-rm -f /usr/local/lib/libglog.so* 2>/dev/null || true
+rm -f /usr/local/lib/libglog.so* /usr/local/lib/libglog.a 2>/dev/null || true
 rm -rf /usr/local/include/glog 2>/dev/null || true
 rm -rf /usr/local/lib/cmake/glog 2>/dev/null || true
+rm -f /usr/local/lib/pkgconfig/libglog.pc 2>/dev/null || true
 
 # gflags (FeedSim installs 2.2.2)
-rm -f /usr/local/lib/libgflags*.so* 2>/dev/null || true
+rm -f /usr/local/lib/libgflags*.so* /usr/local/lib/libgflags*.a 2>/dev/null || true
 rm -rf /usr/local/include/gflags 2>/dev/null || true
 rm -rf /usr/local/lib/cmake/gflags 2>/dev/null || true
 rm -f /usr/local/lib/pkgconfig/gflags.pc 2>/dev/null || true
@@ -123,31 +135,23 @@ else
     alias wget='wget --no-clobber'
 fi
 pushd "${DJANGO_WORKLOAD_DEPS}"
-# cassandra-driver-3.26_aarch64.whl
-wget "https://files.pythonhosted.org/packages/b5/5e/54c58c98a4eeea12a2fee7220e7ac9e8b021ea5c3d84c84adb9106c4ed43/cassandra_driver-3.26.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
-# Removed Cython download as it's not needed
 # Django-5.2.3-py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/1b/11/7aff961db37e1ea501a2bb663d27a8ce97f3683b9e5b83d3bfead8b86fa4/django-5.2.3-py3-none-any.whl"
 # Dulwich 0.21.2.tar.gz
 wget "https://files.pythonhosted.org/packages/14/a5/cf61f9209d48abf47d48086e0a0388f1030bb5f7cf2661972eee56ccee3d/dulwich-0.21.2.tar.gz"
-# django-cassandra-engine-1.6.2.tar.gz
-wget "https://files.pythonhosted.org/packages/1f/5e/438eb7f2d8b8e240701b721a43cb5a20cf970c8e9da8b3770df1de6d7c5b/django-cassandra-engine-1.6.2.tar.gz"
+# Note: django-cassandra-engine is installed directly from PyPI (not pre-downloaded) to avoid poetry build issues
 # django-statsd-mozilla-0.4.3-py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/ac/54/5fa99753dab7ced46129a4c95c777596a2e4094a8b0f65c8764d60d5cff4/django_statsd_mozilla-0.4.0-py3-none-any.whl"
-# numpy-1.22.1-aarch64.whl
-wget "https://files.pythonhosted.org/packages/d6/ec/a8b5f1b6d00bc4fd1bc91043d5dfb029536ec5c7769588d3f4c982240008/numpy-1.22.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl"
 # psutil-5.8.0.tar.gz
 wget "https://files.pythonhosted.org/packages/e1/b0/7276de53321c12981717490516b7e612364f2cb372ee8901bd4a66a000d7/psutil-5.8.0.tar.gz"
-# pylibmc-1.6.1.tar.gz
-wget "https://files.pythonhosted.org/packages/a7/0c/f7a3af34b05c167a69ed1fc330b06b658dac4ab25b8632c52d1022dd5337/pylibmc-1.6.1.tar.gz"
+# pylibmc - installed from GitHub source for Python 3.14 compatibility (see Step 6.3)
 # pytz-2021.1-py2.py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/70/94/784178ca5dd892a98f113cdd923372024dc04b8d40abe77ca76b5fb90ca6/pytz-2021.1-py2.py3-none-any.whl"
 # six-1.16.0-py2.py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/d9/5a/e7c31adbe875f2abbb91bd84cf2dc52d792b5a01506781dbcf25c91daf11/six-1.16.0-py2.py3-none-any.whl"
 # statsd-3.3.0-py2.py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/47/33/c824f799128dfcfce2142f18d9bc6c55c46a939f6e4250639134222d99eb/statsd-3.3.0-py2.py3-none-any.whl"
-# uwsgi-2.0.22.tar.gz
-wget "https://files.pythonhosted.org/packages/a7/4e/c4d5559b3504bb65175a759392b03cac04b8771e9a9b14811adf1151f02f/uwsgi-2.0.22.tar.gz"
+# Note: uwsgi is installed directly from PyPI (not pre-downloaded) to ensure proper linking
 # geomet-0.2.1.post1-py3-none-any.whl
 wget "https://files.pythonhosted.org/packages/c9/81/156ca48f950f833ddc392f8e3677ca50a18cb9d5db38ccb4ecea55a9303f/geomet-0.2.1.post1-py3-none-any.whl"
 # click-7.1.2.tar.gz
@@ -277,59 +281,62 @@ popd
 echo "JDK and Cassandra installed successfully"
 
 # =====================================================================
-# Step 4: Build CPython 3.10 from source
+# Step 4: Build CPython 3.14
 # =====================================================================
 echo ""
 echo "====================================================================="
-echo "Step 4: Building CPython 3.10 from source"
+echo "Step 4: Building CPython 3.14"
 echo "====================================================================="
 
 pushd "${DJANGO_SERVER_ROOT}"
 
-# Ubuntu 24.04 ships Python 3.12; build Python 3.10 from source
-# (same approach as install_django_workload_aarch64.sh for CentOS)
-if ! [ -d Python-3.10.2 ]; then
-    wget https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz
-    tar -xzf Python-3.10.2.tgz
-    cd Python-3.10.2
+# Install python3.14 from source
+if ! [ -d Python-3.14.2 ]; then
+    wget https://www.python.org/ftp/python/3.14.2/Python-3.14.2.tgz
+    tar -xzf Python-3.14.2.tgz
+    cd Python-3.14.2
     ./configure --enable-optimizations --prefix="$(pwd)/python-build" --enable-shared LN="ln -s"
     make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 fi
 
-CPYTHON_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build"
+CPYTHON_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build"
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 
-# Register libpython3.10.so system-wide so subprocesses spawned by
+# Register libpython system-wide so subprocesses spawned by
 # setuptools/pip can find it without LD_LIBRARY_PATH being set.
-echo "${CPYTHON_INSTALL_PREFIX}/lib" | tee /etc/ld.so.conf.d/python310-bench.conf
+echo "${CPYTHON_INSTALL_PREFIX}/lib" | tee /etc/ld.so.conf.d/python-bench.conf
 ldconfig
 
-echo "CPython 3.10 built successfully"
+echo "CPython 3.14 built successfully"
 
 # =====================================================================
-# Step 5: Cinder 3.10 — skipped on ARM
+# Step 5: Build Cinder 3.14
 # =====================================================================
 echo ""
 echo "====================================================================="
-echo "Step 5: Skipping Cinder 3.10 (not used on ARM/aarch64)"
+echo "Step 5: Building Cinder 3.14"
 echo "====================================================================="
 
-# ARM Django jobs use interpreter=cpython with use_jit=0, so Cinder is
-# never executed at runtime. Create a placeholder to satisfy the
-# install_markers check in benchmarks.yml.
-mkdir -p "${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin"
-ln -sf "${CPYTHON_INSTALL_PREFIX}/bin/python3.10" \
-    "${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin/python3.10"
-# benchmarks.yml install_markers expect python3.14; create aliases so checks pass
-ln -sf "${CPYTHON_INSTALL_PREFIX}/bin/python3.10" \
-    "${DJANGO_SERVER_ROOT}/cinder/cinder-build/bin/python3.14"
-mkdir -p "${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build/bin"
-ln -sf "${CPYTHON_INSTALL_PREFIX}/bin/python3.10" \
-    "${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build/bin/python3.14"
+# Download and build Cinder
+# Using meta/3.14 branch at a known good commit for reproducibility
+CINDER_COMMIT="04f91c3659d8d2dfe4331a47548316289d2fa3f0"
+if ! [ -d "cinder" ]; then
+    git clone https://github.com/facebookincubator/cinder.git
+    pushd cinder
+    git checkout "${CINDER_COMMIT}"
+    mkdir -p cinder-build
+    ./configure --prefix="$(pwd)/cinder-build" --enable-profiling --enable-optimizations --enable-shared LN="ln -s"
+    make -j"${NUM_BUILD_JOBS}"
+    make install
+    popd
+fi
 
-echo "Cinder skipped (placeholder created for install marker)"
+CINDER_INSTALL_PREFIX="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
+export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+
+echo "Cinder 3.14 built successfully"
 
 # =====================================================================
 # Step 6: Install Python dependencies in virtual environments
@@ -339,9 +346,60 @@ echo "====================================================================="
 echo "Step 6: Installing Python dependencies in virtual environments"
 echo "====================================================================="
 
-# Create CPython virtual env only (Cinder venv not needed on ARM)
+# Create virtual environments for both CPython and Cinder
+# Create CPython virtual env
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
-[ ! -d venv_cpython ] && "${CPYTHON_INSTALL_PREFIX}/bin/python3.10" -m venv venv_cpython
+[ ! -d venv_cpython ] && "${CPYTHON_INSTALL_PREFIX}/bin/python3.14" -m venv venv_cpython
+
+# Create Cinder virtual env
+export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+[ ! -d venv_cinder ] && "${CINDER_INSTALL_PREFIX}/bin/python3" -m venv venv_cinder
+
+# =====================================================================
+# Step 6.3: Clone pylibmc from GitHub (Python 3.14 compatible)
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 6.3: Cloning pylibmc from GitHub source"
+echo "====================================================================="
+
+# Clone pylibmc 1.6.1 from GitHub and patch for Python 3.14 compatibility
+# pylibmc trunk has bugs in the refactored _fetch_multi function that cause
+# memcached connection failures after ~2300 requests. Using stable 1.6.1
+# with a minimal setup.py patch (distutils→setuptools, remove "U" mode) instead.
+PYLIBMC_DIR="${DJANGO_SERVER_ROOT}/pylibmc"
+if ! [ -d "${PYLIBMC_DIR}" ]; then
+    cd "${DJANGO_SERVER_ROOT}"
+    git clone https://github.com/lericson/pylibmc.git
+    cd "${PYLIBMC_DIR}"
+    git checkout 1.6.1
+    # Apply Python 3.14 compatibility patch (setup.py: distutils removed in 3.12)
+    patch -p1 < "${BENCHPRESS_ROOT}/packages/django_workload/srcs/patches/pylibmc-1.6.1-py314-compat.patch"
+    echo "Applied pylibmc 1.6.1 Python 3.14 compatibility patch"
+fi
+
+# =====================================================================
+# Step 6.4: Clone cassandra-python-driver from GitHub (setuptools v82 compatible)
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 6.4: Cloning cassandra-python-driver from GitHub source"
+echo "====================================================================="
+
+# Clone cassandra-python-driver from GitHub
+# PyPI version uses deprecated ez_setup which is incompatible with setuptools v82+
+# Latest trunk removed ez_setup for compatibility
+CASSANDRA_DRIVER_COMMIT="7d8015e3c1cff543a5f64c70cff3e14216e58037"
+CASSANDRA_DRIVER_DIR="${DJANGO_SERVER_ROOT}/cassandra-python-driver"
+if ! [ -d "${CASSANDRA_DRIVER_DIR}" ]; then
+    cd "${DJANGO_SERVER_ROOT}"
+    git clone https://github.com/apache/cassandra-python-driver.git
+    cd cassandra-python-driver
+    git checkout "${CASSANDRA_DRIVER_COMMIT}"
+fi
+
+# Return to DJANGO_SERVER_ROOT before activating virtual environments
+cd "${DJANGO_SERVER_ROOT}"
 
 # Install packages in CPython environment
 set +u
@@ -351,12 +409,37 @@ set -u
 
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 export CMAKE_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
-export CPATH="${DJANGO_SERVER_ROOT}/Python-3.10.2/python-build/include:${DJANGO_SERVER_ROOT}/Python-3.10.2/Include"
+export CPATH="${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build/include:${DJANGO_SERVER_ROOT}/Python-3.14.2/Include"
+# Set LIBRARY_PATH and LDFLAGS to ensure packages link against CPython's libpython
+export LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
+export LDFLAGS="-L${CPYTHON_INSTALL_PREFIX}/lib -Wl,-rpath,${CPYTHON_INSTALL_PREFIX}/lib"
+
+# Install pylibmc (required by django-workload)
+cd "${PYLIBMC_DIR}"
+pip3.14 install -e .
+echo "pylibmc installed in CPython venv"
+pip3.14 install pymemcache lz4
+echo "pymemcache and lz4 installed in CPython venv"
+
+# Install uwsgi directly from PyPI to ensure proper linking with CPython's libpython
+# Use --no-cache-dir to prevent reusing a wheel built for a different Python environment
+pip3.14 install --no-cache-dir uwsgi
+echo "uwsgi installed in CPython venv"
+
+# Install django-cassandra-engine directly from PyPI to avoid poetry build issues
+pip3.14 install django-cassandra-engine
+echo "django-cassandra-engine installed in CPython venv"
 
 # Install dependencies using third_party pip dependencies
-pip3.10 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
-pip3.10 install "numpy>=1.19" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
-pip3.10 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+cd "${DJANGO_SERVER_ROOT}"
+pip3.14 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+# Install cassandra-driver from GitHub source (setuptools v82+ compatible)
+# Disable Cython extension to avoid build issues
+cd "${CASSANDRA_DRIVER_DIR}"
+CASS_DRIVER_NO_CYTHON=1 pip3.14 install -e .
+echo "cassandra-driver installed in CPython venv"
+cd "${DJANGO_SERVER_ROOT}"
+pip3.14 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
 
 echo "Dependencies installed in CPython venv"
 
@@ -365,6 +448,80 @@ echo "Dependencies installed in CPython venv"
 echo 'JVM_OPTS="$JVM_OPTS -Xss512k"' >> "${DJANGO_WORKLOAD_ROOT}/apache-cassandra/conf/cassandra-env.sh"
 
 deactivate
+
+# Install packages in Cinder environment
+pushd "${DJANGO_SERVER_ROOT}"
+export CPATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build/include:${DJANGO_SERVER_ROOT}/cinder/Include"
+export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+export CMAKE_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+# Critical: Set LIBRARY_PATH and LDFLAGS to ensure uwsgi links against Cinder's libpython
+# Without these, the linker may find CPython's libpython3.14.so instead
+export LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+export LDFLAGS="-L${CINDER_INSTALL_PREFIX}/lib -Wl,-rpath,${CINDER_INSTALL_PREFIX}/lib"
+source ./venv_cinder/bin/activate
+set -u
+# Install pylibmc (required by django-workload)
+cd "${PYLIBMC_DIR}"
+pip3.14 install -e .
+echo "pylibmc installed in Cinder venv"
+pip3.14 install pymemcache lz4
+echo "pymemcache and lz4 installed in Cinder venv"
+
+# Install uwsgi directly from PyPI to ensure proper linking with Cinder's libpython
+# Use --no-cache-dir to prevent reusing a wheel built for a different Python environment
+pip3.14 install --no-cache-dir uwsgi
+echo "uwsgi installed in Cinder venv"
+
+# Install django-cassandra-engine directly from PyPI to avoid poetry build issues
+pip3.14 install django-cassandra-engine
+echo "django-cassandra-engine installed in Cinder venv"
+
+# Install dependencies using third_party pip dependencies
+cd "${DJANGO_SERVER_ROOT}"
+pip3.14 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+# Install cassandra-driver from GitHub source (setuptools v82+ compatible)
+# Disable Cython extension to avoid build issues
+cd "${CASSANDRA_DRIVER_DIR}"
+CASS_DRIVER_NO_CYTHON=1 pip3.14 install -e .
+echo "cassandra-driver installed in Cinder venv"
+cd "${DJANGO_SERVER_ROOT}"
+pip3.14 install -e . --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
+
+echo "Dependencies installed in Cinder venv"
+
+# =====================================================================
+# Step 6.5: Install CinderX for JIT Support
+# =====================================================================
+echo ""
+echo "====================================================================="
+echo "Step 6.5: Installing CinderX for JIT Support"
+echo "====================================================================="
+
+# Clone and install CinderX for JIT functionality
+CINDERX_COMMIT="497b2b671a8084345a8288cfbd9995acfab9dfbf"
+if ! [ -d "${DJANGO_SERVER_ROOT}/cinderx" ]; then
+    cd "${DJANGO_SERVER_ROOT}"
+    git clone https://github.com/facebookincubator/cinderx.git
+    cd cinderx
+    git checkout "${CINDERX_COMMIT}"
+fi
+
+# Install CinderX in Cinder virtual environment (already activated)
+cd "${DJANGO_SERVER_ROOT}/cinderx"
+# Python 3.12+ venvs no longer include setuptools by default.
+# CinderX uses setuptools.build_meta as its build backend, so we must
+# install it explicitly before --no-build-isolation.
+python -m pip install setuptools wheel
+python -m pip install --no-build-isolation -e .
+
+# Validate CinderX installation
+echo "Validating CinderX installation..."
+python -c "import cinderx; cinderx.init(); assert cinderx.is_initialized(), 'CinderX failed to initialize'; print('CinderX initialized successfully')"
+
+echo "CinderX installed and validated successfully"
+
+deactivate
+popd  # ${DJANGO_SERVER_ROOT}
 
 echo "Python dependencies installation completed"
 
@@ -552,13 +709,23 @@ fi
 # Set Proxygen installation directory for building proxygen_binding
 export PROXYGEN_INSTALL_DIR="${DJANGO_WORKLOAD_ROOT}/proxygen/staging"
 
-# Build and install in venv_cpython only (no Cinder venv on ARM)
+# Build and install in venv_cpython
 echo ""
 echo "Installing proxygen_binding in venv_cpython..."
+export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
 "${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install pybind11 wheel setuptools
 "${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install --no-build-isolation -e .
 echo "proxygen_binding installed in venv_cpython"
+
+# Build and install in venv_cinder
+echo ""
+echo "Installing proxygen_binding in venv_cinder..."
+export LD_LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
+cd "${DJANGO_WORKLOAD_ROOT}/proxygen_binding"
+"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install pybind11 wheel setuptools
+"${DJANGO_SERVER_ROOT}/venv_cinder/bin/python" -m pip install --no-build-isolation -e .
+echo "proxygen_binding installed in venv_cinder"
 
 # =====================================================================
 # Step 9: Generate Code Variants for FeedFlow
@@ -569,6 +736,8 @@ echo "Step 9: Generating Code Variants for FeedFlow"
 echo "====================================================================="
 
 # Install jinja2 in venv_cpython
+# Set LD_LIBRARY_PATH for CPython shared library
+export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 echo "Installing jinja2 for code generation..."
 "${DJANGO_SERVER_ROOT}/venv_cpython/bin/python" -m pip install jinja2
 
