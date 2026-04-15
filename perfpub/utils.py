@@ -304,7 +304,27 @@ def get_start_end_index(
         last_secs = default_last_secs
         skip_last_secs = default_skip_last_secs
 
-    # Calculate indices using last_secs and skip_last_secs
+    # Calculate indices using last_secs and skip_last_secs.
+    # For CSVs with relative_secs/epoch_secs timestamps, use timestamp-based
+    # selection to ensure all CSVs cover the same absolute time window,
+    # regardless of per-CSV collection intervals or start-time offsets.
+    if (
+        ts_format in ("relative_secs", "epoch_secs")
+        and ts_column
+        and ts_column in df.columns
+    ):
+        ts_values = pd.to_numeric(df[ts_column], errors="coerce").dropna()
+        if len(ts_values) >= 2:
+            last_ts = ts_values.iloc[-1]
+            end_ts = last_ts - skip_last_secs
+            start_ts = end_ts - last_secs
+            start_index = int((ts_values - start_ts).abs().idxmin())
+            end_index = int((ts_values - end_ts).abs().idxmin())
+            start_index = max(start_index, 0)
+            end_index = max(end_index, start_index)
+            return start_index, end_index
+
+    # Fallback: row-count arithmetic (for time_of_day CSVs or missing timestamp column)
     if last_secs > 0:
         start_index = (
             len(df)
