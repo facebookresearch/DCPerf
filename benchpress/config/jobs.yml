@@ -751,6 +751,75 @@
           - 'benchmarks/feedsim/src/perf.data'
           - '/tmp/feedsim_log.txt'
 
+- name: feedsim_autoscale_dlrm_mini
+  benchmark: feedsim_autoscale
+  description: >
+    DLRM aggregator workload mini version. Configured with a fixed QPS
+    for quick validation runs. Uses DLRM inference instead of PageRank
+    with async I/O mode.
+  args:
+    - '-n {num_instances}'
+    - '--async-io'
+    - '--io-dist={io_dist}'
+    - '--io-mean={io_mean}'
+    - '--workload={workload}'
+    - '--dlrm-model={dlrm_model}'
+    - '--dlrm-batch-size={dlrm_batch_size}'
+    - '--dlrm-threads={dlrm_threads}'
+    - '--dlrm-inferences={dlrm_inferences}'
+    - '--client-side-features={client_side_features}'
+    - '--client-batch-size={client_batch_size}'
+    - '--client-inferences={client_inferences}'
+    - '--client-feature-seed={client_feature_seed}'
+    - '--client-num-dense={client_num_dense}'
+    - '--client-num-sparse={client_num_sparse}'
+    - '-q {fixed_qps}'
+    - '-d {fixed_qps_duration}'
+    - '-w {warmup_time}'
+    - '-r {qps_percentage_threshold}'
+    - '-x {max_warmup_iterations}'
+    - '-D {queue_drain_time}'
+    - '-R {node_rank_seed}'
+    - '-P {page_rank_seed}'
+    - '-C {pointer_chase_seed}'
+    - '-N'
+    - '{extra_args}'
+  vars:
+    - 'num_instances=-1'
+    - 'io_dist=fixed'
+    - 'io_mean=200'
+    - 'workload=dlrm'
+    - 'dlrm_model=models/dlrm_small.pt'
+    - 'dlrm_batch_size=256'
+    - 'dlrm_threads=1'
+    - 'dlrm_inferences=64'
+    - 'client_side_features=0'
+    - 'client_batch_size=256'
+    - 'client_inferences=64'
+    - 'client_feature_seed=42'
+    - 'client_num_dense=13'
+    - 'client_num_sparse=26'
+    - 'fixed_qps=100000'
+    - 'fixed_qps_duration=10'
+    - 'warmup_time=5'
+    - 'qps_percentage_threshold=-1'
+    - 'max_warmup_iterations=-1'
+    - 'queue_drain_time=1'
+    - 'node_rank_seed=54321'
+    - 'page_rank_seed=12345'
+    - 'pointer_chase_seed=98765'
+    - 'extra_args='
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/src/perf.data'
+          - 'benchmarks/feedsim/breakdown.csv'
+          - '/tmp/feedsim_log.txt'
+
 - name: feedsim_autoscale_mini
   benchmark: feedsim_autoscale
   description: >
