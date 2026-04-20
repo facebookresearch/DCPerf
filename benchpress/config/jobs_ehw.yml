@@ -9,9 +9,11 @@
         - '-m server'
         - '-P {ports}'
         - '-p {protocol}'
+        - '-d {duration}'
       vars:
         - 'ports=8082'
         - 'protocol=h2'
+        - 'duration=120'
     proxy:
       args:
         - '-m proxy'
@@ -19,11 +21,13 @@
         - '-b {backend_ports}'
         - '-P {ports}'
         - '-p {protocol}'
+        - '-d {duration}'
       vars:
         - 'backend_hosts='
         - 'backend_ports='
         - 'ports=8081'
         - 'protocol=h2'
+        - 'duration=120'
     client:
       args:
         - '-m client'

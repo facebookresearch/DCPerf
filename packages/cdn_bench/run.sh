@@ -222,7 +222,9 @@ verify_content_server() {
   local port="$2"
   echo -n "  Probing content_server at ${host}:${port} ... "
   local http_code
-  http_code=$(curl -sf --connect-timeout 5 -o /dev/null -w "%{http_code}" "http://[${host}]:${port}/" 2>/dev/null || echo "000")
+  http_code=$(curl -sf --connect-timeout 5 -o /dev/null -w "%{http_code}" "http://[${host}]:${port}/" 2>/dev/null \
+    || curl -sf --connect-timeout 5 -o /dev/null -w "%{http_code}" --http2-prior-knowledge "http://[${host}]:${port}/" 2>/dev/null \
+    || echo "000")
   if [ "$http_code" = "000" ]; then
     echo "-x> no response (connection refused or timeout)"
     return 1
@@ -452,6 +454,8 @@ run_proxy() {
     echo -n "  Checking backend ${bhost}:${bport} ... "
     if curl -sf --connect-timeout 5 -o /dev/null "http://[${bhost}]:${bport}/" 2>/dev/null; then
       echo "-> reachable"
+    elif curl -sf --connect-timeout 5 -o /dev/null --http2-prior-knowledge "http://[${bhost}]:${bport}/" 2>/dev/null; then
+      echo "-> reachable (h2)"
     else
       echo "-x-> UNREACHABLE"
       all_backends_ok=false
