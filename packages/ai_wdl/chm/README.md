@@ -64,3 +64,15 @@ After the benchmark finished, benchpress will report the results in JSON format 
 ```
 
 The key metrics is the throughput which is measure as `Mops/sec`.
+
+
+## Run `chm` with tracing
+
+To enable DynamoRIO tracing with chm, set ENABLE_DR_TRACE=1 when installing. This builds DynamoRIO from source (~5 min) and statically links it into the benchmark binary. DynamoRIO will be built under chm's build directory. After doing this, the binary will be instrumented with DynamoRIO and will write traces to /tmp/drmemtrace_out/ by default. Tracing starts and stops automatically around the benchmark workload:
+
+```
+ENABLE_DR_TRACE=1 ./benchpress_cli.py -b ai install chm_a -f
+./benchpress_cli.py -b ai run chm_a
+```
+
+Note that multi-threaded workloads produce large traces (100+ GB/min), so you may want to run trace_configure() to limit the size and duration of the trace. See dr_trace's README for more details.

@@ -33,6 +33,10 @@
 
 #include "./ConcurrentHashMap.h"
 
+#ifdef DR_TRACE_INCLUDED
+#include "dr_trace.h"
+#endif
+
 // Command line flags
 DEFINE_string(distribution_file, "", "Path to the distribution CSV file");
 DEFINE_int32(num_threads, 4, "Number of worker threads per batch");
@@ -689,7 +693,16 @@ int main(int argc, char* argv[]) {
 
   // Execute benchmark and display results
   chm_benchmark::ChmBenchmark benchmark(*distributionOpt, config);
+
+#ifdef DR_TRACE_INCLUDED
+  trace_configure_env();
+  trace_start();
+#endif
   auto results = benchmark.run();
+#ifdef DR_TRACE_INCLUDED
+  trace_stop();
+#endif
+
   chm_benchmark::ChmBenchmark::printResults(results);
 
   return 0;

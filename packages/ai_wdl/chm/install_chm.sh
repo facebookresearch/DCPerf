@@ -66,13 +66,11 @@ install_system_dependencies() {
     # Ubuntu
     echo "Detected Ubuntu system, installing Ubuntu dependencies"
     sudo apt-get update
-    sudo apt-get install -y libssl-dev
-    sudo apt-get install -y clang
+    sudo apt-get install -y libssl-dev clang
   elif command -v dnf >/dev/null 2>&1; then
     # CentOS
     echo "Detected CentOS system, installing CentOS dependencies"
-    sudo dnf install -y openssl-devel
-    sudo dnf install -y clang
+    sudo dnf install -y openssl-devel clang
   else
     echo "ERROR: This script only supports Ubuntu (apt-get) and CentOS (dnf)"
     exit 1
@@ -161,8 +159,20 @@ build_benchmark() {
   cp "${BPKGS_CHM_ROOT}/model_a.dist" "${BENCHMARKS_DIR}"
   cp "${BPKGS_CHM_ROOT}/model_b.dist" "${BENCHMARKS_DIR}"
 
+  # Optionally set up DynamoRIO tracing support
+  DR_TRACE_FLAGS=""
+  if [ "${ENABLE_DR_TRACE:-0}" = "1" ]; then
+    echo "[DR_TRACE] Setting up DynamoRIO tracing support..."
+    cp -r "${BPKGS_CHM_ROOT}/../../common/dr_trace" "${BUILD_DIR}/dr_trace"
+    # shellcheck disable=SC1091
+    source "${BUILD_DIR}/dr_trace/install_dynamorio.sh"
+    # shellcheck disable=SC2154
+    DR_TRACE_FLAGS="-DENABLE_DR_TRACE=ON -DDR_INSTALL=${DR_INSTALL}"
+  fi
+
   # Configure CMake for optimized release build
-  cmake -DCMAKE_CXX_FLAGS="-O3 -g1" .
+  # shellcheck disable=SC2086
+  cmake -DCMAKE_CXX_FLAGS="-O3 -g1" ${DR_TRACE_FLAGS} .
 
   # Build using all available cores
   make -j
