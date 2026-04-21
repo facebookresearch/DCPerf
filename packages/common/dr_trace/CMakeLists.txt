@@ -17,7 +17,9 @@ endif()
 find_package(glog REQUIRED)
 
 # --- dr_trace library ---------------------------------------------------
-add_library(dr_trace STATIC dr_trace.cpp dr_trace.h)
+add_library(dr_trace STATIC
+  dr_trace.cpp dr_trace.h
+  dr_trace_system_info.cpp dr_trace_system_info.h)
 target_include_directories(dr_trace PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(dr_trace PUBLIC DR_TRACE_INCLUDED=1)
 target_include_directories(dr_trace PUBLIC

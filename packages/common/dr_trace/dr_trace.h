@@ -29,11 +29,12 @@
  *     no-op (logs a warning).
  *   - trace_end() is idempotent: calling it without a matching
  *     trace_begin(), or calling it twice, is a no-op (logs a warning).
- *   - If max_trace_seconds > 0, trace_begin() spawns a watchdog thread
- *     that auto-stops tracing after the timeout. This prevents runaway
- *     traces from filling disk (traces are 100+ GB for multi-threaded
- *     workloads). The watchdog and trace_end() use an atomic CAS to
- *     ensure only one of them actually stops tracing.
+ *   - If max_trace_seconds > 0 or max_trace_mb > 0, trace_begin()
+ *     spawns a watchdog thread that auto-stops tracing when either
+ *     limit is reached. This prevents runaway traces from filling disk
+ *     (traces are ~7 GB/s for multi-threaded workloads). The watchdog
+ *     and trace_end() use an atomic CAS to ensure only one of them
+ *     actually stops tracing.
  */
 
 #pragma once
@@ -64,9 +65,11 @@ struct DrTraceConfig {
   const char* outdir = "/tmp/drmemtrace_out";
   int verbose = 3;
   bool ignore_asserts = true;
-  uint32_t max_trace_seconds =
-      0; // watchdog timeout in seconds (0 = no timeout)
+  uint32_t max_trace_seconds = 0; // Trace timeout in seconds, 0 = no timeout
+  uint64_t max_trace_mb = 0; // Trace size limit in MB, 0 = no limit
+  uint32_t watchdog_poll_seconds = 1; // Watchdog polling interval
   bool record_pagemap = false; // dump /proc/self/pagemap before+after trace
+  bool record_system_info = false; // dump CPU topology + memory region attrs
 };
 
 /**
