@@ -19,6 +19,7 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <vector>
 
 /* ---- Global configuration ---- */
 
@@ -59,6 +60,136 @@ void trace_configure_env(void) {
   }
 
   g_config = cfg;
+}
+
+/* ---- Pagemap dump ---- */
+
+// Binary format written to pagemap_{pre,post}_trace.bin:
+//   Repeated entries of:
+//     uint64_t virt_page_addr   (page-aligned virtual address)
+//     uint64_t pagemap_entry    (raw /proc/self/pagemap entry, 8 bytes)
+//   Only pages with the "present" bit set (bit 63) are written.
+
+struct MapsRange {
+  uint64_t start;
+  uint64_t end;
+};
+
+static std::vector<MapsRange> parse_self_maps() {
+  std::vector<MapsRange> ranges;
+  FILE* f = fopen("/proc/self/maps", "r");
+  if (!f) {
+    return ranges;
+  }
+  char line[512];
+  while (fgets(line, sizeof(line), f)) {
+    uint64_t start = 0;
+    uint64_t end = 0;
+    if (sscanf(line, "%lx-%lx", &start, &end) == 2) {
+      ranges.push_back({start, end});
+    }
+  }
+  fclose(f);
+  return ranges;
+}
+
+static constexpr uint64_t kPageSize = 4096;
+static constexpr uint64_t kPagemapEntrySize = 8;
+static constexpr uint64_t kPresentBit = 1ULL << 63;
+static constexpr uint64_t kPfnMask = 0x007FFFFFFFFFFFFFULL;
+
+// Skip ranges larger than 4 GB. This filters out sanitizer shadow
+// regions (ASAN maps ~128 TB) while keeping all real application
+// mappings (code, heap, stack, mmap'd files).
+static constexpr uint64_t kMaxRangeBytes = 4ULL * 1024 * 1024 * 1024;
+
+// Read pagemap entries in batches of 512 (4 KB per pread).
+static constexpr size_t kBatchPages = 512;
+
+static void dump_pagemap(const char* outdir, const char* filename) {
+  auto ranges = parse_self_maps();
+  if (ranges.empty()) {
+    LOG(WARNING) << "Failed to parse /proc/self/maps, skipping pagemap dump";
+    return;
+  }
+
+  int pm_fd = open("/proc/self/pagemap", O_RDONLY);
+  if (pm_fd < 0) {
+    LOG(WARNING) << "Cannot open /proc/self/pagemap (need CAP_SYS_ADMIN), "
+                 << "skipping pagemap dump";
+    return;
+  }
+
+  std::string dir = std::string(outdir) + "/v2p_maps";
+  mkdir(dir.c_str(), 0755);
+
+  std::string path = dir + "/" + filename;
+  FILE* out = fopen(path.c_str(), "wb");
+  if (!out) {
+    LOG(WARNING) << "Cannot create " << path << ", skipping pagemap dump";
+    close(pm_fd);
+    return;
+  }
+
+  uint64_t pages_written = 0;
+  uint64_t ranges_skipped = 0;
+  bool has_nonzero_pfn = false;
+  for (const auto& range : ranges) {
+    uint64_t range_size = range.end - range.start;
+    if (range_size > kMaxRangeBytes) {
+      ranges_skipped++;
+      continue;
+    }
+
+    uint64_t addr = range.start & ~(kPageSize - 1);
+    while (addr < range.end) {
+      uint64_t remaining = (range.end - addr) / kPageSize;
+      size_t batch = static_cast<size_t>(
+          remaining < kBatchPages ? remaining : kBatchPages);
+      if (batch == 0) {
+        break;
+      }
+
+      uint64_t pm_offset = (addr / kPageSize) * kPagemapEntrySize;
+      uint64_t buf[kBatchPages];
+      ssize_t n = pread(pm_fd, buf, batch * kPagemapEntrySize, pm_offset);
+      if (n <= 0) {
+        break;
+      }
+      size_t entries_read = n / kPagemapEntrySize;
+      for (size_t i = 0; i < entries_read; i++) {
+        if (buf[i] & kPresentBit) {
+          uint64_t page_addr = addr + i * kPageSize;
+          fwrite(&page_addr, sizeof(page_addr), 1, out);
+          fwrite(&buf[i], sizeof(buf[i]), 1, out);
+          pages_written++;
+          if ((buf[i] & kPfnMask) != 0) {
+            has_nonzero_pfn = true;
+          }
+        }
+      }
+      addr += entries_read * kPageSize;
+    }
+  }
+
+  fclose(out);
+  close(pm_fd);
+
+  if (ranges_skipped > 0) {
+    LOG(INFO) << "Skipped " << ranges_skipped
+              << " memory ranges >4GB (sanitizer shadow regions)";
+  }
+
+  if (pages_written == 0 || !has_nonzero_pfn) {
+    // Either no present pages, or PFNs are zeroed (Linux 4.0+ without
+    // CAP_SYS_ADMIN). Remove file and directory so absence signals no data.
+    unlink(path.c_str());
+    rmdir(dir.c_str());
+    LOG(WARNING) << "Pagemap not usable (need CAP_SYS_ADMIN for PFNs), "
+                 << "no pagemap saved";
+  } else {
+    LOG(INFO) << "Wrote " << pages_written << " pagemap entries to " << path;
+  }
 }
 
 /* ---- Forward Declarations ---- */
@@ -191,6 +322,10 @@ void trace_begin(void) {
     return;
   }
 
+  if (g_config.record_pagemap) {
+    dump_pagemap(g_config.outdir, "pagemap_pre_trace.bin");
+  }
+
   // Spawn watchdog BEFORE dr_app_setup_and_start() — creating threads while
   // DR is active causes "Failed to take over all threads" errors.
   if (g_config.max_trace_seconds > 0) {
@@ -217,6 +352,9 @@ void trace_end(void) {
   LOG(INFO) << "Stopping tracing...";
   dr_app_stop_and_cleanup();
   LOG(INFO) << "Stopped tracing.";
+  if (g_config.record_pagemap) {
+    dump_pagemap(g_config.outdir, "pagemap_post_trace.bin");
+  }
 }
 
 /* ---- Watchdog ---- */
@@ -237,6 +375,9 @@ void trace_start_watchdog(void) {
                    << "s (watchdog timeout)";
       dr_app_stop_and_cleanup();
       LOG(INFO) << "Stopped tracing.";
+      if (g_config.record_pagemap) {
+        dump_pagemap(g_config.outdir, "pagemap_post_trace.bin");
+      }
     }
   });
   // NOLINTNEXTLINE(facebook-hte-BadCall-detach)

@@ -66,6 +66,7 @@ struct DrTraceConfig {
   bool ignore_asserts = true;
   uint32_t max_trace_seconds =
       0; // watchdog timeout in seconds (0 = no timeout)
+  bool record_pagemap = false; // dump /proc/self/pagemap before+after trace
 };
 
 /**
