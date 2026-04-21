@@ -18,6 +18,10 @@ using namespace ti::foss_revproxy;
 
 // Configuration flags
 DEFINE_int32(port, 8082, "Port to listen on");
+DEFINE_int32(
+    io_threads,
+    0,
+    "Number of IO threads for request handling (0 = auto-detect based on CPU count)");
 DEFINE_string(cert, "", "TLS certificate file (optional)");
 DEFINE_string(key, "", "TLS key file (optional)");
 DEFINE_bool(quic, false, "Enable QUIC/HTTP3 (requires cert/key)");
@@ -39,6 +43,11 @@ int main(int argc, char** argv) {
   HTTPServer::Config config;
   config.socketConfig.bindAddress.setFromLocalPort(FLAGS_port);
   config.plaintextProtocol = FLAGS_plaintext_proto;
+  config.numIOThreads = FLAGS_io_threads;
+
+  XLOG(INFO) << "IO threads: "
+             << (FLAGS_io_threads == 0 ? "auto-detect"
+                                       : std::to_string(FLAGS_io_threads));
 
   // Configure TLS if provided
   if (!FLAGS_cert.empty() && !FLAGS_key.empty()) {

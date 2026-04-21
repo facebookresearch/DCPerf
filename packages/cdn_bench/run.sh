@@ -48,6 +48,7 @@ LISTEN_PORTS=""         # -P: comma-separated ports for server/proxy instances
 BACKEND_HOSTS=""        # -B: comma-separated backend hosts for proxy
 BACKEND_PORTS=""        # -b: comma-separated backend ports for proxy
 PROXY_TARGETS=""        # -T: comma-separated host:port pairs for client targets
+IO_THREADS=0             # -I: IO threads for server/proxy (0 = auto-detect)
 
 ###############################################################################
 # Parse arguments
@@ -64,13 +65,14 @@ Multi-host options:
     -B <backends>    Comma-separated backend hosts for proxy
     -b <ports>       Comma-separated backend ports for proxy
     -T <targets>     Comma-separated host:port pairs for client targets
+    -I <threads>     IO threads for server/proxy (0 = auto-detect from CPU count)
 
     -h               Show this help
 EOF
     exit 1
 }
 
-while getopts "m:d:r:c:S:p:P:B:b:T:h" opt; do
+while getopts "m:d:r:c:S:p:P:B:b:T:I:h" opt; do
   case $opt in
     m) MODE="$OPTARG" ;;
     d) DURATION="$OPTARG" ;;
@@ -82,6 +84,7 @@ while getopts "m:d:r:c:S:p:P:B:b:T:h" opt; do
     B) BACKEND_HOSTS="$OPTARG" ;;
     b) BACKEND_PORTS="$OPTARG" ;;
     T) PROXY_TARGETS="$OPTARG" ;;
+    I) IO_THREADS="$OPTARG" ;;
     h) usage ;;
     *) usage ;;
   esac
@@ -204,6 +207,7 @@ start_content_server() {
   local stderr_file="$2"
   local args=(
     --port="${port}"
+    --io_threads="${IO_THREADS}"
   )
   if [ -n "$PLAINTEXT_PROTO" ]; then
     args+=(--plaintext_proto="${PLAINTEXT_PROTO}")
@@ -221,19 +225,12 @@ verify_content_server() {
   local host="$1"
   local port="$2"
   echo -n "  Probing content_server at ${host}:${port} ... "
-  local http_code
-  http_code=$(curl -sf --connect-timeout 5 -o /dev/null -w "%{http_code}" "http://[${host}]:${port}/" 2>/dev/null \
-    || curl -sf --connect-timeout 5 -o /dev/null -w "%{http_code}" --http2-prior-knowledge "http://[${host}]:${port}/" 2>/dev/null \
-    || echo "000")
-  if [ "$http_code" = "000" ]; then
-    echo "-x> no response (connection refused or timeout)"
-    return 1
-  elif [ "$http_code" -ge 200 ] && [ "$http_code" -lt 400 ]; then
-    echo "-> HTTP ${http_code}"
+  if nc -z -w5 "${host}" "${port}" 2>/dev/null; then
+    echo "-> reachable (port open)"
     return 0
   else
-    echo "-x>  HTTP ${http_code} (server responded but with error)"
-    return 0
+    echo "-x> no response (connection refused or timeout)"
+    return 1
   fi
 }
 
@@ -247,6 +244,7 @@ start_proxy_server() {
   local stderr_file="$4"
   local args=(
     --port="${port}"
+    --io_threads="${IO_THREADS}"
     --backend_servers="${backend_servers}"
     --backend_ports="${backend_ports}"
     --metrics_summary
@@ -346,6 +344,7 @@ run_server() {
   echo "Configuration"
   echo "  Mode: server"
   echo "  Protocol: ${PROTOCOL}"
+  echo "  IO Threads: ${IO_THREADS} (0=auto)"
   echo "  Ports: ${ports}"
   echo ""
 
@@ -420,6 +419,7 @@ run_proxy() {
   echo "Configuration"
   echo "  Mode: proxy"
   echo "  Protocol: ${PROTOCOL}"
+  echo "  IO Threads: ${IO_THREADS} (0=auto)"
   echo "  Listen Ports: ${ports}"
   echo "  Backend Servers: ${backend_servers}"
   echo "  Backend Ports: ${backend_ports}"
@@ -452,10 +452,8 @@ run_proxy() {
     checked+=("$key")
 
     echo -n "  Checking backend ${bhost}:${bport} ... "
-    if curl -sf --connect-timeout 5 -o /dev/null "http://[${bhost}]:${bport}/" 2>/dev/null; then
+    if nc -z -w5 "${bhost}" "${bport}" 2>/dev/null; then
       echo "-> reachable"
-    elif curl -sf --connect-timeout 5 -o /dev/null --http2-prior-knowledge "http://[${bhost}]:${bport}/" 2>/dev/null; then
-      echo "-> reachable (h2)"
     else
       echo "-x-> UNREACHABLE"
       all_backends_ok=false
@@ -586,10 +584,8 @@ run_client() {
     local port="${entry##*:}"
     local host="${entry%:"$port"}"
     echo -n "  Checking proxy ${host}:${port} ... "
-    if curl -sf --connect-timeout 5 -o /dev/null "http://[${host}]:${port}/" 2>/dev/null; then
+    if nc -z -w5 "${host}" "${port}" 2>/dev/null; then
       echo "-> reachable"
-    elif curl -sf --connect-timeout 5 -o /dev/null --http2-prior-knowledge "http://[${host}]:${port}/" 2>/dev/null; then
-      echo "-> reachable (h2)"
     else
       echo "-x-> UNREACHABLE"
       all_proxies_ok=false

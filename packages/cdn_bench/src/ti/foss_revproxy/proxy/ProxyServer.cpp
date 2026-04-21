@@ -21,6 +21,10 @@
 
 // Server configuration
 DEFINE_int32(port, 8081, "Port to listen on");
+DEFINE_int32(
+    io_threads,
+    0,
+    "Number of IO threads for request handling (0 = auto-detect based on CPU count)");
 DEFINE_string(cert, "", "Certificate file (for TLS/QUIC)");
 DEFINE_string(key, "", "Key file (for TLS/QUIC)");
 DEFINE_string(plaintext_proto, "", "Plaintext protocol (h1, h2, etc.)");
@@ -218,6 +222,11 @@ int main(int argc, char** argv) {
   // Bind to IPv6 wildcard (::) which accepts both IPv4 and IPv6 on dual-stack
   httpServerConfig.socketConfig.bindAddress.setFromIpPort("::", FLAGS_port);
   httpServerConfig.plaintextProtocol = FLAGS_plaintext_proto;
+  httpServerConfig.numIOThreads = FLAGS_io_threads;
+
+  XLOG(INFO) << "IO threads: "
+             << (FLAGS_io_threads == 0 ? "auto-detect"
+                                       : std::to_string(FLAGS_io_threads));
 
   configureTLS(httpServerConfig);
 
