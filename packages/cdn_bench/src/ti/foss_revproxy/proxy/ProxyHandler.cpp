@@ -178,9 +178,25 @@ folly::coro::Task<HTTPSourceHolder> ProxyHandler::forwardToBackend(
         new HTTPHybridSource(std::move(headers), std::move(requestSource)),
         std::move(res->reservation));
 
+    // Read the response header event to catch transport errors early.
+    // Without this, TRANSPORT_READ_ERROR leaks to the downstream session
+    // and triggers noisy "Application supplied internal error code" warnings.
+    auto respHeaderTry = co_await co_awaitTry(response.readHeaderEvent());
+    if (respHeaderTry.hasException()) {
+      XLOG(DBG2) << "Backend " << backendIndex
+                 << " response error (likely connection warmup): "
+                 << respHeaderTry.exception().what();
+      recordFailure(requestStart);
+      co_return getDirectResponse(502, "Backend response error\n");
+    }
+
     recordSuccess(requestStart, backendStart);
 
-    co_return std::move(response);
+    // Re-wrap the already-consumed headers + remaining body source into a
+    // new HTTPHybridSource for the downstream session
+    co_return HTTPSourceHolder(new HTTPHybridSource(
+        std::move(respHeaderTry->headers),
+        respHeaderTry->eom ? HTTPSourceHolder() : std::move(response)));
 
   } catch (const std::exception& ex) {
     XLOG(ERR) << "Exception while getting connection: " << ex.what();

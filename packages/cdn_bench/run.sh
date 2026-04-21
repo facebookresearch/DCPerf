@@ -162,7 +162,7 @@ cleanup() {
     fi
   done
   # Give processes time to flush metrics and exit gracefully
-  sleep 2
+  sleep 5
   for pid in "${BG_PIDS[@]}"; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       # Force kill if still running
@@ -518,7 +518,7 @@ run_proxy() {
         kill -INT "$pid" 2>/dev/null || true
       fi
     done
-    sleep 2
+    sleep 5
     for pid in "${BG_PIDS[@]}"; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       # Force kill if still running
