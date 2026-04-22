@@ -253,7 +253,7 @@ start_proxy_server() {
   if [ -n "$PLAINTEXT_PROTO" ]; then
     args+=(--backend_h2)
   fi
-  "${BIN_DIR}/proxy_server" "${args[@]}" 2> >(tee -a "${stderr_file}" >&2) &
+  "${BIN_DIR}/proxy_server" "${args[@]}" 2>>"${stderr_file}" &
   local pid=$!
   BG_PIDS+=("$pid")
   echo "  proxy_server PID: ${pid} (port ${port})"

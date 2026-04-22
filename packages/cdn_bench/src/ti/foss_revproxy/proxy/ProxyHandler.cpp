@@ -8,6 +8,7 @@
 
 #include "ti/foss_revproxy/proxy/ProxyHandler.h"
 
+#include <folly/Synchronized.h>
 #include <folly/logging/xlog.h>
 
 #include "proxygen/lib/http/coro/HTTPFixedSource.h"
@@ -40,57 +41,65 @@ HTTPCoroSessionPool& ProxyHandler::getBackendPool(
     folly::EventBase* evb,
     size_t backendIdx) {
   using PoolKey = std::pair<folly::EventBase*, size_t>;
-  // TODO(sunobrien): ensure thread safety, leaving this for now since I'm going
-  // to change this implementation anyways as part of the upcoming KR
-  static std::map<PoolKey, std::unique_ptr<HTTPCoroSessionPool>> pools;
+  using PoolMap = std::map<PoolKey, std::unique_ptr<HTTPCoroSessionPool>>;
+
+  static folly::Synchronized<PoolMap> pools;
 
   auto key = std::make_pair(evb, backendIdx);
-  auto it = pools.find(key);
 
-  if (it == pools.end()) {
-    // Create new pool for this (EventBase, backend) pair
-    if (backendIdx >= backends_.size()) {
-      throw std::out_of_range("Backend index out of range");
+  // Fast path: read lock to check if pool already exists
+  {
+    auto locked = pools.rlock();
+    auto it = locked->find(key);
+    if (it != locked->end()) {
+      return *it->second;
     }
-
-    const auto& backend = backends_[backendIdx];
-    bool useH2 = config_.backendH2;
-
-    XLOG(INFO) << "Creating pool for backend " << backendIdx << ": "
-               << backend.host << ":" << backend.port
-               << (backend.tls ? " (TLS, ALPN-negotiated)"
-                               : (useH2 ? " (plaintext, HTTP/2)"
-                                        : " (plaintext, HTTP/1.1)"));
-
-    std::unique_ptr<HTTPCoroSessionPool> pool;
-    HTTPCoroSessionPool::PoolParams poolParams;
-    poolParams.connectTimeout = DEFAULT_CONNECT_TIMEOUT;
-    poolParams.maxConnectionAttempts = MAX_CONNECTION_ATTEMPTS;
-
-    if (backend.tls) {
-      // TLS configuration
-      auto connParams = HTTPCoroConnector::defaultConnectionParams();
-      connParams.serverName = backend.host;
-      connParams.fizzContextAndVerifier =
-          HTTPCoroConnector::makeFizzClientContextAndVerifier(
-              HTTPCoroConnector::defaultTLSParams());
-
-      pool = std::make_unique<HTTPCoroSessionPool>(
-          evb, backend.host, backend.port, poolParams, connParams);
-    } else {
-      auto connParams = HTTPCoroConnector::defaultConnectionParams();
-      if (useH2) {
-        connParams.plaintextProtocol = "h2";
-      }
-
-      pool = std::make_unique<HTTPCoroSessionPool>(
-          evb, backend.host, backend.port, poolParams, connParams);
-    }
-
-    it = pools.emplace(key, std::move(pool)).first;
   }
 
-  return *it->second;
+  // Slow path: create pool outside the lock, then insert
+  if (backendIdx >= backends_.size()) {
+    throw std::out_of_range("Backend index out of range");
+  }
+
+  const auto& backend = backends_[backendIdx];
+  bool useH2 = config_.backendH2;
+
+  XLOG(INFO) << "Creating pool for backend " << backendIdx << ": "
+             << backend.host << ":" << backend.port
+             << (backend.tls ? " (TLS, ALPN-negotiated)"
+                             : (useH2 ? " (plaintext, HTTP/2)"
+                                      : " (plaintext, HTTP/1.1)"));
+
+  HTTPCoroSessionPool::PoolParams poolParams;
+  poolParams.connectTimeout = DEFAULT_CONNECT_TIMEOUT;
+  poolParams.maxConnectionAttempts = MAX_CONNECTION_ATTEMPTS;
+
+  auto connParams = HTTPCoroConnector::defaultConnectionParams();
+  if (backend.tls) {
+    connParams.serverName = backend.host;
+    connParams.fizzContextAndVerifier =
+        HTTPCoroConnector::makeFizzClientContextAndVerifier(
+            HTTPCoroConnector::defaultTLSParams());
+  } else if (useH2) {
+    connParams.plaintextProtocol = "h2";
+  }
+
+  // Create pool on the caller's EventBase thread (outside any lock)
+  auto pool = std::make_unique<HTTPCoroSessionPool>(
+      evb, backend.host, backend.port, poolParams, connParams);
+
+  // Now insert under write lock
+  auto locked = pools.wlock();
+
+  // Verify after acquiring write lock (other thread may have created it)
+  auto it = locked->find(key);
+  if (it != locked->end()) {
+    // Another thread won out discard pool and use theirs
+    return *it->second;
+  }
+
+  auto [inserted, success] = locked->emplace(key, std::move(pool));
+  return *inserted->second;
 }
 
 folly::coro::Task<HTTPSourceHolder> ProxyHandler::handleRequest(
