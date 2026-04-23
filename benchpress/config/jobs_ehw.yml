@@ -40,6 +40,7 @@
         - '-r {target_rps}'
         - '-c {num_connections}'
         - '-S {streams_per_connection}'
+        - '-t {client_threads}'
         - '-p {protocol}'
       vars:
         - 'proxy_targets='
@@ -47,6 +48,7 @@
         - 'target_rps=1000'
         - 'num_connections=4'
         - 'streams_per_connection=100'
+        - 'client_threads=1'
         - 'protocol=h2'
   hooks:
     - hook: perf
