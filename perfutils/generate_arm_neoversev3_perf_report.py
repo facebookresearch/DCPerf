@@ -164,6 +164,27 @@ def _align(grouped_df, ev_a, ev_b):
     return sa, sb
 
 
+def _sum_cmn_event(grouped_df, event_suffix):
+    """Sum a CMN HN-S event across all chiplets (arm_cmn_0, arm_cmn_1, ...).
+
+    CMN-Cypress exposes one arm_cmn_N PMU per chiplet. This helper aggregates
+    a given event across all discovered chiplets so metrics reflect the full
+    system-level cache.
+    """
+    total = None
+    for name, group in grouped_df:
+        if isinstance(name, str) and name.endswith(f"/{event_suffix}/"):
+            if total is None:
+                total = group.counter_value.copy()
+            else:
+                vals = group.counter_value
+                vals.index = total.index
+                total = total + vals
+    if total is None:
+        raise KeyError(event_suffix)
+    return total.reset_index(drop=True)
+
+
 # ===========================================================================
 # Core throughput metrics
 # ===========================================================================
@@ -416,14 +437,36 @@ def l2_cache_miss_rate(grouped_df):
 
 @skip_if_missing
 def l3_cache_mpki(grouped_df):
-    miss_s, inst_s = _align(grouped_df, "r37", "instructions")  # LL_CACHE_MISS_RD
-    return {"name": "L3 Cache MPKI", "series": miss_s.div(inst_s / 1000.0)}
+    # Prefer CMN uncore events for true SLC MPKI (reads + writes).
+    # Falls back to r37 (LL_CACHE_MISS_RD) which on V3 only measures
+    # L2 read misses leaving the PE toward SLC/DRAM.
+    try:
+        miss_s = _sum_cmn_event(grouped_df, "hns_cache_miss_all")
+        inst_s = grouped_df.get_group("instructions").counter_value
+        miss_s.index = inst_s.index
+        return {"name": "L3 Cache MPKI", "series": miss_s.div(inst_s / 1000.0)}
+    except KeyError:
+        miss_s, inst_s = _align(grouped_df, "r37", "instructions")
+        return {"name": "L3 Cache MPKI", "series": miss_s.div(inst_s / 1000.0)}
 
 
 @skip_if_missing
 def l3_cache_miss_rate(grouped_df):
-    miss_s, acc_s = _align(grouped_df, "r37", "r36")  # LL_CACHE_MISS_RD / LL_CACHE_RD
-    return {"name": "L3 Cache Miss Rate %", "series": miss_s / acc_s, "prefix": 100}
+    # Use CMN HN-S uncore events for the real SLC miss rate.
+    # hns_cache_miss_all / hns_slc_sf_cache_access_all gives total (read+write)
+    # SLC miss rate across all chiplets.
+    # Falls back to None if CMN events are not available (kernel without
+    # CONFIG_ARM_CMN=y or firmware without CMNPMU ACPI table).
+    try:
+        access_s = _sum_cmn_event(grouped_df, "hns_slc_sf_cache_access_all")
+        miss_s = _sum_cmn_event(grouped_df, "hns_cache_miss_all")
+        return {
+            "name": "L3 Cache Miss Rate %",
+            "series": miss_s / access_s,
+            "prefix": 100,
+        }
+    except KeyError:
+        return None
 
 
 # ===========================================================================
@@ -764,6 +807,24 @@ def dispatch_stall_mcq(grouped_df):
 
 
 @skip_if_missing
+def cmn_mem_read_bw_MBps(grouped_df):
+    """Memory read bandwidth from CMN MC request counters.
+
+    Each hns_mc_reqs_local_all is a cache-line (64B) request to the memory
+    controller, analogous to Grace's SCF cmem_rd_data.
+    """
+    mc_reqs = _sum_cmn_event(grouped_df, "hns_mc_reqs_local_all")
+    dur = get_duration_series(grouped_df.get_group("instructions"))
+    mc_reqs.index = dur.index
+    bw_series = (mc_reqs * 64).div(dur)
+    return {
+        "name": "CMN Memory Read Bandwidth (MBps)",
+        "series": bw_series,
+        "prefix": 10**-6,
+    }
+
+
+@skip_if_missing
 def sve_pred_empty_pct(grouped_df):
     """SVE predicated ops with no active lanes (wasted work)."""
     empty_s, pred_s = _align(
@@ -899,6 +960,8 @@ def main(
         sve_pred_empty_pct(grouped_df),
         sve_pred_full_pct(grouped_df),
         sve_pred_partial_pct(grouped_df),
+        # --- CMN uncore (SLC / memory bandwidth) ---
+        cmn_mem_read_bw_MBps(grouped_df),
     ]
 
     filtered_metrics = list(itertools.filterfalse(lambda x: x is None, metrics))

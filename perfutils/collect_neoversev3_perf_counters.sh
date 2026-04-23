@@ -127,6 +127,20 @@ L2_CHI_BUSY='r198,r199,r19A,r19B,r19C'
 # sve_pred_full_spec (0x8076), sve_pred_partial_spec (0x8077)
 SVE_PRED='r8074,r8075,r8076,r8077'
 
+### CMN-Cypress Uncore PMU Events (SLC / System Level Cache) ---------
+### Auto-discover arm_cmn_N devices (one per chiplet on NV3).
+### HN-S (Home Node with SLC) events provide true SLC miss rate,
+### which is not observable from the core PMU on Neoverse V3.
+CMN_SLC_EVENTS=""
+for cmn_dev in $(find /sys/bus/event_source/devices/ -maxdepth 1 -name 'arm_cmn_*' -printf '%f\n' 2>/dev/null | sort); do
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_slc_sf_cache_access_all/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_cache_miss_all/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_cache_fill_all/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_mc_reqs_local_all/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_pocq_reqs_recvd_all/,"
+done
+CMN_SLC_EVENTS="${CMN_SLC_EVENTS%,}"
+
 ## Purposedly let CPU events multiplex, simplifies our report generation
 ## In production take proper care of handling multiplexing
 CPU_GROUP_MUX="${INSTRUCTIONS_RATE},${L1_DCACHE_MISSES},${L1_ICACHE_MISSES},${L2_CACHE_MISSES},${L3_CACHE_MISSES}\
@@ -159,8 +173,11 @@ collect_counters() {
     interval="$INTERVAL_SECS"
   fi
   interval_ms="$((interval * 1000))"
-  # Core-only PMU events — all events are collected in a single multiplexed group.
+  # Core PMU events in a single multiplexed group, plus CMN uncore if available.
   events="-e ${CPU_GROUP_MUX}"
+  if [[ -n "$CMN_SLC_EVENTS" ]]; then
+    events+=" -e ${CMN_SLC_EVENTS}"
+  fi
   if [[ -n "$outfile" ]]; then
     perf_stat "$events" "$interval_ms" > "$outfile"
   else
