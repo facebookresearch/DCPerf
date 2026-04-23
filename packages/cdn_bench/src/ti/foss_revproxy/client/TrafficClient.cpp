@@ -248,9 +248,13 @@ std::unique_ptr<HTTPCoroSessionPool> createConnectionPool(
   } else if (FLAGS_target_tls) {
     // TLS configuration (HTTP/1.1 or HTTP/2 over TCP)
     auto connParams = HTTPCoroConnector::defaultConnectionParams();
-    connParams.fizzContextAndVerifier =
-        HTTPCoroConnector::makeFizzClientContextAndVerifier(
-            HTTPCoroConnector::defaultTLSParams());
+    auto tlsParams = HTTPCoroConnector::defaultTLSParams();
+    auto fizzContext =
+        HTTPCoroConnector::makeFizzClientContext(std::move(tlsParams));
+    auto insecureVerifier = std::make_shared<
+        proxygen::InsecureVerifierDangerousDoNotUseInProduction>();
+    connParams.fizzContextAndVerifier = {
+        std::move(fizzContext), std::move(insecureVerifier)};
 
     return std::make_unique<HTTPCoroSessionPool>(
         evb,

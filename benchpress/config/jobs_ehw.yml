@@ -2,7 +2,8 @@
   name: cdn_bench
   description: >
     Distributed CDN benchmark. Run server, proxy, and client roles on
-    separate hosts. Supports multiple instances of each role for scaling.
+    separate hosts. Supports h1, h2, h2-tls, and h3 protocols.
+    Multiple instances of each role for scaling.
   roles:
     server:
       args:
