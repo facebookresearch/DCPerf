@@ -1,0 +1,35 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# Fix tao_bench_server crash on GCC 15+ where _GLIBCXX_ASSERTIONS is
+# enabled by default. std::uniform_int_distribution asserts min <= max,
+# and folly::Random::rand32(min, max) calls distribution(min, max-1),
+# which crashes when min >= max. This can happen in the item generator
+# as the cache fills during warmup.
+#
+# Backward compatible: on older GCC, the check is simply redundant.
+diff --git a/db_items.cpp b/db_items.cpp
+--- a/db_items.cpp
++++ b/db_items.cpp
+@@ -84,6 +84,9 @@
+ }
+ 
+ uint64_t db_items::getUint64(uint64_t n_min, uint64_t n_max) {
++    // Guard against inverted ranges that trigger _GLIBCXX_ASSERTIONS
++    // in std::uniform_int_distribution on GCC 15+
++    if (n_min >= n_max) return n_min;
+     uint64_t result = 0;
+     pthread_mutex_lock(&rngLock);
+     result = folly::Random::rand64(n_min, n_max, _rng);
+@@ -92,6 +95,9 @@
+ }
+ 
+ uint32_t db_items::getUint32(uint32_t n_min, uint32_t n_max) {
++    // Guard against inverted ranges that trigger _GLIBCXX_ASSERTIONS
++    // in std::uniform_int_distribution on GCC 15+
++    if (n_min >= n_max) return n_min;
+     uint32_t result = 0;
+     pthread_mutex_lock(&rngLock);
+     result = folly::Random::rand32(n_min, n_max, _rng);
