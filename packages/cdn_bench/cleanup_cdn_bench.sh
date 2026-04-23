@@ -42,7 +42,11 @@ if [ -d "${BUILD_DIR}" ]; then
 fi
 
 # Remove temp stderr files from benchmark runs
-rm -f "${CDN_PACKAGE_DIR}/.content_stderr" "${CDN_PACKAGE_DIR}/.proxy_stderr" "${CDN_PACKAGE_DIR}/.client_stderr"
+rm -f "${CDN_PACKAGE_DIR}/.content_stderr"* "${CDN_PACKAGE_DIR}/.proxy_stderr"* "${CDN_PACKAGE_DIR}/.client_stderr"*
+
+# Remove auto-generated TLS certificates
+rm -f "${CDN_PACKAGE_DIR}/.cdn_bench_cert.pem" "${CDN_PACKAGE_DIR}/.cdn_bench_key.pem"
+rm -f /tmp/cdn_bench_tls_cert.pem /tmp/cdn_bench_tls_key.pem
 
 # Remove log file
 if [ -f "${CDN_PACKAGE_DIR}/cdn_bench_run.log" ]; then

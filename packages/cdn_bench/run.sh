@@ -101,8 +101,8 @@ esac
 
 # Validate protocol
 case "$PROTOCOL" in
-  h1|h2|h2-tls) ;;
-  *) echo "ERROR: Invalid protocol '$PROTOCOL'. Must be h1, h2, or h2-tls."; exit 1 ;;
+  h1|h2|h2-tls|h3) ;;
+  *) echo "ERROR: Invalid protocol '$PROTOCOL'. Must be h1, h2, h2-tls, or h3."; exit 1 ;;
 esac
 
 # Determine plaintext_proto and TLS flags
@@ -125,6 +125,22 @@ elif [ "$PROTOCOL" = "h2-tls" ]; then
   echo ""
 else
   PLAINTEXT_PROTO=""
+fi
+
+# QUIC/H3: auto-generate self-signed TLS certificate
+QUIC_CERT=""
+QUIC_KEY=""
+if [ "$PROTOCOL" = "h3" ]; then
+  TLS_ENABLED=true
+  QUIC_CERT="${SCRIPT_DIR}/.cdn_bench_cert.pem"
+  QUIC_KEY="${SCRIPT_DIR}/.cdn_bench_key.pem"
+  echo "Generating self-signed TLS certificate for QUIC/H3..."
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+    -nodes -days 1 -subj '/CN=cdn_bench' \
+    -keyout "${QUIC_KEY}" -out "${QUIC_CERT}" 2>/dev/null
+  echo "  Cert: ${QUIC_CERT}"
+  echo "  Key:  ${QUIC_KEY}"
+  echo ""
 fi
 
 ###############################################################################
@@ -156,7 +172,7 @@ esac
 # Kill stale processes from previous runs
 ###############################################################################
 for port in "${CONTENT_PORT}" "${PROXY_PORT}"; do
-  STALE_PID=$(ss -tlnp 2>/dev/null | grep ":${port}\b" | grep -oP 'pid=\K[0-9]+' || true)
+  STALE_PID=$(ss -tlnp -ulnp 2>/dev/null | grep ":${port}\b" | grep -oP 'pid=\K[0-9]+' | head -1 || true)
   if [ -n "$STALE_PID" ]; then
     echo "WARNING: Killing stale process (PID ${STALE_PID}) on port ${port}"
     kill "$STALE_PID" 2>/dev/null || true
@@ -195,9 +211,6 @@ cleanup() {
   done
   # Remove temp files matching our pattern
   rm -f "${SCRIPT_DIR}"/.content_stderr* "${SCRIPT_DIR}"/.proxy_stderr* "${SCRIPT_DIR}"/.client_stderr*
-  if [ "$TLS_ENABLED" = true ]; then
-    rm -f "$TLS_CERT" "$TLS_KEY"
-  fi
 }
 
 trap cleanup EXIT ERR
@@ -209,7 +222,7 @@ wait_for_port() {
   local port="$1"
   local max_wait="${2:-30}"
   local waited=0
-  while ! ss -tlnp 2>/dev/null | grep -q ":${port} " ; do
+  while ! ss -tulnp 2>/dev/null | grep -qE ":${port}\b" ; do
     sleep 1
     waited=$((waited + 1))
     if [ "$waited" -ge "$max_wait" ]; then
@@ -218,6 +231,27 @@ wait_for_port() {
     fi
   done
   echo "  Port ${port} is listening (waited ${waited}s)"
+}
+
+# For QUIC/UDP servers where ss may not detect the port reliably
+wait_for_process() {
+  local pid="$1"
+  local port="$2"
+  sleep 2
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "  Port ${port} process alive (QUIC/UDP, pid ${pid})"
+    return 0
+  else
+    echo "ERROR: Server process ${pid} crashed on startup (port ${port})"
+    for f in "${SCRIPT_DIR}"/.content_stderr* "${SCRIPT_DIR}"/.proxy_stderr*; do
+      if [ -f "$f" ] && [ -s "$f" ]; then
+        echo "  --- $(basename "$f") ---"
+        tail -20 "$f"
+        echo "  ---"
+      fi
+    done
+    exit 1
+  fi
 }
 
 ###############################################################################
@@ -230,10 +264,13 @@ start_content_server() {
     --port="${port}"
     --io_threads="${IO_THREADS}"
   )
-  if [ -n "$PLAINTEXT_PROTO" ]; then
+  if [ "$PROTOCOL" = "h3" ]; then
+    # H3 mode: server runs TLS/H2 (TCP) as the proxy backend.
+    # Only the proxy needs --quic for the client-facing QUIC listener.
+    args+=(--cert="${QUIC_CERT}" --key="${QUIC_KEY}")
+  elif [ -n "$PLAINTEXT_PROTO" ]; then
     args+=(--plaintext_proto="${PLAINTEXT_PROTO}")
-  fi
-  if [ "$TLS_ENABLED" = true ]; then
+  elif [ "$TLS_ENABLED" = true ]; then
     args+=(--cert="$TLS_CERT" --key="$TLS_KEY")
   fi
   "${BIN_DIR}/content_server" "${args[@]}" 2>"${stderr_file}" &
@@ -249,6 +286,7 @@ verify_content_server() {
   local host="$1"
   local port="$2"
   echo -n "  Probing content_server at ${host}:${port} ... "
+  # Content server always uses TCP (even in h3 mode, it's the proxy backend)
   if nc -z -w5 "${host}" "${port}" 2>/dev/null; then
     echo "-> reachable (port open)"
     return 0
@@ -274,7 +312,10 @@ start_proxy_server() {
     --metrics_summary
     --metrics_interval=5
   )
-  if [ "$TLS_ENABLED" = true ]; then
+  if [ "$PROTOCOL" = "h3" ]; then
+    args+=(--cert="${QUIC_CERT}" --key="${QUIC_KEY}" --quic)
+    args+=(--backend_tls --backend_h2)
+  elif [ "$TLS_ENABLED" = true ]; then
     args+=(--cert="$TLS_CERT" --key="$TLS_KEY" --backend_tls --backend_h2)
   elif [ -n "$PLAINTEXT_PROTO" ]; then
     args+=(--plaintext_proto="${PLAINTEXT_PROTO}" --backend_h2)
@@ -307,11 +348,13 @@ run_traffic_client() {
   elif [ "$PROTOCOL" = "h1" ]; then
     args+=(--notarget_h2)
   fi
-  if [ "$TLS_ENABLED" = true ]; then
+
+  if [ "$PROTOCOL" = "h3" ]; then
+    args+=(--target_tls --quic)
+  elif [ "$TLS_ENABLED" = true ]; then
     args+=(--target_tls)
   fi
   "${BIN_DIR}/traffic_client" "${args[@]}" 2>"${stderr_file}" || exit_code=$?
-
   return "$exit_code"
 }
 
@@ -491,10 +534,9 @@ run_proxy() {
     checked+=("$key")
 
     echo -n "  Checking backend ${bhost}:${bport} ... "
+    # Backend always uses TCP (even in h3 mode, proxy connects via H2-TLS)
     if nc -z -w5 "${bhost}" "${bport}" 2>/dev/null; then
       echo "-> reachable"
-    elif curl -ksf --connect-timeout 5 -o /dev/null "https://[${bhost}]:${bport}/" 2>/dev/null; then
-      echo "-> reachable (tls)"
     else
       echo "-x-> UNREACHABLE"
       all_backends_ok=false
@@ -538,7 +580,12 @@ run_proxy() {
   echo "Waiting for proxy servers to start..."
   for port in "${PORT_ARRAY[@]}"; do
     port="$(echo "$port" | tr -d ' ')"
-    wait_for_port "${port}"
+    if [ "$PROTOCOL" = "h3" ]; then
+      local proxy_pid="${BG_PIDS[${#BG_PIDS[@]}-1]}"
+      wait_for_process "${proxy_pid}" "${port}"
+    else
+      wait_for_port "${port}"
+    fi
   done
 
   echo ""
@@ -627,10 +674,15 @@ run_client() {
     local port="${entry##*:}"
     local host="${entry%:"$port"}"
     echo -n "  Checking proxy ${host}:${port} ... "
-    if nc -z -w5 "${host}" "${port}" 2>/dev/null; then
+    if [ "$PROTOCOL" = "h3" ]; then
+      if nc -zu -w5 "${host}" "${port}" 2>/dev/null; then
+        echo "-> reachable (UDP)"
+      else
+        echo "-x-> UNREACHABLE (UDP)"
+        all_proxies_ok=false
+      fi
+    elif nc -z -w5 "${host}" "${port}" 2>/dev/null; then
       echo "-> reachable"
-    elif curl -ksf --connect-timeout 5 -o /dev/null "https://[${host}]:${port}/" 2>/dev/null; then
-      echo "-> reachable (tls)"
     else
       echo "-x-> UNREACHABLE"
       all_proxies_ok=false

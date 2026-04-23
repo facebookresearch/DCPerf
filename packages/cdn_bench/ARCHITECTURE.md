@@ -133,7 +133,41 @@ run.sh
 
 ## Protocol Support
 
-- **H2 (default):** HTTP/2 cleartext (h2c). Uses stream multiplexing for high
-  concurrency over fewer TCP connections.
-- **H1:** HTTP/1.1. One request per connection at a time (no multiplexing).
+The benchmark supports four protocol modes, selected via `-p <protocol>`:
+
+### Supported Protocols
+
+| Protocol | Client → Proxy | Proxy → Server | TLS | Multiplexing |
+|----------|---------------|----------------|-----|--------------|
+| **h1** | HTTP/1.1 cleartext | HTTP/1.1 cleartext | ✗ | None |
+| **h2** (default) | HTTP/2 cleartext (h2c) | HTTP/2 cleartext (h2c) | ✗ | Stream multiplexing |
+| **h2-tls** | HTTP/2 over TLS (h2) | HTTP/2 over TLS (h2) | ✓ | Stream multiplexing |
+| **h3** | HTTP/3 (QUIC) | HTTP/2 over TLS (h2) | ✓ | QUIC stream multiplexing |
+
+### Protocol Details
+
+- **h1:** HTTP/1.1. One request per connection at a time (no multiplexing).
   Useful for baseline comparison.
+- **h2 (default):** HTTP/2 cleartext (h2c). Uses `--plaintext_proto=h2` on
+  servers and `--http2-prior-knowledge` for health checks. Stream multiplexing
+  enables high concurrency over fewer TCP connections.
+- **h2-tls:** HTTP/2 over TLS. Auto-generates a self-signed EC certificate
+  (P-256) at `/tmp/cdn_bench_tls_{cert,key}.pem`. Passes `--cert`/`--key`
+  to content_server and proxy_server, `--backend_tls` to proxy_server, and
+  `--target_tls` to traffic_client. Health checks fall back to
+  `curl -k https://` for TLS endpoints. Measures TLS handshake and symmetric
+  encryption overhead (AES-NI, SHA extensions).
+- **h3:** HTTP/3 over QUIC. Auto-generates a self-signed EC certificate
+  (P-256) at `<script_dir>/.cdn_bench_{cert,key}.pem`. Client uses QUIC
+  transport to proxy (`--quic --target_tls`); proxy connects to backend
+  over h2+TLS (`--backend_tls --backend_h2`). Exercises UDP-based transport,
+  0-RTT connection establishment, and QUIC congestion control.
+
+### Connection Flow by Protocol
+
+```
+h1:       client ──HTTP/1.1──▶ proxy ──HTTP/1.1──▶ server
+h2:       client ──h2c─────▶ proxy ──h2c─────▶ server
+h2-tls:   client ──h2+TLS──▶ proxy ──h2+TLS──▶ server
+h3:       client ══QUIC/H3═▶ proxy ──h2+TLS──▶ server
+```
