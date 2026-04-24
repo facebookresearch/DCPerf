@@ -201,11 +201,34 @@ folly::coro::Task<HTTPSourceHolder> ProxyHandler::forwardToBackend(
 
     recordSuccess(requestStart, backendStart);
 
-    // Re-wrap the already-consumed headers + remaining body source into a
-    // new HTTPHybridSource for the downstream session
-    co_return HTTPSourceHolder(new HTTPHybridSource(
-        std::move(respHeaderTry->headers),
-        respHeaderTry->eom ? HTTPSourceHolder() : std::move(response)));
+    // Fully drain the backend response body before returning to the client.
+    // Use makeFixedSource to preserve original backend headers (Content-Type,
+    // etc.)
+    if (respHeaderTry->eom) {
+      co_return HTTPSourceHolder(
+          HTTPFixedSource::makeFixedSource(std::move(respHeaderTry->headers)));
+    }
+
+    std::string bodyData;
+    while (true) {
+      auto bodyEvent = co_await response.readBodyEvent(4096);
+      auto* bq = asBodyEv(bodyEvent);
+      if (bq) {
+        auto buf = bq->move();
+        if (buf) {
+          bodyData.append(
+              reinterpret_cast<const char*>(buf->data()), buf->length());
+        }
+      }
+      if (bodyEvent.eom) {
+        break;
+      }
+    }
+
+    co_return HTTPSourceHolder(
+        HTTPFixedSource::makeFixedSource(
+            std::move(respHeaderTry->headers),
+            folly::IOBuf::copyBuffer(bodyData)));
 
   } catch (const std::exception& ex) {
     XLOG(ERR) << "Exception while getting connection: " << ex.what();
