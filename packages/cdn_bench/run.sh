@@ -101,13 +101,31 @@ esac
 
 # Validate protocol
 case "$PROTOCOL" in
-  h1|h2) ;;
-  *) echo "ERROR: Invalid protocol '$PROTOCOL'. Must be h1 or h2."; exit 1 ;;
+  h1|h2|h2-tls) ;;
+  *) echo "ERROR: Invalid protocol '$PROTOCOL'. Must be h1, h2, or h2-tls."; exit 1 ;;
 esac
 
-# Determine plaintext_proto flag for proxy and content server
+# Determine plaintext_proto and TLS flags
+TLS_ENABLED=false
+TLS_CERT=""
+TLS_KEY=""
 if [ "$PROTOCOL" = "h2" ]; then
   PLAINTEXT_PROTO="h2"
+elif [ "$PROTOCOL" = "h2-tls" ]; then
+  PLAINTEXT_PROTO=""
+  TLS_ENABLED=true
+  TLS_CERT="/tmp/cdn_bench_tls_cert.pem"
+  TLS_KEY="/tmp/cdn_bench_tls_key.pem"
+  echo "Generating self-signed TLS certificate..."
+  if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+    -keyout "$TLS_KEY" -out "$TLS_CERT" \
+    -days 1 -nodes -subj "/CN=cdn-bench" 2>&1; then
+    echo "ERROR: Failed to generate TLS certificate (is openssl installed?)"
+    exit 1
+  fi
+  echo "  cert: ${TLS_CERT}"
+  echo "  key:  ${TLS_KEY}"
+  echo ""
 else
   PLAINTEXT_PROTO=""
 fi
@@ -180,6 +198,9 @@ cleanup() {
   done
   # Remove temp files matching our pattern
   rm -f "${SCRIPT_DIR}"/.content_stderr* "${SCRIPT_DIR}"/.proxy_stderr* "${SCRIPT_DIR}"/.client_stderr*
+  if [ "$TLS_ENABLED" = true ]; then
+    rm -f "$TLS_CERT" "$TLS_KEY"
+  fi
 }
 
 trap cleanup EXIT ERR
@@ -214,6 +235,9 @@ start_content_server() {
   )
   if [ -n "$PLAINTEXT_PROTO" ]; then
     args+=(--plaintext_proto="${PLAINTEXT_PROTO}")
+  fi
+  if [ "$TLS_ENABLED" = true ]; then
+    args+=(--cert="$TLS_CERT" --key="$TLS_KEY")
   fi
   "${BIN_DIR}/content_server" "${args[@]}" 2>"${stderr_file}" &
   local pid=$!
@@ -253,7 +277,9 @@ start_proxy_server() {
     --metrics_summary
     --metrics_interval=5
   )
-  if [ -n "$PLAINTEXT_PROTO" ]; then
+  if [ "$TLS_ENABLED" = true ]; then
+    args+=(--cert="$TLS_CERT" --key="$TLS_KEY" --backend_tls --backend_h2)
+  elif [ -n "$PLAINTEXT_PROTO" ]; then
     args+=(--plaintext_proto="${PLAINTEXT_PROTO}" --backend_h2)
   fi
   "${BIN_DIR}/proxy_server" "${args[@]}" 2>>"${stderr_file}" &
@@ -279,12 +305,16 @@ run_traffic_client() {
     --streams_per_connection="${STREAMS_PER_CONNECTION}"
     --client_threads="${CLIENT_THREADS}"
   )
-  if [ "$PROTOCOL" = "h2" ]; then
+  if [ "$PROTOCOL" = "h2" ] || [ "$PROTOCOL" = "h2-tls" ]; then
     args+=(--target_h2)
   elif [ "$PROTOCOL" = "h1" ]; then
     args+=(--notarget_h2)
   fi
+  if [ "$TLS_ENABLED" = true ]; then
+    args+=(--target_tls)
+  fi
   "${BIN_DIR}/traffic_client" "${args[@]}" 2>"${stderr_file}" || exit_code=$?
+
   return "$exit_code"
 }
 
@@ -354,8 +384,9 @@ run_server() {
   echo "Configuration"
   echo "  Mode: server"
   echo "  Protocol: ${PROTOCOL}"
-  echo "  IO Threads: ${IO_THREADS} (0=auto)"
   echo "  Ports: ${ports}"
+  echo "  IO Threads: ${IO_THREADS} (0=auto)"
+  echo "  TLS: ${TLS_ENABLED}"
   echo ""
 
   IFS=',' read -ra PORT_ARRAY <<< "$ports"
@@ -429,8 +460,9 @@ run_proxy() {
   echo "Configuration"
   echo "  Mode: proxy"
   echo "  Protocol: ${PROTOCOL}"
+  echo "  Listen Ports: ${LISTEN_PORTS:-8081}"
   echo "  IO Threads: ${IO_THREADS} (0=auto)"
-  echo "  Listen Ports: ${ports}"
+  echo "  TLS: ${TLS_ENABLED}"
   echo "  Backend Servers: ${backend_servers}"
   echo "  Backend Ports: ${backend_ports}"
   echo ""
@@ -464,6 +496,8 @@ run_proxy() {
     echo -n "  Checking backend ${bhost}:${bport} ... "
     if nc -z -w5 "${bhost}" "${bport}" 2>/dev/null; then
       echo "-> reachable"
+    elif curl -ksf --connect-timeout 5 -o /dev/null "https://[${bhost}]:${bport}/" 2>/dev/null; then
+      echo "-> reachable (tls)"
     else
       echo "-x-> UNREACHABLE"
       all_backends_ok=false
@@ -572,6 +606,7 @@ run_client() {
   echo "Configuration"
   echo "  Mode: client"
   echo "  Protocol: ${PROTOCOL}"
+  echo "  TLS: ${TLS_ENABLED}"
   echo "  Duration: ${DURATION}"
   echo "  Target RPS: ${TARGET_RPS}"
   echo "  Connections: ${NUM_CONNECTIONS}"
@@ -597,6 +632,8 @@ run_client() {
     echo -n "  Checking proxy ${host}:${port} ... "
     if nc -z -w5 "${host}" "${port}" 2>/dev/null; then
       echo "-> reachable"
+    elif curl -ksf --connect-timeout 5 -o /dev/null "https://[${host}]:${port}/" 2>/dev/null; then
+      echo "-> reachable (tls)"
     else
       echo "-x-> UNREACHABLE"
       all_proxies_ok=false

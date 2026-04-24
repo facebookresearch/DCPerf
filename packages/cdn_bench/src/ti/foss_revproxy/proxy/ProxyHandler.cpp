@@ -14,6 +14,8 @@
 #include "proxygen/lib/http/coro/HTTPFixedSource.h"
 #include "proxygen/lib/http/coro/HTTPHybridSource.h"
 
+#include "proxygen/httpserver/samples/hq/InsecureVerifierDangerousDoNotUseInProduction.h"
+
 using namespace proxygen;
 using namespace proxygen::coro;
 
@@ -77,9 +79,13 @@ HTTPCoroSessionPool& ProxyHandler::getBackendPool(
   auto connParams = HTTPCoroConnector::defaultConnectionParams();
   if (backend.tls) {
     connParams.serverName = backend.host;
-    connParams.fizzContextAndVerifier =
-        HTTPCoroConnector::makeFizzClientContextAndVerifier(
-            HTTPCoroConnector::defaultTLSParams());
+    auto tlsParams = HTTPCoroConnector::defaultTLSParams();
+    auto fizzContext =
+        HTTPCoroConnector::makeFizzClientContext(std::move(tlsParams));
+    auto insecureVerifier = std::make_shared<
+        proxygen::InsecureVerifierDangerousDoNotUseInProduction>();
+    connParams.fizzContextAndVerifier = {
+        std::move(fizzContext), std::move(insecureVerifier)};
   } else if (useH2) {
     connParams.plaintextProtocol = "h2";
   }
