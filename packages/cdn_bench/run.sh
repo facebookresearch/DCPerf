@@ -49,6 +49,7 @@ BACKEND_HOSTS=""        # -B: comma-separated backend hosts for proxy
 BACKEND_PORTS=""        # -b: comma-separated backend ports for proxy
 PROXY_TARGETS=""        # -T: comma-separated host:port pairs for client targets
 IO_THREADS=0             # -I: IO threads for server/proxy (0 = auto-detect)
+CLIENT_THREADS=1         # -t: client IO threads (0 = auto-detect)
 
 ###############################################################################
 # Parse arguments
@@ -66,13 +67,14 @@ Multi-host options:
     -b <ports>       Comma-separated backend ports for proxy
     -T <targets>     Comma-separated host:port pairs for client targets
     -I <threads>     IO threads for server/proxy (0 = auto-detect from CPU count)
+    -t <threads>     Client IO threads (0 = auto-detect, default: 1)
 
     -h               Show this help
 EOF
     exit 1
 }
 
-while getopts "m:d:r:c:S:p:P:B:b:T:I:h" opt; do
+while getopts "m:d:r:c:S:p:P:B:b:T:I:t:h" opt; do
   case $opt in
     m) MODE="$OPTARG" ;;
     d) DURATION="$OPTARG" ;;
@@ -85,6 +87,7 @@ while getopts "m:d:r:c:S:p:P:B:b:T:I:h" opt; do
     b) BACKEND_PORTS="$OPTARG" ;;
     T) PROXY_TARGETS="$OPTARG" ;;
     I) IO_THREADS="$OPTARG" ;;
+    t) CLIENT_THREADS="$OPTARG" ;;
     h) usage ;;
     *) usage ;;
   esac
@@ -251,7 +254,7 @@ start_proxy_server() {
     --metrics_interval=5
   )
   if [ -n "$PLAINTEXT_PROTO" ]; then
-    args+=(--backend_h2)
+    args+=(--plaintext_proto="${PLAINTEXT_PROTO}" --backend_h2)
   fi
   "${BIN_DIR}/proxy_server" "${args[@]}" 2>>"${stderr_file}" &
   local pid=$!
@@ -267,14 +270,21 @@ run_traffic_client() {
   local target_port="$2"
   local stderr_file="$3"
   local exit_code=0
-  "${BIN_DIR}/traffic_client" \
-    --target_host="${target_host}" \
-    --target_port="${target_port}" \
-    --target_rps="${TARGET_RPS}" \
-    --duration_sec="${DURATION}" \
-    --num_connections="${NUM_CONNECTIONS}" \
-    --streams_per_connection="${STREAMS_PER_CONNECTION}" \
-    2>"${stderr_file}" || exit_code=$?
+  local args=(
+    --target_host="${target_host}"
+    --target_port="${target_port}"
+    --target_rps="${TARGET_RPS}"
+    --duration_sec="${DURATION}"
+    --num_connections="${NUM_CONNECTIONS}"
+    --streams_per_connection="${STREAMS_PER_CONNECTION}"
+    --client_threads="${CLIENT_THREADS}"
+  )
+  if [ "$PROTOCOL" = "h2" ]; then
+    args+=(--target_h2)
+  elif [ "$PROTOCOL" = "h1" ]; then
+    args+=(--notarget_h2)
+  fi
+  "${BIN_DIR}/traffic_client" "${args[@]}" 2>"${stderr_file}" || exit_code=$?
   return "$exit_code"
 }
 
@@ -566,6 +576,7 @@ run_client() {
   echo "  Target RPS: ${TARGET_RPS}"
   echo "  Connections: ${NUM_CONNECTIONS}"
   echo "  Streams Per Connection: ${STREAMS_PER_CONNECTION}"
+  echo "  Client Threads: ${CLIENT_THREADS} (0=auto)"
   echo "  Proxy Targets: ${PROXY_TARGETS}"
   echo ""
 
