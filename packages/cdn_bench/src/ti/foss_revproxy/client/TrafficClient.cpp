@@ -6,11 +6,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <folly/executors/IOThreadPoolExecutor.h>
 #include <folly/experimental/coro/Sleep.h>
 #include <folly/init/Init.h>
 #include <folly/io/async/EventBase.h>
 #include <folly/logging/xlog.h>
 #include <folly/portability/GFlags.h>
+#include <folly/synchronization/Baton.h>
+#include <folly/system/HardwareConcurrency.h>
 
 #include <atomic>
 #include <chrono>
@@ -36,6 +39,11 @@ DEFINE_string(target_host, "::1", "Target server hostname or IP");
 DEFINE_int32(target_port, 8081, "Target server port");
 DEFINE_bool(target_tls, false, "Use TLS to connect to target");
 DEFINE_bool(quic, false, "Use QUIC/HTTP3");
+DEFINE_bool(
+    target_h2,
+    true,
+    "Use HTTP/2 for plaintext connections (h2c). "
+    "Ignored when --target_tls or --quic is set");
 
 DEFINE_int32(target_rps, 10, "Target requests per second");
 DEFINE_int32(duration_sec, 10, "Duration to run traffic (seconds)");
@@ -46,6 +54,10 @@ DEFINE_int32(
     streams_per_connection,
     1,
     "Max concurrent streams per connection");
+DEFINE_int32(
+    client_threads,
+    1,
+    "Number of client IO threads (0 = auto-detect based on CPU count)");
 
 DEFINE_double(
     reset_probability,
@@ -130,7 +142,8 @@ folly::coro::Task<void> sendSingleRequest(
   // Read response
   auto headerEvent = co_await co_awaitTry(responseSource->readHeaderEvent());
   if (headerEvent.hasException()) {
-    XLOG(ERR) << "Req #" << requestNum << " - Failed to read headers";
+    XLOG(ERR) << "Req #" << requestNum << " - Failed to read headers: "
+              << headerEvent.exception().what();
     metrics.errors++;
     co_return;
   }
@@ -200,20 +213,7 @@ folly::coro::Task<void> createTrafficWorkerTask(
 }
 
 /**
- * Run all workers and cleanup when complete
- */
-folly::coro::Task<void> runAllWorkers(
-    std::vector<folly::coro::Task<void>> tasks,
-    std::atomic<bool>* shouldStopPtr,
-    folly::EventBase* evbPtr) {
-  co_await folly::coro::collectAllRange(std::move(tasks));
-  XLOG(INFO) << "All workers completed";
-  shouldStopPtr->store(true);
-  evbPtr->terminateLoopSoon();
-}
-
-/**
- * Get or create connection pool (singleton per EventBase)
+ * Create connection pool for a given EventBase
  */
 std::unique_ptr<HTTPCoroSessionPool> createConnectionPool(
     folly::EventBase* evb) {
@@ -260,9 +260,81 @@ std::unique_ptr<HTTPCoroSessionPool> createConnectionPool(
         std::move(connParams));
   } else {
     // Plaintext configuration
+    auto connParams = HTTPCoroConnector::defaultConnectionParams();
+    if (FLAGS_target_h2) {
+      connParams.plaintextProtocol = "h2";
+    }
     return std::make_unique<HTTPCoroSessionPool>(
-        evb, FLAGS_target_host, FLAGS_target_port, poolParams);
+        evb, FLAGS_target_host, FLAGS_target_port, poolParams, connParams);
   }
+}
+
+/**
+ * Run all workers on an IOThreadPoolExecutor EventBase.
+ * Owns the connection pool — created on this EventBase thread.
+ * If terminateOnComplete is true, signals shouldStop and terminates the
+ * EventBase loop after all workers finish (used by the single-threaded path).
+ */
+folly::coro::Task<void> runWorkersOnPoolThread(
+    folly::EventBase* evb,
+    Metrics& metrics,
+    std::atomic<bool>& shouldStop,
+    int startWorker,
+    int numWorkers,
+    bool terminateOnComplete,
+    folly::Baton<>* doneBaton = nullptr) {
+  // Create pool ON the EventBase thread (critical for socket affinity)
+  auto pool = createConnectionPool(evb);
+
+  std::vector<folly::coro::Task<void>> tasks;
+  tasks.reserve(numWorkers);
+  for (int i = 0; i < numWorkers; ++i) {
+    tasks.push_back(
+        createTrafficWorkerTask(*pool, metrics, shouldStop, startWorker + i));
+  }
+
+  co_await folly::coro::collectAllRange(std::move(tasks));
+  XLOG(INFO) << "All workers on EVB completed";
+  if (terminateOnComplete) {
+    shouldStop.store(true);
+    evb->terminateLoopSoon();
+  } else if (doneBaton && !shouldStop.exchange(true)) {
+    doneBaton->post();
+  }
+  // pool destroyed here on the EventBase thread — safe for drain()
+}
+
+/**
+ * Launch workers on a single EventBase.
+ * Pool creation and ownership handled by runWorkersOnPoolThread coroutine.
+ */
+void launchWorkersOnEvb(
+    folly::EventBase* evb,
+    Metrics& metrics,
+    std::atomic<bool>& shouldStop,
+    int startWorker,
+    int numWorkers,
+    bool terminateOnComplete,
+    folly::Baton<>* doneBaton = nullptr) {
+  evb->runInEventBaseThread([evb,
+                             &metrics,
+                             &shouldStop,
+                             startWorker,
+                             numWorkers,
+                             terminateOnComplete,
+                             doneBaton]() {
+    folly::coro::co_withExecutor(
+        evb,
+        runWorkersOnPoolThread(
+            evb,
+            metrics,
+            shouldStop,
+            startWorker,
+            numWorkers,
+            terminateOnComplete,
+            doneBaton))
+        .start();
+  });
 }
 
 int main(int argc, char** argv) {
@@ -281,44 +353,100 @@ int main(int argc, char** argv) {
   XLOG(INFO) << "Streams per connection: " << FLAGS_streams_per_connection;
   XLOG(INFO) << "Reset probability: " << FLAGS_reset_probability;
 
+  int numThreads = FLAGS_client_threads;
+  if (numThreads == 0) {
+    numThreads = folly::available_concurrency();
+  }
+  XLOG(INFO) << "Client threads: " << numThreads;
+
   Metrics metrics;
   metrics.startTime = std::chrono::steady_clock::now();
 
   std::atomic<bool> shouldStop{false};
-  folly::EventBase evb;
-  auto pool = createConnectionPool(&evb);
 
-  // Schedule duration timer
-  evb.runAfterDelay(
-      [&shouldStop, &evb]() {
-        XLOG(INFO) << "Duration expired, stopping...";
-        shouldStop.store(true);
-        evb.terminateLoopSoon();
-      },
-      FLAGS_duration_sec * 1000); // milliseconds
+  if (numThreads == 1) {
+    // Single-threaded path: use a simple EventBase (preserves original
+    // behavior). Pool is owned by the worker coroutine, which terminates the
+    // loop when all workers finish.
+    folly::EventBase evb;
 
-  // Launch workers
-  evb.runInEventBaseThread([poolPtr = pool.get(),
-                            metricsPtr = &metrics,
-                            shouldStopPtr = &shouldStop,
-                            evbPtr = &evb]() {
-    // Create tasks
-    std::vector<folly::coro::Task<void>> tasks;
-    tasks.reserve(FLAGS_num_connections);
-    for (int i = 0; i < FLAGS_num_connections; ++i) {
-      tasks.push_back(
-          createTrafficWorkerTask(*poolPtr, *metricsPtr, *shouldStopPtr, i));
+    // Schedule duration timer
+    evb.runAfterDelay(
+        [&shouldStop, &evb]() {
+          XLOG(INFO) << "Duration expired, stopping...";
+          shouldStop.store(true);
+          evb.terminateLoopSoon();
+        },
+        FLAGS_duration_sec * 1000);
+
+    launchWorkersOnEvb(
+        &evb,
+        metrics,
+        shouldStop,
+        /*startWorker=*/0,
+        FLAGS_num_connections,
+        /*terminateOnComplete=*/true);
+
+    XLOG(INFO) << "Starting event loop...";
+    evb.loop();
+  } else {
+    // Multi-threaded path: use IOThreadPoolExecutor
+    folly::IOThreadPoolExecutor executor(numThreads);
+
+    // Distribute workers across threads round-robin
+    int workersPerThread = FLAGS_num_connections / numThreads;
+    int extraWorkers = FLAGS_num_connections % numThreads;
+
+    XLOG(INFO) << "Distributing " << FLAGS_num_connections
+               << " connections across " << numThreads << " threads";
+
+    // Collect EventBases and launch workers on each
+    auto evbs = executor.getAllEventBases();
+    if (evbs.empty()) {
+      XLOG(ERR) << "IOThreadPoolExecutor produced no EventBases";
+      return 1;
     }
 
-    // Start all workers
-    folly::coro::co_withExecutor(
-        evbPtr, runAllWorkers(std::move(tasks), shouldStopPtr, evbPtr))
-        .start();
-  });
+    folly::Baton<> doneBaton;
 
-  // Run event loop
-  XLOG(INFO) << "Starting event loop...";
-  evb.loop();
+    int workerOffset = 0;
+    for (size_t t = 0; t < evbs.size(); ++t) {
+      int numWorkers =
+          workersPerThread + (static_cast<int>(t) < extraWorkers ? 1 : 0);
+      if (numWorkers == 0) {
+        continue;
+      }
+
+      launchWorkersOnEvb(
+          evbs[t].get(),
+          metrics,
+          shouldStop,
+          workerOffset,
+          numWorkers,
+          /*terminateOnComplete=*/false,
+          &doneBaton);
+      workerOffset += numWorkers;
+    }
+
+    // Duration timer: also uses shouldStop.exchange to guard the post
+    evbs[0]->runAfterDelay(
+        [&shouldStop, &doneBaton]() {
+          XLOG(INFO) << "Duration expired, stopping...";
+          if (!shouldStop.exchange(true)) {
+            doneBaton.post();
+          }
+        },
+        FLAGS_duration_sec * 1000);
+
+    XLOG(INFO) << "Starting event loops on " << numThreads << " threads...";
+
+    doneBaton.wait();
+
+    // Release KeepAlive tokens, then join (pools destroyed on their EventBase
+    // threads when coroutine frames are cleaned up during join)
+    evbs.clear();
+    executor.join();
+  }
 
   // Print final statistics
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -335,9 +463,6 @@ int main(int argc, char** argv) {
     double actualRps = (metrics.requestsSent * 1000.0) / elapsed.count();
     XLOG(INFO) << "Actual RPS: " << actualRps;
   }
-
-  // Drain pool
-  pool->drain();
 
   XLOG(INFO) << "=== Traffic Client Shutdown ===";
   return 0;
