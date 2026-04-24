@@ -330,8 +330,7 @@ def compute_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> f
 
 
 def compute_memcpy_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
-    scores = []
-    for low, high in [
+    all_ranges = [
         ("0", "7"),
         ("8", "16"),
         ("16", "32"),
@@ -339,17 +338,27 @@ def compute_memcpy_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) ->
         ("256", "1024"),
         ("1024", "8192"),
         ("8192", "32768"),
-    ]:
+    ]
+    all_weights = [1, 1.38, 1.02, 0.61, 0.33, 0.05, 0.01]
+    scores = []
+    weights = []
+    for (low, high), w in zip(all_ranges, all_weights):
+        cold_key = "%bench(" + low + "_to_" + high + "_COLD_folly)"
+        hot_key = "%bench(" + low + "_to_" + high + "_HOT_folly)"
+        if cold_key not in sum_c or hot_key not in sum_c:
+            continue
+        if cold_key not in sum_baseline or hot_key not in sum_baseline:
+            continue
         scores.append(
             (
-                sum_baseline["%bench(" + low + "_to_" + high + "_COLD_folly)"]
-                / sum_c["%bench(" + low + "_to_" + high + "_COLD_folly)"]
-                + sum_baseline["%bench(" + low + "_to_" + high + "_HOT_folly)"]
-                / sum_c["%bench(" + low + "_to_" + high + "_HOT_folly)"]
+                sum_baseline[cold_key] / sum_c[cold_key]
+                + sum_baseline[hot_key] / sum_c[hot_key]
             )
             / 2
         )
-    weights = [1, 1.38, 1.02, 0.61, 0.33, 0.05, 0.01]
+        weights.append(w)
+    if not scores:
+        return 0.0
     score = weighted_geomean(scores, weights)
     return score
 
