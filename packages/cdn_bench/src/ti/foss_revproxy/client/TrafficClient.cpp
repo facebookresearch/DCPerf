@@ -274,6 +274,8 @@ std::unique_ptr<HTTPCoroSessionPool> createConnectionPool(
  * Owns the connection pool — created on this EventBase thread.
  * If terminateOnComplete is true, signals shouldStop and terminates the
  * EventBase loop after all workers finish (used by the single-threaded path).
+ * If doneBaton is non-null, posts it when workers complete early
+ * (multi-threaded path with --max_requests).
  */
 folly::coro::Task<void> runWorkersOnPoolThread(
     folly::EventBase* evb,
@@ -407,6 +409,10 @@ int main(int argc, char** argv) {
       return 1;
     }
 
+    // The Baton synchronizes main() with either:
+    //   1. The duration timer firing (normal case), or
+    //   2. All workers completing early (--max_requests case)
+    // Multiple posts are safe (Baton::post is idempotent after first).
     folly::Baton<> doneBaton;
 
     int workerOffset = 0;
