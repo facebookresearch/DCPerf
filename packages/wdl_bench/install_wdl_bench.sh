@@ -196,6 +196,9 @@ build_folly()
     clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
 
+    # Fix zlib download URL (zlib.net moved old releases to /fossils/)
+    sed -i 's|url = https://zlib.net/zlib-|url = https://zlib.net/fossils/zlib-|' build/fbcode_builder/manifests/zlib
+
     # execute the build in a subshell with a new conda build environment
     (
         FBENV="folly_build_env"
@@ -245,6 +248,9 @@ build_fbthrift()
     pushd "${WDL_SOURCE}"
     clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
+
+    # Fix zlib download URL (zlib.net moved old releases to /fossils/)
+    sed -i 's|url = https://zlib.net/zlib-|url = https://zlib.net/fossils/zlib-|' build/fbcode_builder/manifests/zlib
 
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
     echo "Building fbthrift with $(get_march_for_host)"
