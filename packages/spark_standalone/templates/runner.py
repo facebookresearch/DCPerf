@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -57,9 +58,12 @@ def download_dataset(args):
 def install_database(args):
     metadata_dir = os.path.join(SPARK_DIR, "spark-4.0.2-bin-hadoop3", "metastore_db")
     database_dir = os.path.join(args.warehouse_dir, f"{args.dataset_name.lower()}.db")
-    if os.path.exists(metadata_dir) and os.path.exists(database_dir):
-        print("Database already created; directly run test")
-        return
+    if os.path.exists(metadata_dir):
+        print("Removing stale metastore_db to ensure tables are recreated")
+        shutil.rmtree(metadata_dir)
+    if os.path.exists(database_dir):
+        print(f"Removing stale warehouse data at {database_dir}")
+        shutil.rmtree(database_dir)
     os.chdir(WORK_DIR)
     cmd_list = [
         "../scripts/run_perf_common.py",
