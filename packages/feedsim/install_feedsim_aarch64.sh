@@ -214,10 +214,8 @@ if ! [ -d "libtorch" ]; then
     ln -sf "${TORCH_DIR}/lib" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/lib"
     ln -sf "${TORCH_DIR}/share" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share"
 
-    # Also symlink cmake files into conda share dir (some cmake scripts look there)
-    mkdir -p "${CONDA_DIR}/share/cmake"
-    ln -sf "${TORCH_DIR}/share/cmake/Caffe2" "${CONDA_DIR}/share/cmake/Caffe2"
-    ln -sf "${TORCH_DIR}/share/cmake/Torch" "${CONDA_DIR}/share/cmake/Torch"
+    # Remove any leftover conda cmake files that could confuse find_package
+    rm -rf "${CONDA_DIR}/share/cmake/Caffe2" "${CONDA_DIR}/share/cmake/Torch"
 
     msg "LibTorch (CPU-only) installed via pip: ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
 else
@@ -288,7 +286,7 @@ BP_CXX="${BP_CXX:-g++}"
 
 cmake -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/build-deps;${FEEDSIM_THIRD_PARTY_SRC}/miniconda3" \
+    -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/build-deps" \
     -DCMAKE_C_COMPILER="$BP_CC" \
     -DCMAKE_CXX_COMPILER="$BP_CXX" \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \
