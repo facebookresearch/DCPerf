@@ -70,6 +70,116 @@ Another example. if you would like to run level 5 to 11, you can run the followi
 ./benchpress_cli.py run video_transcode_bench_svt -i '{"levels": "5:11"}'
 ```
 
+## VideoTranscodeBench Timed Mini (Two-Run Pattern)
+
+The timed mini variant uses a two-run pattern to reduce execution time,
+similar to DjangoBench and SparkBench mini versions.
+
+### Run 1: Prep (on a real machine with the full dataset)
+
+Run the prep variant to downscale a sampled subset of clips and cache them
+for reuse:
+
+```bash
+./benchpress_cli.py run video_transcode_bench_svt_timed_mini_prep
+```
+
+This creates the following cached artifacts inside
+`benchmarks/video_transcode_bench/`:
+- `resized_clips/` — downscaled video clips ready for encoding
+- `run-ffmpeg-svt-1p-m*.txt` — encoding command files
+- `job_durations_m*.txt` — per-job duration stats used by the reuse variant
+  to determine how many jobs to run
+
+Back up these files for use on other machines or emulators.
+
+### (Optional) Delete source dataset to save space
+
+After the prep run, the original dataset (~42GB) in `datasets/cuts/` is no
+longer needed. You can delete it to reduce disk usage:
+
+```bash
+rm -rf ./benchmarks/video_transcode_bench/datasets/cuts/
+```
+
+### Run 2+: Reuse (on emulator or target machine)
+
+Copy the cached artifacts to the target machine, then run the reuse variant:
+
+```bash
+./benchpress_cli.py run video_transcode_bench_svt_timed_mini_reuse
+```
+
+This skips the downscaling phase entirely and runs only the encoding workload.
+The reuse variant uses the per-job durations from the prep run to compute
+exactly how many jobs fit within `max_time` on the target machine's core
+count. All cached files are preserved after each run, so the reuse variant
+can be run repeatedly without re-prepping.
+
+If `resized_clips/` is not found, the reuse variant will exit with an error
+directing you to run the prep variant first.
+
+### Tuning parameters
+
+#### Sample rate (`sample_rate`)
+
+The mini prep variant (`video_transcode_bench_svt_timed_mini_prep`) uses
+`sample_rate=0.2` by default, selecting ~20% of the source clips
+(deterministic with `sampling_seed=1000`). The full prep variant
+(`video_transcode_bench_svt_timed_prep`) uses `sample_rate=1.0` (all clips).
+This parameter controls the trade-off between **score representativeness**
+and **image size**:
+
+- **Higher sample rate** (e.g., 0.5 or 1.0): more clips are downscaled and
+  available for encoding. The reuse variant has a larger pool of jobs to draw
+  from, ensuring all cores stay saturated even on high core-count machines.
+  However, this increases the size of `resized_clips/` and the emulator/OS
+  image. With `sample_rate=1.0`, `resized_clips/` can be several GB.
+- **Lower sample rate** (e.g., 0.1): fewer clips, smaller `resized_clips/`
+  directory, faster prep run. On machines with many cores, the job pool may
+  be too small to keep all cores busy for the full `max_time`, reducing the
+  effective measurement window.
+
+To override the default:
+```bash
+./benchpress_cli.py run video_transcode_bench_svt_timed_mini_prep \
+  -i '{"sample_rate": "0.5"}'
+```
+
+#### Fast jobs first (`--fast-jobs-first`)
+
+The prep variant uses `--fast-jobs-first` to reverse the command file order so
+that small-resolution (fast) encoding jobs run first. This is useful for the
+prep run where all jobs complete regardless of order.
+
+The reuse variant does **not** use `--fast-jobs-first`. This is a deliberate
+choice for score representativeness: the reuse variant truncates the job list
+to fit within `max_time`, and if `--fast-jobs-first` were enabled, the
+truncated subset would contain only the smallest clips. Small clips have
+higher per-pixel encoder overhead (setup, GOP management, and I/O costs are
+amortized over fewer pixels), resulting in **lower throughput and a deflated
+score** that is not representative of the full benchmark.
+
+Without `--fast-jobs-first`, the truncated subset includes a mix of clip sizes
+and resolutions, producing a throughput measurement that better reflects the
+full workload.
+
+### Full timed variant (prep/reuse)
+
+The same two-run pattern is available for the full (non-mini) timed variant:
+
+```bash
+# Prep: downscale all clips, full encoding
+./benchpress_cli.py run video_transcode_bench_svt_timed_prep
+
+# Reuse: skip downscaling, reuse cached clips
+./benchpress_cli.py run video_transcode_bench_svt_timed_reuse
+```
+
+These use `sample_rate=1.0` (all clips) and `max_time=600`. Scores from the
+reuse variant can be compared with the prep variant and the original
+`video_transcode_bench_svt_timed` job to validate representativeness.
+
 ## Note
 
 This benchmark normally takes around tens of minutes to finish, depending on the levels or predefined workload you choose. Note that lower levels (like level 1, 2, and 3) can take hours to complete. **We suggest starting form higher levels (or `short` as runtime) for fast iterations.** The default `runtime` is `medium`.

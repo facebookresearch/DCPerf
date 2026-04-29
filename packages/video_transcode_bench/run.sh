@@ -100,6 +100,12 @@ main() {
     local fast_jobs_first
     fast_jobs_first=0
 
+    local skip_downscale
+    skip_downscale=0
+
+    local keep_downscaled
+    keep_downscaled=0
+
     # Create a backup of generate_commands_all.py before making any changes, to restore it later and avoid replicating changes for susequent runs
     cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.backup.py
 
@@ -139,7 +145,13 @@ main() {
                 score_mode="$2"
                 ;;
             --fast-jobs-first)
-                fast_jobs_first=1
+                fast_jobs_first="$2"
+                ;;
+            --skip-downscale)
+                skip_downscale=1
+                ;;
+            --keep-downscaled)
+                keep_downscaled=1
                 ;;
             -h)
                 show_help >&2
@@ -154,7 +166,7 @@ main() {
         esac
 
         case $1 in
-            --levels|--encoder|--output|--runtime|--parallelism|--procs|--sample-rate|--sampling-seed|--sleep-before-perf|--max-time|--score-mode)
+            --levels|--encoder|--output|--runtime|--parallelism|--procs|--sample-rate|--sampling-seed|--sleep-before-perf|--max-time|--score-mode|--fast-jobs-first)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -220,7 +232,9 @@ main() {
     benchreps_tell_state "working on config"
     pushd "${FFMPEG_ROOT}"
 
-    delete_replicas
+    if [ "$skip_downscale" = "0" ]; then
+        delete_replicas
+    fi
 
     # Prepare the configuration parameters
     low=$(echo "${levels}" | cut -d':' -f1)
@@ -238,11 +252,17 @@ main() {
     range+="]"
 
     # Calculate num_pool
-    num_files=$(find ./datasets/cuts/ | wc -l)
-    num_files=$(echo "$num_files * 8" | bc -l | awk '{print int($0)}')
+    if [ -d "./datasets/cuts/" ]; then
+        num_files=$(find ./datasets/cuts/ | wc -l)
+        num_files=$(echo "$num_files * 8" | bc -l | awk '{print int($0)}')
+    else
+        num_files=0
+    fi
     num_proc=$(nproc)
     if [ -z "$procs" ] || [ $procs -eq -1 ]; then
-        if [ "$num_files" -lt "$num_proc" ]; then
+        if [ "$skip_downscale" = "1" ]; then
+            num_pool_val=$num_proc
+        elif [ "$num_files" -lt "$num_proc" ]; then
             num_pool_val=$num_files
         else
             num_pool_val=$num_proc
@@ -268,48 +288,110 @@ main() {
         exit 1
     fi
 
-    # Use the Python script to modify generate_commands_all.py
-    python3 ./modify_generate_commands_all.py --sample-rate ${sample_rate} --sampling-seed ${sampling_seed} --lp-number "${lp_number}" --num-pool "${num_pool}" --range "${range}" --encoder $encoder
-    # create a copy of generate_commands_all.py to generate_commands_all.debug.py for debugging purposes
-    cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.debug.py
-    #generate commands
-    python3 ./generate_commands_all.py
-
-    head -n -6 "./${run_sh}" > temp.sh && mv temp.sh "./${run_sh}" && chmod +x ./${run_sh}
-
     # Derive the run-paral-cpu script name from run_sh
     run_paral_cpu="${run_sh/-run-all-paral.sh/-run-paral-cpu.sh}"
     # Determine the encoder test identifier for command file names
     enc_test_id="${run_paral_cpu%-run-paral-cpu.sh}"
 
-    # Reverse command file order so fast (small resolution) jobs run first
-    if [ "$fast_jobs_first" = "1" ]; then
-        for num in $(seq "${low}" "${high}"); do
-            cmd_file="run-${enc_test_id}-m${num}.txt"
-            if [ -f "$cmd_file" ]; then
-                tac "$cmd_file" > "${cmd_file}.tmp" && mv "${cmd_file}.tmp" "$cmd_file"
-            fi
-        done
+    if [ "$skip_downscale" = "1" ] && [ -f "./${run_sh}" ]; then
+        # Reuse command files and scripts from a prior prep run.
+        # Command files are always stored in original order on disk.
+        # fast_jobs_first reversal is applied at runtime in run-paral-cpu.sh.
+        true
+    else
+        # Use the Python script to modify generate_commands_all.py
+        python3 ./modify_generate_commands_all.py --sample-rate ${sample_rate} --sampling-seed ${sampling_seed} --lp-number "${lp_number}" --num-pool "${num_pool}" --range "${range}" --encoder $encoder
+        # create a copy of generate_commands_all.py to generate_commands_all.debug.py for debugging purposes
+        cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.debug.py
+        #generate commands
+        python3 ./generate_commands_all.py
     fi
 
-    # Overwrite run-paral-cpu to use the timed parallel feeder
-    cat > "./${run_paral_cpu}" <<FEEDER_EOF
+    # Overwrite run-paral-cpu to use the timed parallel feeder.
+    # Command files are always in original order on disk. When fast_jobs_first
+    # is active, tac reverses at runtime so small/fast jobs run first.
+    # Durations file is passed for reuse runs (from a prior prep run).
+    local cmd_input="run-${enc_test_id}-m\$1.txt"
+    local dur_arg=""
+    if [ "$skip_downscale" = "1" ]; then
+        dur_arg=" job_durations_m\$1.txt"
+    fi
+    if [ "$fast_jobs_first" = "1" ]; then
+        cat > "./${run_paral_cpu}" <<FEEDER_EOF
 #!/bin/bash
-./timed_parallel_feeder.sh run-${enc_test_id}-m\$1.txt ${num_pool_val} ${max_time} joblog_m\$1.txt
+tac run-${enc_test_id}-m\$1.txt > .run-${enc_test_id}-m\$1.reversed.txt
+[ -f job_durations_m\$1.txt ] && tac job_durations_m\$1.txt > .job_durations_m\$1.reversed.txt
+CMD_FILE=.run-${enc_test_id}-m\$1.reversed.txt
+DUR_FILE=\$([ -f .job_durations_m\$1.reversed.txt ] && echo .job_durations_m\$1.reversed.txt || echo "")
+./timed_parallel_feeder.sh \$CMD_FILE ${num_pool_val} ${max_time} joblog_m\$1.txt \$DUR_FILE
+rm -f .run-${enc_test_id}-m\$1.reversed.txt .job_durations_m\$1.reversed.txt
 FEEDER_EOF
+    else
+        cat > "./${run_paral_cpu}" <<FEEDER_EOF
+#!/bin/bash
+./timed_parallel_feeder.sh run-${enc_test_id}-m\$1.txt ${num_pool_val} ${max_time} joblog_m\$1.txt${dur_arg}
+FEEDER_EOF
+    fi
     chmod +x "./${run_paral_cpu}"
 
     export LD_LIBRARY_PATH="${FFMPEG_ROOT}/ffmpeg_build/lib64/"
     ldconfig
 
-    #run
+    # Split the generated run script into downscaling and encoding phases.
+    # The generated script prints "Downscaling Finished" between the two
+    # phases. We split on the ORIGINAL script (before any trimming) so that
+    # encoding lines are never lost, regardless of script length.
+    downscale_sh="${run_sh%.sh}-downscale.sh"
+    encode_sh="${run_sh%.sh}-encode.sh"
+    split_line=$(grep -n "Downscaling Finished" "./${run_sh}" | tail -1 | cut -d: -f1)
+    if [ -n "$split_line" ]; then
+        head -n "$split_line" "./${run_sh}" > "./${downscale_sh}"
+        # Extract encoding section: copy variable definitions from the script
+        # header (lines before the first command), then the encoding for-loop
+        # up to its closing "done". Exclude trailing aom-testing boilerplate.
+        # Variable lines are those starting with a variable assignment or array
+        # declaration (e.g., encoder_type=, enc_mode_array=, debug_date=, debug_filename=).
+        last_done_line=$(tail -n +"$((split_line + 1))" "./${run_sh}" | grep -n '^done' | head -1 | cut -d: -f1)
+        if [ -n "$last_done_line" ]; then
+            last_done_line=$((split_line + last_done_line))
+        else
+            last_done_line=$(wc -l < "./${run_sh}")
+        fi
+        {
+            echo '#!/bin/bash'
+            # Copy variable definitions from the script header so the
+            # encoding loop has access to enc_mode_array, encoder_type, etc.
+            head -n "$split_line" "./${run_sh}" | grep '^[a-zA-Z_][a-zA-Z_0-9]*='
+            sed -n "$((split_line + 1)),${last_done_line}p" "./${run_sh}"
+        } > "./${encode_sh}"
+        chmod +x "./${downscale_sh}" "./${encode_sh}"
+    else
+        echo '#!/bin/bash' > "./${downscale_sh}"
+        cp "./${run_sh}" "./${encode_sh}"
+        chmod +x "./${downscale_sh}" "./${encode_sh}"
+    fi
+
+    if [ "$skip_downscale" = "1" ]; then
+        # Reuse cached resized_clips from a prior prep run
+        if [ ! -d "${FFMPEG_ROOT}/resized_clips" ] || [ -z "$(ls -A "${FFMPEG_ROOT}/resized_clips" 2>/dev/null)" ]; then
+            echo "Error: resized_clips/ not found or empty. Run video_transcode_bench_svt_timed_mini_prep first." >&2
+            exit 1
+        fi
+        log_start "$BREAKDOWN_FOLDER" "$preprocessing_operation_name" "$$" "downscaling_cached"
+        log_end "$BREAKDOWN_FOLDER" "$preprocessing_operation_name" "$$" "downscaling_cached"
+    else
+        log_start "$BREAKDOWN_FOLDER" "$preprocessing_operation_name" "$$" "downscaling"
+        ./"${downscale_sh}"
+        log_end "$BREAKDOWN_FOLDER" "$preprocessing_operation_name" "$$" "downscaling"
+    fi
+
     log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
     log_main_benchmark_start "$BREAKDOWN_FOLDER" "$$"
     benchreps_tell_state "start"
     if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
         collect_perf_record &
     fi
-    ./"${run_sh}"
+    ./"${encode_sh}"
     benchreps_tell_state "done"
     log_main_benchmark_end "$BREAKDOWN_FOLDER" "$$"
     log_postprocessing_start "$BREAKDOWN_FOLDER" "$$"
@@ -416,7 +498,22 @@ FEEDER_EOF
         fi
     done
 
-    delete_replicas
+    # Save per-job durations for reuse runs. The durations file preserves
+    # the command file order (fast-first) so the reuse feeder can compute
+    # exactly how many jobs fit within max_time on any target core count.
+    if [ "$keep_downscaled" = "1" ]; then
+        for num in $(seq "${low}" "${high}"); do
+            joblog="joblog_m${num}.txt"
+            if [ -f "${joblog}" ]; then
+                awk 'NR>1 && $7==0 { print $1, $4 }' "${joblog}" | \
+                    sort -n -k1,1 | awk '{ print $2 }' > "job_durations_m${num}.txt"
+            fi
+        done
+    fi
+
+    if [ "$keep_downscaled" = "0" ]; then
+        delete_replicas
+    fi
 
     # Restore the original generate_commands_all.py from backup
     mv ${FFMPEG_ROOT}/generate_commands_all.backup.py ${FFMPEG_ROOT}/generate_commands_all.py

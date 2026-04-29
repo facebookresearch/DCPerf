@@ -1496,7 +1496,7 @@
     - '--sampling-seed {sampling_seed}'
     - '--max-time {max_time}'
     - '--score-mode {score_mode}'
-    - '--fast-jobs-first'
+    - '--fast-jobs-first {fast_jobs_first}'
   vars:
     - 'encoder=svt'
     - 'levels=0:0'
@@ -1508,12 +1508,102 @@
     - 'sampling_seed=1000'
     - 'max_time=600'
     - 'score_mode=megapixel'
+    - 'fast_jobs_first=1'
   hooks:
     - hook: cpu-mpstat
       options:
         args:
           - '-u'   # utilization
           - '1'    # second interval
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+          - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
+
+- name: video_transcode_bench_svt_timed_prep
+  benchmark: video_transcode_bench
+  description: >
+    Prep run for time-based SVT-AV1 video encoding workload. Downscales all
+    clips and caches them in resized_clips/ for subsequent runs with
+    video_transcode_bench_svt_timed_reuse. After this run, the datasets/cuts/
+    directory (~42GB) can be deleted to save space.
+  args:
+    - '--encoder {encoder}'
+    - '--levels {levels}'
+    - '--output {output}'
+    - '--runtime {runtime}'
+    - '--parallelism {parallelism}'
+    - '--procs {procs}'
+    - '--sample-rate {sample_rate}'
+    - '--sampling-seed {sampling_seed}'
+    - '--max-time {max_time}'
+    - '--score-mode {score_mode}'
+    - '--fast-jobs-first {fast_jobs_first}'
+    - '--keep-downscaled'
+  vars:
+    - 'encoder=svt'
+    - 'levels=0:0'
+    - 'output=video_transcode_bench_results.txt'
+    - 'runtime=medium'
+    - 'parallelism=1'
+    - 'procs=-1'
+    - 'sample_rate=1.0'
+    - 'sampling_seed=1000'
+    - 'max_time=600'
+    - 'score_mode=megapixel'
+    - 'fast_jobs_first=0'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'
+          - '1'
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+          - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
+
+- name: video_transcode_bench_svt_timed_reuse
+  benchmark: video_transcode_bench
+  description: >
+    Reuse run for time-based SVT-AV1 video encoding workload. Skips
+    downscaling and uses cached resized_clips/ from a prior prep run
+    (video_transcode_bench_svt_timed_prep). Errors if resized_clips/
+    is not found. Keeps cached clips for subsequent runs.
+  args:
+    - '--encoder {encoder}'
+    - '--levels {levels}'
+    - '--output {output}'
+    - '--runtime {runtime}'
+    - '--parallelism {parallelism}'
+    - '--procs {procs}'
+    - '--max-time {max_time}'
+    - '--score-mode {score_mode}'
+    - '--fast-jobs-first {fast_jobs_first}'
+    - '--skip-downscale'
+    - '--keep-downscaled'
+  vars:
+    - 'encoder=svt'
+    - 'levels=0:0'
+    - 'output=video_transcode_bench_results.txt'
+    - 'runtime=medium'
+    - 'parallelism=1'
+    - 'procs=-1'
+    - 'max_time=600'
+    - 'score_mode=megapixel'
+    - 'fast_jobs_first=0'
+  hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'
+          - '1'
     - hook: copymove
       options:
         is_move: true
@@ -1557,12 +1647,13 @@
           - 'benchmarks/video_transcode_bench/breakdown.csv'
 
 
-- name: video_transcode_bench_svt_timed_mini
+- name: video_transcode_bench_svt_timed_mini_prep
   benchmark: video_transcode_bench
   description: >
-    Time-based mini SVT-AV1 video encoding workload. Uses sampling to reduce
-    the dataset and a time limit to ensure consistent runtime regardless of
-    core count. Suitable for quick validation on high core count machines.
+    Prep run for time-based mini SVT-AV1 video encoding workload. Downscales
+    a sampled subset of clips (20%) and caches them in resized_clips/ for
+    subsequent runs with video_transcode_bench_svt_timed_mini_reuse. After
+    this run, the datasets/cuts/ directory (~42GB) can be deleted to save space.
   execute_cmd_from_file: true
   args:
     - '--encoder {encoder}'
@@ -1576,7 +1667,8 @@
     - '--sleep-before-perf {sleep_before_perf}'
     - '--max-time {max_time}'
     - '--score-mode {score_mode}'
-    - '--fast-jobs-first'
+    - '--fast-jobs-first {fast_jobs_first}'
+    - '--keep-downscaled'
   vars:
     - 'encoder=svt'
     - 'levels=0:0'
@@ -1584,11 +1676,53 @@
     - 'runtime=medium'
     - 'parallelism=1'
     - 'procs=-1'
-    - 'sample_rate=1'
+    - 'sample_rate=0.2'
     - 'sampling_seed=1000'
     - 'sleep_before_perf=0'
-    - 'max_time=15'
+    - 'max_time=600'
     - 'score_mode=megapixel'
+    - 'fast_jobs_first=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/video_transcode_bench/video_transcode_bench_results.txt'
+          - 'benchmarks/video_transcode_bench/perf.data'
+          - 'benchmarks/video_transcode_bench/breakdown.csv'
+
+- name: video_transcode_bench_svt_timed_mini_reuse
+  benchmark: video_transcode_bench
+  description: >
+    Reuse run for time-based mini SVT-AV1 video encoding workload. Skips
+    downscaling and uses cached resized_clips/ from a prior prep run
+    (video_transcode_bench_svt_timed_mini_prep). Errors if resized_clips/
+    is not found. Keeps cached clips for subsequent runs.
+  execute_cmd_from_file: true
+  args:
+    - '--encoder {encoder}'
+    - '--levels {levels}'
+    - '--output {output}'
+    - '--runtime {runtime}'
+    - '--parallelism {parallelism}'
+    - '--procs {procs}'
+    - '--sleep-before-perf {sleep_before_perf}'
+    - '--max-time {max_time}'
+    - '--score-mode {score_mode}'
+    - '--fast-jobs-first {fast_jobs_first}'
+    - '--skip-downscale'
+    - '--keep-downscaled'
+  vars:
+    - 'encoder=svt'
+    - 'levels=0:0'
+    - 'output=video_transcode_bench_results.txt'
+    - 'runtime=medium'
+    - 'parallelism=1'
+    - 'procs=-1'
+    - 'sleep_before_perf=0'
+    - 'max_time=8'
+    - 'score_mode=megapixel'
+    - 'fast_jobs_first=0'
   hooks:
     - hook: copymove
       options:
