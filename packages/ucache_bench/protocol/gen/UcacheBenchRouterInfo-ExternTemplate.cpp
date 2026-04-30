@@ -12,7 +12,7 @@
  *
  *  @generated
  */
-#include "UcacheBenchRouterInfo.h"
+#include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/UcacheBenchRouterInfo.h"
 
 #include <folly/dynamic.h>
 

@@ -41,6 +41,8 @@ class UcbSetRequest;
 namespace facebook {
 namespace ucachebench {
 
+struct UcacheBenchRouterInfo;
+
 namespace detail {
 
 using UcacheBenchRoutableRequests = carbon::List<

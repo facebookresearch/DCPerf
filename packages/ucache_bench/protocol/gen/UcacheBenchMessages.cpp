@@ -12,7 +12,7 @@
  *
  *  @generated
  */
-#include "UcacheBenchMessages.h"
+#include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/UcacheBenchMessages.h"
 
 namespace facebook {
 namespace ucachebench {
