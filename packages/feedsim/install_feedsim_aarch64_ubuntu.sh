@@ -157,17 +157,21 @@ fi
 
 msg "Installing third-party dependencies ... DONE"
 
-# Installing LibTorch via Miniconda for aarch64
-# PyTorch does not provide official pre-built LibTorch binaries for ARM64 Linux
-# We use anaconda's main channel which provides CPU-only pre-built C++ libraries
-msg "Installing LibTorch via Miniconda for aarch64..."
+# Installing LibTorch via pip for aarch64
+# PyTorch does not provide official pre-built LibTorch C++ binaries for ARM64
+# Linux via conda or download.pytorch.org/libtorch. The conda default channel
+# now ships CUDA-enabled libtorch (gpu_cuda130) even on aarch64, which fails
+# on machines without CUDA (e.g., Grace).
+# Instead, we install the CPU-only torch wheel via pip and extract the
+# libtorch cmake/headers/libs from the pip package.
+msg "Installing LibTorch via pip (CPU-only) for aarch64..."
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 MINICONDA_VERSION="latest"
 CONDA_DIR="${FEEDSIM_THIRD_PARTY_SRC}/miniconda3"
 
 if ! [ -d "libtorch" ]; then
-    # Install Miniconda if not present
+    # Install Miniconda for a clean Python environment
     if ! [ -d "${CONDA_DIR}" ]; then
         msg "Installing Miniconda..."
         ARCH="$(uname -m)"
@@ -177,35 +181,36 @@ if ! [ -d "libtorch" ]; then
         rm miniconda.sh
     fi
 
-    # Initialize conda for this script
     export PATH="${CONDA_DIR}/bin:${PATH}"
-    eval "$("${CONDA_DIR}/bin/conda" shell.bash hook)"
 
-    # Accept Conda Terms of Service (required for non-interactive usage)
-    msg "Accepting Conda Terms of Service..."
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
-
-    # Install libtorch from anaconda's main channel (CPU-only, no CUDA dependencies)
-    # Note: conda-forge libtorch has CUDA dependencies that cause build issues
-    msg "Installing libtorch from anaconda main channel..."
-    conda install -y libtorch
+    # Install CPU-only PyTorch via pip — this is the only reliable way to get
+    # CPU-only libtorch on aarch64
+    msg "Installing PyTorch CPU-only via pip..."
+    pip install torch --index-url https://download.pytorch.org/whl/cpu
 
     # Also install libstdcxx-ng to ensure compatible C++ runtime
+    eval "$("${CONDA_DIR}/bin/conda" shell.bash hook)"
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
     conda install -y -c conda-forge libstdcxx-ng
 
-    # Create libtorch directory structure with symlinks to conda files
+    # Locate the pip-installed torch package
+    TORCH_DIR="$(${CONDA_DIR}/bin/python3 -c 'import torch, os; print(os.path.dirname(torch.__file__))')"
+    msg "Found torch at: ${TORCH_DIR}"
+
+    # Create libtorch directory structure with symlinks to pip torch
     mkdir -p "${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+    ln -sf "${TORCH_DIR}/include" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/include"
+    ln -sf "${TORCH_DIR}/lib" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/lib"
+    ln -sf "${TORCH_DIR}/share" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share"
 
-    # libtorch installs directly under conda prefix
-    ln -sf "${CONDA_DIR}/include" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/include"
-    ln -sf "${CONDA_DIR}/lib" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/lib"
-    ln -sf "${CONDA_DIR}/share" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share"
-
-    msg "LibTorch installed from anaconda main channel: ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+    msg "LibTorch (CPU-only) installed via pip: ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
 else
     msg "[SKIPPED] LibTorch already installed"
 fi
+
+# Always remove conda cmake files that reference CUDA — they confuse find_package
+# even when libtorch symlinks point to the CPU-only pip torch
+rm -rf "${CONDA_DIR}/share/cmake/Caffe2" "${CONDA_DIR}/share/cmake/Torch" 2>/dev/null || true
 
 # Set up environment to use conda's libstdc++ for compatibility with libtorch
 # This resolves GLIBCXX version mismatch between system and conda libraries
@@ -258,6 +263,10 @@ if [ -f "third_party/fizz/fizz/tool/FizzServerCommand.cpp" ]; then
     # Replace EVP_PKEY_cmp with EVP_PKEY_eq
     sed -i 's/EVP_PKEY_cmp(pubKey.get(), key.get()) == 1/EVP_PKEY_eq(pubKey.get(), key.get())/g' "third_party/fizz/fizz/tool/FizzServerCommand.cpp"
 fi
+
+# Remove liburing-dev — Ubuntu's version is too old for folly v2026.01.05.00
+# which uses io_uring zero-copy RX APIs requiring liburing >= 2.6
+apt remove -y liburing-dev 2>/dev/null || true
 
 mkdir -p build && cd build/
 

@@ -214,13 +214,14 @@ if ! [ -d "libtorch" ]; then
     ln -sf "${TORCH_DIR}/lib" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/lib"
     ln -sf "${TORCH_DIR}/share" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share"
 
-    # Remove any leftover conda cmake files that could confuse find_package
-    rm -rf "${CONDA_DIR}/share/cmake/Caffe2" "${CONDA_DIR}/share/cmake/Torch"
-
     msg "LibTorch (CPU-only) installed via pip: ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
 else
     msg "[SKIPPED] LibTorch already installed"
 fi
+
+# Always remove conda cmake files that reference CUDA — they confuse find_package
+# even when libtorch symlinks point to the CPU-only pip torch
+rm -rf "${CONDA_DIR}/share/cmake/Caffe2" "${CONDA_DIR}/share/cmake/Torch" 2>/dev/null || true
 
 # Set up environment to use conda's libstdc++ for compatibility with libtorch
 export LD_LIBRARY_PATH="${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib:${LD_LIBRARY_PATH:-}"
