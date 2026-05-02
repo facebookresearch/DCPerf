@@ -38,7 +38,7 @@ INTERVAL_SECS=5
 
 ### Cycles and Instructions
 # cpu_cycles (0x11), inst_retired (0x08)
-INSTRUCTIONS_RATE='cycles,instructions,duration_time,task-clock,r08'
+INSTRUCTIONS_RATE='cycles,instructions,duration_time,task-clock'
 
 ### Cache Effectiveness Metrics
 # L1D: l1d_cache (0x04), l1d_cache_refill (0x03), l1d_cache_miss (0x8144), l1d_cache_lmiss_rd (0x39)
@@ -62,8 +62,9 @@ BRANCH_MISPREDS='r21,r22,r78,r7a'
 
 ### Arithmetic / Instruction Mix
 # dp_spec (0x73, int), ase_spec (0x74, SIMD arith), vfp_spec (0x75, FP ops),
-# fp_scale_ops_spec (0x80C0, scalable FP), fp_fixed_ops_spec (0x80C1, non-scalable FP), crypto_spec (0x77)
-ARITHMETRIC_RATE='r73,r74,r75,r80C0,r80C1,r77'
+# fp_scale_ops_spec (0x80C0, scalable FP), fp_fixed_ops_spec (0x80C1, non-scalable FP), crypto_spec (0x77),
+# inst_spec (0x1B, operations speculatively executed)
+ARITHMETRIC_RATE='r73,r74,r75,r80C0,r80C1,r77,r1B'
 
 ### SIMD / SVE
 # ase_inst_spec (0x8005, Advanced SIMD inst), sve_inst_spec (0x8006, SVE inst), simd_inst_spec (0x8004)

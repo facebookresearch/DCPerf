@@ -243,37 +243,37 @@ def ipc(grouped_df):
 
 @skip_if_missing
 def int_inst_percent(grouped_df):
-    int_s, inst_s = _align(grouped_df, "r73", "instructions")  # DP_SPEC
+    int_s, inst_s = _align(grouped_df, "r73", "r1B")  # DP_SPEC / INST_SPEC
     return {"name": "INT instruction %", "series": int_s / inst_s, "prefix": 100}
 
 
 @skip_if_missing
 def simd_inst_percent(grouped_df):
-    simd_s, inst_s = _align(grouped_df, "r74", "instructions")  # ASE_SPEC
+    simd_s, inst_s = _align(grouped_df, "r74", "r1B")  # ASE_SPEC / INST_SPEC
     return {"name": "SIMD instruction %", "series": simd_s / inst_s, "prefix": 100}
 
 
 @skip_if_missing
 def fp_inst_percent(grouped_df):
-    fp_s, inst_s = _align(grouped_df, "r75", "instructions")  # VFP_SPEC
+    fp_s, inst_s = _align(grouped_df, "r75", "r1B")  # VFP_SPEC / INST_SPEC
     return {"name": "FP instruction %", "series": fp_s / inst_s, "prefix": 100}
 
 
 @skip_if_missing
 def ld_inst_percent(grouped_df):
-    ld_s, inst_s = _align(grouped_df, "r70", "instructions")  # LD_SPEC
+    ld_s, inst_s = _align(grouped_df, "r70", "r1B")  # LD_SPEC / INST_SPEC
     return {"name": "Load instruction %", "series": ld_s / inst_s, "prefix": 100}
 
 
 @skip_if_missing
 def st_inst_percent(grouped_df):
-    st_s, inst_s = _align(grouped_df, "r71", "instructions")  # ST_SPEC
+    st_s, inst_s = _align(grouped_df, "r71", "r1B")  # ST_SPEC / INST_SPEC
     return {"name": "Store instruction %", "series": st_s / inst_s, "prefix": 100}
 
 
 @skip_if_missing
 def crypto_inst_percent(grouped_df):
-    cr_s, inst_s = _align(grouped_df, "r77", "instructions")  # CRYPTO_SPEC
+    cr_s, inst_s = _align(grouped_df, "r77", "r1B")  # CRYPTO_SPEC / INST_SPEC
     return {"name": "Crypto instruction %", "series": cr_s / inst_s, "prefix": 100}
 
 
@@ -281,7 +281,7 @@ def crypto_inst_percent(grouped_df):
 def branch_inst_percent(grouped_df):
     br_imm = grouped_df.get_group("r78").counter_value  # BR_IMMED_SPEC
     br_ind = grouped_df.get_group("r7a").counter_value  # BR_INDIRECT_SPEC
-    inst_s = grouped_df.get_group("instructions").counter_value
+    inst_s = grouped_df.get_group("r1B").counter_value  # INST_SPEC
     br_imm.index = inst_s.index
     br_ind.index = inst_s.index
     return {
@@ -293,13 +293,13 @@ def branch_inst_percent(grouped_df):
 
 @skip_if_missing
 def sve_inst_percent(grouped_df):
-    sve_s, inst_s = _align(grouped_df, "r8006", "instructions")  # SVE_INST_SPEC
+    sve_s, inst_s = _align(grouped_df, "r8006", "r1B")  # SVE_INST_SPEC / INST_SPEC
     return {"name": "SVE instruction %", "series": sve_s / inst_s, "prefix": 100}
 
 
 @skip_if_missing
 def int_arith_inst_percent(grouped_df):
-    int_s, inst_s = _align(grouped_df, "r8040", "instructions")  # INT_SPEC
+    int_s, inst_s = _align(grouped_df, "r8040", "r1B")  # INT_SPEC / INST_SPEC
     return {
         "name": "INT Arith instruction %",
         "series": int_s / inst_s,
@@ -314,22 +314,22 @@ def int_arith_inst_percent(grouped_df):
 
 @skip_if_missing
 def fp_hp_percent(grouped_df):
-    """Half-precision FP ops as % of all speculated ops."""
-    hp_s, spec_s = _align(grouped_df, "r8014", "r3B")  # FP_HP_SPEC / OP_SPEC
+    """Half-precision FP ops as % of all speculated instructions."""
+    hp_s, spec_s = _align(grouped_df, "r8014", "r1B")  # FP_HP_SPEC / INST_SPEC
     return {"name": "FP Half-Precision %", "series": hp_s / spec_s, "prefix": 100}
 
 
 @skip_if_missing
 def fp_sp_percent(grouped_df):
-    """Single-precision FP ops as % of all speculated ops."""
-    sp_s, spec_s = _align(grouped_df, "r8018", "r3B")  # FP_SP_SPEC / OP_SPEC
+    """Single-precision FP ops as % of all speculated instructions."""
+    sp_s, spec_s = _align(grouped_df, "r8018", "r1B")  # FP_SP_SPEC / INST_SPEC
     return {"name": "FP Single-Precision %", "series": sp_s / spec_s, "prefix": 100}
 
 
 @skip_if_missing
 def fp_dp_percent(grouped_df):
-    """Double-precision FP ops as % of all speculated ops."""
-    dp_s, spec_s = _align(grouped_df, "r801C", "r3B")  # FP_DP_SPEC / OP_SPEC
+    """Double-precision FP ops as % of all speculated instructions."""
+    dp_s, spec_s = _align(grouped_df, "r801C", "r1B")  # FP_DP_SPEC / INST_SPEC
     return {"name": "FP Double-Precision %", "series": dp_s / spec_s, "prefix": 100}
 
 
@@ -536,9 +536,8 @@ def retiring_slots(grouped_df):
     op_ret.index = cycles.index
     op_spec.index = cycles.index
     stall_slot.index = cycles.index
-    # Neoverse V3 has 10-wide dispatch (per kernel metrics.json)
-    # retiring = OP_RETIRED / (10 * CPU_CYCLES)
-    retire_pct = op_ret / (10 * cycles)
+    # retiring = (1 - STALL_SLOT / (CPU_CYCLES * 10)) * (OP_RETIRED / OP_SPEC)
+    retire_pct = (1 - stall_slot / (10 * cycles)) * (op_ret / op_spec)
     return {"name": "TopDown Retiring %", "series": retire_pct, "prefix": 100}
 
 
@@ -556,24 +555,11 @@ def frontend_bound_slots(grouped_df):
 
 @skip_if_missing
 def backend_bound_slots(grouped_df):
-    # V3: backend_bound = 100% - retiring - frontend_bound - bad_speculation
-    op_ret = grouped_df.get_group("r3A").counter_value  # OP_RETIRED
-    op_spec = grouped_df.get_group("r3B").counter_value  # OP_SPEC
-    stall_slot = grouped_df.get_group("r3F").counter_value  # STALL_SLOT
-    fe_slot = grouped_df.get_group("r3E").counter_value  # STALL_SLOT_FRONTEND
-    fe_flush = grouped_df.get_group("r8162").counter_value  # STALL_FRONTEND_FLUSH
+    # V3: backend_bound = STALL_SLOT_BACKEND / (10 * CPU_CYCLES)
+    be_slot = grouped_df.get_group("r3D").counter_value  # STALL_SLOT_BACKEND
     cycles = grouped_df.get_group("cycles").counter_value
-    op_ret.index = cycles.index
-    op_spec.index = cycles.index
-    stall_slot.index = cycles.index
-    fe_slot.index = cycles.index
-    fe_flush.index = cycles.index
-    retiring = op_ret / (10 * cycles)
-    fe_bound = (fe_slot / (10 * cycles)) - (fe_flush / cycles)
-    bad_spec = (1 - stall_slot / (10 * cycles)) * (
-        1 - op_ret / op_spec
-    ) + fe_flush / cycles
-    be_pct = 1.0 - retiring - fe_bound - bad_spec
+    be_slot.index = cycles.index
+    be_pct = be_slot / (10 * cycles)
     return {"name": "TopDown BackendBound %", "series": be_pct, "prefix": 100}
 
 
@@ -965,7 +951,7 @@ def main(
     ]
 
     filtered_metrics = list(itertools.filterfalse(lambda x: x is None, metrics))
-    shortest_series = max(filtered_metrics, key=lambda m: m["series"].size)
+    shortest_series = min(filtered_metrics, key=lambda m: m["series"].size)
     df_metrics = concat_series(filtered_metrics, shortest_series)
     if series:
         series.write(df_metrics.to_csv(index=False))
