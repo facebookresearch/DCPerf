@@ -12,11 +12,13 @@
         - '-p {protocol}'
         - '-d {duration}'
         - '-I {io_threads}'
+        - '-R {response_size}'
       vars:
         - 'ports=8082'
         - 'protocol=h2'
         - 'duration=120'
         - 'io_threads=0'
+        - 'response_size=0'
     proxy:
       args:
         - '-m proxy'

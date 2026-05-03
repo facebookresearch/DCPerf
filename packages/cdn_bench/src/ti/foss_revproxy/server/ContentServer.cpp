@@ -30,6 +30,7 @@ DEFINE_double(
     reset_probability,
     0.0,
     "Probability (0.0-1.0) of randomly resetting connections");
+DECLARE_int32(response_size);
 
 int main(int argc, char** argv) {
   const folly::Init init(&argc, &argv);

@@ -9,8 +9,7 @@
 #pragma once
 
 #include <folly/coro/Task.h>
-#include <atomic>
-#include <string>
+#include <folly/portability/GFlags.h>
 
 #include "proxygen/lib/http/coro/HTTPCoroSession.h"
 

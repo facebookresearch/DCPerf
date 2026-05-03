@@ -50,6 +50,7 @@ BACKEND_PORTS=""        # -b: comma-separated backend ports for proxy
 PROXY_TARGETS=""        # -T: comma-separated host:port pairs for client targets
 IO_THREADS=0             # -I: IO threads for server/proxy (0 = auto-detect)
 CLIENT_THREADS=1         # -t: client IO threads (0 = auto-detect)
+RESPONSE_SIZE=0          # -R: minimum response body size in bytes (0 = no padding)
 
 ###############################################################################
 # Parse arguments
@@ -74,7 +75,7 @@ EOF
     exit 1
 }
 
-while getopts "m:d:r:c:S:p:P:B:b:T:I:t:h" opt; do
+while getopts "m:d:r:c:S:p:P:B:b:T:I:t:R:h" opt; do
   case $opt in
     m) MODE="$OPTARG" ;;
     d) DURATION="$OPTARG" ;;
@@ -88,6 +89,7 @@ while getopts "m:d:r:c:S:p:P:B:b:T:I:t:h" opt; do
     T) PROXY_TARGETS="$OPTARG" ;;
     I) IO_THREADS="$OPTARG" ;;
     t) CLIENT_THREADS="$OPTARG" ;;
+    R) RESPONSE_SIZE="$OPTARG" ;;
     h) usage ;;
     *) usage ;;
   esac
@@ -266,6 +268,7 @@ start_content_server() {
   local args=(
     --port="${port}"
     --io_threads="${IO_THREADS}"
+    --response_size="${RESPONSE_SIZE}"
   )
   if [ "$PROTOCOL" = "h3" ]; then
     # H3 mode: server runs TLS/H2 (TCP) as the proxy backend.
@@ -276,6 +279,7 @@ start_content_server() {
   elif [ "$TLS_ENABLED" = true ]; then
     args+=(--cert="$TLS_CERT" --key="$TLS_KEY")
   fi
+  echo "  Command: ${BIN_DIR}/content_server ${args[*]}"
   "${BIN_DIR}/content_server" "${args[@]}" 2>"${stderr_file}" &
   local pid=$!
   BG_PIDS+=("$pid")
@@ -323,6 +327,7 @@ start_proxy_server() {
   elif [ -n "$PLAINTEXT_PROTO" ]; then
     args+=(--plaintext_proto="${PLAINTEXT_PROTO}" --backend_h2)
   fi
+  echo "  Command: ${BIN_DIR}/proxy_server ${args[*]}"
   "${BIN_DIR}/proxy_server" "${args[@]}" 2>>"${stderr_file}" &
   local pid=$!
   BG_PIDS+=("$pid")
@@ -357,6 +362,7 @@ run_traffic_client() {
   elif [ "$TLS_ENABLED" = true ]; then
     args+=(--target_tls)
   fi
+  echo "  Command: ${BIN_DIR}/traffic_client ${args[*]}"
   "${BIN_DIR}/traffic_client" "${args[@]}" 2>"${stderr_file}" || exit_code=$?
   return "$exit_code"
 }

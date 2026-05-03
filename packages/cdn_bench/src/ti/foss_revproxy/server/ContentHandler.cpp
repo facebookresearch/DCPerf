@@ -7,10 +7,15 @@
  */
 
 #include "ti/foss_revproxy/server/ContentHandler.h"
-
 #include <folly/logging/xlog.h>
+#include <folly/portability/GFlags.h>
 
 #include "proxygen/lib/http/coro/HTTPFixedSource.h"
+
+DEFINE_int32(
+    response_size,
+    0,
+    "Minimum response body size in bytes (0 = no padding)");
 
 using namespace proxygen;
 using namespace proxygen::coro;
@@ -25,6 +30,24 @@ constexpr int NUM_JS_VARIANTS = 2;
 constexpr int NUM_PNG_VARIANTS = 3;
 constexpr size_t REQUEST_BODY_READ_SIZE =
     4096; // Buffer size for reading request bodies
+
+std::unique_ptr<folly::IOBuf> padBody(std::unique_ptr<folly::IOBuf> body) {
+  if (FLAGS_response_size <= 0) {
+    return body;
+  }
+  auto currentSize = body ? body->computeChainDataLength() : 0;
+  if (currentSize >= static_cast<size_t>(FLAGS_response_size)) {
+    return body;
+  }
+  auto padding = folly::IOBuf::create(FLAGS_response_size - currentSize);
+  memset(padding->writableData(), 'X', FLAGS_response_size - currentSize);
+  padding->append(FLAGS_response_size - currentSize);
+  if (body) {
+    body->prependChain(std::move(padding));
+    return body;
+  }
+  return padding;
+}
 } // namespace
 
 // Minimal valid PNG images (1x1 pixel, different colors)
@@ -107,7 +130,7 @@ HTTPSourceHolder ContentHandler::generateResponse(
     msg->getHeaders().set(HTTP_HEADER_CONTENT_TYPE, "text/html; charset=utf-8");
     return HTTPFixedSource::makeFixedSource(
         std::move(msg),
-        folly::IOBuf::copyBuffer(getHTMLContent(requestNumber)));
+        padBody(folly::IOBuf::copyBuffer(getHTMLContent(requestNumber))));
   }
 
   if (path.find("/api/") == 0 || path.find(".json") != std::string::npos) {
@@ -116,7 +139,7 @@ HTTPSourceHolder ContentHandler::generateResponse(
     msg->setStatusMessage("OK");
     msg->getHeaders().set(HTTP_HEADER_CONTENT_TYPE, "application/json");
     return HTTPFixedSource::makeFixedSource(
-        std::move(msg), folly::IOBuf::copyBuffer(getJSONContent()));
+        std::move(msg), padBody(folly::IOBuf::copyBuffer(getJSONContent())));
   }
 
   if (path.find(".js") != std::string::npos) {
@@ -125,7 +148,8 @@ HTTPSourceHolder ContentHandler::generateResponse(
     msg->setStatusMessage("OK");
     msg->getHeaders().set(HTTP_HEADER_CONTENT_TYPE, "application/javascript");
     return HTTPFixedSource::makeFixedSource(
-        std::move(msg), folly::IOBuf::copyBuffer(getJSContent(requestNumber)));
+        std::move(msg),
+        padBody(folly::IOBuf::copyBuffer(getJSContent(requestNumber))));
   }
 
   if (path.find(".png") != std::string::npos || path.find("/image") == 0) {
@@ -136,7 +160,7 @@ HTTPSourceHolder ContentHandler::generateResponse(
     msg->getHeaders().set(HTTP_HEADER_CONTENT_TYPE, "image/png");
     return HTTPFixedSource::makeFixedSource(
         std::move(msg),
-        folly::IOBuf::copyBuffer(imgData.data(), imgData.size()));
+        padBody(folly::IOBuf::copyBuffer(imgData.data(), imgData.size())));
   }
 
   // Default: return 404
