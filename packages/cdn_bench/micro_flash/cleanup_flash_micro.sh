@@ -11,13 +11,13 @@ FLASH_MICRO_DIR="$(dirname "$(readlink -f "$0")")"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 ##########################################
-# Install prerequisite packages
+# Remove prerequisite packages
 ##########################################
-echo "Installing prerequisite packages..."
+echo "Removing prerequisite packages..."
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  apt remove -y fio fio-engine-libaio
+  apt remove -y fio fio-engine-libaio libaio-dev
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  dnf remove -y fio fio-engine-libaio
+  dnf remove -y fio fio-engine-libaio libaio-dev
 fi
 
 cd "$FLASH_MICRO_DIR" || exit 1
