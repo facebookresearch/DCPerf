@@ -938,7 +938,7 @@ def main(
     ]
 
     filtered_metrics = list(itertools.filterfalse(lambda x: x is None, metrics))
-    shortest_series = max(filtered_metrics, key=lambda m: m["series"].size)
+    shortest_series = min(filtered_metrics, key=lambda m: m["series"].size)
     df_metrics = concat_series(filtered_metrics, shortest_series)
     if series:
         series.write(df_metrics.to_csv(index=False))

@@ -26,7 +26,7 @@ INTERVAL_SECS=5
 
 ### Cycles and Instructions
 # r08: ins
-INSTRUCTIONS_RATE='cycles,instructions,duration_time,task-clock,r08'
+INSTRUCTIONS_RATE='cycles,instructions,duration_time,task-clock'
 
 ### Cache Effectiveness Metrics
 # l1d access, l1d miss
