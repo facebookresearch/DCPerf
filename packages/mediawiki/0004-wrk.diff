@@ -69,17 +69,10 @@ index 827c4c9..eb51467 100644
 
  #endif
 diff --git a/src/net.c b/src/net.c
-index 75916f7..5fa0a5d 100644
+index 75916f7..ee25ff2 100644
 --- a/src/net.c
 +++ b/src/net.c
-@@ -11,12 +11,16 @@ status sock_connect(connection *c, char *host) {
- }
-
- status sock_close(connection *c) {
-+    close(c->fd);
-     return OK;
- }
-
+@@ -17,6 +17,9 @@ status sock_close(connection *c) {
  status sock_read(connection *c, size_t *n) {
      ssize_t r = read(c->fd, c->buf, sizeof(c->buf));
      *n = (size_t) r;
