@@ -40,6 +40,8 @@ if [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq 8 ]; then
     GLOG_NAME="glog-devel-0.3.5-5.el8"
 elif [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq 9 ]; then
     GLOG_NAME="glog-devel-0.3.5-15.el9"
+elif [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -ge 10 ]; then
+    GLOG_NAME="glog-devel"
 else
     echo "Warning: unsupported platform ${LINUX_DIST_ID}-${VERSION_ID}"
 fi
@@ -58,8 +60,11 @@ elif [ "$LINUX_DIST_ID" = "centos" ]; then
     zlib-devel bzip2-devel xz-devel lz4-devel libzstd-devel \
     snappy-devel libaio-devel libunwind-devel patch \
     double-conversion-devel libsodium-devel \
-    gflags-devel-2.2.2 fmt-devel perl libtool pcre-devel \
+    gflags-devel-2.2.2 fmt-devel perl libtool \
     git python3-devel ${GLOG_NAME}
+    if [ "$VERSION_ID" -lt 10 ]; then
+        dnf install -y pcre-devel
+    fi
 fi
 
 # Installing dependencies
@@ -178,6 +183,22 @@ cp "${BPKGS_TAO_BENCH_ROOT}/leader_sizes.json" "${TAO_BENCH_ROOT}/"
 cp -r "${COMMON_DIR}/affinitize" "${TAO_BENCH_ROOT}/"
 popd
 
+
+# === Install PCRE1 from source on CentOS 10 (pcre-devel removed from repos) ===
+if [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq 10 ]; then
+    if ! [ -d "pcre-8.45" ]; then
+        curl -fL https://sourceforge.net/projects/pcre/files/pcre/8.45/pcre-8.45.tar.gz/download > pcre-8.45.tar.gz
+        tar -zxf pcre-8.45.tar.gz
+        pushd pcre-8.45
+        ./configure --prefix="${TAO_BENCH_DEPS}"
+        make -j"${NUM_BUILD_JOBS}"
+        make install
+        popd
+    else
+        echo "[SKIPPED] PCRE 8.45"
+    fi
+fi
+
 # === Build and install memtier_client (tao_bench_client) ===
 pushd "${TAO_BENCH_ROOT}"
 # Download memtier benchmark
@@ -191,7 +212,8 @@ git apply --check "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_2023061
     git apply "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_20230615.diff"
 # Build and install
 autoreconf --force --install
-PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" ./configure --enable-tls
+PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" ./configure --enable-tls \
+    LDFLAGS="-L${TAO_BENCH_DEPS}/lib" CPPFLAGS="-I${TAO_BENCH_DEPS}/include"
 make -j"${NUM_BUILD_JOBS}" || ( automake --add-missing && make -j"${NUM_BUILD_JOBS}" )
 cp memtier_benchmark "${TAO_BENCH_ROOT}/tao_bench_client"
 popd # memtier_client

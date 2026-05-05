@@ -8,6 +8,22 @@ if [ "$(id -u)" != "0" ]; then
     SUDO=sudo
 fi
 
+centos10() {
+    echo "Installing dependencies for CentOS 10"
+
+    $SUDO dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel lshw sysstat dmidecode
+    pip-3.12 install pandas packaging
+
+    if ! [ "${IS_INTERNAL_TEST:-}" = "1" ]; then
+        $SUDO dnf install -y epel-release numactl
+        $SUDO dnf install -y 'dnf-command(config-manager)'
+        $SUDO dnf config-manager --set-enabled crb
+    fi
+    $SUDO dnf group install -y "Development Tools" --exclude="texlive*"
+
+    $SUDO dnf install -y openssl-devel
+}
+
 centos9() {
     echo "Installing dependencies for CentOS 9"
 
@@ -82,7 +98,9 @@ else
 fi
 
 if [ "$ID" == "centos" ]; then
-    if [ "$VERSION_ID" == "9" ]; then
+    if [ "$VERSION_ID" == "10" ]; then
+        centos10
+    elif [ "$VERSION_ID" == "9" ]; then
         centos9
     elif [ "$VERSION_ID" == "8" ]; then
         centos8

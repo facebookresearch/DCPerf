@@ -199,6 +199,13 @@ build_folly()
     # Fix zlib download URL (zlib.net moved old releases to /fossils/)
     sed -i 's|url = https://zlib.net/zlib-|url = https://zlib.net/fossils/zlib-|' build/fbcode_builder/manifests/zlib
 
+    # Fix __folly_memset undefined reference on x86_64: CentOS 10 GCC 14 defines
+    # __AVX2__ by default, so FollyMemset.cpp excludes its fallback. Patch it to
+    # always compile the fallback so __folly_memset is available.
+    if [ "$ARCH" != "aarch64" ]; then
+        sed -i 's/#if !defined(__AVX2__) && !(defined(__linux__) && defined(__aarch64__))/#if 1/' folly/FollyMemset.cpp
+    fi
+
     # execute the build in a subshell with a new conda build environment
     (
         FBENV="folly_build_env"
@@ -228,7 +235,7 @@ build_folly()
 
         echo "Building folly with $(get_march_for_host)"
         MARCH="$(get_march_for_host)"
-        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE"}' "$MARCH" "$MARCH")
+        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_ASM_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE"}' "$MARCH" "$MARCH" "$MARCH")
         python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES"
         conda deactivate
         conda env remove -n "$FBENV" -y
@@ -255,9 +262,14 @@ build_fbthrift()
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
     echo "Building fbthrift with $(get_march_for_host)"
     MARCH="$(get_march_for_host)"
-    EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE"}' "$MARCH" "$MARCH")
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES" --only-deps --no-tests
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES" --no-deps
+    # Find the getdeps-built boost root (folly was compiled against it, not the system boost)
+    GETDEPS_BOOST_ROOT=$(find "${WDL_BUILD}/installed" -maxdepth 1 -type d -name "boost-*" | head -1)
+    if [ -n "$GETDEPS_BOOST_ROOT" ]; then
+        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE","CMAKE_EXE_LINKER_FLAGS":"-Wl,--start-group","BOOST_ROOT":"%s","Boost_NO_SYSTEM_PATHS":"ON"}' "$MARCH" "$MARCH" "$GETDEPS_BOOST_ROOT")
+    else
+        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE","CMAKE_EXE_LINKER_FLAGS":"-Wl,--start-group"}' "$MARCH" "$MARCH")
+    fi
+    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES"
     for benchmark in $fbthrift_benchmark_list; do
       cp "$WDL_BUILD/build/fbthrift/bin/$benchmark" "$WDL_ROOT/$benchmark"
     done

@@ -13,6 +13,7 @@ DJANGO_WORKLOAD_ROOT="${BENCHMARKS_ROOT}/django_workload"
 DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 DJANGO_SERVER_ROOT="${DJANGO_REPO_ROOT}/django-workload"
 DJANGO_WORKLOAD_DEPS="${DJANGO_SERVER_ROOT}/third_party"
+VERSION_ID="$(awk -F "=" '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
 # Source the build parallelism utility and calculate optimal job count
 # This considers both CPU cores and memory limits (including cgroup constraints)
@@ -41,6 +42,16 @@ dnf install -y memcached libmemcached-awesome-devel zlib-devel screen \
     openssl-devel bzip2-devel libffi-devel wget make xz-devel haproxy \
     xxhash-devel perl-FindBin perl-JSON perl-core liburing-devel \
     ninja-build clang libev libev-devel cmake
+
+# Verify critical headers are present (zlib.h is needed by pylibmc)
+if [ ! -f /usr/include/zlib.h ]; then
+    echo "WARNING: zlib.h not found after dnf install. Attempting reinstall of zlib-devel..."
+    dnf reinstall -y zlib-devel || dnf install -y zlib-devel
+    if [ ! -f /usr/include/zlib.h ]; then
+        echo "FATAL: zlib.h not found in /usr/include. pylibmc build will fail."
+        exit 1
+    fi
+fi
 
 echo "System dependencies installed successfully"
 
@@ -171,13 +182,21 @@ echo "Step 3: Installing JDK and Cassandra"
 echo "====================================================================="
 
 # Install JDK
-JDK_NAME=java-1.8.0-openjdk-devel
+if [ "$VERSION_ID" -ge 10 ]; then
+    JDK_NAME=java-21-openjdk-devel
+else
+    JDK_NAME=java-1.8.0-openjdk-devel
+fi
 dnf install -y "${JDK_NAME}" || { echo "Could not install ${JDK_NAME} package"; exit 1;}
 echo "JDK installed successfully"
 
 # Install Cassandra
 # Download Cassandra from third-party source
-cassandra_version=3.11.19
+if [ "$VERSION_ID" -ge 10 ]; then
+    cassandra_version=5.0.8
+else
+    cassandra_version=3.11.19
+fi
 CASSANDRA_NAME="apache-cassandra-${cassandra_version}"
 if ! [ -d "${CASSANDRA_NAME}" ]; then
     CASSANDRA_TAR="${CASSANDRA_NAME}-bin.tar.gz"
@@ -199,12 +218,39 @@ if [ -f "conf/jvm.options" ]; then
 fi
 cp "${TEMPLATES_DIR}/jvm.options" "${CASSANDRA_ROOT}/conf/jvm.options" || exit 1
 
+# Remove JVM options incompatible with Java 21+ (CentOS 10)
+if [ "$VERSION_ID" -ge 10 ]; then
+    sed -i '/UseBiasedLocking/d' "${CASSANDRA_ROOT}/conf/jvm.options"
+    sed -i '/UseCondCardMark/d' "${CASSANDRA_ROOT}/conf/jvm.options"
+    sed -i '/ParGCCardsPerStrideChunk/d' "${CASSANDRA_ROOT}/conf/jvm.options"
+
+    # Allow deprecated Security Manager for Cassandra on Java 21+
+    echo '-Djava.security.manager=allow' >> "${CASSANDRA_ROOT}/conf/jvm.options"
+    # Cassandra 5.x uses jvm-server.options
+    if [ -f "${CASSANDRA_ROOT}/conf/jvm-server.options" ]; then
+        echo '-Djava.security.manager=allow' >> "${CASSANDRA_ROOT}/conf/jvm-server.options"
+    fi
+fi
+
+# Create logs directory for Cassandra GC logs
+mkdir -p "${CASSANDRA_ROOT}/logs"
+
 # Create data directories to use in configuring Cassandra
 mkdir -p /data/cassandra/{commitlog,data,saved_caches,hints}/
 chmod -R 0700 /data/cassandra
 
 # Copy configurations
 cp "${TEMPLATES_DIR}/cassandra.yaml" "${CASSANDRA_ROOT}/conf/cassandra.yaml.template" || exit 1
+
+# Remove deprecated Thrift/RPC properties incompatible with Cassandra 4.0+
+if [ "$VERSION_ID" -ge 10 ]; then
+    sed -i 's/^thrift_prepared_statements_cache_size_mb:/#thrift_prepared_statements_cache_size_mb:/' "${CASSANDRA_ROOT}/conf/cassandra.yaml.template"
+    sed -i 's/^start_rpc:/#start_rpc:/' "${CASSANDRA_ROOT}/conf/cassandra.yaml.template"
+    sed -i 's/^rpc_port:/#rpc_port:/' "${CASSANDRA_ROOT}/conf/cassandra.yaml.template"
+    sed -i 's/^rpc_server_type:/#rpc_server_type:/' "${CASSANDRA_ROOT}/conf/cassandra.yaml.template"
+    sed -i 's/^thrift_framed_transport_size_in_mb:/#thrift_framed_transport_size_in_mb:/' "${CASSANDRA_ROOT}/conf/cassandra.yaml.template"
+    sed -i 's/^request_scheduler:/#request_scheduler:/' "${CASSANDRA_ROOT}/conf/cassandra.yaml.template"
+fi
 popd
 
 echo "JDK and Cassandra installed successfully"
