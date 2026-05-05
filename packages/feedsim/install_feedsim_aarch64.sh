@@ -1,11 +1,10 @@
 #!/bin/bash
-# Copyright (c) Meta Platforms, Inc. and affiliates.
+# Copyright (c) Meta Platforms, Inc. and affiliates and Contributors
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
 set -Eeuo pipefail
-# trap cleanup SIGINT SIGTERM ERR EXIT
 
 cleanup() {
   trap - SIGINT SIGTERM ERR EXIT
@@ -20,6 +19,24 @@ die() {
   local code=${2-1} # default exit status 1
   msg "$msg"
   exit "$code"
+}
+
+verify_checksum() {
+    local file="$1"
+    local expected_checksum="$2"
+
+    if ! [ -f "$file" ]; then
+        echo "WARNING: File not found: $file"
+        exit 1
+    fi
+
+    local actual_checksum
+    actual_checksum=$(sha256sum "$file" | awk '{print $1}')
+
+    if [[ "$actual_checksum" != "$expected_checksum" ]]; then
+        echo "WARNING: Checksum mismatch for file: $file"
+        exit 1
+    fi
 }
 
 # Constants
@@ -56,114 +73,123 @@ else
 fi
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
-# Installing cmake-4.0.3
-
-if ! [ -d "cmake-4.0.3" ]; then
-    wget "https://github.com/Kitware/CMake/releases/download/v4.0.3/cmake-4.0.3.tar.gz"
-    tar -zxf "cmake-4.0.3.tar.gz"
-    cd "cmake-4.0.3"
-    mkdir staging
-    ./bootstrap --parallel=8 --prefix="$(pwd)/staging"
-    make -j8
-    make install
-    cd ../
+DEP_CMAKE_VERSION="4.0.3"
+# Installing cmake
+if ! [ -d "cmake-${DEP_CMAKE_VERSION}-linux-aarch64" ]; then
+    wget "https://github.com/Kitware/CMake/releases/download/v${DEP_CMAKE_VERSION}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz" -O "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz"
+    verify_checksum "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz" "391da1544ef50ac31300841caaf11db4de3976cdc4468643272e44b3f4644713"
+    tar xfz "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz"
+    export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64/bin:${PATH}"
 else
-    msg "[SKIPPED] cmake-4.0.3"
+    msg "[SKIPPED] cmake-${DEP_CMAKE_VERSION}"
 fi
 
-export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-4.0.3/staging/bin:${PATH}"
-
+# Installing fast_float
 if ! [ -d "fast_float" ]; then
     git clone https://github.com/fastfloat/fast_float.git
     cd fast_float
+    git checkout v8.1.0
     mkdir build && cd build
     cmake ..
-    make
+    make -j"$(nproc)"
     make install
     cd ../../
+else
+    msg "[SKIPPED] fast_float"
 fi
 
 # Installing gengetopt
-if ! [ -d "gengetopt-2.23" ]; then
+DEP_GENGOPT_VERSION="2.23"
+if ! [ -d "gengetopt-${DEP_GENGOPT_VERSION}" ]; then
     # Source the download retry function
     source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
-    download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
-    tar -xf "gengetopt-2.23.tar.xz"
-    cd "gengetopt-2.23"
+    download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-${DEP_GENGOPT_VERSION}.tar.xz"
+    verify_checksum "gengetopt-${DEP_GENGOPT_VERSION}.tar.xz" "b941aec9011864978dd7fdeb052b1943535824169d2aa2b0e7eae9ab807584ac"
+    tar -xf "gengetopt-${DEP_GENGOPT_VERSION}.tar.xz"
+    cd "gengetopt-${DEP_GENGOPT_VERSION}"
     ./configure
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] gengetopt-2.23"
+    msg "[SKIPPED] gengetopt-${DEP_GENGOPT_VERSION}"
 fi
 
+DEP_BOOST_VERSION="1_88_0"
 # Installing Boost
-if ! [ -d "boost_1_88_0" ]; then
-    wget "https://archives.boost.io/release/1.88.0/source/boost_1_88_0.tar.gz"
-    tar -xzf "boost_1_88_0.tar.gz"
-    cd "boost_1_88_0"
+if ! [ -d "boost_${DEP_BOOST_VERSION}" ]; then
+    wget "https://archives.boost.io/release/$(echo $DEP_BOOST_VERSION | sed 's/_/./g')/source/boost_${DEP_BOOST_VERSION}.tar.gz" -O "boost_${DEP_BOOST_VERSION}.tar.gz"
+    verify_checksum "boost_${DEP_BOOST_VERSION}.tar.gz" "3621533e820dcab1e8012afd583c0c73cf0f77694952b81352bf38c1488f9cb4"
+    tar -xzf "boost_${DEP_BOOST_VERSION}.tar.gz"
+    cd "boost_${DEP_BOOST_VERSION}"
     ./bootstrap.sh --without-libraries=python
-    ./b2 install
+    ./b2 -j"$(nproc)" install
     cd ../
 else
-    msg "[SKIPPED] boost_1_88_0"
+    msg "[SKIPPED] boost_${DEP_BOOST_VERSION}"
 fi
 
-
+DEP_GFLAGS_VERSION="2.2.2"
 # Installing gflags
-if ! [ -d "gflags-2.2.2" ]; then
-    wget "https://github.com/gflags/gflags/archive/refs/tags/v2.2.2.tar.gz" -O "gflags-2.2.2.tar.gz"
-    tar -xzf "gflags-2.2.2.tar.gz"
-    cd "gflags-2.2.2"
+if ! [ -d "gflags-${DEP_GFLAGS_VERSION}" ]; then
+    wget "https://github.com/gflags/gflags/archive/refs/tags/v${DEP_GFLAGS_VERSION}.tar.gz" -O "gflags-${DEP_GFLAGS_VERSION}.tar.gz"
+    verify_checksum "gflags-${DEP_GFLAGS_VERSION}.tar.gz" "34af2f15cf7367513b352bdcd2493ab14ce43692d2dcd9dfc499492966c64dcf"
+    tar -xzf "gflags-${DEP_GFLAGS_VERSION}.tar.gz"
+    cd "gflags-${DEP_GFLAGS_VERSION}"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
-    make -j8
+    make -j"$(nproc)"
     make install
     cd ../../
 else
-    msg "[SKIPPED] gflags-2.2.2"
+    msg "[SKIPPED] gflags-${DEP_GFLAGS_VERSION}"
 fi
 
+DEP_GFLAGS_VERSION="0.4.0"
 # Installing glog
-if ! [ -d "glog-0.4.0" ]; then
-    wget "https://github.com/google/glog/archive/refs/tags/v0.4.0.tar.gz" -O "glog-0.4.0.tar.gz"
-    tar -xzf "glog-0.4.0.tar.gz"
-    cd "glog-0.4.0"
+if ! [ -d "glog-${DEP_GFLAGS_VERSION}" ]; then
+    wget "https://github.com/google/glog/archive/refs/tags/v${DEP_GFLAGS_VERSION}.tar.gz" -O "glog-${DEP_GFLAGS_VERSION}.tar.gz"
+    verify_checksum "glog-${DEP_GFLAGS_VERSION}.tar.gz" "f28359aeba12f30d73d9e4711ef356dc842886968112162bc73002645139c39c"
+    tar -xzf "glog-${DEP_GFLAGS_VERSION}.tar.gz"
+    cd "glog-${DEP_GFLAGS_VERSION}"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
-    make -j8
+    make -j"$(nproc)"
     make install
     cd ../../
 else
-    msg "[SKIPPED] glog-0.4.0"
+    msg "[SKIPPED] glog-${DEP_GFLAGS_VERSION}"
 fi
 
+DEP_JEMALLOC_VERSION="5.3.0"
 # Installing JEMalloc
-if ! [ -d "jemalloc-5.3.0" ]; then
-    wget "https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2"
-    bunzip2 "jemalloc-5.3.0.tar.bz2"
-    tar -xvf "jemalloc-5.3.0.tar"
-    cd "jemalloc-5.3.0"
+if ! [ -d "jemalloc-${DEP_JEMALLOC_VERSION}" ]; then
+    wget "https://github.com/jemalloc/jemalloc/releases/download/${DEP_JEMALLOC_VERSION}/jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2" -O "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2"
+    verify_checksum "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2" "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa"
+    bunzip2 "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2"
+    tar -xvf "jemalloc-${DEP_JEMALLOC_VERSION}.tar"
+    cd "jemalloc-${DEP_JEMALLOC_VERSION}"
     ./configure --enable-prof --enable-prof-libunwind
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] jemalloc-5.3.0"
+    msg "[SKIPPED] jemalloc-${DEP_JEMALLOC_VERSION}"
 fi
 
+DEP_LIBEVENT_VERSION="2.1.12-stable"
 # Installing libevent
-if ! [ -d "libevent-2.1.12-stable" ]; then
-    wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
-    tar -xzf "libevent-2.1.12-stable.tar.gz"
-    cd "libevent-2.1.12-stable"
+if ! [ -d "libevent-${DEP_LIBEVENT_VERSION}" ]; then
+    wget "https://github.com/libevent/libevent/releases/download/release-${DEP_LIBEVENT_VERSION}/libevent-${DEP_LIBEVENT_VERSION}.tar.gz" -O "libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
+    verify_checksum "libevent-${DEP_LIBEVENT_VERSION}.tar.gz" "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
+    tar -xzf "libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
+    cd "libevent-${DEP_LIBEVENT_VERSION}"
     ./configure
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] libevent-2.1.12-stable"
+    msg "[SKIPPED] libevent-${DEP_LIBEVENT_VERSION}"
 fi
 
 msg "Installing third-party dependencies ... DONE"
@@ -214,6 +240,9 @@ if ! [ -d "libtorch" ]; then
     ln -sf "${TORCH_DIR}/lib" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/lib"
     ln -sf "${TORCH_DIR}/share" "${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share"
 
+    # Remove any leftover conda cmake files that could confuse find_package
+    rm -rf "${CONDA_DIR}/share/cmake/Caffe2" "${CONDA_DIR}/share/cmake/Torch"
+
     msg "LibTorch (CPU-only) installed via pip: ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
 else
     msg "[SKIPPED] LibTorch already installed"
@@ -245,10 +274,9 @@ fi
 
 
 # Installing FeedSim
-cd "${FEEDSIM_ROOT_SRC}"
+cd "${FEEDSIM_ROOT_SRC}/src"
 
-cd "src"
-
+msg "Initializing third-party submodules"
 # Populate third party submodules
 while read -r submod;
 do
@@ -266,6 +294,7 @@ do
     fi
 
 done < "${FEEDSIM_ROOT}/submodules.txt"
+msg "Initializing third-party submodules ... DONE"
 
 # Patch fizz for OpenSSL 3.0 compatibility
 if [ -f "third_party/fizz/fizz/tool/FizzServerCommand.cpp" ]; then
@@ -273,9 +302,10 @@ if [ -f "third_party/fizz/fizz/tool/FizzServerCommand.cpp" ]; then
     sed -i 's/EVP_PKEY_cmp(pubKey.get(), key.get()) == 1/EVP_PKEY_eq(pubKey.get(), key.get())/g' "third_party/fizz/fizz/tool/FizzServerCommand.cpp"
 fi
 
+msg "Building FeedSim ..."
 mkdir -p build && cd build/
 
-# Build FeedSim with DLRM support
+# Build FeedSim
 FS_CFLAGS="${BP_CFLAGS:--O3 -DNDEBUG}"
 FS_CXXFLAGS="${BP_CXXFLAGS:--O3 -DNDEBUG -Wno-deprecated-declarations}"
 FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic -L${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib -Wl,-rpath,${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/lib"
@@ -297,7 +327,7 @@ cmake -G Ninja \
     -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
     ../
 
-ninja-build -v -j1
+ninja-build -j 1
 
 msg ""
 msg "=== FeedSim Installation Complete ==="

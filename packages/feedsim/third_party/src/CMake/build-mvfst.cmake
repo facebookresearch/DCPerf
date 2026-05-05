@@ -28,3 +28,4 @@ ExternalProject_Add(mvfst
     BUILD_COMMAND
         cmake --build .
     )
+ExternalProject_Add_StepDependencies(mvfst configure fmt folly fizz)

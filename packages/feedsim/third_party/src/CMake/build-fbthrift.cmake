@@ -43,7 +43,7 @@ ExternalProject_Add(fbthrift
         cmake --build .
     )
 
-ExternalProject_Add_StepDependencies(fbthrift configure folly wangle fmt)
+ExternalProject_Add_StepDependencies(fbthrift configure folly wangle fmt mvfst)
 
 ExternalProject_Get_Property(fbthrift SOURCE_DIR)
 ExternalProject_Get_Property(fbthrift INSTALL_DIR)
