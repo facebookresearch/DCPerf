@@ -1,24 +1,37 @@
-# NIC Micro Benchmark Runbook
+# NIC Micro Benchmark (micro_nic)
 
-## Overview
+NIC microbenchmarking using iperf3. This benchmark evaluates network interface card performance with configurability for high parallelization and NUMA-aware tests. The micro requires two peerable hosts: one acting as the client (traffic generator) and one as the server (machine under test).
 
-The NIC Micro benchmark uses iperf3 to stress test network interface cards with the configurability needed for high parallelization and NUMA-aware tests. The micro requires two peerable hosts, one acting as the client, and one as the server(Our machine under test).
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Running the Benchmark](#running-the-benchmark)
+- [Cleanup](#cleanup)
+- [Parameter Reference](#parameter-reference)
+- [Common Workloads](#common-workloads)
+- [Output and Metrics](#output-and-metrics)
+- [Troubleshooting](#troubleshooting)
+
+---
 
 ## Prerequisites
 
 ### Installation
 
-Run the install command on both server and client machines:
+Run the install command on **both** server and client machines:
 
 ```bash
 sudo ./benchpress_cli.py -b ehw install micro_nic
 ```
 
-This installs:
-- iperf3 package
-- Makes run.sh executable
+**What gets installed:**
+- `iperf3` - Network performance measurement tool
+- Executable permissions on `run.sh`
 
-## Quick Start
+---
+
+## Running the Benchmark
 
 ### Two-Machine Setup (Recommended)
 
@@ -34,19 +47,19 @@ sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{
 
 ---
 
-## Detailed Usage
+## Cleanup
 
-### Server Role
-
-The server listens for incoming iperf3 connections. It runs in **one-off mode** by default, meaning it will exit after the client test completes (required for DC Perf metrics collection).
-
-#### Basic Server Command
+Remove artifacts and stop any lingering iperf3 processes:
 
 ```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"<PORT>","interval":"<INTERVAL>"}'
+sudo ./benchpress_cli.py -b ehw clean micro_nic
 ```
 
-#### Server Parameters
+---
+
+## Parameter Reference
+
+### Server Role Parameters
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -54,29 +67,7 @@ sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{
 | `interval` | Reporting interval in seconds | `1` |
 | `extra_args` | Additional iperf3 flags (e.g., `-N 0 -M 0` for NUMA binding) | (empty) |
 
-#### Multi-Port Server (Multiple Instances)
-
-To run multiple iperf3 server instances on different ports:
-
-```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"<PORT_1>,<PORT_2>","interval":"<INTERVAL>","extra_args":"-N <NUMA_NODE> -M <NUMA_NODE>"}'
-```
-
-This spawns two iperf3 servers listening on the specified ports.
-
----
-
-### Client Role
-
-The client generates traffic to stress the server's NIC.
-
-#### Basic Client Command
-
-```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"<PORT>","duration":"<DURATION>","parallel":"<PARALLEL_STREAMS>","interval":"<INTERVAL>"}'
-```
-
-#### Client Parameters
+### Client Role Parameters
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -87,23 +78,7 @@ sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{
 | `interval` | Reporting interval in seconds | `1` |
 | `extra_args` | Additional iperf3 flags | (empty) |
 
-#### High-Performance Client (NIC Saturation)
-
-```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"<PORT>","duration":"<DURATION>","parallel":"32","interval":"<INTERVAL>","extra_args":"-f g -N <NUMA_NODE> -M <NUMA_NODE> -V"}'
-```
-
-#### Multi-Server Client (Parallel Connections)
-
-To connect to multiple server instances simultaneously:
-
-```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>,<SERVER_IP>","port":"<PORT_1>,<PORT_2>","duration":"<DURATION>","parallel":"32","interval":"<INTERVAL>","extra_args":"-f g -N <NUMA_NODE> -M <NUMA_NODE> -V"}'
-```
-
----
-
-## Extra Args Reference
+### Extra Args Reference
 
 The `extra_args` parameter accepts any valid iperf3 flags. Common options:
 
@@ -122,17 +97,161 @@ The `extra_args` parameter accepts any valid iperf3 flags. Common options:
 | `-Z` | Zero-copy mode |
 | `-A <affinity>` | CPU affinity (e.g., `0,1` or `0-3`) |
 
-### Example: UDP Test with Bandwidth Limit
+---
 
+## Common Workloads
+
+### 1. CDN Edge Host Evaluation
+
+Evaluate NIC performance for CDN edge host qualification with NUMA-aware core pinning and progressive stream scaling. This methodology tests single-process receive efficiency, which is more representative of CDN edge proxy behavior than multi-process approaches.
+
+#### Progressive Stream Testing
+
+Run a series of tests with decreasing stream counts to characterize single-flow ceilings and multi-flow scaling:
+
+**8-Stream Test (Maximum Parallelism):**
 ```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"<PORT>","duration":"<DURATION>","parallel":"8","interval":"<INTERVAL>","extra_args":"-u -b <BANDWIDTH> -N <NUMA_NODE> -M <NUMA_NODE>"}'
+# Server (DUT, receiver):
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201","interval":"10","extra_args":"-A 0"}'
+
+# Client (traffic generator):
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"5201","duration":"60","parallel":"8","interval":"10","extra_args":"-f g -A 0"}'
 ```
 
-### Example: Reverse Mode (Download Test)
+**4-Stream Test (Moderate Parallelism):**
+```bash
+# Server:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201","interval":"10","extra_args":"-A 0"}'
+
+# Client:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"5201","duration":"60","parallel":"4","interval":"10","extra_args":"-f g -A 0"}'
+```
+
+**2-Stream Test (Single-Flow Characterization):**
+```bash
+# Server:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201","interval":"10","extra_args":"-A 0"}'
+
+# Client:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"5201","duration":"60","parallel":"2","interval":"10","extra_args":"-f g -A 0"}'
+```
+
+**What to look at:**
+- iperf3 aggregate throughput (Gbps) — should approach 100G with 8 streams
+- Per-stream fairness — balanced distribution indicates good RSS hashing
+- Retransmit counts — high retransmits suggest buffer or flow control issues
+- Server CPU utilization — should remain low (<5%) for efficient NIC/driver
+- RX dropped packets — should be zero for lossless operation
+
+**Expected results (100G NIC):**
+- 8-stream: ~92-93 Gbps aggregate (near line rate)
+- 4-stream: ~88-92 Gbps aggregate (slight reduction from 8-stream)
+- 2-stream: ~50 Gbps aggregate (~25 Gbps per flow TCP ceiling)
+
+### 2. CDN Edge Host with NUMA Awareness and Multi-Port
+
+For multi-socket systems or hosts with multiple NICs, ensure cores are pinned to the same NUMA node as the NIC. This eliminates cross-NUMA traffic and maximizes throughput.
+
+**Prerequisites:**
+```bash
+# 1. Check NIC's NUMA node
+cat /sys/class/net/eth0/device/numa_node
+
+# 2. Check NUMA topology
+numactl --hardware
+
+# 3. Identify cores on the NIC's NUMA node
+lscpu | grep "NUMA node0"  # or node1 depending on NIC location
+```
+
+**8-Port Multi-Instance Configuration:**
 
 ```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"<PORT>","duration":"<DURATION>","parallel":"16","interval":"<INTERVAL>","extra_args":"-R -N <NUMA_NODE> -M <NUMA_NODE> -V"}'
+# Server (Machine Under Test) - 8 instances pinned to NUMA node 0:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201,5202,5203,5204,5205,5206,5207,5208","interval":"10","extra_args":"-A 0,10,20,30,40,50,60,70 -N 0 -M 0"}'
 ```
+
+```bash
+# Client (Traffic Generator) - 8 instances with matching affinity:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>","port":"5201,5202,5203,5204,5205,5206,5207,5208","duration":"60","parallel":"1","interval":"10","extra_args":"-f g -A 0,10,20,30,40,50,60,70 -N 0 -M 0"}'
+```
+
+**Key points:**
+- `-A 0,10,20,30,40,50,60,70` assigns each iperf3 instance to a dedicated core
+- `-N 0 -M 0` binds both CPU and memory to NUMA node 0 (where the NIC resides)
+- Spread cores across physical cores (e.g., 0, 10, 20, 30...) to avoid SMT sibling contention
+- The number of CPU affinities should match the number of ports/instances
+
+**What to look at:**
+- Aggregate throughput across all instances
+- Per-instance fairness
+- NUMA node utilization (should be isolated to one node)
+- Cross-NUMA traffic (should be minimal)
+
+### 3. High-Performance Single-Port (NIC Saturation)
+
+For quick NIC qualification without multi-port complexity:
+
+```bash
+# Server:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201","interval":"10","extra_args":"-N <NUMA_NODE> -M <NUMA_NODE>"}'
+
+# Client:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"5201","duration":"60","parallel":"32","interval":"10","extra_args":"-f g -N <NUMA_NODE> -M <NUMA_NODE> -V"}'
+```
+
+**What to look at:**
+- Achieved throughput vs NIC line rate
+- CPU overhead (sys, softirq)
+- Retransmits and drops
+
+### 4. UDP Testing with Bandwidth Limit
+
+For UDP-based CDN workloads or packet-per-second characterization:
+
+```bash
+# Server:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201","interval":"10","extra_args":"-N <NUMA_NODE> -M <NUMA_NODE>"}'
+
+# Client:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"5201","duration":"60","parallel":"8","interval":"10","extra_args":"-u -b 10G -N <NUMA_NODE> -M <NUMA_NODE>"}'
+```
+
+### 5. Reverse Mode (Download Test)
+
+Test server-to-client direction (simulating origin fetch or cache fill):
+
+```bash
+# Server:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201","interval":"10","extra_args":"-N <NUMA_NODE> -M <NUMA_NODE>"}'
+
+# Client:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"5201","duration":"60","parallel":"16","interval":"10","extra_args":"-R -f g -N <NUMA_NODE> -M <NUMA_NODE> -V"}'
+```
+
+### 6. Quick System Validation
+
+Fast sanity check before deeper testing:
+
+```bash
+# Server:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201","interval":"1","extra_args":""}'
+
+# Client:
+sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>","port":"5201","duration":"30","parallel":"4","interval":"1","extra_args":"-f g"}'
+```
+
+---
+
+## Workload Selection Guide
+
+| System Type | Configuration | Key Parameters | Primary Metric |
+|-------------|---------------|----------------|----------------|
+| CDN Edge Qualification | Progressive 8/4/2-stream | `parallel=8,4,2`, single process | Throughput scaling, retransmits |
+| CDN Edge Multi-NUMA Multi-Core | 8-port multi-instance | `-A <cores> -N <node> -M <node>` | NUMA-local throughput, fairness |
+| UDP/PPS Testing | UDP mode | `-u -b <rate>` | Packet rate, loss rate |
+| Download/Origin | Reverse mode | `-R` | Server egress throughput |
+| Quick Validation | Basic 4-stream | `parallel=4`, short duration | Basic connectivity, sanity check |
 
 ---
 
@@ -166,6 +285,22 @@ The `nic_run.log` file contains:
 - CPU and NUMA topology
 - Full iperf3 benchmark output
 - Post-benchmark NIC statistics (RX/TX bytes, packets, errors, drops)
+
+### Key Metrics
+
+**Throughput Metrics:**
+- `throughput_gbps` — Aggregate throughput in Gbps
+- `throughput_per_stream_gbps` — Per-stream throughput for fairness analysis
+
+**Reliability Metrics:**
+- `retransmits` — TCP retransmit count (high values indicate congestion or buffer issues)
+- `rx_dropped` — RX packets dropped (should be zero for lossless operation)
+- `rx_errors` — RX errors (should be zero)
+
+**System Metrics:**
+- Server/client CPU utilization (usr, sys, softirq, irq)
+- Memory usage
+- Network interface counters
 
 ---
 
@@ -223,18 +358,6 @@ The `-A` flag in `extra_args` supports **comma-separated CPU cores** that are au
 
 The number of CPU affinities provided should match the number of ports/instances. If fewer affinities are provided than instances, only the first N instances will have CPU pinning applied.
 
-### Recommended Configuration for 100G NIC Saturation
-
-**Server (Machine Under Test):**
-```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role server -i 1 --role_input='{"port":"5201,5202,5203,5204,5205,5206,5207,5208","interval":"10","extra_args":"-A 0,10,20,30,40,50,60,70"}'
-```
-
-**Client (Traffic Generator):**
-```bash
-sudo ./benchpress_cli.py -b ehw run micro_nic --role client -i 1 --role_input='{"server_ip":"<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>,<SERVER_IP>","port":"5201,5202,5203,5204,5205,5206,5207,5208","duration":"60","parallel":"1","interval":"10","extra_args":"-f g -A 0,10,20,30,40,50,60,70"}'
-```
-
 ### Choosing CPU Cores
 
 1. **Check NIC's NUMA node**: `cat /sys/class/net/eth0/device/numa_node`
@@ -252,12 +375,23 @@ sudo ./benchpress_cli.py -b ehw install micro_nic
 
 ---
 
-## Cleanup
+## Baseline Setup (Before Benchmarking)
 
-To clean up after testing:
+For accurate, comparable results across machines:
 
 ```bash
-sudo ./benchpress_cli.py -b ehw clean micro_nic
-```
+# 1. Check NIC information
+ethtool -i eth0 # or other iface
 
-This removes any temporary files and stops any lingering iperf3 processes.
+# 2. Check NIC NUMA node
+cat /sys/class/net/eth0/device/numa_node
+
+# 3. Verify NUMA configuration
+numactl --hardware
+
+# 4. Check available CPU cores
+lscpu
+
+# 5. Verify iperf3 version
+iperf3 --version
+```
