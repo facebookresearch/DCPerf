@@ -231,6 +231,9 @@ git apply --check "${TEMPLATES_DIR}/0001-oss-performance-scalable-hhvm.diff" \
 # templates/oss-performance-mediawiki/0006-oss-performance-reuse-mediawiki-hhvm.diff
 git apply --check "${TEMPLATES_DIR}/0006-oss-performance-reuse-mediawiki-hhvm.diff" \
     && git apply "${TEMPLATES_DIR}/0006-oss-performance-reuse-mediawiki-hhvm.diff"
+# Strip null bytes from nginx access log to fix UTF-8 errors in metrics on ARM
+git apply --check "${TEMPLATES_DIR}/0008-nginx-strip-null-bytes.diff" \
+    && git apply "${TEMPLATES_DIR}/0008-nginx-strip-null-bytes.diff"
 
 # apply options for mediawiki mini patch
 git apply --check "${TEMPLATES_DIR}/0007-oss-performance-more-warmup-options.diff" \
