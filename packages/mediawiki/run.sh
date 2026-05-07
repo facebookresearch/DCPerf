@@ -383,7 +383,7 @@ function main() {
     _preflight_args+=(--auto-fix-ulimit)
     # Also raise the ulimit in this shell so child processes (HHVM, nginx, wrk)
     # inherit the higher limit. The Python auto-fix only affects its own process.
-    ulimit -n 100000 2>/dev/null || true
+    ulimit -n 1000000 2>/dev/null || true
   fi
   python3 "${SCRIPT_DIR}/../common/preflight_checks.py" "${_preflight_args[@]}"
 

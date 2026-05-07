@@ -275,7 +275,7 @@ please feel free to use the following Table of Contents:
 - OS: CentOS Stream 8/9, Ubuntu 22.04
 - Running as the root user
 - Have access to the internet
-- Please set the open file limit (`ulimit -n`) to at least 65536. For permanent change please
+- Please set the open file limit (`ulimit -n`) to at least 1000000. For permanent change please
   edit `/etc/security/limits.conf`
 
 ### Install Prerequisites
@@ -448,7 +448,7 @@ BMC Firmware       23.13
 Kernel Version    6.8.0-51-generic
 SELinux Status    Disabled          [OK]
 NVME-TCP Module   Present           [OK]
-Open Files Limit  65535             [OK]
+Open Files Limit  1000000            [OK]
 THP Status        madvise
 **** Hardware Configurations ****
 NUMA Nodes      1

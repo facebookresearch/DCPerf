@@ -548,7 +548,7 @@ Please resolve the build error by downgrading your Numpy to 1.26 (by running
 ## Cannot assign requested address on the clients
 
 First, please make sure the open files limit (`ulimit -n`) on your system is large enough.
-We recommend at least 64K for this limit.
+We recommend at least 1M for this limit.
 
 If the error still exists after raising the open files limit, please reduce the value of
 `clients_per_thread` parameter in your client commands. By default this parameter is set

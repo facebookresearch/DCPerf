@@ -13,7 +13,7 @@ Diagnosis merging is handled at the framework level in run.py.
 
 Usage:
     python3 preflight_checks.py --benchmark mediawiki --benchpress-root /path \
-        [--auto-fix-ulimit] [--min-fds 100000]
+        [--auto-fix-ulimit] [--min-fds 1000000]
 """
 
 import argparse
@@ -28,7 +28,7 @@ from diagnosis_utils import (
 
 
 # Default minimum file descriptors needed for a reliable run.
-DEFAULT_MIN_FDS = 100_000
+DEFAULT_MIN_FDS = 1_000_000
 
 
 def run_checks(args):

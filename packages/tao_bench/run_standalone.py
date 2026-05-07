@@ -450,7 +450,7 @@ if __name__ == "__main__":
 
     if soft_limit < required_fds:
         if args.auto_fix_ulimit:
-            new_limit = max(required_fds, 100000)
+            new_limit = max(required_fds, 1000000)
             try:
                 if hard_limit < new_limit:
                     # Raising hard limit requires root

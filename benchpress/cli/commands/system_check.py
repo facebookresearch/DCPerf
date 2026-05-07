@@ -127,7 +127,7 @@ class SystemCheckCommand(BenchpressCommand):
 
         open_files_limit = self.run_cmd("ulimit -n")
         row = ["Open Files Limit", open_files_limit, ""]
-        if int(open_files_limit) < 65535:
+        if int(open_files_limit) < 1000000:
             row[-1] = click.style("[BAD]", fg="red")
         else:
             row[-1] = click.style("[OK]", fg="green")
