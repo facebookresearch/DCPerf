@@ -1921,7 +1921,7 @@ class PolicyMemoizationPrimitives:
             "num_invocations": num_invocations,
             "calls_with_kwargs": with_kwargs,
             "calls_without_kwargs": num_invocations - with_kwargs,
-            "unique_keys": len(set(c["cache_key"] for c in wrapper_calls)),
+            "unique_keys": len({c["cache_key"] for c in wrapper_calls}),
         }
 
     @staticmethod
@@ -1962,7 +1962,7 @@ class PolicyMemoizationPrimitives:
 
         return {
             "num_keys": num_keys,
-            "unique_keys": len(set(k["key"] for k in keys_generated)),
+            "unique_keys": len({k["key"] for k in keys_generated}),
             "avg_key_length": sum(k["length"] for k in keys_generated)
             / max(1, num_keys),
             "avg_components": sum(k["num_components"] for k in keys_generated)
@@ -3397,7 +3397,7 @@ class SharedCachePrimitives:
         return {
             "num_lookups": num_lookups,
             "avg_key_length": avg_length,
-            "unique_keys": len(set(l["cache_key"] for l in lookups)),
+            "unique_keys": len({l["cache_key"] for l in lookups}),
         }
 
     @staticmethod
