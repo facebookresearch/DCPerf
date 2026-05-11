@@ -41,7 +41,7 @@ apt install -y memcached libmemcached-dev zlib1g-dev screen \
     libssl-dev libcrypt-dev haproxy libxxhash-dev \
     perl liburing-dev ninja-build libev4 libev-dev cmake \
     software-properties-common build-essential libbz2-dev libreadline-dev \
-    libsqlite3-dev libncurses-dev liblzma-dev wget unzip netcat-openbsd
+    libsqlite3-dev libncurses-dev liblzma-dev wget unzip netcat-openbsd git
 
 # Detect Ubuntu version for version-specific logic
 UBUNTU_VERSION="$(. /etc/os-release && echo "${VERSION_ID}")"
