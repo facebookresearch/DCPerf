@@ -123,6 +123,13 @@ def add_common_server_args(server_parser: ArgumentParser) -> List[Tuple[str, str
         help="hard bind NIC channels to cores",
     )
     server_parser.add_argument(
+        "--affinitize-iolocal-cores",
+        type=int,
+        default=0,
+        help="set to non-zero to affinitize NIC channels to CPU cores "
+        + "that are local to the IO die (IOD)",
+    )
+    server_parser.add_argument(
         "--stats-interval",
         type=int,
         default=5000,
