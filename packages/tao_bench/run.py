@@ -129,6 +129,55 @@ def profile_server():
     return p_prof
 
 
+def get_iolocal_cores(interface_name):
+    """Discover CPU cores that are local to the IO die (IOD) for the given NIC.
+
+    1. Get PCIe BDF from ethtool -i {interface_name}
+    2. Read /sys/class/pci_bus/{bdf}/cpulistaffinity to get IOD-local cores
+    Returns a list of individual core numbers.
+    """
+    # Get PCIe BDF (bus-info) from ethtool
+    result = subprocess.run(
+        ["ethtool", "-i", interface_name],
+        capture_output=True,
+        text=True,
+    )
+    bdf = None
+    for line in result.stdout.splitlines():
+        if line.startswith("bus-info:"):
+            bdf = line.split(":", 1)[1].strip()
+            break
+    if not bdf:
+        raise RuntimeError(
+            f"Could not determine PCIe BDF for interface {interface_name}"
+        )
+
+    # Extract the bus portion (e.g., "0000:c1" from "0000:c1:00.0")
+    # /sys/class/pci_bus/ uses the domain:bus format
+    parts = bdf.split(":")
+    if len(parts) >= 2:
+        pcie_bus = f"{parts[0]}:{parts[1]}"
+    else:
+        pcie_bus = bdf
+
+    # Read cpulistaffinity for this PCIe bus
+    affinity_path = f"/sys/class/pci_bus/{pcie_bus}/cpulistaffinity"
+    with open(affinity_path, "r") as f:
+        cpu_list_str = f.read().strip()
+    if not cpu_list_str:
+        raise RuntimeError(f"Could not read IOD-local CPU list from {affinity_path}")
+
+    # Expand range notation (e.g. "64-127,192-255") into individual core numbers
+    cores = []
+    for part in cpu_list_str.split(","):
+        if "-" in part:
+            start, end = part.split("-", 1)
+            cores.extend(range(int(start), int(end) + 1))
+        else:
+            cores.append(int(part))
+    return cores
+
+
 def affinitize_nic(args):
     n_cores = len(os.sched_getaffinity(0))
     n_channels = int(n_cores * args.nic_channel_ratio)
@@ -146,9 +195,14 @@ def affinitize_nic(args):
             "-a",
             "--xps",
         ]
-        if args.hard_binding:
+        if args.affinitize_iolocal_cores:
+            iolocal_cores = get_iolocal_cores(args.interface_name)
             cmd += [
-                "--cpu",
+                "--cpus",
+            ] + [str(c) for c in iolocal_cores]
+        elif args.hard_binding:
+            cmd += [
+                "--cpus",
                 " ".join(str(x) for x in range(n_channels)),
             ]
         else:
