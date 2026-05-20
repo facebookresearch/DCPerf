@@ -65,8 +65,15 @@ detect_cuda_driver() {
     return
   fi
 
-  # Check common cuda-compat locations
-  for dir in /usr/local/cuda-13.*/compat /usr/local/cuda/compat /usr/lib64; do
+  # Check common cuda-compat locations (all CUDA versions, not just 13.x)
+  local search_dirs=(
+    /usr/local/cuda-*/compat
+    /usr/local/cuda/compat
+    /usr/lib64
+    /usr/lib/x86_64-linux-gnu
+    /usr/local/lib
+  )
+  for dir in "${search_dirs[@]}"; do
     if [ -f "${dir}/libcuda.so.1" ]; then
       HAS_CUDA_DRIVER=true
       CUDA_COMPAT_DIR="${dir}"
@@ -80,9 +87,18 @@ detect_cuda_driver() {
   # Try to install cuda-compat (NVIDIA driver userspace libs, no kernel module)
   local installed=false
   if command -v dnf &>/dev/null; then
-    # Find latest cuda-compat-13 package
+    # Add NVIDIA CUDA repo if not already configured
+    if ! dnf repolist 2>/dev/null | grep -qi "cuda"; then
+      log_info "Adding NVIDIA CUDA repository..."
+      # Detect RHEL/CentOS version for correct repo URL
+      local rhel_ver
+      rhel_ver=$(rpm -E '%{rhel}' 2>/dev/null || echo "9")
+      dnf config-manager --add-repo \
+        "https://developer.download.nvidia.com/compute/cuda/repos/rhel${rhel_ver}/x86_64/cuda-rhel${rhel_ver}.repo" 2>/dev/null || true
+    fi
+    # Find latest cuda-compat package
     local pkg
-    pkg=$(dnf list available 2>/dev/null | grep "cuda-compat-13" | tail -1 | awk '{print $1}') || true
+    pkg=$(dnf list available 2>/dev/null | grep -E "^cuda-compat" | sort -V | tail -1 | awk '{print $1}') || true
     if [ -n "$pkg" ]; then
       log_info "Installing ${pkg}..."
       if dnf install -y "$pkg" 2>&1; then
@@ -90,14 +106,36 @@ detect_cuda_driver() {
       fi
     fi
   elif command -v apt-get &>/dev/null; then
+    # Add NVIDIA CUDA repo for Ubuntu if not present
+    if ! apt-cache policy 2>/dev/null | grep -qi "cuda"; then
+      log_info "Adding NVIDIA CUDA repository..."
+      local arch
+      arch=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+      local distro
+      distro=$(. /etc/os-release && echo "${ID}${VERSION_ID}" | tr -d '.')
+      wget -qO /tmp/cuda-keyring.deb \
+        "https://developer.download.nvidia.com/compute/cuda/repos/${distro}/${arch}/cuda-keyring_1.1-1_all.deb" 2>/dev/null && \
+        dpkg -i /tmp/cuda-keyring.deb 2>/dev/null && \
+        apt-get update 2>/dev/null || true
+    fi
     if apt-get install -y cuda-compat 2>/dev/null; then
       installed=true
     fi
   fi
 
   if $installed; then
-    # Re-scan for the installed library
-    for dir in /usr/local/cuda-13.*/compat /usr/local/cuda/compat; do
+    # Refresh ldconfig after install
+    ldconfig 2>/dev/null || true
+
+    # Check ldconfig first (most reliable after install)
+    if ldconfig -p 2>/dev/null | grep -q "libcuda.so.1"; then
+      HAS_CUDA_DRIVER=true
+      log_info "Installed cuda-compat, found libcuda.so.1 via ldconfig."
+      return
+    fi
+
+    # Re-scan common install locations (all CUDA versions)
+    for dir in /usr/local/cuda-*/compat /usr/local/cuda/compat /usr/lib64 /usr/lib/x86_64-linux-gnu; do
       if [ -f "${dir}/libcuda.so.1" ]; then
         HAS_CUDA_DRIVER=true
         CUDA_COMPAT_DIR="${dir}"
@@ -146,8 +184,8 @@ setup_conda_environment() {
   conda_prefix=$(conda run -n base printenv CONDA_PREFIX)
   rm -rf "${conda_prefix}/envs/${BUILD_ENV}"
 
-  exec_with_retries 3 conda create -y -n "${BUILD_ENV}" -c conda-forge python="${PYTHON_VERSION}"
-  exec_with_retries 3 conda run -n "${BUILD_ENV}" pip install --upgrade pip
+  exec_with_retries 3 conda create -y -n "${BUILD_ENV}" -c conda-forge python="${PYTHON_VERSION}" pip
+  exec_with_retries 3 conda run -n "${BUILD_ENV}" python -m pip install --upgrade pip
   log_info "Conda environment ready."
 }
 
@@ -171,7 +209,7 @@ install_pytorch() {
       "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.version.cuda}')"
   else
     log_info "Installing PyTorch CPU from PyPI..."
-    conda run -n "${BUILD_ENV}" pip install --pre torch \
+    conda run -n "${BUILD_ENV}" python -m pip install --pre torch \
       --index-url https://download.pytorch.org/whl/cpu/
 
     log_info "Verifying PyTorch CPU installation..."
@@ -229,6 +267,7 @@ SETUP_EOF
   cp "${build_dir}"/_mock_cuda_C*.so "${BENCHMARKS_DIR}/"
 
   # Clean up
+  cd "${BENCHMARKS_DIR}"
   rm -rf "${build_dir}"
   log_info "C extensions built and installed."
 }
@@ -316,9 +355,36 @@ case "$STAGE" in
     # that let cudart initialize without real GPU hardware.
     CUDA_SUPPORT="$(cat "${SCRIPT_DIR}/.cuda_support" 2>/dev/null || echo cpu)"
     if [ "$CUDA_SUPPORT" != "cuda" ]; then
-      echo "ERROR: Stage 2 requires libcuda.so.1 (install cuda-compat package)."
-      echo "Use stage1 for machines without any CUDA libraries."
-      exit 1
+      # Re-check at runtime in case cuda-compat was installed after benchpress install
+      if ldconfig -p 2>/dev/null | grep -q "libcuda.so.1"; then
+        CUDA_SUPPORT="cuda"
+      else
+        for _dir in /usr/local/cuda-*/compat /usr/local/cuda/compat /usr/lib64 /usr/lib/x86_64-linux-gnu; do
+          if [ -f "${_dir}/libcuda.so.1" ]; then
+            CUDA_SUPPORT="cuda"
+            export LD_LIBRARY_PATH="${_dir}:${LD_LIBRARY_PATH:-}"
+            break
+          fi
+        done
+      fi
+    fi
+    if [ "$CUDA_SUPPORT" != "cuda" ]; then
+      echo "WARNING: Stage 2 requires libcuda.so.1 but it is not available."
+      echo "Falling back to stage1 (TorchDispatchMode interception)."
+      # Strip stage2-only args (--delay-mode <value>) before passing to stage1
+      stage1_args=()
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --delay-mode)
+            shift 2 || shift  # skip flag and its value
+            ;;
+          *)
+            stage1_args+=("$1")
+            shift
+            ;;
+        esac
+      done
+      exec python "${SCRIPT_DIR}/stage1_benchmark.py" "${stage1_args[@]}"
     fi
     exec python "${SCRIPT_DIR}/stage2_benchmark.py" "$@"
     ;;

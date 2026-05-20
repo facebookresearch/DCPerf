@@ -13,9 +13,13 @@ install_packages() {
     if command -v dnf >/dev/null 2>&1; then
         # Red Hat/Fedora/CentOS systems
         # Note: fast_float and boost are built from source since system packages are too old
-        sudo dnf install -y clang jemalloc-devel xxhash-devel bzip2-devel libomp-devel gengetopt gcc-toolset-14-libatomic-devel python3-devel gtest-devel \
+        # On CentOS Stream 10+, gcc-toolset-14 doesn't exist (GCC 14 is default);
+        # use libatomic-devel directly. On older systems, try gcc-toolset-14-libatomic-devel.
+        sudo dnf install -y clang jemalloc-devel xxhash-devel bzip2-devel libomp-devel gengetopt python3-devel gtest-devel \
             double-conversion double-conversion-devel libsodium-devel \
             gflags-devel glog-devel libunwind-devel libevent-devel lz4-devel libzstd-devel snappy-devel xz-devel binutils-devel
+        # Install libatomic — try gcc-toolset first (RHEL 9), fall back to base package (CentOS Stream 10+)
+        sudo dnf install -y gcc-toolset-14-libatomic-devel 2>/dev/null || sudo dnf install -y libatomic 2>/dev/null || true
     elif command -v apt-get >/dev/null 2>&1; then
         # Ubuntu/Debian systems - map package names to Ubuntu equivalents
         # Note: fast_float and boost are built from source since system packages are too old
