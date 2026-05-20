@@ -3048,7 +3048,7 @@ class CPUPrimitives:
 
         # Aggregate statistics by source
         stats_by_source = {}
-        for source_name in set(item["source"] for item in top_results):
+        for source_name in {item["source"] for item in top_results}:
             source_items_in_top = [
                 item for item in top_results if item["source"] == source_name
             ]
