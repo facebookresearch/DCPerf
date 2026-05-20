@@ -11,8 +11,8 @@ fi
 centos10() {
     echo "Installing dependencies for CentOS 10"
 
-    $SUDO dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel lshw sysstat dmidecode
-    pip-3.12 install pandas packaging
+    $SUDO dnf install -y git python3-pyyaml python3-pip xz-devel lshw sysstat dmidecode
+    pip-3.12 install click tabulate pandas packaging
 
     if ! [ "${IS_INTERNAL_TEST:-}" = "1" ]; then
         $SUDO dnf install -y epel-release numactl
