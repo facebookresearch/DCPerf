@@ -10,6 +10,11 @@
 // @thrift.AllowLegacyMissingUris
 // package;
 
+include "thrift/annotation/thrift.thrift"
+
+@thrift.AllowLegacyMissingUris
+package;
+
 namespace py mock_services
 
 // ============================================================================
