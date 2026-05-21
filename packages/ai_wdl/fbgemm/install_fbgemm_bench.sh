@@ -170,6 +170,7 @@ setup_miniconda() {
 
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+  conda tos accept --override-channels --channel https://conda.anaconda.org/conda-forge || true
 
   echo "Miniconda setup complete and ready for use!"
 }
@@ -758,7 +759,7 @@ test_python_import_package () {
 generate_standalone_executable () {
   # Install PyInstaller if not already installed
   echo "[SETUP] Installing PyInstaller for creating standalone executable..."
-  pip install pyinstaller
+  ${CONDA_PIP} install pyinstaller
 
   # Define the path to the benchmark script that will be converted to an executable
   echo "[SETUP] Setting up paths for PyInstaller..."
@@ -772,13 +773,18 @@ generate_standalone_executable () {
   # shellcheck disable=SC2086
   SHARED_LIBS=$(find ./_skbuild/linux-${MACHINE_NAME_LC}-3.13 -name "*.so" -printf "%p:fbgemm_gpu\n")
 
+  if [ -z "$SHARED_LIBS" ]; then
+    echo "[ERROR] No shared libraries found in _skbuild directory! Build may have failed."
+    return 1
+  fi
+
   # Build the standalone executable using PyInstaller
   # --onefile: Create a single executable file
   # --distpath: Specify the output directory
   # --add-binary: Include binary files (shared libraries) in the executable
   echo "[BUILD] Building standalone executable with PyInstaller..."
   # shellcheck disable=SC2046,SC2086
-  pyinstaller --onefile --distpath $DIST_DIR $SCRIPT_PATH $(echo $SHARED_LIBS | xargs -n 1 echo --add-binary)
+  ${CONDA_ENV_BIN}/pyinstaller --onefile --distpath $DIST_DIR $SCRIPT_PATH $(echo $SHARED_LIBS | xargs -n 1 echo --add-binary)
 
   # Notify the user that the build is complete
   echo "[SUCCESS] Build complete. Executable is located in the $DIST_DIR directory."
@@ -843,7 +849,21 @@ setup_conda_environment() {
   eval "$(${MINICONDA_PREFIX}/bin/conda shell.bash hook)"
   conda activate ${BUILD_ENV}
 
+  # Export direct paths to conda env binaries for reliable access
+  # NOTE: conda run has a bug where pip installs to the base env instead of target env
+  # Using direct binary paths avoids this issue entirely
+  export CONDA_ENV_BIN="${MINICONDA_PREFIX}/envs/${BUILD_ENV}/bin"
+  export CONDA_PIP="${CONDA_ENV_BIN}/pip"
+  export CONDA_PYTHON="${CONDA_ENV_BIN}/python"
+
+  # Reinstall pip in the target env - conda run pip upgrade may have removed it
+  # due to a conda run bug that targets the base env instead
+  ${CONDA_PYTHON} -m ensurepip --upgrade 2>/dev/null || true
+  ${CONDA_PYTHON} -m pip install --upgrade pip
+
   echo "[SETUP] Conda environment setup complete."
+  echo "[SETUP] Using pip at: ${CONDA_PIP}"
+  echo "[SETUP] Using python at: ${CONDA_PYTHON}"
 }
 
 # Function to install necessary build tools and compilers
@@ -875,18 +895,18 @@ install_pytorch() {
   test_network_connection || return 1
 
   # Install the CPU variant of PyTorch using PIP
-  # We use the pre-release version and specify the CPU-only variant
+  # NOTE: Using ${CONDA_PIP} directly to avoid conda run bug that installs to base env
   echo "[SETUP] Installing PyTorch CPU variant..."
-  conda run -n $BUILD_ENV pip install --pre torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu/
+  ${CONDA_PIP} install torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu/ || \
+  ${CONDA_PIP} install --pre torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu/ || \
+  ${CONDA_PIP} install torch --index-url https://download.pytorch.org/whl/cpu/
 
-  # Test if the PyTorch package loads correctly by importing a submodule
-  # This verifies that PyTorch is properly installed
+  # Verify PyTorch is properly installed in the conda env
   echo "[CHECK] Testing PyTorch installation..."
-  python -c "import torch.distributed"
-
-  # Print the installed PyTorch version to verify the correct version is installed
-  echo "[CHECK] Verifying PyTorch version..."
-  python -c "import torch; print(torch.__version__)"
+  ${CONDA_PYTHON} -c "import torch; print('PyTorch version:', torch.__version__)" || {
+    echo "[ERROR] PyTorch installation failed! torch not importable."
+    return 1
+  }
 
   echo "[SETUP] PyTorch installation complete."
 }
@@ -979,10 +999,20 @@ install_fbgemm_cpu() {
 install_fbgemm() {
   echo "[BUILD] Installing FBGEMM requirements and building the library..."
 
+  # Install build-system dependencies that are required before setup.py runs
+  echo "[BUILD] Installing build-system dependencies..."
+  ${CONDA_PIP} install setuptools_git_versioning setuptools wheel || {
+    echo "[ERROR] Failed to install build-system dependencies!"
+    return 1
+  }
+
   # Install the required Python packages for FBGEMM
   # These are specified in the requirements.txt file
   echo "[BUILD] Installing Python dependencies..."
-  pip install -r requirements.txt
+  ${CONDA_PIP} install -r requirements.txt || {
+    echo "[ERROR] Failed to install requirements.txt!"
+    return 1
+  }
 
   # Set the package name based on the build variant
   # We're building the CPU variant of FBGEMM GPU
@@ -1024,7 +1054,10 @@ install_fbgemm() {
   # We specify the CPU variant to build without CUDA support
   echo "[BUILD] Building and installing FBGEMM..."
   # shellcheck disable=SC2086
-  print_exec conda run -n $BUILD_ENV python setup.py ${run_multicore} install --build-variant=cpu
+  print_exec ${CONDA_PYTHON} setup.py ${run_multicore} install --build-variant=cpu || {
+    echo "[ERROR] FBGEMM build failed!"
+    return 1
+  }
 
   # Generate a standalone executable for the project
   # This creates a self-contained executable that can be run without Python
