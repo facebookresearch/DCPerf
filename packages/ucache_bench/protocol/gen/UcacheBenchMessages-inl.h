@@ -12,6 +12,9 @@
  *
  *  @generated
  */
+#pragma once
+
+#include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/UcacheBenchMessages-decl.h"
 
 namespace facebook {
 namespace ucachebench {
