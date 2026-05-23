@@ -1,0 +1,23 @@
+{
+  "platform": "t1_mln",
+  "display_name": "AMD Milan (Northdome)",
+  "vr_efficiency": 0.89,
+  "components": {
+    "server": {
+      "sensor_pattern": "INA230.*Power",
+      "aggregation": "sum"
+    },
+    "cpu": {
+      "sensor_pattern": "SOC.*Pwr",
+      "aggregation": "sum"
+    },
+    "motherboard": {
+      "sensor_pattern": "SP_HSC_IN_POWER",
+      "aggregation": "sum",
+      "divisor": 4
+    }
+  },
+  "derived_metrics": {
+    "memory": "(server - cpu) * vr_efficiency"
+  }
+}

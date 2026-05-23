@@ -1,0 +1,35 @@
+{
+  "platform": "t1_cpl",
+  "display_name": "Intel Cooper Lake (Yosemite V3)",
+  "vr_efficiency": 0.89,
+  "components": {
+    "server": {
+      "sensors": ["HSC_Input_Pwr"],
+      "aggregation": "sum"
+    },
+    "cpu": {
+      "sensor_pattern": "CPU_Package_Pwr",
+      "aggregation": "sum"
+    },
+    "memory": {
+      "sensor_pattern": "VDDQ_.*VRPout",
+      "aggregation": "sum"
+    },
+    "fan": {
+      "sensor_pattern": "BMC_SENSOR_FAN_PWR",
+      "aggregation": "sum",
+      "divisor": 4
+    },
+    "nic": {
+      "sensor_pattern": "BMC_SENSOR_NIC_PWR",
+      "aggregation": "sum",
+      "divisor": 4
+    },
+    "motherboard": {
+      "sensor_pattern": "BMC_SENSOR_MEDUSA_PWR",
+      "aggregation": "sum",
+      "divisor": 4
+    }
+  },
+  "derived_metrics": {}
+}

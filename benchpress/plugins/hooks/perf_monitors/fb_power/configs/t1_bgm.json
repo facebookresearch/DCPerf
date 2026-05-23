@@ -1,0 +1,47 @@
+{
+  "platform": "t1_bgm",
+  "display_name": "AMD Bergamo (Halfdome)",
+  "vr_efficiency": 0.89,
+  "components": {
+    "server": {
+      "sensor_pattern": "MB_HSC_INPUT_PWR_W",
+      "aggregation": "sum"
+    },
+    "cpu": {
+      "sensor_pattern": "MB_SOC_PACKAGE_PWR_W",
+      "aggregation": "sum"
+    },
+    "memory": {
+      "sensor_pattern": "MB_VR_DIMMA\\d+_PMIC_PWR_W",
+      "aggregation": "sum"
+    },
+    "core": {
+      "sensor_pattern": "MB_VR_CPU\\d+_PWR_W",
+      "aggregation": "sum"
+    },
+    "io": {
+      "sensor_pattern": "MB_VR_PVDD.*_PWR_W",
+      "aggregation": "sum"
+    },
+    "soc_non_core": {
+      "sensor_pattern": "MB_VR_SOC.*_PWR_W",
+      "aggregation": "sum"
+    },
+    "fan": {
+      "sensor_pattern": "BB_FAN_PWR_W",
+      "aggregation": "sum",
+      "divisor": 2
+    },
+    "nic": {
+      "sensor_pattern": "BB_NIC_PWR_W",
+      "aggregation": "sum",
+      "divisor": 2
+    },
+    "motherboard": {
+      "sensor_pattern": "BB_MEDUSA_PWR_W",
+      "aggregation": "sum",
+      "divisor": 2
+    }
+  },
+  "derived_metrics": {}
+}
