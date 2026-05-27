@@ -16,6 +16,7 @@ from os import path
 
 import benchpress.lib.sys_specs as sys_specs
 import click
+import yaml
 from benchpress.lib.history import History
 from benchpress.lib.hook_factory import HookFactory
 from benchpress.lib.job import get_target_jobs
@@ -37,6 +38,57 @@ from .command import BenchpressCommand
 
 
 logger = logging.getLogger(__name__)
+
+
+class ParseInputError(Exception):
+    """Raised when a CLI value cannot be parsed as JSON or loaded from file."""
+
+
+def _parse_json_or_file(value, arg_name):
+    """Parse `value` as JSON, or as a path to a JSON/YAML file.
+
+    First attempts to parse `value` as a JSON literal. If that fails with a
+    `JSONDecodeError`, treats `value` as a file path:
+      - `.json` files are loaded with `json.load()`
+      - `.yml` / `.yaml` files are loaded with `yaml.safe_load()`
+
+    Raises:
+        ParseInputError: if `value` can be parsed neither as JSON nor as a
+            supported file. The exception's message includes the `arg_name`
+            and a description of what went wrong.
+
+    Args:
+        value: The raw CLI argument string.
+        arg_name: The name of the CLI argument (used in error messages).
+
+    Returns:
+        The parsed Python object (typically a dict).
+    """
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        pass
+
+    # Treat value as a file path.
+    lower = value.lower()
+    if not (
+        lower.endswith(".json") or lower.endswith(".yml") or lower.endswith(".yaml")
+    ):
+        raise ParseInputError(
+            f"{arg_name}: could not parse as JSON and value is not a "
+            f".json/.yml/.yaml file path: {value!r}"
+        )
+
+    if not os.path.isfile(value):
+        raise ParseInputError(f"{arg_name}: file not found: {value}")
+
+    try:
+        with open(value, "r") as f:
+            if lower.endswith(".json"):
+                return json.load(f)
+            return yaml.safe_load(f)
+    except (OSError, json.JSONDecodeError, yaml.YAMLError) as e:
+        raise ParseInputError(f"{arg_name}: failed to load {value}: {e}") from e
 
 
 class RunCommand(BenchpressCommand):
@@ -100,7 +152,10 @@ class RunCommand(BenchpressCommand):
             "-i",
             "--role_input",
             default={},
-            help="role depended args, e.g. server_hostname",
+            help=(
+                "role depended args, e.g. server_hostname. "
+                "Accepts a JSON string or a path to a .json/.yml/.yaml file."
+            ),
         )
         parser.add_argument(
             "--disable-hooks",
@@ -123,7 +178,11 @@ class RunCommand(BenchpressCommand):
             "-a",
             "--hook-args",
             default="{}",
-            help='Hook arguments in JSON format, e.g. \'{"hook1": {"key": <value>, ...}, "hook2": {...}, ...}\'',
+            help=(
+                "Hook arguments as a JSON string, e.g. "
+                '\'{"hook1": {"key": <value>, ...}, "hook2": {...}, ...}\', '
+                "or a path to a .json/.yml/.yaml file containing the same."
+            ),
         )
 
     def run(self, args, jobs) -> None:
@@ -196,15 +255,19 @@ class RunCommand(BenchpressCommand):
         role_in = {}
         if args.role_input:
             try:
-                role_in = json.loads(args.role_input)
-            except Exception:
-                click.echo("role_input must be json dictionary format", err=True)
+                role_in = _parse_json_or_file(args.role_input, "--role_input")
+            except ParseInputError as e:
+                click.echo(str(e), err=True)
                 click.echo("example input format for iperf:", err=True)
                 click.echo(
                     './benchpress run iperf --role client --role_input=\'{"server_hostname":"rtptest1234.prn1"}\'',
                     err=True,
                 )
-                exit(1)
+                click.echo(
+                    "or: ./benchpress run iperf --role client --role_input=role_input.yaml",
+                    err=True,
+                )
+                sys.exit(1)
 
         for job in jobs:
             if not verify_install(job):
@@ -218,10 +281,14 @@ class RunCommand(BenchpressCommand):
                 continue
 
             try:
-                additional_hook_args = json.loads(args.hook_args)
-            except json.JSONDecodeError:
+                additional_hook_args = _parse_json_or_file(
+                    args.hook_args, "--hook-args"
+                )
+            except ParseInputError as e:
                 logger.warning(
-                    "Could not parse hook args - please make sure it's in valid JSON format"
+                    "Could not parse hook args (%s); please make sure it's in valid "
+                    "JSON format or a path to a .json/.yml/.yaml file",
+                    e,
                 )
                 additional_hook_args = {}
 
