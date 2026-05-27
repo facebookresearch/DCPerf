@@ -171,6 +171,22 @@ health_check:
   path: ./benchmarks/health_check/run.sh
   metrics: []
 
+graph500_omp_csr:
+  parser: graph500
+  install_script: ./packages/graph500/install_graph500.sh
+  cleanup_script: ./packages/graph500/cleanup_graph500.sh
+  install_markers:
+    - ./benchmarks/graph500/graph500_reference_bfs
+  path: ./packages/graph500/run.sh
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - harmonic_mean_TEPS
+    - harmonic_stddev_TEPS
+
 sleep:
   path: /usr/bin/sleep
   parser: returncode
