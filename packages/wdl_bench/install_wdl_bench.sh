@@ -74,8 +74,8 @@ declare -A REPOS=(
 )
 
 declare -A TAGS=(
-    ['folly']='v2026.01.05.00'
-    ['fbthrift']='v2026.01.05.00'
+    ['folly']='v2026.05.25.00'
+    ['fbthrift']='v2026.05.25.00'
     ['lzbench']='v2.2'
     ['openssl']='openssl-3.6.0'
     ['vdso']='a90085a8e4e1e07a93cc45a68da246fa98a9f831'
@@ -117,7 +117,8 @@ elif [ "$LINUX_DIST_ID" = "centos" ]; then
     git tar unzip perl openssl-devel python3-devel gawk python3-numpy \
     dnf-plugins-core rpm-build audit-libs-devel gd-devel gdb \
     libcap-devel libpng-devel libselinux-devel texinfo valgrind \
-    google-benchmark-devel environment-modules openblas-devel pkg-config
+    google-benchmark-devel environment-modules openblas-devel pkg-config \
+    gflags-devel
 
 fi
 
@@ -199,11 +200,34 @@ build_folly()
     # Fix zlib download URL (zlib.net moved old releases to /fossils/)
     sed -i 's|url = https://zlib.net/zlib-|url = https://zlib.net/fossils/zlib-|' build/fbcode_builder/manifests/zlib
 
-    # Fix __folly_memset undefined reference on x86_64: CentOS 10 GCC 14 defines
+    # Remove all patches from getdeps manifests. The getdeps.py _apply_patchfile()
+    # runs git apply from the wrong cwd when using a custom --scratch-path, causing
+    # all patches to fail with "No such file or directory". These patches are either
+    # Windows-only or minor fixes not needed for Linux benchmark builds.
+    sed -i '/^patchfile\s*=/d' ./build/fbcode_builder/manifests/*
+    rm -f ./build/fbcode_builder/patches/*
+
+    # Fix __folly_memset undefined reference on x86_64
     # __AVX2__ by default, so FollyMemset.cpp excludes its fallback. Patch it to
     # always compile the fallback so __folly_memset is available.
     if [ "$ARCH" != "aarch64" ]; then
         sed -i 's/#if !defined(__AVX2__) && !(defined(__linux__) && defined(__aarch64__))/#if 1/' folly/FollyMemset.cpp
+    fi
+
+    # io_uring support is disabled by removing liburing.h after install-system-deps
+    # (see below). No source patching needed here.
+
+    # On aarch64, use folly's ARM Optimized Routines (AOR) memcpy/memset with
+    # IFUNC runtime selection between NEON (AdvSIMD), SVE, and MOPS implementations.
+    # The cmake build includes the assembly files via external/aor/CMakeLists.txt but
+    # is missing the IFUNC selector files that provide __folly_memcpy/__folly_memset.
+    if [ "$ARCH" = "aarch64" ]; then
+        # Add memcpy_select_aarch64.cpp to the memcpy-impl target
+        sed -i '/NAME memcpy-impl/,/^)/{/SRCS/a\    memcpy_select_aarch64.cpp
+}' folly/CMakeLists.txt
+        # Add memset_select_aarch64.cpp to the memset-impl target
+        sed -i '/NAME memset-impl/,/^)/{/SRCS/a\    memset_select_aarch64.cpp
+}' folly/CMakeLists.txt
     fi
 
     # execute the build in a subshell with a new conda build environment
@@ -214,6 +238,13 @@ build_folly()
         env $(get_conda_proxy_args) conda create --override-channels -y -c conda-forge --force -n "$FBENV" "python=3.12" "numpy<2"
         conda activate "$FBENV"
         python3 ./build/fbcode_builder/getdeps.py install-system-deps --recursive
+
+        # Remove liburing headers so __has_include(<liburing.h>) returns false.
+        # The system liburing-devel has headers too old for folly's ZCRX APIs
+        # (requires kernel 6.12+). Removing the header disables all io_uring code
+        # paths at compile time via FOLLY_HAS_LIBURING=0.
+        rm -f /usr/include/liburing.h
+        rm -rf /usr/include/liburing
 
         # On Ubuntu 24.04, the conda-installed gmock/gtest (1.11) are too old
         # to handle C++20 std::span (missing const_iterator, added in C++23).
@@ -235,7 +266,11 @@ build_folly()
 
         echo "Building folly with $(get_march_for_host)"
         MARCH="$(get_march_for_host)"
-        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_ASM_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE"}' "$MARCH" "$MARCH" "$MARCH")
+        # Fix aarch64 GCC NEON/SVE bridge type mismatch (uint64x2_t vs __Uint8x16_t)
+        if [ "$ARCH" = "aarch64" ]; then
+            MARCH="$MARCH -flax-vector-conversions"
+        fi
+        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_ASM_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE","CMAKE_DISABLE_FIND_PACKAGE_LibUring":"TRUE"}' "$MARCH" "$MARCH" "$MARCH")
         python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES"
         conda deactivate
         conda env remove -n "$FBENV" -y
@@ -259,9 +294,21 @@ build_fbthrift()
     # Fix zlib download URL (zlib.net moved old releases to /fossils/)
     sed -i 's|url = https://zlib.net/zlib-|url = https://zlib.net/fossils/zlib-|' build/fbcode_builder/manifests/zlib
 
+    # Remove all patches from getdeps manifests (same git apply cwd bug as folly)
+    sed -i '/^patchfile\s*=/d' ./build/fbcode_builder/manifests/*
+    rm -f ./build/fbcode_builder/patches/*
+
     ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
     echo "Building fbthrift with $(get_march_for_host)"
     MARCH="$(get_march_for_host)"
+    # On aarch64 with GCC, CompactProtocol.cpp uses NEON/SVE intrinsics that rely on
+    # clang-specific extensions (vector subscript, implicit pointer casts) which GCC
+    # cannot compile. Disable the NEON/SVE code path for this one file.
+    if [ "$ARCH" = "aarch64" ]; then
+        MARCH="$MARCH -Wno-error=return-type -flax-vector-conversions"
+        sed -i '1i #undef FOLLY_ARM_FEATURE_NEON_SVE_BRIDGE\n#define FOLLY_ARM_FEATURE_NEON_SVE_BRIDGE 0' \
+            "${WDL_SOURCE}/fbthrift/thrift/lib/cpp2/protocol/CompactProtocol.cpp"
+    fi
     # Find the getdeps-built boost root (folly was compiled against it, not the system boost)
     GETDEPS_BOOST_ROOT=$(find "${WDL_BUILD}/installed" -maxdepth 1 -type d -name "boost-*" | head -1)
     if [ -n "$GETDEPS_BOOST_ROOT" ]; then
@@ -317,6 +364,16 @@ build_vdso()
     pushd "${WDL_SOURCE}"
     clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib/vdso_bench" || exit
+
+    # On aarch64, define CONFIG_ARM so the source uses the ARM code path
+    # (cntvct_el0) instead of the x86 path (rdtscp). Inject at top of source
+    # since the Makefile hardcodes CFLAGS without accepting overrides.
+    # Also add -march=native so clang can assemble ARMv8.5 instructions (sb).
+    if [ "$ARCH" = "aarch64" ]; then
+        sed -i '1i #define CONFIG_ARM' vdso_bench.c
+        sed -i 's/-O2/-O2 -march=native/' Makefile
+    fi
+
     make -j "$(nproc)"
     cp ./vdso_bench "${WDL_ROOT}/" || exit
 

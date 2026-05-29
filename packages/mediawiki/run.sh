@@ -199,8 +199,14 @@ function run_benchmark() {
 
   cd "${OLD_CWD}/oss-performance" || exit
   # shellcheck disable=2086
+  # Disable JIT for the orchestrator on ARM to avoid HHVM 3.30 ARM JIT segfault
+  local _jit_flag=""
+  if [ "$(uname -m)" = "aarch64" ]; then
+    _jit_flag="-vEval.Jit=0"
+  fi
   HHVM_DISABLE_NUMA=1 "$_hhvm_path" \
     -vEval.ProfileHWEnable=0 \
+    ${_jit_flag} \
     perf.php \
     --nginx "$_nginx_path" \
     ${lg_params} \

@@ -58,16 +58,16 @@ exec_non_json() {
 run_list=""
 
 declare -A prod_benchmark_config=(
-    ['random_benchmark']="--bm_regex=xoshiro --json"
-    ['memcpy_benchmark']="--json"
-    ['memset_benchmark']="--json"
-    ['hash_hash_benchmark']="--bm_regex=RapidHash --json"
-    ['hash_checksum_benchmark']="--json"
-    ['synchronization_lifo_sem_bench']="--bm_min_iters=1000000 --json"
-    ['synchronization_small_locks_benchmark']="--bm_min_iters=1000000 --bm_regex=\"(atomic_cas|atomics_fetch_add|std_mutex_simple).*\" -run_fairness=false -unlocked_work 0 --json"
-    ['container_hash_maps_bench']="--bm_max_iters=1073741824 --bm_regex=\"f14(vec)|(val)\" --json" # filter find, insert, InsertSqBr, erase, and Iter operations in results parse script
-    ['ProtocolBench']="--bm_regex=\"(^Binary)|(^Compact)Protocol\" --json"
-    ['VarintUtilsBench']="--json"
+    ['random_benchmark']="--bm_mode=best-of --bm_regex=xoshiro --json"
+    ['memcpy_benchmark']="--bm_mode=best-of --json"
+    ['memset_benchmark']="--bm_mode=best-of --json"
+    ['hash_hash_benchmark']="--bm_mode=best-of --bm_regex=RapidHash --json"
+    ['hash_checksum_benchmark']="--bm_mode=best-of --json"
+    ['synchronization_lifo_sem_bench']="--bm_mode=best-of --bm_min_iters=1000000 --json"
+    ['synchronization_small_locks_benchmark']="--bm_mode=best-of --bm_min_iters=1000000 --bm_regex=\"(atomic_cas|atomics_fetch_add|std_mutex_simple).*\" -run_fairness=false -unlocked_work 0 --json"
+    ['container_hash_maps_bench']="--bm_mode=best-of --bm_max_iters=1073741824 --bm_regex=\"f14(vec)|(val)\" --json" # filter find, insert, InsertSqBr, erase, and Iter operations in results parse script
+    ['ProtocolBench']="--benchmark_filter='(^Binary)|(^Compact)Protocol' --benchmark_format=json"
+    ['VarintUtilsBench']="--bm_mode=best-of --json"
     ['concurrency_concurrent_hash_map_bench']=""
     ['lzbench']="-v -ezstd,1,3 ${WDL_DATASETS}/silesia.tar"
     ['openssl']="speed -seconds 20 -evp aes-256-gcm"

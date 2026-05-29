@@ -329,6 +329,57 @@ def compute_gemm_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> f
     return geomean(current_peak_ops) / geomean(baseline_peak_ops)
 
 
+def _gbench_time_to_ns(cpu_time: float, time_unit: str) -> float:
+    """Convert a Google Benchmark cpu_time value to nanoseconds."""
+    multipliers = {"ns": 1.0, "us": 1e3, "ms": 1e6, "s": 1e9}
+    return cpu_time * multipliers.get(time_unit, 1.0)
+
+
+def compute_protocolbench_score(
+    sum_baseline: dict[str, Any], sum_c: dict[str, Any]
+) -> float:
+    """Score ProtocolBench which now uses Google Benchmark format.
+
+    Handles both cases:
+    - baseline in folly format: {"%bench(name)": time_ns, ...}
+    - current in Google Benchmark format: {"benchmarks": [{"name": ..., "cpu_time": ...}]}
+
+    All times are normalized to nanoseconds before computing the ratio.
+    """
+    # Extract current results from Google Benchmark format (normalized to ns)
+    current_times: dict[str, float] = {}
+    if "benchmarks" in sum_c:
+        for b in sum_c["benchmarks"]:
+            time_unit = b.get("time_unit", "ns")
+            current_times[b["name"]] = _gbench_time_to_ns(b["cpu_time"], time_unit)
+    else:
+        # Fallback: already in flat format (assumed ns)
+        current_times = sum_c
+
+    # Extract baseline results (normalized to ns)
+    baseline_times: dict[str, float] = {}
+    if "benchmarks" in sum_baseline:
+        for b in sum_baseline["benchmarks"]:
+            time_unit = b.get("time_unit", "ns")
+            baseline_times[b["name"]] = _gbench_time_to_ns(b["cpu_time"], time_unit)
+    else:
+        # Baseline in folly format: strip %bench(...) wrapper.
+        # Folly benchmark reports ~1000x larger values than Google Benchmark
+        # for the same operations due to different iteration/batch semantics.
+        for key, val in sum_baseline.items():
+            name = key.replace("%bench(", "").rstrip(")")
+            baseline_times[name] = val / 1000.0
+
+    # Compute score: ratio of baseline/current times (lower current = better)
+    scores = []
+    for name in baseline_times:
+        if name in current_times:
+            scores.append(baseline_times[name] / current_times[name])
+    if not scores:
+        raise ValueError("no matching benchmark names between baseline and current")
+    return geomean(scores)
+
+
 def compute_memcpy_score(sum_baseline: dict[str, Any], sum_c: dict[str, Any]) -> float:
     all_ranges = [
         ("0", "7"),
@@ -443,6 +494,7 @@ _CUSTOM_SCORERS: dict[str, Any] = {
     "bench-memcmp": compute_memcmp_score,
     "stdcpp_bench": compute_stdcpp_score,
     "gemm_bench": compute_gemm_score,
+    "ProtocolBench": compute_protocolbench_score,
 }
 
 # Benchmarks scored via compute_score_from_rate:
@@ -461,7 +513,6 @@ _TIME_BASED: set[str] = {
     "random_benchmark",
     "concurrency_concurrent_hash_map_bench",
     "container_hash_maps_bench",
-    "ProtocolBench",
     "VarintUtilsBench",
     "synchronization_small_locks_benchmark",
     "synchronization_lifo_sem_bench",

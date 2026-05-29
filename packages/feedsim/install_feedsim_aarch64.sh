@@ -228,6 +228,7 @@ if ! [ -d "libtorch" ]; then
     # Also install libstdcxx-ng to ensure compatible C++ runtime
     eval "$("${CONDA_DIR}/bin/conda" shell.bash hook)"
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
     conda install -y -c conda-forge libstdcxx-ng
 
     # Locate the pip-installed torch package

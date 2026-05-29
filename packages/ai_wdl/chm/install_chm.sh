@@ -141,6 +141,16 @@ build_folly() {
   pushd folly-${FOLLY_VERSION} || exit 1
   # Fix zlib download URL (zlib.net moved old releases to /fossils/)
   sed -i 's|url = https://zlib.net/zlib-|url = https://zlib.net/fossils/zlib-|' build/fbcode_builder/manifests/zlib
+
+  # On aarch64 (e.g., CentOS 10 with GCC 14 + NumPy 2.x), Boost 1.83's
+  # boost-python fails to compile because NumPy 2.0 made PyArray_Descr opaque
+  # (removed direct ->elsize access). Since CHM doesn't use boost-python at all,
+  # skip building it on aarch64 to avoid the incompatibility.
+  if [ "$(uname -m)" = "aarch64" ]; then
+    echo "[FIX] Removing --with-python from boost manifest (not needed, avoids NumPy 2.x build failure on aarch64)"
+    sed -i '/^--with-python$/d' build/fbcode_builder/manifests/boost
+  fi
+
   # Install system dependencies required by Folly
   sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive
   # Build Folly with system packages allowed and using our build directory
