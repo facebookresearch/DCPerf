@@ -8,9 +8,15 @@
 #pragma once
 
 #include <cachelib/allocator/CacheAllocator.h>
+#include <cachelib/common/Hash.h>
+#include <cachelib/common/Mutex.h>
+#include <folly/String.h>
+#include <folly/container/F14Map.h>
+#include <folly/fibers/TimedMutex.h>
 #include <folly/futures/Future.h>
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -104,6 +110,23 @@ struct UcacheBenchConfig {
   uint64_t cachelib_num_shards = 0; // 0 = use default
   uint32_t min_alloc_size = 64; // Minimum allocation size in bytes
 
+  // Per-request CPU overhead simulation (LEGACY - use production_features)
+  uint32_t cpu_overhead_level = 0;
+
+  // CacheTable-style bucket locking
+  // 0 = disabled, >0 = 2^bucket_lock_power locks (production default: 20)
+  uint32_t bucket_lock_power = 0;
+
+  // Production-like per-request features
+  // Enables realistic per-request overhead matching production ucache:
+  // - Compound key construction (McStoredKey-like)
+  // - MurmurHash2 key hashing (matching getHashForKey)
+  // - Multiple atomic stat increments per request (matching USTAT_INCR)
+  // - ACL prefix hash lookup
+  // - Timestamp reads (matching ucache::gettime)
+  // - Overload check simulation (atomic reads)
+  bool production_features_enabled = false;
+
   // Navy (NVM/SSD cache) config (if navy_cache_size_mb > 0, hybrid mode is
   // enabled)
   std::string navy_cache_path = "/tmp/ucachebench_ssd";
@@ -174,6 +197,31 @@ class UcacheBenchServer {
  private:
   void setupCacheLib();
 
+  // Simulate per-request CPU overhead (legacy)
+  void simulatePerRequestOverhead(const std::string& key);
+
+  // Production-like per-request processing
+  // Returns a compound key string (like McStoredKey in production)
+  std::string buildCompoundKey(const std::string& key);
+  void runProductionGetOverhead(
+      const std::string& key,
+      bool hit,
+      const void* valueData = nullptr,
+      size_t valueLen = 0);
+  void runProductionSetOverhead(
+      const std::string& key,
+      const void* valueData = nullptr,
+      size_t valueLen = 0);
+
+  // Additional production-like CPU work
+  uint32_t computeValueChecksum(const void* data, size_t len);
+  void simulateThriftSerialization(
+      const std::string& key,
+      const void* valueData,
+      size_t valueLen,
+      bool hit);
+  void simulateIoBufProcessing(const void* valueData, size_t valueLen);
+
   // Increment metrics based on current phase
   void recordGet(bool hit);
   void recordSet();
@@ -182,9 +230,51 @@ class UcacheBenchServer {
   // Periodic stats thread function
   void periodicStatsLoop(uint32_t intervalSec);
 
+  // Bucket lock type matching production CacheTable:
+  // folly::fibers::TimedRWMutexWritePriority yields the fiber on contention,
+  // driving fiber scheduling overhead and jemalloc contention.
+  using BucketMutex =
+      folly::fibers::TimedRWMutexWritePriority<folly::fibers::GenericBaton>;
+  using BucketLocks = facebook::cachelib::RWBucketLocks<BucketMutex>;
+
   UcacheBenchConfig config_;
   std::unique_ptr<CacheAllocator> cache_;
   PoolId poolId_{};
+  std::unique_ptr<BucketLocks> bucketLocks_;
+
+  // Production-like per-request stats counters
+  // Matches the many USTAT_INCR / STAT_INCREMENT calls in production ucache.
+  // Each is a separate cache line to create realistic atomic contention
+  // patterns.
+  struct alignas(64) ProdStats {
+    std::atomic<uint64_t> inflightRequests{0};
+    std::atomic<uint64_t> totalRequests{0};
+    std::atomic<uint64_t> getHits{0};
+    std::atomic<uint64_t> getMisses{0};
+    std::atomic<uint64_t> setStored{0};
+    std::atomic<uint64_t> keyBytesTotal{0};
+    std::atomic<uint64_t> valueBytesTotal{0};
+    std::atomic<uint64_t> aclChecks{0};
+    std::atomic<uint64_t> aclAllowed{0};
+    std::atomic<uint64_t> ticketChecks{0};
+    std::atomic<uint64_t> overloadChecks{0};
+    std::atomic<uint64_t> prefixCounterHits{0};
+  } prodStats_;
+
+  // ACL prefix table (simulates production granular ACL categories)
+  folly::F14FastMap<uint64_t, uint32_t> aclPrefixTable_;
+
+  // Production auth attribute serialization
+  // Production calls security::authn::attributes::serializer::serialize()
+  // per request, which URI-escapes identity attributes into query strings.
+  // This showed up as ~1% CPU per thread in production perf profiles.
+  struct IdentityAttribute {
+    std::string key;
+    std::string value;
+  };
+  std::vector<IdentityAttribute> mockIdentityAttributes_;
+  void initMockIdentityAttributes();
+  std::string serializeIdentityAttributes(const std::string& requestKey);
 
   // Phase-based metric tracking
   std::atomic<TrackingPhase> currentPhase_{TrackingPhase::NONE};
