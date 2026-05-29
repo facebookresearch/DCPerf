@@ -177,6 +177,32 @@ def get_affinitize_nic_path() -> str:
     return os.path.join(UCACHE_BENCH_DIR, "affinitize", "affinitize_nic.py")
 
 
+def _clamp_to_nic_max_channels(interface_name: str, n_channels: int) -> int:
+    """Query NIC max combined channels and clamp n_channels if it exceeds the limit."""
+    try:
+        result = subprocess.run(
+            ["ethtool", "-l", interface_name],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        # Parse "Combined:" from the "Pre-set maximums" section (before "Current hardware settings")
+        sections = result.stdout.split("Current hardware settings")
+        if len(sections) > 1:
+            for line in sections[0].split("\n"):
+                if "Combined:" in line:
+                    max_channels = int(line.split(":")[1].strip())
+                    if n_channels > max_channels:
+                        print(
+                            f"Clamping n_channels from {n_channels} to NIC max {max_channels}"
+                        )
+                        return max_channels
+                    break
+    except (subprocess.CalledProcessError, OSError, ValueError) as e:
+        print(f"Warning: could not query NIC max channels: {e}")
+    return n_channels
+
+
 def affinitize_nic(args: argparse.Namespace) -> None:
     """Configure NIC IRQ affinity to distribute interrupts across CPUs.
 
@@ -196,6 +222,9 @@ def affinitize_nic(args: argparse.Namespace) -> None:
             f"(cores={n_cores}, ratio={args.nic_channel_ratio})"
         )
         return
+
+    # Query NIC max combined channels to avoid requesting more than supported
+    n_channels = _clamp_to_nic_max_channels(args.interface_name, n_channels)
 
     # Step 1: Set NIC channel count
     try:
