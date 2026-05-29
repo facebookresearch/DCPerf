@@ -25,12 +25,14 @@ import argparse
 import os
 import pathlib
 import subprocess
+import sys
 import threading
 from typing import List, Optional
 
 
 BENCHPRESS_ROOT: pathlib.Path = pathlib.Path(os.path.abspath(__file__)).parents[2]
 UCACHE_BENCH_DIR: str = os.path.join(BENCHPRESS_ROOT, "benchmarks", "ucache_bench")
+AFFINITIZE_NIC_SYSTEM_PATH: str = "/usr/local/bin/affinitize_nic"
 
 # Constants
 MEM_USAGE_FACTOR = 0.75  # to prevent OOM
@@ -132,14 +134,12 @@ def run_cmd(
             stderr=subprocess.STDOUT,
         )
         try:
-            if timeout:
-                proc.wait(timeout=timeout)
-            else:
-                proc.wait()
+            # Use communicate() instead of wait() to actively read stdout
+            # and avoid pipe deadlock when the child produces verbose output
+            stdout, _ = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.terminate()
-            proc.wait()
-        stdout, _ = proc.communicate()
+            stdout, _ = proc.communicate()
         return stdout.decode("utf-8")
     else:
         return ""
@@ -156,6 +156,107 @@ def profile_server() -> None:
     subprocess.run(
         ["perf", "record", "-a", "-g", "-o", "perf.data", "--", "sleep", "5"]
     )
+
+
+def get_affinitize_nic_path() -> str:
+    """Get path to the affinitize_nic script.
+
+    Checks system path first, then common packages dir, falls back to
+    benchmark-local copy (created by install script for OSS builds).
+    """
+    if os.path.exists(AFFINITIZE_NIC_SYSTEM_PATH):
+        return AFFINITIZE_NIC_SYSTEM_PATH
+    # Internal fbpkg: shared utility in packages/common/affinitize/
+    common_path = os.path.join(
+        BENCHPRESS_ROOT, "packages", "common", "affinitize", "affinitize_nic.py"
+    )
+    if os.path.exists(common_path):
+        return common_path
+    # OSS: copied by install script to benchmark dir
+    return os.path.join(UCACHE_BENCH_DIR, "affinitize", "affinitize_nic.py")
+
+
+def _clamp_to_nic_max_channels(interface_name: str, n_channels: int) -> int:
+    """Query NIC max combined channels and clamp n_channels if it exceeds the limit."""
+    try:
+        result = subprocess.run(
+            ["ethtool", "-l", interface_name],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        # Parse "Combined:" from the "Pre-set maximums" section (before "Current hardware settings")
+        sections = result.stdout.split("Current hardware settings")
+        if len(sections) > 1:
+            for line in sections[0].split("\n"):
+                if "Combined:" in line:
+                    max_channels = int(line.split(":")[1].strip())
+                    if n_channels > max_channels:
+                        print(
+                            f"Clamping n_channels from {n_channels} to NIC max {max_channels}"
+                        )
+                        return max_channels
+                    break
+    except (subprocess.CalledProcessError, OSError, ValueError) as e:
+        print(f"Warning: could not query NIC max channels: {e}")
+    return n_channels
+
+
+def affinitize_nic(args: argparse.Namespace) -> None:
+    """Configure NIC IRQ affinity to distribute interrupts across CPUs.
+
+    This prevents IRQ processing from bottlenecking on a few cores.
+    Ported from TaoBench's NIC affinity tuning.
+
+    Steps:
+    1. Set the number of NIC combined channels using ethtool
+    2. Redistribute IRQ affinity across CPUs using affinitize_nic.py
+    """
+    n_cores = len(os.sched_getaffinity(0))
+    n_channels = int(n_cores * args.nic_channel_ratio)
+
+    if n_channels <= 0:
+        print(
+            f"Skipping NIC affinity: n_channels={n_channels} "
+            f"(cores={n_cores}, ratio={args.nic_channel_ratio})"
+        )
+        return
+
+    # Query NIC max combined channels to avoid requesting more than supported
+    n_channels = _clamp_to_nic_max_channels(args.interface_name, n_channels)
+
+    # Step 1: Set NIC channel count
+    try:
+        cmd = ["ethtool", "-L", args.interface_name, "combined", str(n_channels)]
+        print(f"Setting NIC channels: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"Failed to set NIC channels to {n_channels}: {e}")
+
+    # Step 2: Set IRQ affinity
+    try:
+        cmd = [
+            get_affinitize_nic_path(),
+            "-f",
+            "-a",
+            "--xps",
+        ]
+        if args.hard_binding:
+            cmd += [
+                "--cpu",
+                " ".join(str(x) for x in range(n_channels)),
+            ]
+        else:
+            cmd += [
+                "-A",
+                "all-nodes",
+                "--max-cpus",
+                str(n_channels),
+            ]
+        print(f"Setting NIC IRQ affinity: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"Failed to set NIC IRQ affinity: {e}")
 
 
 def run_server(args: argparse.Namespace) -> None:
@@ -176,6 +277,10 @@ def run_server(args: argparse.Namespace) -> None:
     if args.hash_power == 20:  # Default value, likely not explicitly set
         hash_power = calculate_hash_power(memory_mb)
         print(f"Auto-calculated hash_power={hash_power} for {memory_mb}MB memory")
+
+    # Configure NIC IRQ affinity before starting server
+    if args.interface_name != "lo" and args.nic_channel_ratio > 0:
+        affinitize_nic(args)
 
     print(
         f"Starting UcacheBench server with {args.memory_mb}MB memory on port {args.port}"
@@ -235,6 +340,10 @@ def run_server(args: argparse.Namespace) -> None:
         server_cmd.append(
             f"--rpc_num_cpu_worker_threads={args.rpc_num_cpu_worker_threads}"
         )
+    if args.rpc_socket_max_reads_per_event != 1:
+        server_cmd.append(
+            f"--rpc_socket_max_reads_per_event={args.rpc_socket_max_reads_per_event}"
+        )
 
     # CPU pinning configuration
     if args.cpu_pinning_enabled:
@@ -269,6 +378,30 @@ def run_server(args: argparse.Namespace) -> None:
     if args.verbose:
         server_cmd.append("--verbose=true")
 
+    # Fiber configuration
+    if args.enable_fibers:
+        server_cmd.append("--enable_fibers=true")
+    if args.fiber_stack_size != 65536:
+        server_cmd.append(f"--fiber_stack_size={args.fiber_stack_size}")
+    if args.fiber_max_pool_size != 1000:
+        server_cmd.append(f"--fiber_max_pool_size={args.fiber_max_pool_size}")
+    if args.fiber_pool_resize_period_ms != 1000:
+        server_cmd.append(
+            f"--fiber_pool_resize_period_ms={args.fiber_pool_resize_period_ms}"
+        )
+
+    # Per-request CPU overhead simulation
+    if args.cpu_overhead_level > 0:
+        server_cmd.append(f"--cpu_overhead_level={args.cpu_overhead_level}")
+
+    # CacheTable-style bucket locking
+    if args.bucket_lock_power > 0:
+        server_cmd.append(f"--bucket_lock_power={args.bucket_lock_power}")
+
+    # Production-like per-request features
+    if args.production_features:
+        server_cmd.append("--production_features=true")
+
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         delay = args.perf_record_delay
         print(f"DCPERF_PERF_RECORD=1, will start perf record after {delay}s delay")
@@ -276,7 +409,26 @@ def run_server(args: argparse.Namespace) -> None:
         t_prof.start()
 
     stdout = run_cmd(server_cmd, timeout=None, for_real=args.real)
-    print(stdout)
+
+    # Write full output to a log file for debugging, then only print
+    # the tail to stdout. This prevents pipe deadlock with the parent
+    # process (benchpress) which may use proc.wait() before reading
+    # stdout — if output exceeds the 64KB pipe buffer, both processes
+    # deadlock. The results JSON is always at the end of the output.
+    log_path = os.path.join(UCACHE_BENCH_DIR, "server_output.log")
+    try:
+        with open(log_path, "w") as f:
+            f.write(stdout)
+        print(f"Full server output written to {log_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"Warning: could not write server log: {e}", file=sys.stderr)
+
+    # Print only the last 200 lines to stdout (results JSON + summary)
+    lines = stdout.split("\n")
+    if len(lines) > 200:
+        print(f"[...truncated {len(lines) - 200} lines of verbose output...]")
+    tail = lines[-200:] if len(lines) > 200 else lines
+    print("\n".join(tail))
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         t_prof.cancel()
@@ -312,10 +464,18 @@ def run_client(args: argparse.Namespace) -> None:
     if args.admin_port > 0:
         client_cmd.append(f"--admin_port={args.admin_port}")
 
+    # Connection ramp-up configuration
+    if args.connection_ramp_seconds != 10:
+        client_cmd.append(f"--connection_ramp_seconds={args.connection_ramp_seconds}")
+    if not args.warmup_adaptive_load:
+        client_cmd.append("--warmup_adaptive_load=false")
+    if args.warmup_initial_inflight != 2:
+        client_cmd.append(f"--warmup_initial_inflight={args.warmup_initial_inflight}")
+
     # Timeout configuration
-    if args.connection_timeout_ms != 1000:
+    if args.connection_timeout_ms != 5000:
         client_cmd.append(f"--connection_timeout_ms={args.connection_timeout_ms}")
-    if args.send_timeout_ms != 1000:
+    if args.send_timeout_ms != 5000:
         client_cmd.append(f"--send_timeout_ms={args.send_timeout_ms}")
 
     # Security configuration
@@ -340,11 +500,33 @@ def run_client(args: argparse.Namespace) -> None:
     if args.enable_random_source_ip:
         client_cmd.append("--enable_random_source_ip=true")
 
+    if args.failures_until_tko > 0:
+        client_cmd.append(f"--failures_until_tko={args.failures_until_tko}")
+
+    if args.use_same_thread_client:
+        client_cmd.append("--use_same_thread_client=true")
+
     if args.verbose:
         client_cmd.append("--verbose=true")
 
     stdout = run_cmd(client_cmd, timeout=None, for_real=args.real)
-    print(stdout)
+
+    # Write full output to a log file for debugging, then only print
+    # the tail to stdout to prevent pipe deadlock with parent process.
+    log_path = os.path.join(UCACHE_BENCH_DIR, "client_output.log")
+    try:
+        with open(log_path, "w") as f:
+            f.write(stdout)
+        print(f"Full client output written to {log_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"Warning: could not write client log: {e}", file=sys.stderr)
+
+    # Print only the last 200 lines to stdout (results JSON + summary)
+    lines = stdout.split("\n")
+    if len(lines) > 200:
+        print(f"[...truncated {len(lines) - 200} lines of verbose output...]")
+    tail = lines[-200:] if len(lines) > 200 else lines
+    print("\n".join(tail))
 
 
 def init_parser() -> argparse.ArgumentParser:
@@ -461,6 +643,12 @@ def init_parser() -> argparse.ArgumentParser:
         default=1,
         help="Number of CPU worker threads for ThriftServer",
     )
+    server_parser.add_argument(
+        "--rpc-socket-max-reads-per-event",
+        type=int,
+        default=1,
+        help="Max reads per socket per event loop iteration (production uses 1, ThriftServer default is 16)",
+    )
 
     # CPU pinning configuration
     server_parser.add_argument(
@@ -498,6 +686,27 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Reduce IO thread count to match non-IRQ CPU count (set to non-zero to enable)",
+    )
+
+    # NIC IRQ affinity configuration (ported from TaoBench)
+    server_parser.add_argument(
+        "--nic-channel-ratio",
+        type=float,
+        default=0.0,
+        help="Ratio of NIC channels to logical cores (0.0 = disabled, 0.5 = TaoBench default). "
+        "Sets ethtool combined channels and redistributes IRQ affinity.",
+    )
+    server_parser.add_argument(
+        "--interface-name",
+        type=str,
+        default="eth0",
+        help="Network interface name for NIC IRQ affinity tuning",
+    )
+    server_parser.add_argument(
+        "--hard-binding",
+        type=int,
+        default=0,
+        help="Hard bind NIC channels to specific CPU cores (set to non-zero to enable)",
     )
 
     # Navy (hybrid mode) configuration
@@ -564,6 +773,56 @@ def init_parser() -> argparse.ArgumentParser:
         help="Timeout in seconds for waiting for clients (0 = no timeout)",
     )
 
+    # Fiber configuration
+    server_parser.add_argument(
+        "--enable-fibers",
+        type=int,
+        default=0,
+        help="Enable fiber-based request processing (set to non-zero to enable)",
+    )
+    server_parser.add_argument(
+        "--fiber-stack-size",
+        type=int,
+        default=65536,
+        help="Stack size for IO thread fibers in bytes",
+    )
+    server_parser.add_argument(
+        "--fiber-max-pool-size",
+        type=int,
+        default=1000,
+        help="Maximum number of preallocated free fibers to keep around",
+    )
+    server_parser.add_argument(
+        "--fiber-pool-resize-period-ms",
+        type=int,
+        default=1000,
+        help="Period in ms for resizing the fiber pool (0 = disabled)",
+    )
+
+    # Per-request CPU overhead simulation
+    server_parser.add_argument(
+        "--cpu-overhead-level",
+        type=int,
+        default=0,
+        help="Per-request CPU overhead simulation level (0=disabled, 1=light ~3%%, 2=medium ~5%%, 3=heavy ~8%%)",
+    )
+
+    # CacheTable-style bucket locking
+    server_parser.add_argument(
+        "--bucket-lock-power",
+        type=int,
+        default=0,
+        help="CacheTable-style fiber-aware RW bucket locks. 2^N locks. Production=20. 0=disabled.",
+    )
+
+    # Production-like per-request features
+    server_parser.add_argument(
+        "--production-features",
+        type=int,
+        default=0,
+        help="Enable production-like per-request overhead (key construction, ACL, stats, timestamps). 0=disabled, 1=enabled.",
+    )
+
     # Profiling configuration
     server_parser.add_argument(
         "--perf-record-delay",
@@ -574,7 +833,10 @@ def init_parser() -> argparse.ArgumentParser:
     )
 
     server_parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging"
+        "--verbose",
+        type=int,
+        default=0,
+        help="Enable verbose logging (set to non-zero to enable)",
     )
     server_parser.add_argument(
         "--real", action="store_true", help="Actually run the command"
@@ -600,13 +862,13 @@ def init_parser() -> argparse.ArgumentParser:
     client_parser.add_argument(
         "--connection-timeout-ms",
         type=int,
-        default=1000,
+        default=5000,
         help="Connection timeout in milliseconds",
     )
     client_parser.add_argument(
         "--send-timeout-ms",
         type=int,
-        default=1000,
+        default=5000,
         help="Send timeout in milliseconds",
     )
     client_parser.add_argument(
@@ -660,6 +922,31 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Enable random source IP addresses for connection fanout (set to non-zero to enable)",
+    )
+    client_parser.add_argument(
+        "--connection-ramp-seconds",
+        type=int,
+        default=10,
+        help="Seconds to gradually ramp up connections before warmup (0 = disabled)",
+    )
+    client_parser.add_argument(
+        "--warmup-adaptive-load",
+        type=int,
+        default=1,
+        help="Enable adaptive load control during warmup (1=enabled, 0=disabled)",
+    )
+    client_parser.add_argument(
+        "--warmup-initial-inflight",
+        type=int,
+        default=2,
+        help="Initial max inflight per thread when adaptive load is enabled",
+    )
+
+    client_parser.add_argument(
+        "--use-same-thread-client",
+        type=int,
+        default=0,
+        help="Use createSameThreadClient() to eliminate cross-thread hops (1=enabled, 0=disabled)",
     )
 
     # Workload configuration
@@ -731,7 +1018,18 @@ def init_parser() -> argparse.ArgumentParser:
     )
 
     client_parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging"
+        "--failures-until-tko",
+        type=int,
+        default=0,
+        help="Number of consecutive failures before mcrouter marks server as TKO "
+        "(0 = mcrouter default of 3). Production typically uses 12-32.",
+    )
+
+    client_parser.add_argument(
+        "--verbose",
+        type=int,
+        default=0,
+        help="Enable verbose logging (set to non-zero to enable)",
     )
     client_parser.add_argument(
         "--real", action="store_true", help="Actually run the command"
