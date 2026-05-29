@@ -36,6 +36,7 @@ from .health_check import HealthCheckParser
 from .iperf import IperfParser
 from .lmbench_lat_mem_rd import LmbenchLatMemRdParser
 from .ltp import LtpParser
+from .lzbench_perf import LzbenchPerfParser
 from .mediawiki import MediawikiParser
 from .memcached_bench import MemcachedBenchParser
 from .minebench import KMeansParser, PLSAParser, RSearchParser
@@ -45,6 +46,7 @@ from .multichase_pingpong import MultichasePingpongParser
 from .multichase_pointer import MultichasePointerParser
 from .nginx_wrk_bench import NginxWrkParser
 from .nnpi_net4 import NNPINet4Parser
+from .openssl_speed import OpensslSpeedParser
 from .perftest import PerftestParser
 from .pytorch_gemm_gpuless import PytorchGemmGpulessParser
 from .rebatch import RebatchParser
@@ -107,6 +109,8 @@ def register_parsers(factory):
     factory.register("mlc", MlcParser)
     factory.register("iperf", IperfParser)
     factory.register("lmbench_lat_mem_rd", LmbenchLatMemRdParser)
+    factory.register("lzbench_perf", LzbenchPerfParser)
+    factory.register("openssl_speed", OpensslSpeedParser)
     factory.register("checkmark", CheckmarkParser)
     factory.register("nnpi_net4", NNPINet4Parser)
     factory.register("perftest", PerftestParser)
