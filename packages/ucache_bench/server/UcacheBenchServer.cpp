@@ -13,8 +13,8 @@
 #include <folly/hash/Hash.h>
 #include <folly/io/IOBuf.h>
 #include <folly/portability/GFlags.h>
-#include <chrono>
 #include <time.h>
+#include <chrono>
 
 #include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
@@ -389,9 +389,9 @@ std::string UcacheBenchServer::serializeIdentityAttributes(
 
 // Hot key detection matching production TLHotKeyTracker::check().
 // Production calls bumpHash() on two thread-local HotHashDetectors per request
-// (one for QPS hotness, one for egress hotness) and again on the egress detector
-// per response. This drives L1 counter increments, conditional L2 probes,
-// and periodic maintenance (counter decay, threshold adjustment).
+// (one for QPS hotness, one for egress hotness) and again on the egress
+// detector per response. This drives L1 counter increments, conditional L2
+// probes, and periodic maintenance (counter decay, threshold adjustment).
 void UcacheBenchServer::runHotKeyDetection(uint64_t keyHash) {
   auto& detectors = *hotKeyDetectors_;
   // QPS detector bump (matches TLHotKeyTracker::checkHotKeyOnly)
@@ -411,7 +411,8 @@ void UcacheBenchServer::runHotKeyDetection(uint64_t keyHash) {
 // 4. Sliding window counter write (add response size)
 // We simulate with a thread-local F14 map doing equivalent work.
 void UcacheBenchServer::runEgressRateLimiting(
-    uint64_t keyHash, size_t responseSize) {
+    uint64_t keyHash,
+    size_t responseSize) {
   auto& tracker = *egressTrackers_;
 
   // Simulate ConcurrentLRUHashMap::find + potential insert
@@ -464,8 +465,8 @@ void UcacheBenchServer::runKcbDoubleLookup(const std::string& key) {
 }
 
 // Per-thread CPU load measurement matching production shouldLoadShed().
-// Production reads thread-local timing counters to estimate per-thread CPU load,
-// comparing against a threshold to decide if load shedding is needed.
+// Production reads thread-local timing counters to estimate per-thread CPU
+// load, comparing against a threshold to decide if load shedding is needed.
 void UcacheBenchServer::runCpuLoadMeasurement() {
   auto& counters = *cpuLoadCounters_;
 
@@ -483,9 +484,90 @@ void UcacheBenchServer::runCpuLoadMeasurement() {
   folly::doNotOptimizeAway(shouldShed);
 }
 
+// Static member for FiberToken contention
+std::atomic<uint64_t> UcacheBenchServer::activeFibersTotal_{0};
+
+// Per-request heap allocations matching production ucache patterns.
+// Production does 5-8 heap allocations per request through key construction,
+// fiber task capture, egress tracking, and IOBuf operations.
+// Each allocation goes through jemalloc, which under contention from 300+
+// threads does mmap/munmap syscalls that show up as %sys.
+void UcacheBenchServer::runPerRequestAllocations(
+    const std::string& key,
+    size_t valueLen) {
+  // 1. UcacheStoredKey: std::string cachelibKey_ (key_len + 1 byte for appId)
+  // Production: UcacheKey.h:34-51
+  std::string storedKey(key.size() + 1, '\0');
+  storedKey[0] = static_cast<char>(0x01); // appId byte
+  std::memcpy(storedKey.data() + 1, key.data(), key.size());
+  folly::doNotOptimizeAway(storedKey.data());
+
+  // 2. McStoredKey hashAlias: std::string (matches ct_item.h:135)
+  // Production resolves hash aliases for routing
+  std::string hashAlias = key.substr(0, std::min(key.size(), size_t(16)));
+  folly::doNotOptimizeAway(hashAlias.data());
+
+  // 3. McStoredKey ticket: std::string (matches ct_item.h:137)
+  // Production extracts ticket from request context
+  std::string ticket(32, 'T');
+  folly::doNotOptimizeAway(ticket.data());
+
+  // 4. Fiber task lambda capture allocation
+  // Production: UcacheRequestCommon.h:178 addTaskEager captures
+  // UcacheThriftCallback + Request + FiberToken in a heap-allocated lambda.
+  // Typical size: ~200-500 bytes depending on request type.
+  auto lambdaCapture = std::make_unique<char[]>(256);
+  std::memset(lambdaCapture.get(), 0, 256);
+  folly::doNotOptimizeAway(lambdaCapture.get());
+
+  // 5. KCB derived key construction (matches KcbKeyUtil.cpp:13-19)
+  // Production: fmt::format("{}:kcb:{}", appKey, kcbId)
+  std::string derivedKey = storedKey + ":kcb:12345";
+  folly::doNotOptimizeAway(derivedKey.data());
+
+  // 6. Egress hash computation with vector allocation
+  // Production: UcacheThriftCallback.h:141 allocates vector for multi-get
+  // We simulate a small vector allocation per request
+  std::vector<std::optional<uint64_t>> egressHashes(4);
+  for (size_t i = 0; i < egressHashes.size(); ++i) {
+    egressHashes[i] = folly::hash::twang_mix64(folly::hash::fnv64(key) + i);
+  }
+  folly::doNotOptimizeAway(egressHashes.data());
+
+  // 7. convertToIOBuf std::function allocation
+  // Production: CacheAllocator.h:4567 allocates a type-erased std::function
+  // for the IOBuf converter lambda per cache hit
+  if (valueLen > 0) {
+    std::function<void(void*)> freeFunc = [](void* ptr) {
+      folly::doNotOptimizeAway(ptr);
+    };
+    folly::doNotOptimizeAway(&freeFunc);
+  }
+}
+
+// FiberToken global atomic contention matching production.
+// Production increments a global atomic on fiber entry and decrements on exit.
+// With 300+ IO threads, this creates massive cache-line bouncing as the
+// atomic counter ping-pongs between L1 caches on different cores.
+// This shows up as %sys because cache-line invalidation protocols involve
+// inter-core messaging handled by the kernel's cache coherence mechanisms.
+void UcacheBenchServer::runFiberTokenContention() {
+  // Increment on "fiber entry" (matches FiberToken constructor)
+  auto before = activeFibersTotal_.fetch_add(1, std::memory_order_relaxed);
+  folly::doNotOptimizeAway(before);
+
+  // Per-thread counter increment (matches ++ctx.numActiveFibers_)
+  auto& counters = *cpuLoadCounters_;
+  counters.requestsProcessed.fetch_add(1, std::memory_order_relaxed);
+
+  // Decrement on "fiber exit" (matches FiberToken destructor)
+  activeFibersTotal_.fetch_sub(1, std::memory_order_relaxed);
+}
+
 // Configurable CPU busy-work per request.
 // Burns cpu_work_us microseconds of CPU doing real computation (hash chains)
-// to simulate aggregate production overhead that can't be individually replicated.
+// to simulate aggregate production overhead that can't be individually
+// replicated.
 void UcacheBenchServer::runCpuBusyWork(const std::string& key) {
   if (config_.cpu_work_us == 0) {
     return;
@@ -517,25 +599,27 @@ std::string UcacheBenchServer::buildCompoundKey(const std::string& key) {
   // Production allocates UcacheStoredKey with region prefix, pool name, etc.
   std::string compound;
   compound.reserve(key.size() + 32);
-  compound.append("uc:");                   // region prefix (production: "uc:")
-  compound.append(config_.pool_name);       // pool name
+  compound.append("uc:"); // region prefix (production: "uc:")
+  compound.append(config_.pool_name); // pool name
   compound.push_back(':');
-  compound.append(key);                     // actual key
-  compound.append(":v1");                   // version suffix
+  compound.append(key); // actual key
+  compound.append(":v1"); // version suffix
   return compound;
 }
 
-// Production-like GET overhead: key construction, hashing, ACL, stats, timestamps,
-// checksum, serialization, IOBuf processing
+// Production-like GET overhead: key construction, hashing, ACL, stats,
+// timestamps, checksum, serialization, IOBuf processing
 void UcacheBenchServer::runProductionGetOverhead(
-    const std::string& key, bool hit,
-    const void* valueData, size_t valueLen) {
+    const std::string& key,
+    bool hit,
+    const void* valueData,
+    size_t valueLen) {
   // 1. Key construction (matches createMcStoredKey)
   auto compoundKey = buildCompoundKey(key);
 
   // 2. Key hashing (matches getHashForKey using MurmurHash2)
-  uint64_t keyHash = facebook::cachelib::MurmurHash2()(
-      compoundKey.data(), compoundKey.size());
+  uint64_t keyHash =
+      facebook::cachelib::MurmurHash2()(compoundKey.data(), compoundKey.size());
   folly::doNotOptimizeAway(keyHash);
 
   // 3. Timestamp reads (matches ucache::gettime() called at request start)
@@ -544,8 +628,8 @@ void UcacheBenchServer::runProductionGetOverhead(
 
   // 4. ACL prefix check (matches prefixAclsHandler_->checkAcl)
   // Production: extracts key prefix, looks up ACL category, checks identity
-  uint64_t prefixHash = folly::hash::fnv64_buf(key.data(),
-      std::min(key.size(), size_t(8)));
+  uint64_t prefixHash =
+      folly::hash::fnv64_buf(key.data(), std::min(key.size(), size_t(8)));
   auto aclIt = aclPrefixTable_.find(prefixHash & 0xFF);
   prodStats_.aclChecks.fetch_add(1, std::memory_order_relaxed);
   if (aclIt != aclPrefixTable_.end()) {
@@ -564,8 +648,8 @@ void UcacheBenchServer::runProductionGetOverhead(
 
   // 6. Overload protection check (matches OverloadProtector::onRequest)
   // Production reads atomic counters to check CPU and network overload
-  auto inflight = prodStats_.inflightRequests.fetch_add(
-      1, std::memory_order_relaxed);
+  auto inflight =
+      prodStats_.inflightRequests.fetch_add(1, std::memory_order_relaxed);
   folly::doNotOptimizeAway(inflight);
 
   // 7. Stats tracking (matches many USTAT_INCR / STAT_INCREMENT calls)
@@ -632,6 +716,14 @@ void UcacheBenchServer::runProductionGetOverhead(
   clock_gettime(CLOCK_MONOTONIC, &ts);
   folly::doNotOptimizeAway(ts);
 
+  // 14. Per-request heap allocations (matches production key construction,
+  // fiber task capture, egress hash vector, convertToIOBuf std::function)
+  runPerRequestAllocations(key, hit ? valueLen : 0);
+
+  // 15. FiberToken global atomic contention
+  // (matches UcacheIOThreadContext::FiberToken inc/dec per request)
+  runFiberTokenContention();
+
   // Decrement inflight
   prodStats_.inflightRequests.fetch_sub(1, std::memory_order_relaxed);
 }
@@ -639,18 +731,19 @@ void UcacheBenchServer::runProductionGetOverhead(
 // Production-like SET overhead
 void UcacheBenchServer::runProductionSetOverhead(
     const std::string& key,
-    const void* valueData, size_t valueLen) {
+    const void* valueData,
+    size_t valueLen) {
   auto compoundKey = buildCompoundKey(key);
-  uint64_t keyHash = facebook::cachelib::MurmurHash2()(
-      compoundKey.data(), compoundKey.size());
+  uint64_t keyHash =
+      facebook::cachelib::MurmurHash2()(compoundKey.data(), compoundKey.size());
   folly::doNotOptimizeAway(keyHash);
 
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
 
   // ACL check
-  uint64_t prefixHash = folly::hash::fnv64_buf(key.data(),
-      std::min(key.size(), size_t(8)));
+  uint64_t prefixHash =
+      folly::hash::fnv64_buf(key.data(), std::min(key.size(), size_t(8)));
   auto aclIt = aclPrefixTable_.find(prefixHash & 0xFF);
   prodStats_.aclChecks.fetch_add(1, std::memory_order_relaxed);
   if (aclIt != aclPrefixTable_.end()) {
@@ -687,8 +780,8 @@ void UcacheBenchServer::runProductionSetOverhead(
   runCpuLoadMeasurement();
 
   // Stats
-  auto inflight = prodStats_.inflightRequests.fetch_add(
-      1, std::memory_order_relaxed);
+  auto inflight =
+      prodStats_.inflightRequests.fetch_add(1, std::memory_order_relaxed);
   folly::doNotOptimizeAway(inflight);
   prodStats_.totalRequests.fetch_add(1, std::memory_order_relaxed);
   prodStats_.keyBytesTotal.fetch_add(key.size(), std::memory_order_relaxed);
@@ -698,6 +791,12 @@ void UcacheBenchServer::runProductionSetOverhead(
   clock_gettime(CLOCK_MONOTONIC, &ts);
   folly::doNotOptimizeAway(ts);
 
+  // Per-request heap allocations (same as GET path)
+  runPerRequestAllocations(key, valueLen);
+
+  // FiberToken global atomic contention
+  runFiberTokenContention();
+
   prodStats_.inflightRequests.fetch_sub(1, std::memory_order_relaxed);
 }
 
@@ -706,8 +805,7 @@ void UcacheBenchServer::runProductionSetOverhead(
 // (matching CacheLib's item checksum and mcrouter's payload CRC).
 // CRC32C uses hardware acceleration (SSE4.2) on x86, making it fast but
 // still measurably present in perf profiles at high QPS.
-uint32_t UcacheBenchServer::computeValueChecksum(
-    const void* data, size_t len) {
+uint32_t UcacheBenchServer::computeValueChecksum(const void* data, size_t len) {
   return folly::crc32c(
       reinterpret_cast<const uint8_t*>(data), len, /*startingChecksum=*/0);
 }
@@ -717,7 +815,10 @@ uint32_t UcacheBenchServer::computeValueChecksum(
 // field headers (type + id), varint-encoded lengths, and value bytes.
 // This shows up as ~3-5% CPU in production perf profiles for high-QPS pools.
 void UcacheBenchServer::simulateThriftSerialization(
-    const std::string& key, const void* valueData, size_t valueLen, bool hit) {
+    const std::string& key,
+    const void* valueData,
+    size_t valueLen,
+    bool hit) {
   // Simulate compact protocol field encoding:
   // - Result field (1 byte type + varint field id + varint value)
   // - Flags field (same pattern)
@@ -733,7 +834,7 @@ void UcacheBenchServer::simulateThriftSerialization(
   serBuf.reserve(estimatedSize);
 
   // Field 1: result (compact protocol: delta field id + type nibble + value)
-  serBuf.push_back(0x15);  // field delta=1, type=i32
+  serBuf.push_back(0x15); // field delta=1, type=i32
   // Varint encode the result
   uint32_t result = hit ? 1 : 0;
   while (result >= 0x80) {
@@ -743,11 +844,11 @@ void UcacheBenchServer::simulateThriftSerialization(
   serBuf.push_back(static_cast<char>(result));
 
   // Field 2: flags
-  serBuf.push_back(0x15);  // field delta=1, type=i32
+  serBuf.push_back(0x15); // field delta=1, type=i32
   serBuf.push_back(0x00);
 
   // Field 3: key as binary
-  serBuf.push_back(0x18);  // field delta=1, type=binary
+  serBuf.push_back(0x18); // field delta=1, type=binary
   // Varint encode length
   uint32_t keyLen = static_cast<uint32_t>(key.size());
   while (keyLen >= 0x80) {
@@ -759,7 +860,7 @@ void UcacheBenchServer::simulateThriftSerialization(
 
   // Field 4: value as binary (for hits)
   if (hit && valueData && valueLen > 0) {
-    serBuf.push_back(0x18);  // field delta=1, type=binary
+    serBuf.push_back(0x18); // field delta=1, type=binary
     uint32_t vLen = static_cast<uint32_t>(valueLen);
     while (vLen >= 0x80) {
       serBuf.push_back(static_cast<char>(vLen | 0x80));
@@ -769,7 +870,7 @@ void UcacheBenchServer::simulateThriftSerialization(
     // Copy value data (simulates the actual serialization copy)
     serBuf.append(
         reinterpret_cast<const char*>(valueData),
-        std::min(valueLen, size_t(4096)));  // Cap at 4KB to avoid huge copies
+        std::min(valueLen, size_t(4096))); // Cap at 4KB to avoid huge copies
   }
 
   // Stop field
@@ -784,7 +885,8 @@ void UcacheBenchServer::simulateThriftSerialization(
 // header IOBuf -> value IOBuf -> trailer IOBuf.
 // The IOBuf allocation, chaining, and eventual coalescing adds overhead.
 void UcacheBenchServer::simulateIoBufProcessing(
-    const void* valueData, size_t valueLen) {
+    const void* valueData,
+    size_t valueLen) {
   if (!valueData || valueLen == 0) {
     return;
   }
@@ -792,7 +894,7 @@ void UcacheBenchServer::simulateIoBufProcessing(
   // Simulate the work of building a multi-segment IOBuf response:
   // 1. Allocate header IOBuf (protocol header + flags)
   auto headerBuf = folly::IOBuf::create(32);
-  headerBuf->append(16);  // 16 bytes of protocol header
+  headerBuf->append(16); // 16 bytes of protocol header
   std::memset(headerBuf->writableData(), 0x01, 16);
 
   // 2. Wrap value data in an IOBuf (zero-copy reference)
@@ -835,7 +937,8 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
     auto item = cache_->find(keyStr);
     bool hit = item != nullptr;
 
-    // Production-like per-request overhead (after cache lookup, like production)
+    // Production-like per-request overhead (after cache lookup, like
+    // production)
     if (config_.production_features_enabled) {
       const void* valPtr = hit ? item->getMemory() : nullptr;
       size_t valLen = hit ? item->getSize() : 0;

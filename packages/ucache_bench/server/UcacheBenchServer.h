@@ -10,12 +10,12 @@
 #include <cachelib/allocator/CacheAllocator.h>
 #include <cachelib/common/Hash.h>
 #include <cachelib/common/Mutex.h>
-#include <folly/container/F14Map.h>
-#include <folly/String.h>
-#include <folly/fibers/TimedMutex.h>
-#include <folly/ThreadLocal.h>
-#include <folly/futures/Future.h>
 #include <cachelib/common/hothash/HotHashDetector.h>
+#include <folly/String.h>
+#include <folly/ThreadLocal.h>
+#include <folly/container/F14Map.h>
+#include <folly/fibers/TimedMutex.h>
+#include <folly/futures/Future.h>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -211,16 +211,22 @@ class UcacheBenchServer {
   // Returns a compound key string (like McStoredKey in production)
   std::string buildCompoundKey(const std::string& key);
   void runProductionGetOverhead(
-      const std::string& key, bool hit,
-      const void* valueData = nullptr, size_t valueLen = 0);
+      const std::string& key,
+      bool hit,
+      const void* valueData = nullptr,
+      size_t valueLen = 0);
   void runProductionSetOverhead(
       const std::string& key,
-      const void* valueData = nullptr, size_t valueLen = 0);
+      const void* valueData = nullptr,
+      size_t valueLen = 0);
 
   // Additional production-like CPU work
   uint32_t computeValueChecksum(const void* data, size_t len);
   void simulateThriftSerialization(
-      const std::string& key, const void* valueData, size_t valueLen, bool hit);
+      const std::string& key,
+      const void* valueData,
+      size_t valueLen,
+      bool hit);
   void simulateIoBufProcessing(const void* valueData, size_t valueLen);
 
   // Increment metrics based on current phase
@@ -245,7 +251,8 @@ class UcacheBenchServer {
 
   // Production-like per-request stats counters
   // Matches the many USTAT_INCR / STAT_INCREMENT calls in production ucache.
-  // Each is a separate cache line to create realistic atomic contention patterns.
+  // Each is a separate cache line to create realistic atomic contention
+  // patterns.
   struct alignas(64) ProdStats {
     std::atomic<uint64_t> inflightRequests{0};
     std::atomic<uint64_t> totalRequests{0};
@@ -285,7 +292,7 @@ class UcacheBenchServer {
     facebook::cachelib::HotHashDetector qpsDetector;
     facebook::cachelib::HotHashDetector egressDetector;
     HotKeyDetectors()
-        : qpsDetector(1024, 8, 30, 128),   // production defaults
+        : qpsDetector(1024, 8, 30, 128), // production defaults
           egressDetector(1024, 16, 30, 128) // egress uses 2x warm set
     {}
   };
@@ -295,7 +302,8 @@ class UcacheBenchServer {
   // Egress rate limiting simulation (matches NetworkOverloadProtector)
   // Production tracks per-key egress via ConcurrentLRUHashMap with
   // SlidingWindowCounter + DynamicTokenBucket per entry.
-  // We simulate with a thread-local F14 map doing hash lookups + counter updates.
+  // We simulate with a thread-local F14 map doing hash lookups + counter
+  // updates.
   struct EgressTracker {
     folly::F14FastMap<uint64_t, std::pair<uint64_t, uint64_t>> keyEgress;
     uint64_t totalBytes{0};
@@ -309,6 +317,23 @@ class UcacheBenchServer {
 
   // Configurable CPU busy-work per request
   void runCpuBusyWork(const std::string& key);
+
+  // Per-request heap allocations matching production ucache.
+  // Production allocates per request:
+  // - UcacheStoredKey: std::string for cachelib key (key_len+1 bytes)
+  // - McStoredKey: 3 std::strings (ukey, hashAlias, ticket)
+  // - Fiber task lambda capture (~200-500 bytes heap via FiberManager)
+  // - Egress hash vector: std::vector<std::optional<uint64_t>> (16*N bytes)
+  // - KCB derived key: fmt::format string allocation
+  // These drive jemalloc pressure → mmap/munmap syscalls → %sys
+  void runPerRequestAllocations(const std::string& key, size_t valueLen);
+
+  // FiberToken global atomic contention matching production.
+  // Production increments/decrements a global atomic<uint64_t> on every
+  // request entry/exit via UcacheIOThreadContext::FiberToken.
+  // This creates cross-thread cache-line bouncing → %sys.
+  static std::atomic<uint64_t> activeFibersTotal_;
+  void runFiberTokenContention();
 
   // Per-thread CPU load measurement (matches shouldLoadShed)
   struct alignas(64) CpuLoadCounters {
