@@ -56,7 +56,13 @@ _SUBPARSERS = {
 #     -> Gbps = MBps * 8 / 1000  => factor 0.008
 #   - compress: same MB/s -> Gb/s conversion on the host (lzbench) side
 _SPEEDUP_PAIRS = [
-    ("offload_throughput_Gbps_avg", "host_cipher_throughput_MBps_max", 0.008),
+    # crypto: AES-GCM offload (Gb/s) vs AES-GCM host (decimal MB/s -> Gb/s)
+    (
+        "offload_aesgcm_throughput_Gbps_avg",
+        "host_aesgcm_cipher_throughput_MBps_max",
+        0.008,
+    ),
+    # compress: offload (Gb/s) vs lzbench host (decimal MB/s -> Gb/s)
     ("offload_compress_throughput_Gbps_avg", "host_best_compress_MBps", 0.008),
 ]
 
