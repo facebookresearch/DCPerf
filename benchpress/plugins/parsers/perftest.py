@@ -41,6 +41,8 @@ class PerftestParser(Parser):
                 header = line
                 if "Gb/sec" in line:
                     bw_unit = "Gbps"
+                elif "MiB/sec" in line:
+                    bw_unit = "MiBps"
                 elif "MB/sec" in line:
                     bw_unit = "MBps"
                 continue
