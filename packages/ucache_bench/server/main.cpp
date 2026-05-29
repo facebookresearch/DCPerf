@@ -86,6 +86,39 @@ DEFINE_uint64(
     "Number of CacheLib shards (0 = use default)");
 DEFINE_uint32(min_alloc_size, 64, "Minimum allocation size in bytes");
 
+// Per-request CPU overhead simulation
+DEFINE_uint32(
+    cpu_overhead_level,
+    0,
+    "Per-request CPU overhead simulation level to match production ucache. "
+    "0=disabled, 1=light (ACL hash + timestamps ~3%), "
+    "2=medium (+ CacheTable + serialization ~5%), "
+    "3=heavy (+ identity verification + sampling ~8%)");
+
+// CacheTable-style bucket locking
+DEFINE_uint32(
+    bucket_lock_power,
+    0,
+    "Enable CacheTable-style fiber-aware RW bucket locks. "
+    "Number of locks = 2^bucket_lock_power. Production default is 20 (1M locks). "
+    "0 = disabled.");
+
+// Configurable per-request CPU work
+DEFINE_uint32(
+    cpu_work_us,
+    50,
+    "Microseconds of CPU busy-work per request. Simulates aggregate production "
+    "overhead. 0 = disabled.");
+
+// Production-like per-request features
+DEFINE_bool(
+    production_features,
+    false,
+    "Enable production-like per-request overhead: compound key construction "
+    "(McStoredKey), MurmurHash2 key hashing, ACL prefix checks, "
+    "stats tracking (12+ atomic increments), timestamp reads, "
+    "and overload protection checks. Matches production ucache request path.");
+
 // Navy (NVM/SSD cache) configuration (if navy_cache_size_mb > 0, hybrid mode
 // is enabled)
 DEFINE_string(
@@ -197,6 +230,18 @@ UcacheBenchConfig createConfigFromFlags() {
   config.lru_rebalancing_hits_max_age_sec =
       FLAGS_lru_rebalancing_hits_max_age_sec;
   config.lru_hits_victim_by_free_mem = FLAGS_lru_hits_victim_by_free_mem;
+
+  // Per-request CPU overhead simulation
+  config.cpu_overhead_level = FLAGS_cpu_overhead_level;
+
+  // CacheTable-style bucket locking
+  config.bucket_lock_power = FLAGS_bucket_lock_power;
+
+  // Configurable per-request CPU work
+  config.cpu_work_us = FLAGS_cpu_work_us;
+
+  // Production-like per-request features
+  config.production_features_enabled = FLAGS_production_features;
 
   // Hash table settings
   config.hashtable_lock_power = FLAGS_hashtable_lock_power;

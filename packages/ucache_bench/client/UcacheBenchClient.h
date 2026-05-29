@@ -213,8 +213,10 @@ class UcacheBenchClient {
   std::shared_ptr<
       facebook::memcache::mcrouter::CarbonRouterInstance<UcacheBenchRouterInfo>>
       routerInstance_;
-  // Note: No longer using a shared client_ member
-  // Instead, each thread creates its own client from routerInstance_
+
+  // Effective connection parameters (derived from --num_connections or flags)
+  uint32_t effectiveNumProxies_{0};
+  uint32_t effectiveAdditionalFanout_{0};
 
   // Admin server connection for multi-client coordination
   std::unique_ptr<AdminConnection> adminConnection_;
