@@ -13,7 +13,6 @@ from .cpu_limit import CpuLimit
 from .cpu_mpstat import CpuMpstat
 from .emon import Emon
 from .file import FileHook
-from .netem import NetemHook
 from .perf import Perf
 from .result import ResultHook
 from .shell import ShellHook
@@ -34,7 +33,6 @@ def register_hooks(factory):
     factory.register("cpu-mpstat", CpuMpstat)
     factory.register("emon", Emon)
     factory.register("file", FileHook)
-    factory.register("netem", NetemHook)
     factory.register("perf", Perf)
     factory.register("result", ResultHook)
     factory.register("shell", ShellHook)
