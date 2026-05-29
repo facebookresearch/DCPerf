@@ -507,8 +507,20 @@ def run_client(args: argparse.Namespace) -> None:
     if args.failures_until_tko > 0:
         client_cmd.append(f"--failures_until_tko={args.failures_until_tko}")
 
-    if args.use_same_thread_client:
-        client_cmd.append("--use_same_thread_client=true")
+    if not args.use_same_thread_client:
+        client_cmd.append("--use_same_thread_client=false")
+
+    # Simplified connection control
+    if args.num_connections > 0:
+        client_cmd.append(f"--num_connections={args.num_connections}")
+
+    # Auto-concurrency discovery
+    if args.auto_concurrency:
+        client_cmd.append("--auto_concurrency=true")
+        if args.ramp_seconds != 30:
+            client_cmd.append(f"--ramp_seconds={args.ramp_seconds}")
+        if args.target_utilization != 1.0:
+            client_cmd.append(f"--target_utilization={args.target_utilization}")
 
     if args.verbose:
         client_cmd.append("--verbose=true")
@@ -930,6 +942,30 @@ def init_parser() -> argparse.ArgumentParser:
         help="Number of additional connections per server for fanout",
     )
     client_parser.add_argument(
+        "--num-connections",
+        type=int,
+        default=0,
+        help="Target TCP connection count (derives num_proxies/additional_fanout automatically)",
+    )
+    client_parser.add_argument(
+        "--auto-concurrency",
+        type=int,
+        default=0,
+        help="Enable AIMD auto-concurrency discovery during benchmark (1=enabled, 0=disabled)",
+    )
+    client_parser.add_argument(
+        "--ramp-seconds",
+        type=int,
+        default=30,
+        help="Duration of AIMD ramp phase when auto-concurrency is enabled",
+    )
+    client_parser.add_argument(
+        "--target-utilization",
+        type=float,
+        default=1.0,
+        help="Fraction of peak concurrency for steady state (0.0-1.0)",
+    )
+    client_parser.add_argument(
         "--enable-random-source-ip",
         type=int,
         default=0,
@@ -957,7 +993,7 @@ def init_parser() -> argparse.ArgumentParser:
     client_parser.add_argument(
         "--use-same-thread-client",
         type=int,
-        default=0,
+        default=1,
         help="Use createSameThreadClient() to eliminate cross-thread hops (1=enabled, 0=disabled)",
     )
 
