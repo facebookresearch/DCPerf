@@ -9,7 +9,9 @@
 
 #include <folly/BenchmarkUtil.h>
 #include <folly/Format.h>
+#include <folly/hash/Checksum.h>
 #include <folly/hash/Hash.h>
+#include <folly/io/IOBuf.h>
 #include <folly/portability/GFlags.h>
 #include <chrono>
 #include <time.h>
@@ -47,10 +49,11 @@ UcacheBenchServer::UcacheBenchServer(const UcacheBenchConfig& config)
     for (uint64_t i = 0; i < 256; ++i) {
       aclPrefixTable_[i] = static_cast<uint32_t>(i % 8); // 8 ACL categories
     }
+    initMockIdentityAttributes();
     if (config_.verbose) {
       printf(
           "Production features enabled: key construction, stats tracking, "
-          "ACL checks, overload protection\n");
+          "ACL checks, auth serialization, overload protection\n");
     }
   }
 }
@@ -336,6 +339,54 @@ void UcacheBenchServer::simulatePerRequestOverhead(const std::string& key) {
   folly::doNotOptimizeAway(ts);
 }
 
+// Initialize mock identity attributes matching production's authenticated
+// identity context. Production builds these from TLS certificate fields,
+// service identity, and connection metadata.
+void UcacheBenchServer::initMockIdentityAttributes() {
+  mockIdentityAttributes_ = {
+      {"authn.namespace", "service_identity"},
+      {"authn.name", "ucache.regional.prn:prn:facebook:ucache:us-east"},
+      {"authn.cert.subject",
+       "CN=ucache.regional.us-east.facebook.com,O=Facebook Inc,L=Menlo Park,ST=California,C=US"},
+      {"authn.peer.ipaddress", "2401:db00:026c:6419:face:0000:03e3:0000"},
+      {"authn.connection.security_protocol", "TLS_AES_256_GCM_SHA384"},
+  };
+}
+
+// Serialize identity attributes matching production's
+// security::authn::attributes::serializer::serialize().
+// Production URI-escapes each attribute key+value and joins with '&'.
+// This showed up as ~1% CPU per thread in perf profiles.
+std::string UcacheBenchServer::serializeIdentityAttributes(
+    const std::string& requestKey) {
+  std::string serialized;
+  serialized.reserve(512);
+
+  for (size_t i = 0; i < mockIdentityAttributes_.size(); ++i) {
+    if (i > 0) {
+      serialized.push_back('&');
+    }
+    // URI-escape key and value (matches production's folly::uriEscape calls)
+    std::string escapedKey;
+    folly::uriEscape(mockIdentityAttributes_[i].key, escapedKey);
+    std::string escapedValue;
+    folly::uriEscape(mockIdentityAttributes_[i].value, escapedValue);
+
+    serialized.append(escapedKey);
+    serialized.push_back('=');
+    serialized.append(escapedValue);
+  }
+
+  // Production also appends request-specific context
+  std::string escapedReqKey;
+  folly::uriEscape(requestKey, escapedReqKey);
+  serialized.append("&req.key=");
+  serialized.append(escapedReqKey);
+
+  folly::doNotOptimizeAway(serialized.data());
+  return serialized;
+}
+
 // Build compound key matching production McStoredKey construction.
 // Production builds: UcacheStoredKey(key, hashAlias, kcbId, ticket)
 // This involves string concatenation, hashing, and memory allocation.
@@ -352,9 +403,11 @@ std::string UcacheBenchServer::buildCompoundKey(const std::string& key) {
   return compound;
 }
 
-// Production-like GET overhead: key construction, hashing, ACL, stats, timestamps
+// Production-like GET overhead: key construction, hashing, ACL, stats, timestamps,
+// checksum, serialization, IOBuf processing
 void UcacheBenchServer::runProductionGetOverhead(
-    const std::string& key, bool hit) {
+    const std::string& key, bool hit,
+    const void* valueData, size_t valueLen) {
   // 1. Key construction (matches createMcStoredKey)
   auto compoundKey = buildCompoundKey(key);
 
@@ -378,13 +431,22 @@ void UcacheBenchServer::runProductionGetOverhead(
   }
   folly::doNotOptimizeAway(aclIt);
 
-  // 5. Overload protection check (matches OverloadProtector::onRequest)
+  // 5. Auth attribute serialization (matches
+  // ThriftConnectionAttributesHandler::preReadImpl ->
+  // ContextBasedPolicyChecker::isAccessPermitted ->
+  // security::authn::attributes::serializer::serialize)
+  // Production serializes connection identity attributes with URI escaping
+  // for every request. This is ~1% of CPU per thread in production perf.
+  auto serializedAttrs = serializeIdentityAttributes(key);
+  folly::doNotOptimizeAway(serializedAttrs.data());
+
+  // 6. Overload protection check (matches OverloadProtector::onRequest)
   // Production reads atomic counters to check CPU and network overload
   auto inflight = prodStats_.inflightRequests.fetch_add(
       1, std::memory_order_relaxed);
   folly::doNotOptimizeAway(inflight);
 
-  // 6. Stats tracking (matches many USTAT_INCR / STAT_INCREMENT calls)
+  // 7. Stats tracking (matches many USTAT_INCR / STAT_INCREMENT calls)
   // Production increments: requests, keyBytesTotal, prefixCounters,
   // get_hit/get_miss, tickets_checked, inflight_requests
   prodStats_.totalRequests.fetch_add(1, std::memory_order_relaxed);
@@ -396,17 +458,36 @@ void UcacheBenchServer::runProductionGetOverhead(
     prodStats_.getMisses.fetch_add(1, std::memory_order_relaxed);
   }
 
-  // 7. Ticket staleness check (matches checkTicketStaleness)
+  // 8. Ticket staleness check (matches checkTicketStaleness)
   // Production: reads FOLLY_SETTING, compares HLC tickets
   prodStats_.ticketChecks.fetch_add(1, std::memory_order_relaxed);
 
-  // 8. Overload check completion + egress hash
+  // 9. Overload check completion + egress hash
   // Production: computeAndStoreEgressHash, enforceEgressLimit
   uint64_t egressHash = folly::hash::twang_mix64(keyHash);
   folly::doNotOptimizeAway(egressHash);
   prodStats_.overloadChecks.fetch_add(1, std::memory_order_relaxed);
 
-  // 9. Response timestamp (matches ServiceRouterLoggingHandler post-write)
+  // 10. CRC32C checksum on value data (matches production integrity checks)
+  // Production computes CRC32C on item data for integrity verification.
+  // Uses hardware-accelerated CRC32C (SSE4.2 on x86).
+  if (hit && valueData && valueLen > 0) {
+    auto crc = computeValueChecksum(valueData, valueLen);
+    folly::doNotOptimizeAway(crc);
+  }
+
+  // 11. Thrift compact protocol serialization simulation
+  // Production serializes every response through Thrift CompactProtocol.
+  // This involves varint encoding, field headers, and data copies.
+  simulateThriftSerialization(key, valueData, valueLen, hit);
+
+  // 12. IOBuf chain construction and manipulation
+  // Production builds multi-segment IOBuf chains for network responses.
+  if (hit && valueData && valueLen > 0) {
+    simulateIoBufProcessing(valueData, valueLen);
+  }
+
+  // 13. Response timestamp (matches ServiceRouterLoggingHandler post-write)
   clock_gettime(CLOCK_MONOTONIC, &ts);
   folly::doNotOptimizeAway(ts);
 
@@ -415,7 +496,9 @@ void UcacheBenchServer::runProductionGetOverhead(
 }
 
 // Production-like SET overhead
-void UcacheBenchServer::runProductionSetOverhead(const std::string& key) {
+void UcacheBenchServer::runProductionSetOverhead(
+    const std::string& key,
+    const void* valueData, size_t valueLen) {
   auto compoundKey = buildCompoundKey(key);
   uint64_t keyHash = facebook::cachelib::MurmurHash2()(
       compoundKey.data(), compoundKey.size());
@@ -433,6 +516,19 @@ void UcacheBenchServer::runProductionSetOverhead(const std::string& key) {
     prodStats_.aclAllowed.fetch_add(1, std::memory_order_relaxed);
   }
 
+  // Auth attribute serialization (same as GET path)
+  auto serializedAttrs = serializeIdentityAttributes(key);
+  folly::doNotOptimizeAway(serializedAttrs.data());
+
+  // CRC32C checksum on incoming value (production verifies value integrity)
+  if (valueData && valueLen > 0) {
+    auto crc = computeValueChecksum(valueData, valueLen);
+    folly::doNotOptimizeAway(crc);
+  }
+
+  // Thrift deserialization simulation (production deserializes SET request)
+  simulateThriftSerialization(key, valueData, valueLen, /*hit=*/true);
+
   // Stats
   auto inflight = prodStats_.inflightRequests.fetch_add(
       1, std::memory_order_relaxed);
@@ -446,6 +542,118 @@ void UcacheBenchServer::runProductionSetOverhead(const std::string& key) {
   folly::doNotOptimizeAway(ts);
 
   prodStats_.inflightRequests.fetch_sub(1, std::memory_order_relaxed);
+}
+
+// Simulate CRC32C checksum computation on response values.
+// Production ucache computes checksums for data integrity verification
+// (matching CacheLib's item checksum and mcrouter's payload CRC).
+// CRC32C uses hardware acceleration (SSE4.2) on x86, making it fast but
+// still measurably present in perf profiles at high QPS.
+uint32_t UcacheBenchServer::computeValueChecksum(
+    const void* data, size_t len) {
+  return folly::crc32c(
+      reinterpret_cast<const uint8_t*>(data), len, /*startingChecksum=*/0);
+}
+
+// Simulate Thrift compact protocol serialization overhead.
+// Production serializes every response through Thrift compact protocol:
+// field headers (type + id), varint-encoded lengths, and value bytes.
+// This shows up as ~3-5% CPU in production perf profiles for high-QPS pools.
+void UcacheBenchServer::simulateThriftSerialization(
+    const std::string& key, const void* valueData, size_t valueLen, bool hit) {
+  // Simulate compact protocol field encoding:
+  // - Result field (1 byte type + varint field id + varint value)
+  // - Flags field (same pattern)
+  // - Key field (type + id + varint length + key bytes)
+  // - Value field (type + id + varint length + value bytes for hits)
+  //
+  // We build a simulated serialization buffer matching the work done by
+  // apache::thrift::CompactProtocolWriter
+
+  // Pre-size buffer: header overhead + key + value
+  size_t estimatedSize = 64 + key.size() + (hit ? valueLen : 0);
+  std::string serBuf;
+  serBuf.reserve(estimatedSize);
+
+  // Field 1: result (compact protocol: delta field id + type nibble + value)
+  serBuf.push_back(0x15);  // field delta=1, type=i32
+  // Varint encode the result
+  uint32_t result = hit ? 1 : 0;
+  while (result >= 0x80) {
+    serBuf.push_back(static_cast<char>(result | 0x80));
+    result >>= 7;
+  }
+  serBuf.push_back(static_cast<char>(result));
+
+  // Field 2: flags
+  serBuf.push_back(0x15);  // field delta=1, type=i32
+  serBuf.push_back(0x00);
+
+  // Field 3: key as binary
+  serBuf.push_back(0x18);  // field delta=1, type=binary
+  // Varint encode length
+  uint32_t keyLen = static_cast<uint32_t>(key.size());
+  while (keyLen >= 0x80) {
+    serBuf.push_back(static_cast<char>(keyLen | 0x80));
+    keyLen >>= 7;
+  }
+  serBuf.push_back(static_cast<char>(keyLen));
+  serBuf.append(key);
+
+  // Field 4: value as binary (for hits)
+  if (hit && valueData && valueLen > 0) {
+    serBuf.push_back(0x18);  // field delta=1, type=binary
+    uint32_t vLen = static_cast<uint32_t>(valueLen);
+    while (vLen >= 0x80) {
+      serBuf.push_back(static_cast<char>(vLen | 0x80));
+      vLen >>= 7;
+    }
+    serBuf.push_back(static_cast<char>(vLen));
+    // Copy value data (simulates the actual serialization copy)
+    serBuf.append(
+        reinterpret_cast<const char*>(valueData),
+        std::min(valueLen, size_t(4096)));  // Cap at 4KB to avoid huge copies
+  }
+
+  // Stop field
+  serBuf.push_back(0x00);
+
+  folly::doNotOptimizeAway(serBuf.data());
+  folly::doNotOptimizeAway(serBuf.size());
+}
+
+// Simulate IOBuf chain construction and manipulation.
+// Production builds response IOBuf chains with multiple segments:
+// header IOBuf -> value IOBuf -> trailer IOBuf.
+// The IOBuf allocation, chaining, and eventual coalescing adds overhead.
+void UcacheBenchServer::simulateIoBufProcessing(
+    const void* valueData, size_t valueLen) {
+  if (!valueData || valueLen == 0) {
+    return;
+  }
+
+  // Simulate the work of building a multi-segment IOBuf response:
+  // 1. Allocate header IOBuf (protocol header + flags)
+  auto headerBuf = folly::IOBuf::create(32);
+  headerBuf->append(16);  // 16 bytes of protocol header
+  std::memset(headerBuf->writableData(), 0x01, 16);
+
+  // 2. Wrap value data in an IOBuf (zero-copy reference)
+  auto valueBuf = folly::IOBuf::wrapBuffer(valueData, valueLen);
+
+  // 3. Chain them together (header -> value)
+  headerBuf->appendChain(std::move(valueBuf));
+
+  // 4. Compute total chain length (production does this for stats/logging)
+  size_t chainLen = headerBuf->computeChainDataLength();
+  folly::doNotOptimizeAway(chainLen);
+
+  // 5. Coalesce if needed (production coalesces small chains for network send)
+  if (chainLen < 2048) {
+    headerBuf->coalesce();
+  }
+
+  folly::doNotOptimizeAway(headerBuf->data());
 }
 
 folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
@@ -472,7 +680,9 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
 
     // Production-like per-request overhead (after cache lookup, like production)
     if (config_.production_features_enabled) {
-      runProductionGetOverhead(keyStr, hit);
+      const void* valPtr = hit ? item->getMemory() : nullptr;
+      size_t valLen = hit ? item->getSize() : 0;
+      runProductionGetOverhead(keyStr, hit, valPtr, valLen);
     }
 
     if (hit) {
@@ -521,9 +731,13 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
     // Legacy CPU overhead simulation
     simulatePerRequestOverhead(keyStr);
 
+    // Extract value early so we can pass it to production overhead
+    const auto& valueIoBuf = req.value();
+    auto valueStr = valueIoBuf->to<std::string>();
+
     // Production-like per-request overhead
     if (config_.production_features_enabled) {
-      runProductionSetOverhead(keyStr);
+      runProductionSetOverhead(keyStr, valueStr.data(), valueStr.size());
     }
 
     // Acquire exclusive bucket lock if enabled
@@ -532,10 +746,6 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
       bucketLock.emplace(
           bucketLocks_->lockExclusive(keyStr.data(), keyStr.size()));
     }
-
-    // Extract value from IOBuf
-    const auto& valueIoBuf = req.value();
-    auto valueStr = valueIoBuf->to<std::string>();
 
     // Create item
     auto item = cache_->allocate(poolId_, keyStr, valueStr.size());
