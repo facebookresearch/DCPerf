@@ -25,6 +25,7 @@
 #include <folly/coro/AsyncScope.h>
 #include <folly/coro/BlockingWait.h>
 #include <folly/coro/Promise.h>
+#include <folly/coro/Sleep.h>
 #include <folly/fibers/FiberManagerMap.h>
 #include <folly/io/async/ScopedEventBaseThread.h>
 #include <folly/portability/GFlags.h>
@@ -319,9 +320,9 @@ DEFINE_uint32(value_size_max, 1024, "Maximum value size in bytes");
 DEFINE_double(get_ratio, 0.9, "Ratio of GET operations (vs SET operations)");
 DEFINE_uint32(
     connection_timeout_ms,
-    1000,
+    5000,
     "Connection timeout in milliseconds");
-DEFINE_uint32(send_timeout_ms, 1000, "Send timeout in milliseconds");
+DEFINE_uint32(send_timeout_ms, 5000, "Send timeout in milliseconds");
 DEFINE_string(
     security_mech,
     "plain",
@@ -346,6 +347,30 @@ DEFINE_bool(
     enable_random_source_ip,
     false,
     "Enable random source IP addresses for connection fanout (works with BucketHashSelector)");
+DEFINE_uint32(
+    connection_ramp_seconds,
+    10,
+    "Seconds to gradually ramp up connections before warmup. "
+    "Prevents connection storm when additional_fanout is large. "
+    "0 = disabled (all connections established at once)");
+DEFINE_bool(
+    warmup_adaptive_load,
+    true,
+    "Enable adaptive load control during warmup (TCP congestion control style). "
+    "Starts with low concurrency and ramps up until errors spike, then backs off. "
+    "Prevents TKO cascade when multiple clients warm up simultaneously");
+DEFINE_uint32(
+    warmup_initial_inflight,
+    2,
+    "Initial max inflight per thread when adaptive load is enabled. "
+    "Total initial concurrency = num_threads * warmup_initial_inflight");
+DEFINE_uint32(
+    failures_until_tko,
+    0,
+    "Number of consecutive failures before mcrouter marks a server as TKO "
+    "(0 = use mcrouter default of 3). Production typically uses 12-32. "
+    "With many proxy threads, a low value causes premature TKO because the "
+    "counter is global across all threads");
 DEFINE_bool(verbose, false, "Enable verbose logging");
 DEFINE_bool(
     use_distribution,
@@ -551,6 +576,14 @@ UcacheBenchClient::UcacheBenchClient() {
     options.num_proxies = FLAGS_num_proxies;
   }
 
+  // Configure TKO behavior to match production settings.
+  // The default failures_until_tko=3 is too aggressive with many proxy threads
+  // because the failure counter is global — just 3 timeouts from ANY thread
+  // marks the server as TKO, stopping all traffic.
+  if (FLAGS_failures_until_tko > 0) {
+    options.failures_until_tko = FLAGS_failures_until_tko;
+  }
+
   // Create CarbonRouterInstance with UcacheBench RouterInfo
   auto routerPtr = facebook::memcache::mcrouter::CarbonRouterInstance<
       UcacheBenchRouterInfo>::init("ucache_bench_client", options);
@@ -585,6 +618,11 @@ UcacheBenchClient::UcacheBenchClient() {
           totalConnections);
     } else {
       printf("  Connection fanout disabled (using default connections)\n");
+    }
+    if (FLAGS_failures_until_tko > 0) {
+      printf(
+          "  TKO threshold: %u failures (overriding default of 3)\n",
+          FLAGS_failures_until_tko);
     }
     if (FLAGS_enable_random_source_ip) {
       printf(
@@ -634,6 +672,100 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     fflush(stdout);
   }
 
+  // Connection ramp-up phase: gradually establish connections to avoid
+  // overwhelming the server's accept queue when additional_fanout is large.
+  // With num_proxies=64 and additional_fanout=500, mcrouter creates 32K
+  // ProxyDestination objects. Without ramp-up, all connections are established
+  // simultaneously on first request, causing a connection storm that TKOs the
+  // server.
+  if (FLAGS_connection_ramp_seconds > 0 && FLAGS_additional_fanout > 0) {
+    uint32_t totalDestinations =
+        FLAGS_num_proxies * (1 + FLAGS_additional_fanout);
+    if (FLAGS_verbose) {
+      printf(
+          "Connection ramp-up: establishing ~%u connections over %u seconds\n",
+          totalDestinations,
+          FLAGS_connection_ramp_seconds);
+      fflush(stdout);
+    }
+
+    // Use a small thread pool for connection ramp-up (1 thread per proxy)
+    uint32_t rampThreads = std::min(numThreads, FLAGS_num_proxies);
+    folly::IOThreadPoolExecutor rampPool(rampThreads);
+    auto rampEvbs = rampPool.getAllEventBases();
+
+    // Create one client with low maxOutstanding for connection ramp-up
+    auto rampClient = routerInstance_->createClient(1);
+
+    auto rampDuration = std::chrono::seconds(FLAGS_connection_ramp_seconds);
+    auto rampStart = std::chrono::steady_clock::now();
+    auto rampEnd = rampStart + rampDuration;
+
+    // Send requests with diverse keys to trigger lazy connection creation
+    // across different hash destinations. Each unique key hashes to a different
+    // ProxyDestination, establishing a new TCP connection.
+    std::atomic<uint64_t> rampOps{0};
+    std::atomic<uint64_t> rampSuccesses{0};
+    std::atomic<uint64_t> rampErrors{0};
+
+    auto rampWorker = [&](size_t /*threadIdx*/) -> folly::coro::Task<void> {
+      while (std::chrono::steady_clock::now() < rampEnd) {
+        std::string key = generateKey();
+        std::string value = generateValue();
+
+        UcbSetRequest request;
+        request.key_ref() = carbon::Keys<folly::IOBuf>(
+            std::move(*folly::IOBuf::copyBuffer(key)));
+        request.value_ref() = *folly::IOBuf::copyBuffer(value);
+        request.exptime_ref() = 3600;
+
+        auto [promise, future] =
+            folly::coro::makePromiseContract<UcbSetReply>();
+
+        rampClient->send(
+            request,
+            [p = std::move(promise)](
+                const UcbSetRequest&, UcbSetReply&& reply) mutable {
+              p.setValue(std::move(reply));
+            });
+
+        UcbSetReply result = co_await std::move(future);
+        rampOps++;
+
+        if (*result.result_ref() == carbon::Result::STORED) {
+          rampSuccesses++;
+        } else {
+          rampErrors++;
+        }
+
+        // Pace the ramp-up: sleep briefly between requests to spread
+        // connection creation over the ramp-up period
+        co_await folly::coro::sleep(std::chrono::milliseconds(1));
+      }
+      co_return;
+    };
+
+    // Start ramp-up workers
+    folly::coro::AsyncScope rampScope;
+    for (size_t i = 0; i < rampThreads; ++i) {
+      rampScope.add(
+          folly::coro::co_withExecutor(
+              rampEvbs.at(i % rampEvbs.size()), rampWorker(i)));
+    }
+
+    folly::coro::blockingWait(
+        rampScope.joinAsync().scheduleOn(rampEvbs.front()));
+
+    if (FLAGS_verbose) {
+      printf(
+          "Connection ramp-up complete: %lu ops (%lu success, %lu errors)\n",
+          rampOps.load(),
+          rampSuccesses.load(),
+          rampErrors.load());
+      fflush(stdout);
+    }
+  }
+
   auto startTime = std::chrono::steady_clock::now();
   auto endTime = startTime + std::chrono::seconds(FLAGS_warmup_seconds);
 
@@ -642,6 +774,15 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   std::atomic<uint64_t> setSuccesses{0};
   std::atomic<uint64_t> setErrors{0};
   std::atomic<bool> shouldStop{false};
+
+  // Adaptive load control: shared dynamic inflight limit
+  // All workers read this to cap their concurrency. The control thread adjusts
+  // it based on observed error rate (TCP congestion control style: AIMD).
+  std::atomic<uint32_t> currentMaxInflight{maxInflight};
+  if (FLAGS_warmup_adaptive_load) {
+    currentMaxInflight.store(
+        std::min(maxInflight, FLAGS_warmup_initial_inflight));
+  }
 
   // Progress monitoring thread
   std::thread progressThread;
@@ -663,13 +804,111 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
         double successRate = ops > 0 ? (successes * 100.0 / ops) : 0;
 
         printf(
-            "Warmup progress: %.1fs elapsed, %lu ops (%.1f QPS avg), Success: %.1f%%, Errors: %lu\n",
+            "Warmup progress: %.1fs elapsed, %lu ops (%.1f QPS avg), Success: %.1f%%, Errors: %lu, MaxInflight: %u\n",
             elapsed,
             ops,
             avgQps,
             successRate,
-            errors);
+            errors,
+            currentMaxInflight.load());
         fflush(stdout);
+      }
+    });
+  }
+
+  // Adaptive load control thread: monitors error rate and adjusts
+  // currentMaxInflight using AIMD (Additive Increase, Multiplicative Decrease).
+  // Like TCP congestion control: ramp up when healthy, cut back on errors.
+  std::thread adaptiveThread;
+  if (FLAGS_warmup_adaptive_load) {
+    adaptiveThread = std::thread([&]() {
+      constexpr auto kCheckInterval = std::chrono::seconds(2);
+      constexpr double kErrorThreshold = 0.05; // 5% error rate triggers backoff
+      constexpr double kHealthyThreshold = 0.01; // <1% errors = healthy, grow
+
+      uint64_t prevOps = 0;
+      uint64_t prevErrors = 0;
+      bool reachedMax = false;
+
+      while (!shouldStop.load() && std::chrono::steady_clock::now() < endTime) {
+        std::this_thread::sleep_for(kCheckInterval);
+        if (shouldStop.load()) {
+          break;
+        }
+
+        uint64_t curOps = totalOps.load();
+        uint64_t curErrors = setErrors.load();
+
+        uint64_t windowOps = curOps - prevOps;
+        uint64_t windowErrors = curErrors - prevErrors;
+        prevOps = curOps;
+        prevErrors = curErrors;
+
+        if (windowOps < 100) {
+          // Not enough data yet, keep growing slowly
+          uint32_t cur = currentMaxInflight.load();
+          if (cur < maxInflight) {
+            uint32_t next = std::min(maxInflight, cur + 1);
+            currentMaxInflight.store(next);
+            if (FLAGS_verbose) {
+              printf(
+                  "Adaptive load: too few ops (%lu), inflight %u -> %u\n",
+                  windowOps,
+                  cur,
+                  next);
+              fflush(stdout);
+            }
+          }
+          continue;
+        }
+
+        double errorRate =
+            static_cast<double>(windowErrors) / static_cast<double>(windowOps);
+        uint32_t cur = currentMaxInflight.load();
+
+        if (errorRate > kErrorThreshold) {
+          // Multiplicative decrease: halve the inflight limit
+          uint32_t next = std::max(1u, cur / 2);
+          currentMaxInflight.store(next);
+          reachedMax = false;
+          if (FLAGS_verbose) {
+            printf(
+                "Adaptive load: HIGH errors (%.1f%% of %lu ops), inflight %u -> %u (backoff)\n",
+                errorRate * 100.0,
+                windowOps,
+                cur,
+                next);
+            fflush(stdout);
+          }
+        } else if (errorRate < kHealthyThreshold && cur < maxInflight) {
+          // Additive increase: grow inflight
+          // Use slow start (double) when far from max, linear when close
+          uint32_t next;
+          if (cur < maxInflight / 4) {
+            // Slow start phase: double
+            next = std::min(maxInflight, cur * 2);
+          } else {
+            // Congestion avoidance: linear increase
+            uint32_t increment = std::max(1u, maxInflight / 10);
+            next = std::min(maxInflight, cur + increment);
+          }
+          currentMaxInflight.store(next);
+          if (next == maxInflight && !reachedMax) {
+            reachedMax = true;
+            if (FLAGS_verbose) {
+              printf("Adaptive load: reached max inflight %u\n", maxInflight);
+              fflush(stdout);
+            }
+          } else if (FLAGS_verbose && next != cur) {
+            printf(
+                "Adaptive load: healthy (%.2f%% errors), inflight %u -> %u\n",
+                errorRate * 100.0,
+                cur,
+                next);
+            fflush(stdout);
+          }
+        }
+        // If error rate is between thresholds, hold steady
       }
     });
   }
@@ -748,9 +987,11 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
         localSuccesses++;
       } else {
         localErrors++;
-        if (FLAGS_verbose) {
+        // Rate-limit verbose error output to avoid flooding stdout pipe
+        // which can deadlock when run through benchpress/automark
+        if (FLAGS_verbose && (localErrors.load() % 1000 == 1)) {
           printf(
-              "Warmup SET error: %s\n",
+              "Warmup SET error (sample 1/1000): %s\n",
               carbon::resultToString(*result.result_ref()));
         }
       }
@@ -759,10 +1000,12 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
 
     // Main loop - matches production LoadgenWorker::co_run()
     while (std::chrono::steady_clock::now() < endTime) {
-      // Spawn requests up to max_inflight
-      size_t n = maxInflight - inflight.load();
+      // Spawn requests up to current dynamic inflight limit
+      uint32_t limit = currentMaxInflight.load();
+      size_t currentInflight = inflight.load();
+      size_t n = (currentInflight < limit) ? (limit - currentInflight) : 0;
       if (n > 0 && std::chrono::steady_clock::now() < endTime) {
-        for (size_t i = 0; i < n && inflight.load() < maxInflight; i++) {
+        for (size_t i = 0; i < n && inflight.load() < limit; i++) {
           inflight++;
           scope.add(
               folly::coro::co_withExecutor(
@@ -829,6 +1072,9 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       mainScope.joinAsync().scheduleOn(workerEvbs.front()));
 
   shouldStop = true;
+  if (adaptiveThread.joinable()) {
+    adaptiveThread.join();
+  }
   if (progressThread.joinable()) {
     progressThread.join();
   }
@@ -1135,17 +1381,18 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           workerSetSuccesses[workerId]->fetch_add(1);
         } else {
           workerSetErrors[workerId]->fetch_add(1);
-          if (FLAGS_verbose) {
+          if (FLAGS_verbose &&
+              (workerSetErrors[workerId]->load() % 1000 == 1)) {
             printf(
-                "Benchmark SET error (on GET miss): %s\n",
+                "Benchmark SET error (on GET miss, sample 1/1000): %s\n",
                 carbon::resultToString(*setResult.result_ref()));
           }
         }
       } else {
         workerGetErrors[workerId]->fetch_add(1);
-        if (FLAGS_verbose) {
+        if (FLAGS_verbose && (workerGetErrors[workerId]->load() % 1000 == 1)) {
           printf(
-              "Benchmark GET error: %s\n",
+              "Benchmark GET error (sample 1/1000): %s\n",
               carbon::resultToString(*result.result_ref()));
         }
       }
@@ -1204,9 +1451,9 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         workerSetSuccesses[workerId]->fetch_add(1);
       } else {
         workerSetErrors[workerId]->fetch_add(1);
-        if (FLAGS_verbose) {
+        if (FLAGS_verbose && (workerSetErrors[workerId]->load() % 1000 == 1)) {
           printf(
-              "Benchmark SET error: %s\n",
+              "Benchmark SET error (sample 1/1000): %s\n",
               carbon::resultToString(*result.result_ref()));
         }
       }
