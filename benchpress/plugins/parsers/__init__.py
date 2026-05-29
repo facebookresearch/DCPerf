@@ -21,6 +21,7 @@ from .deser import DeserParser
 from .django_workload import DjangoWorkloadParser
 from .dpdk_compress_perf import DpdkCompressPerfParser
 from .dpdk_crypto_perf import DpdkCryptoPerfParser
+from .dpdk_testpmd import DpdkTestpmdParser
 from .embedding import EmbeddingParser
 from .encryption import EncryptionParser
 from .fb_fiosynth import Fiosynth_Parser
@@ -79,6 +80,7 @@ def register_parsers(factory):
     factory.register("django_workload", DjangoWorkloadParser)
     factory.register("dpdk_compress_perf", DpdkCompressPerfParser)
     factory.register("dpdk_crypto_perf", DpdkCryptoPerfParser)
+    factory.register("dpdk_testpmd", DpdkTestpmdParser)
     factory.register("encryption", EncryptionParser)
     factory.register("fb_fiosynth", Fiosynth_Parser)
     factory.register("fbgemm", FbgemmParser)
