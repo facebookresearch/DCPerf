@@ -491,6 +491,9 @@ def run_client(args: argparse.Namespace) -> None:
     if args.failures_until_tko > 0:
         client_cmd.append(f"--failures_until_tko={args.failures_until_tko}")
 
+    if args.use_same_thread_client:
+        client_cmd.append("--use_same_thread_client=true")
+
     if args.verbose:
         client_cmd.append("--verbose=true")
 
@@ -901,6 +904,13 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=2,
         help="Initial max inflight per thread when adaptive load is enabled",
+    )
+
+    client_parser.add_argument(
+        "--use-same-thread-client",
+        type=int,
+        default=0,
+        help="Use createSameThreadClient() to eliminate cross-thread hops (1=enabled, 0=disabled)",
     )
 
     # Workload configuration
