@@ -34,7 +34,7 @@ from benchpress.lib.parser import Parser
 
 from .dpdk_compress_perf import DpdkCompressPerfParser
 from .dpdk_crypto_perf import DpdkCryptoPerfParser
-from .lmbench_lat_mem_rd import LmbenchLatMemRdParser
+from .loaded_latency import LoadedLatencyParser
 from .openssl_speed import OpensslSpeedParser
 from .perftest import PerftestParser
 from .spdk_accel_perf import SpdkAccelPerfParser
@@ -49,7 +49,7 @@ _SUBPARSERS = {
     "dpdk_compress_perf": DpdkCompressPerfParser,
     "spdk_accel_perf": SpdkAccelPerfParser,
     "stream": StreamParser,
-    "lmbench_lat_mem_rd": LmbenchLatMemRdParser,
+    "loaded_latency": LoadedLatencyParser,
     "perftest": PerftestParser,
 }
 
