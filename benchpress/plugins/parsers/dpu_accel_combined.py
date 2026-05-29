@@ -35,7 +35,6 @@ from benchpress.lib.parser import Parser
 from .dpdk_compress_perf import DpdkCompressPerfParser
 from .dpdk_crypto_perf import DpdkCryptoPerfParser
 from .lmbench_lat_mem_rd import LmbenchLatMemRdParser
-from .lzbench_perf import LzbenchPerfParser
 from .openssl_speed import OpensslSpeedParser
 from .perftest import PerftestParser
 from .spdk_accel_perf import SpdkAccelPerfParser
@@ -48,7 +47,6 @@ _SUBPARSERS = {
     "openssl_speed": OpensslSpeedParser,
     "dpdk_crypto_perf": DpdkCryptoPerfParser,
     "dpdk_compress_perf": DpdkCompressPerfParser,
-    "lzbench_perf": LzbenchPerfParser,
     "spdk_accel_perf": SpdkAccelPerfParser,
     "stream": StreamParser,
     "lmbench_lat_mem_rd": LmbenchLatMemRdParser,
@@ -60,7 +58,8 @@ _SUBPARSERS = {
 # metric into the offload metric's unit:
 #   - crypto: openssl reports decimal MB/s, dpdk reports Gb/s
 #     -> Gbps = MBps * 8 / 1000  => factor 0.008
-#   - compress: same MB/s -> Gb/s conversion on the host (lzbench) side
+#   - compress: both legs are dpdk-test-compress-perf (host software PMD vs
+#     offload HW PMD), already in Gb/s => factor 1.0
 _SPEEDUP_PAIRS = [
     # crypto: AES-GCM offload (Gb/s) vs AES-GCM host (decimal MB/s -> Gb/s)
     (
@@ -68,8 +67,12 @@ _SPEEDUP_PAIRS = [
         "host_aesgcm_cipher_throughput_MBps_max",
         0.008,
     ),
-    # compress: offload (Gb/s) vs lzbench host (decimal MB/s -> Gb/s)
-    ("offload_compress_throughput_Gbps_avg", "host_best_compress_MBps", 0.008),
+    # compress: offload HW PMD (Gb/s) vs host software PMD (Gb/s), same tool
+    (
+        "offload_compress_throughput_Gbps_avg",
+        "host_compress_throughput_Gbps_avg",
+        1.0,
+    ),
 ]
 
 # (baseline_key, treatment_key, out_key) — emit a percent overhead
