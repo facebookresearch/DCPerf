@@ -60,6 +60,23 @@ _SPEEDUP_PAIRS = [
     ("offload_compress_throughput_Gbps_avg", "host_best_compress_MBps", 0.008),
 ]
 
+# (baseline_key, treatment_key, out_key) — emit a percent overhead
+# (baseline - treatment) / baseline * 100 when both legs are present.
+# Used by --kind=dif, where the legs are a baseline memcpy and the DIF
+# generate/verify SPDK accel workloads (same MiB/s unit).
+_OVERHEAD_PAIRS = [
+    (
+        "baseline_total_throughput_MiBps",
+        "dif_generate_copy_total_throughput_MiBps",
+        "dif_generate_overhead_pct",
+    ),
+    (
+        "baseline_total_throughput_MiBps",
+        "dif_verify_total_throughput_MiBps",
+        "dif_verify_overhead_pct",
+    ),
+]
+
 
 def _split_sections(stdout):
     """Yield (label, subparser_name, lines, failed) per leg."""
@@ -105,4 +122,11 @@ class DpuAccelCombinedParser(Parser):
                 if denom > 0:
                     metrics["offload_vs_host_speedup"] = off / denom
                     break
+
+        for base_key, treat_key, out_key in _OVERHEAD_PAIRS:
+            base = metrics.get(base_key)
+            treat = metrics.get(treat_key)
+            if isinstance(base, (int, float)) and isinstance(treat, (int, float)):
+                if base > 0:
+                    metrics[out_key] = (base - treat) / base * 100.0
         return metrics
