@@ -37,6 +37,7 @@ from .dpdk_crypto_perf import DpdkCryptoPerfParser
 from .lmbench_lat_mem_rd import LmbenchLatMemRdParser
 from .lzbench_perf import LzbenchPerfParser
 from .openssl_speed import OpensslSpeedParser
+from .perftest import PerftestParser
 from .spdk_accel_perf import SpdkAccelPerfParser
 from .stream import StreamParser
 
@@ -51,6 +52,7 @@ _SUBPARSERS = {
     "spdk_accel_perf": SpdkAccelPerfParser,
     "stream": StreamParser,
     "lmbench_lat_mem_rd": LmbenchLatMemRdParser,
+    "perftest": PerftestParser,
 }
 
 # Ordered list of (offload_key, host_key, host_to_offload_factor) tuples
