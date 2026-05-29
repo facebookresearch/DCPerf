@@ -394,6 +394,14 @@ def run_server(args: argparse.Namespace) -> None:
     if args.cpu_overhead_level > 0:
         server_cmd.append(f"--cpu_overhead_level={args.cpu_overhead_level}")
 
+    # CacheTable-style bucket locking
+    if args.bucket_lock_power > 0:
+        server_cmd.append(f"--bucket_lock_power={args.bucket_lock_power}")
+
+    # Production-like per-request features
+    if args.production_features:
+        server_cmd.append("--production_features=true")
+
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         delay = args.perf_record_delay
         print(f"DCPERF_PERF_RECORD=1, will start perf record after {delay}s delay")
@@ -797,6 +805,22 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Per-request CPU overhead simulation level (0=disabled, 1=light ~3%%, 2=medium ~5%%, 3=heavy ~8%%)",
+    )
+
+    # CacheTable-style bucket locking
+    server_parser.add_argument(
+        "--bucket-lock-power",
+        type=int,
+        default=0,
+        help="CacheTable-style fiber-aware RW bucket locks. 2^N locks. Production=20. 0=disabled.",
+    )
+
+    # Production-like per-request features
+    server_parser.add_argument(
+        "--production-features",
+        type=int,
+        default=0,
+        help="Enable production-like per-request overhead (key construction, ACL, stats, timestamps). 0=disabled, 1=enabled.",
     )
 
     # Profiling configuration
