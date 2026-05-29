@@ -26,6 +26,33 @@ namespace ucachebench {
 UcacheBenchServer::UcacheBenchServer(const UcacheBenchConfig& config)
     : config_(config) {
   setupCacheLib();
+
+  // Initialize CacheTable-style bucket locks if enabled
+  if (config_.bucket_lock_power > 0) {
+    bucketLocks_ = std::make_unique<BucketLocks>(
+        config_.bucket_lock_power,
+        std::make_shared<facebook::cachelib::MurmurHash2>());
+    if (config_.verbose) {
+      printf(
+          "Bucket locking enabled: 2^%u = %u locks (fiber-aware RW mutex)\n",
+          config_.bucket_lock_power,
+          1u << config_.bucket_lock_power);
+    }
+  }
+
+  // Initialize production-like ACL prefix table
+  // Simulates production's granular ACL prefix categories.
+  // Production has ~100-500 ACL categories with prefix matching.
+  if (config_.production_features_enabled) {
+    for (uint64_t i = 0; i < 256; ++i) {
+      aclPrefixTable_[i] = static_cast<uint32_t>(i % 8); // 8 ACL categories
+    }
+    if (config_.verbose) {
+      printf(
+          "Production features enabled: key construction, stats tracking, "
+          "ACL checks, overload protection\n");
+    }
+  }
 }
 
 UcacheBenchServer::~UcacheBenchServer() {
@@ -309,6 +336,118 @@ void UcacheBenchServer::simulatePerRequestOverhead(const std::string& key) {
   folly::doNotOptimizeAway(ts);
 }
 
+// Build compound key matching production McStoredKey construction.
+// Production builds: UcacheStoredKey(key, hashAlias, kcbId, ticket)
+// This involves string concatenation, hashing, and memory allocation.
+std::string UcacheBenchServer::buildCompoundKey(const std::string& key) {
+  // Matches createMcStoredKeyFromRequest: prefix + key + kcbId suffix
+  // Production allocates UcacheStoredKey with region prefix, pool name, etc.
+  std::string compound;
+  compound.reserve(key.size() + 32);
+  compound.append("uc:");                   // region prefix (production: "uc:")
+  compound.append(config_.pool_name);       // pool name
+  compound.push_back(':');
+  compound.append(key);                     // actual key
+  compound.append(":v1");                   // version suffix
+  return compound;
+}
+
+// Production-like GET overhead: key construction, hashing, ACL, stats, timestamps
+void UcacheBenchServer::runProductionGetOverhead(
+    const std::string& key, bool hit) {
+  // 1. Key construction (matches createMcStoredKey)
+  auto compoundKey = buildCompoundKey(key);
+
+  // 2. Key hashing (matches getHashForKey using MurmurHash2)
+  uint64_t keyHash = facebook::cachelib::MurmurHash2()(
+      compoundKey.data(), compoundKey.size());
+  folly::doNotOptimizeAway(keyHash);
+
+  // 3. Timestamp reads (matches ucache::gettime() called at request start)
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  // 4. ACL prefix check (matches prefixAclsHandler_->checkAcl)
+  // Production: extracts key prefix, looks up ACL category, checks identity
+  uint64_t prefixHash = folly::hash::fnv64_buf(key.data(),
+      std::min(key.size(), size_t(8)));
+  auto aclIt = aclPrefixTable_.find(prefixHash & 0xFF);
+  prodStats_.aclChecks.fetch_add(1, std::memory_order_relaxed);
+  if (aclIt != aclPrefixTable_.end()) {
+    prodStats_.aclAllowed.fetch_add(1, std::memory_order_relaxed);
+  }
+  folly::doNotOptimizeAway(aclIt);
+
+  // 5. Overload protection check (matches OverloadProtector::onRequest)
+  // Production reads atomic counters to check CPU and network overload
+  auto inflight = prodStats_.inflightRequests.fetch_add(
+      1, std::memory_order_relaxed);
+  folly::doNotOptimizeAway(inflight);
+
+  // 6. Stats tracking (matches many USTAT_INCR / STAT_INCREMENT calls)
+  // Production increments: requests, keyBytesTotal, prefixCounters,
+  // get_hit/get_miss, tickets_checked, inflight_requests
+  prodStats_.totalRequests.fetch_add(1, std::memory_order_relaxed);
+  prodStats_.keyBytesTotal.fetch_add(key.size(), std::memory_order_relaxed);
+  if (hit) {
+    prodStats_.getHits.fetch_add(1, std::memory_order_relaxed);
+    prodStats_.prefixCounterHits.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    prodStats_.getMisses.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  // 7. Ticket staleness check (matches checkTicketStaleness)
+  // Production: reads FOLLY_SETTING, compares HLC tickets
+  prodStats_.ticketChecks.fetch_add(1, std::memory_order_relaxed);
+
+  // 8. Overload check completion + egress hash
+  // Production: computeAndStoreEgressHash, enforceEgressLimit
+  uint64_t egressHash = folly::hash::twang_mix64(keyHash);
+  folly::doNotOptimizeAway(egressHash);
+  prodStats_.overloadChecks.fetch_add(1, std::memory_order_relaxed);
+
+  // 9. Response timestamp (matches ServiceRouterLoggingHandler post-write)
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  folly::doNotOptimizeAway(ts);
+
+  // Decrement inflight
+  prodStats_.inflightRequests.fetch_sub(1, std::memory_order_relaxed);
+}
+
+// Production-like SET overhead
+void UcacheBenchServer::runProductionSetOverhead(const std::string& key) {
+  auto compoundKey = buildCompoundKey(key);
+  uint64_t keyHash = facebook::cachelib::MurmurHash2()(
+      compoundKey.data(), compoundKey.size());
+  folly::doNotOptimizeAway(keyHash);
+
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  // ACL check
+  uint64_t prefixHash = folly::hash::fnv64_buf(key.data(),
+      std::min(key.size(), size_t(8)));
+  auto aclIt = aclPrefixTable_.find(prefixHash & 0xFF);
+  prodStats_.aclChecks.fetch_add(1, std::memory_order_relaxed);
+  if (aclIt != aclPrefixTable_.end()) {
+    prodStats_.aclAllowed.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  // Stats
+  auto inflight = prodStats_.inflightRequests.fetch_add(
+      1, std::memory_order_relaxed);
+  folly::doNotOptimizeAway(inflight);
+  prodStats_.totalRequests.fetch_add(1, std::memory_order_relaxed);
+  prodStats_.keyBytesTotal.fetch_add(key.size(), std::memory_order_relaxed);
+  prodStats_.setStored.fetch_add(1, std::memory_order_relaxed);
+  prodStats_.overloadChecks.fetch_add(1, std::memory_order_relaxed);
+
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  folly::doNotOptimizeAway(ts);
+
+  prodStats_.inflightRequests.fetch_sub(1, std::memory_order_relaxed);
+}
+
 folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
     const UcbGetRequest& req) {
   UcbGetReply reply;
@@ -318,11 +457,25 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
     // Extract key from Carbon Keys type - convert to string
     std::string keyStr = req.key()->fullKey().str();
 
-    // Simulate production per-request CPU overhead (ACL, hashing, timestamps)
+    // Legacy CPU overhead simulation
     simulatePerRequestOverhead(keyStr);
 
+    // Acquire shared bucket lock if enabled
+    std::optional<BucketLocks::ReadLockHolder> bucketLock;
+    if (bucketLocks_) {
+      bucketLock.emplace(
+          bucketLocks_->lockShared(keyStr.data(), keyStr.size()));
+    }
+
     auto item = cache_->find(keyStr);
-    if (item) {
+    bool hit = item != nullptr;
+
+    // Production-like per-request overhead (after cache lookup, like production)
+    if (config_.production_features_enabled) {
+      runProductionGetOverhead(keyStr, hit);
+    }
+
+    if (hit) {
       // Cache hit
       reply.result() = carbon::Result::FOUND;
 
@@ -365,10 +518,22 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
     // Extract key from Carbon Keys type - convert to string
     std::string keyStr = req.key()->fullKey().str();
 
-    // Simulate production per-request CPU overhead (ACL, hashing, timestamps)
+    // Legacy CPU overhead simulation
     simulatePerRequestOverhead(keyStr);
 
-    // Extract value from IOBuf (need to work with the const IOBuf)
+    // Production-like per-request overhead
+    if (config_.production_features_enabled) {
+      runProductionSetOverhead(keyStr);
+    }
+
+    // Acquire exclusive bucket lock if enabled
+    std::optional<BucketLocks::WriteLockHolder> bucketLock;
+    if (bucketLocks_) {
+      bucketLock.emplace(
+          bucketLocks_->lockExclusive(keyStr.data(), keyStr.size()));
+    }
+
+    // Extract value from IOBuf
     const auto& valueIoBuf = req.value();
     auto valueStr = valueIoBuf->to<std::string>();
 
