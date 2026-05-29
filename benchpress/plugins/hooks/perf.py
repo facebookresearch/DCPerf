@@ -32,23 +32,30 @@ if not open_source:
 DEFAULT_OPTIONS = {
     "mpstat": {
         "interval": 5,
+        "enabled": True,
     },
     "cpufreq_scaling": {
         "interval": 5,
+        "enabled": True,
     },
     "cpufreq_cpuinfo": {
         "interval": 5,
+        "enabled": True,
     },
-    "perfstat": {"interval": 5, "additional_events": []},
-    "netstat": {"interval": 5, "additional_counters": []},
-    "memstat": {"interval": 5, "additional_counters": []},
-    "topdown": {"interval": 5},
-    "power": {"interval": 1},
-    "vmstat": {"interval": 5},
+    "perfstat": {"interval": 5, "additional_events": [], "enabled": True},
+    "netstat": {"interval": 5, "additional_counters": [], "enabled": True},
+    "memstat": {"interval": 5, "additional_counters": [], "enabled": True},
+    "topdown": {"interval": 5, "enabled": True},
+    "power": {"interval": 1, "enabled": True},
+    "vmstat": {"interval": 5, "enabled": True},
 }
 
 if not open_source:
-    DEFAULT_OPTIONS["fb_power"] = {"interval": 10, "post_process": True}
+    DEFAULT_OPTIONS["fb_power"] = {
+        "interval": 10,
+        "post_process": True,
+        "enabled": True,
+    }
 
 AVAIL_MONITORS = {
     "mpstat": mpstat.MPStat,
@@ -86,9 +93,14 @@ class Perf(Hook):
         should_run_perf_stat = True
         self.monitors = []
         for mon_name in AVAIL_MONITORS.keys():
+            # `enabled` is a perf-hook-level flag, not a monitor constructor
+            # arg. Pop it out before passing the rest to the monitor class.
+            init_args = dict(self.opts[mon_name])
+            if not init_args.pop("enabled", True):
+                logger.info(f"Perf monitor {mon_name} is disabled by config")
+                continue
             try:
                 MonitorClass = AVAIL_MONITORS[mon_name]
-                init_args = self.opts[mon_name]
                 monitor = MonitorClass(job_uuid=job.uuid, **init_args)
                 # We should disable PerfStat (and not run anything that uses PMU)
                 # if IntelPerfSpect3 is enabled.
