@@ -34,9 +34,11 @@ from benchpress.lib.parser import Parser
 
 from .dpdk_compress_perf import DpdkCompressPerfParser
 from .dpdk_crypto_perf import DpdkCryptoPerfParser
+from .lmbench_lat_mem_rd import LmbenchLatMemRdParser
 from .lzbench_perf import LzbenchPerfParser
 from .openssl_speed import OpensslSpeedParser
 from .spdk_accel_perf import SpdkAccelPerfParser
+from .stream import StreamParser
 
 _LEG_RE = re.compile(r"^##DPU_PERF_LEG=([a-z0-9_]+),([a-z0-9_]+)##\s*$")
 _FAIL_RE = re.compile(r"^##DPU_PERF_LEG_FAILED=([a-z0-9_]+)##\s*$")
@@ -47,6 +49,8 @@ _SUBPARSERS = {
     "dpdk_compress_perf": DpdkCompressPerfParser,
     "lzbench_perf": LzbenchPerfParser,
     "spdk_accel_perf": SpdkAccelPerfParser,
+    "stream": StreamParser,
+    "lmbench_lat_mem_rd": LmbenchLatMemRdParser,
 }
 
 # Ordered list of (offload_key, host_key, host_to_offload_factor) tuples
