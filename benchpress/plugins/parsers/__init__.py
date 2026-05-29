@@ -19,6 +19,7 @@ from .cloudsuite_graph import CloudSuiteGraphParser
 from .compression_parser import CompressionParser
 from .deser import DeserParser
 from .django_workload import DjangoWorkloadParser
+from .dpdk_compress_perf import DpdkCompressPerfParser
 from .embedding import EmbeddingParser
 from .encryption import EncryptionParser
 from .fb_fiosynth import Fiosynth_Parser
@@ -72,6 +73,7 @@ def register_parsers(factory):
     factory.register("clang", ClangParser)
     factory.register("compression_parser", CompressionParser)
     factory.register("django_workload", DjangoWorkloadParser)
+    factory.register("dpdk_compress_perf", DpdkCompressPerfParser)
     factory.register("encryption", EncryptionParser)
     factory.register("fb_fiosynth", Fiosynth_Parser)
     factory.register("fbgemm", FbgemmParser)
