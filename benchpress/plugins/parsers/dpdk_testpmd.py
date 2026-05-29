@@ -36,9 +36,19 @@ _PORT_HDR_RE = re.compile(r"Forward statistics for port\s+(\d+)")
 _RX_RE = re.compile(r"RX-packets:\s+(\d+)\s+RX-dropped:\s+(\d+)")
 _TX_RE = re.compile(r"TX-packets:\s+(\d+)\s+TX-dropped:\s+(\d+)")
 
+# Trailing summary lines emitted by run_nic_sriov.sh after the per-VF
+# testpmd outputs. Optional; absent for plain emu_virtio_net runs.
+_SRIOV_KV_KEYS = {
+    "num_vfs",
+    "aggregate_rx_packets_total",
+    "aggregate_tx_packets_total",
+    "aggregate_rx_dropped_total",
+}
+_KV_RE = re.compile(r"^([a-z_]+):\s*(\d+)\s*$")
+
 
 class DpdkTestpmdParser(Parser):
-    def parse(self, stdout, stderr, returncode):
+    def parse(self, stdout, stderr, returncode):  # noqa: C901
         metrics: Dict = {}
         # Track per-port latest counters; testpmd may emit multiple snapshots
         # under --stats-period, so we want the most recent one.
@@ -52,6 +62,10 @@ class DpdkTestpmdParser(Parser):
             if m:
                 current_port = int(m.group(1))
                 latest_per_port.setdefault(current_port, {})
+                continue
+            m = _KV_RE.match(line)
+            if m and m.group(1) in _SRIOV_KV_KEYS:
+                metrics[m.group(1)] = int(m.group(2))
                 continue
             if current_port is None:
                 continue
