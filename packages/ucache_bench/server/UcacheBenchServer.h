@@ -13,7 +13,9 @@
 #include <folly/container/F14Map.h>
 #include <folly/String.h>
 #include <folly/fibers/TimedMutex.h>
+#include <folly/ThreadLocal.h>
 #include <folly/futures/Future.h>
+#include <cachelib/common/hothash/HotHashDetector.h>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -268,6 +270,22 @@ class UcacheBenchServer {
   std::vector<IdentityAttribute> mockIdentityAttributes_;
   void initMockIdentityAttributes();
   std::string serializeIdentityAttributes(const std::string& requestKey);
+
+  // Hot key detection (matches production TLHotKeyTracker)
+  // Production maintains two thread-local HotHashDetectors per IO thread:
+  // one for QPS hotness, one for egress hotness. Each call to bumpHash()
+  // does L1 counter increment + conditional L2 probe + periodic maintenance.
+  // We store detectors per-thread via folly::ThreadLocal.
+  struct HotKeyDetectors {
+    facebook::cachelib::HotHashDetector qpsDetector;
+    facebook::cachelib::HotHashDetector egressDetector;
+    HotKeyDetectors()
+        : qpsDetector(1024, 8, 30, 128),   // production defaults
+          egressDetector(1024, 16, 30, 128) // egress uses 2x warm set
+    {}
+  };
+  folly::ThreadLocal<HotKeyDetectors> hotKeyDetectors_;
+  void runHotKeyDetection(uint64_t keyHash);
 
   // Phase-based metric tracking
   std::atomic<TrackingPhase> currentPhase_{TrackingPhase::NONE};
