@@ -27,6 +27,12 @@ DEFINE_uint32(
     1,
     "Number of CPU worker threads for ThriftServer. "
     "Production ucache uses 1. These handle CPU-bound work separate from IO");
+DEFINE_uint32(
+    rpc_socket_max_reads_per_event,
+    1,
+    "Max reads per socket per event loop iteration. "
+    "Production ucache uses 1. ThriftServer default is 16. "
+    "Higher values let a single connection deliver more requests per epoll wakeup");
 
 // CPU pinning configuration flags
 DEFINE_bool(
@@ -163,7 +169,8 @@ apache::thrift::ThriftServer& UcacheBenchRpcServer::addThriftServer() {
   // Prevent single connection from monopolizing an IO thread's event loop.
   // Without this, a few hot connections can starve others, limiting
   // multi-client scalability.
-  thriftServer_->setSocketMaxReadsPerEvent(1);
+  thriftServer_->setSocketMaxReadsPerEvent(
+      FLAGS_rpc_socket_max_reads_per_event);
 
   // Disable timeouts — let clients control timing, same as production ucache.
   thriftServer_->setQueueTimeout(std::chrono::milliseconds(0));
@@ -176,8 +183,10 @@ apache::thrift::ThriftServer& UcacheBenchRpcServer::addThriftServer() {
   thriftServer_->disableActiveRequestsTracking();
 
   XLOG(INFO) << "ThriftServer configured with "
-             << FLAGS_rpc_num_cpu_worker_threads << " CPU worker threads and "
-             << numAcceptorThreads << " acceptor threads";
+             << FLAGS_rpc_num_cpu_worker_threads << " CPU worker threads, "
+             << numAcceptorThreads << " acceptor threads, "
+             << "socketMaxReadsPerEvent="
+             << FLAGS_rpc_socket_max_reads_per_event;
 
   return *thriftServer_;
 }
