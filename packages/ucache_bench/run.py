@@ -398,6 +398,10 @@ def run_server(args: argparse.Namespace) -> None:
     if args.bucket_lock_power > 0:
         server_cmd.append(f"--bucket_lock_power={args.bucket_lock_power}")
 
+    # Configurable per-request CPU work
+    if args.cpu_work_us > 0:
+        server_cmd.append(f"--cpu_work_us={args.cpu_work_us}")
+
     # Production-like per-request features
     if args.production_features:
         server_cmd.append("--production_features=true")
@@ -805,6 +809,14 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Per-request CPU overhead simulation level (0=disabled, 1=light ~3%%, 2=medium ~5%%, 3=heavy ~8%%)",
+    )
+
+    # Configurable per-request CPU work
+    server_parser.add_argument(
+        "--cpu-work-us",
+        type=int,
+        default=0,
+        help="Microseconds of CPU busy-work per request. 0=disabled.",
     )
 
     # CacheTable-style bucket locking

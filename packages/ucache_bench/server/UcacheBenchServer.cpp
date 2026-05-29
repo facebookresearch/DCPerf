@@ -483,6 +483,32 @@ void UcacheBenchServer::runCpuLoadMeasurement() {
   folly::doNotOptimizeAway(shouldShed);
 }
 
+// Configurable CPU busy-work per request.
+// Burns cpu_work_us microseconds of CPU doing real computation (hash chains)
+// to simulate aggregate production overhead that can't be individually replicated.
+void UcacheBenchServer::runCpuBusyWork(const std::string& key) {
+  if (config_.cpu_work_us == 0) {
+    return;
+  }
+  struct timespec start, now;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  uint64_t hash = folly::hash::fnv64(key);
+  uint64_t targetNs = static_cast<uint64_t>(config_.cpu_work_us) * 1000;
+  for (;;) {
+    // Do real computation to burn CPU
+    for (int i = 0; i < 64; ++i) {
+      hash = folly::hash::twang_mix64(hash);
+    }
+    folly::doNotOptimizeAway(hash);
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    uint64_t elapsedNs = (now.tv_sec - start.tv_sec) * 1000000000ULL +
+        (now.tv_nsec - start.tv_nsec);
+    if (elapsedNs >= targetNs) {
+      break;
+    }
+  }
+}
+
 // Build compound key matching production McStoredKey construction.
 // Production builds: UcacheStoredKey(key, hashAlias, kcbId, ticket)
 // This involves string concatenation, hashing, and memory allocation.
@@ -816,6 +842,9 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
       runProductionGetOverhead(keyStr, hit, valPtr, valLen);
     }
 
+    // Configurable CPU busy-work
+    runCpuBusyWork(keyStr);
+
     if (hit) {
       // Cache hit
       reply.result() = carbon::Result::FOUND;
@@ -870,6 +899,9 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
     if (config_.production_features_enabled) {
       runProductionSetOverhead(keyStr, valueStr.data(), valueStr.size());
     }
+
+    // Configurable CPU busy-work
+    runCpuBusyWork(keyStr);
 
     // Acquire exclusive bucket lock if enabled
     std::optional<BucketLocks::WriteLockHolder> bucketLock;

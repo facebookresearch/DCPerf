@@ -129,6 +129,11 @@ struct UcacheBenchConfig {
   // - Overload check simulation (atomic reads)
   bool production_features_enabled = false;
 
+  // Configurable per-request CPU work (microseconds of busy computation)
+  // Used to simulate aggregate production CPU overhead that can't be
+  // individually replicated (e.g., NVM admission, complex routing, etc.)
+  uint32_t cpu_work_us = 0; // 0 = disabled
+
   // Navy (NVM/SSD cache) config (if navy_cache_size_mb > 0, hybrid mode is
   // enabled)
   std::string navy_cache_path = "/tmp/ucachebench_ssd";
@@ -301,6 +306,9 @@ class UcacheBenchServer {
 
   // KCB double-lookup simulation (matches production Key Client Binding)
   void runKcbDoubleLookup(const std::string& key);
+
+  // Configurable CPU busy-work per request
+  void runCpuBusyWork(const std::string& key);
 
   // Per-thread CPU load measurement (matches shouldLoadShed)
   struct alignas(64) CpuLoadCounters {
