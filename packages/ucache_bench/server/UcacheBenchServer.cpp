@@ -915,19 +915,15 @@ void UcacheBenchServer::simulateIoBufProcessing(
   folly::doNotOptimizeAway(headerBuf->data());
 }
 
-folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
-    const UcbGetRequest& req) {
+UcbGetReply UcacheBenchServer::processUcbGetSync(const UcbGetRequest& req) {
   UcbGetReply reply;
   reply.result() = carbon::Result::NOTFOUND;
 
   try {
-    // Extract key from Carbon Keys type - convert to string
     std::string keyStr = req.key()->fullKey().str();
 
-    // Legacy CPU overhead simulation
     simulatePerRequestOverhead(keyStr);
 
-    // Acquire shared bucket lock if enabled
     std::optional<BucketLocks::ReadLockHolder> bucketLock;
     if (bucketLocks_) {
       bucketLock.emplace(
@@ -945,33 +941,18 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
       runProductionGetOverhead(keyStr, hit, valPtr, valLen);
     }
 
-    // Configurable CPU busy-work
     runCpuBusyWork(keyStr);
 
     if (hit) {
-      // Cache hit
       reply.result() = carbon::Result::FOUND;
-
-      // Set the value as IOBuf
       auto valueView = item->getMemory();
       reply.value() = *folly::IOBuf::copyBuffer(
           reinterpret_cast<const char*>(valueView), item->getSize());
-
       reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
-
-      recordGet(true /* hit */);
-
-      if (config_.verbose) {
-        printf("Cache hit for key: %s\n", keyStr.c_str());
-      }
+      recordGet(true);
     } else {
-      // Cache miss
       reply.result() = carbon::Result::NOTFOUND;
-      recordGet(false /* miss */);
-
-      if (config_.verbose) {
-        printf("Cache miss for key: %s\n", keyStr.c_str());
-      }
+      recordGet(false);
     }
   } catch (const std::exception& ex) {
     printf("Error processing get request: %s\n", ex.what());
@@ -979,66 +960,46 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
     reply.message() = ex.what();
   }
 
-  return folly::makeSemiFuture(std::move(reply));
+  return reply;
 }
 
-folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
-    const UcbSetRequest& req) {
+folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
+    const UcbGetRequest& req) {
+  return folly::makeSemiFuture(processUcbGetSync(req));
+}
+
+UcbSetReply UcacheBenchServer::processUcbSetSync(const UcbSetRequest& req) {
   UcbSetReply reply;
   reply.result() = carbon::Result::NOTSTORED;
 
   try {
-    // Extract key from Carbon Keys type - convert to string
     std::string keyStr = req.key()->fullKey().str();
 
-    // Legacy CPU overhead simulation
     simulatePerRequestOverhead(keyStr);
 
-    // Extract value early so we can pass it to production overhead
     const auto& valueIoBuf = req.value();
     auto valueStr = valueIoBuf->to<std::string>();
 
-    // Production-like per-request overhead
     if (config_.production_features_enabled) {
       runProductionSetOverhead(keyStr, valueStr.data(), valueStr.size());
     }
 
-    // Configurable CPU busy-work
     runCpuBusyWork(keyStr);
 
-    // Acquire exclusive bucket lock if enabled
     std::optional<BucketLocks::WriteLockHolder> bucketLock;
     if (bucketLocks_) {
       bucketLock.emplace(
           bucketLocks_->lockExclusive(keyStr.data(), keyStr.size()));
     }
 
-    // Create item
     auto item = cache_->allocate(poolId_, keyStr, valueStr.size());
     if (item) {
-      // Copy data to the item
       std::memcpy(item->getMemory(), valueStr.data(), valueStr.size());
-
-      // Insert into cache - insertOrReplace always succeeds with a valid handle
-      // It returns the old item handle (if replaced) or null (if new insertion)
       cache_->insertOrReplace(item);
-
       reply.result() = carbon::Result::STORED;
       reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
-
       recordSet();
-
-      if (config_.verbose) {
-        printf("Stored key: %s, size: %zu\n", keyStr.c_str(), valueStr.size());
-      }
     } else {
-      if (config_.verbose) {
-        printf(
-            "ERROR: allocate failed for key: %s, size: %zu, poolId: %u\n",
-            keyStr.c_str(),
-            valueStr.size(),
-            static_cast<uint32_t>(poolId_));
-      }
       reply.result() = carbon::Result::NOTSTORED;
       reply.message() = "allocate failed";
     }
@@ -1048,34 +1009,29 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
     reply.message() = ex.what();
   }
 
-  return folly::makeSemiFuture(std::move(reply));
+  return reply;
 }
 
-folly::SemiFuture<UcbDeleteReply> UcacheBenchServer::processUcbDelete(
+folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
+    const UcbSetRequest& req) {
+  return folly::makeSemiFuture(processUcbSetSync(req));
+}
+
+UcbDeleteReply UcacheBenchServer::processUcbDeleteSync(
     const UcbDeleteRequest& req) {
   UcbDeleteReply reply;
   reply.result() = carbon::Result::NOTFOUND;
 
   try {
-    // Extract key from Carbon Keys type - convert to string
     std::string keyStr = req.key()->fullKey().str();
 
-    // Try to remove from cache
     auto removeResult = cache_->remove(keyStr);
     if (removeResult == CacheAllocator::RemoveRes::kSuccess) {
       reply.result() = carbon::Result::DELETED;
       reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
-
       recordDelete();
-
-      if (config_.verbose) {
-        printf("Deleted key: %s\n", keyStr.c_str());
-      }
     } else {
       reply.result() = carbon::Result::NOTFOUND;
-      if (config_.verbose) {
-        printf("Key not found for deletion: %s\n", keyStr.c_str());
-      }
     }
   } catch (const std::exception& ex) {
     printf("Error processing delete request: %s\n", ex.what());
@@ -1083,7 +1039,12 @@ folly::SemiFuture<UcbDeleteReply> UcacheBenchServer::processUcbDelete(
     reply.message() = ex.what();
   }
 
-  return folly::makeSemiFuture(std::move(reply));
+  return reply;
+}
+
+folly::SemiFuture<UcbDeleteReply> UcacheBenchServer::processUcbDelete(
+    const UcbDeleteRequest& req) {
+  return folly::makeSemiFuture(processUcbDeleteSync(req));
 }
 
 void UcacheBenchServer::printStats() {

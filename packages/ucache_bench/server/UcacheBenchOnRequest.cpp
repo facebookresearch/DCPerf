@@ -22,15 +22,7 @@ void UcacheBenchOnRequest::onRequestThrift(
     UcbGetRequest&& request) {
   ucacheBenchOnRequestCommon(
       std::move(callback), std::move(request), [this](auto&& cb, auto&& req) {
-        try {
-          auto reply = server_->processUcbGet(req).get();
-          cb->result(std::move(reply));
-        } catch (const std::exception& ex) {
-          UcbGetReply reply;
-          reply.result() = carbon::Result::REMOTE_ERROR;
-          reply.message() = ex.what();
-          cb->result(std::move(reply));
-        }
+        cb->result(server_->processUcbGetSync(req));
       });
 }
 
@@ -39,15 +31,7 @@ void UcacheBenchOnRequest::onRequestThrift(
     UcbSetRequest&& request) {
   ucacheBenchOnRequestCommon(
       std::move(callback), std::move(request), [this](auto&& cb, auto&& req) {
-        try {
-          auto reply = server_->processUcbSet(req).get();
-          cb->result(std::move(reply));
-        } catch (const std::exception& ex) {
-          UcbSetReply reply;
-          reply.result() = carbon::Result::REMOTE_ERROR;
-          reply.message() = ex.what();
-          cb->result(std::move(reply));
-        }
+        cb->result(server_->processUcbSetSync(req));
       });
 }
 
@@ -56,15 +40,7 @@ void UcacheBenchOnRequest::onRequestThrift(
     UcbDeleteRequest&& request) {
   ucacheBenchOnRequestCommon(
       std::move(callback), std::move(request), [this](auto&& cb, auto&& req) {
-        try {
-          auto reply = server_->processUcbDelete(req).get();
-          cb->result(std::move(reply));
-        } catch (const std::exception& ex) {
-          UcbDeleteReply reply;
-          reply.result() = carbon::Result::REMOTE_ERROR;
-          reply.message() = ex.what();
-          cb->result(std::move(reply));
-        }
+        cb->result(server_->processUcbDeleteSync(req));
       });
 }
 
