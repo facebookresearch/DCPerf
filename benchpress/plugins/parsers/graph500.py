@@ -8,7 +8,15 @@ import re
 
 from benchpress.lib.parser import Parser
 
-TEPS_REGEX = r"(\w+_TEPS):\s+(\d+\.?\d*e?[+-]\d*)"
+# Match `<name>_TEPS:` followed by an optional non-digit token (e.g. the
+# graph500 v3 validation marker `!`), then the metric value.
+#
+# Examples that must parse:
+#   "harmonic_mean_TEPS: 5.66e+07"               (v2)
+#   "bfs  harmonic_mean_TEPS:     !  7.79e+07"   (v3 with validation marker)
+#   "bfs  min_TEPS:                  6.38e+07"   (v3 no marker)
+#   "bfs  harmonic_stddev_TEPS:      604630"     (v3 plain integer)
+TEPS_REGEX = r"(\w+_TEPS):[\s!]+(\d+\.?\d*(?:e[+-]?\d+)?)"
 
 
 class Graph500Parser(Parser):

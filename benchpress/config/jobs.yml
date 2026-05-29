@@ -1856,3 +1856,9 @@
     - '{duration}'
   vars:
     - 'duration'
+
+- benchmark: graph500_omp_csr
+  name: graph500_omp_csr
+  description: Graph500 v3 reference BFS (MPI). Single positional arg is SCALE (log2 vertices); run.sh wraps the binary with mpirun -np <largest pow2 <= nproc>.
+  args:
+    - "20"
