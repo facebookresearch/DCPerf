@@ -60,6 +60,7 @@ from .silo import SiloParser
 from .small_locks_bench import SmallLocksParser
 from .spark_standalone import SparkStandaloneParser
 from .spdk_accel_perf import SpdkAccelPerfParser
+from .spdk_integrity import SpdkIntegrityParser
 from .spec_cpu2006 import SPECCPU2006Parser
 from .stream import StreamParser
 from .syscall import SyscallParser
@@ -112,6 +113,7 @@ def register_parsers(factory):
     factory.register("tao_bench_autoscale", TaoBenchAutoscaleParser)
     factory.register("speccpu2006", SPECCPU2006Parser)
     factory.register("spdk_accel_perf", SpdkAccelPerfParser)
+    factory.register("spdk_integrity", SpdkIntegrityParser)
     factory.register("stream", StreamParser)
     factory.register("mlc", MlcParser)
     factory.register("iperf", IperfParser)
