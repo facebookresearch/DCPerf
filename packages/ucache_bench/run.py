@@ -273,6 +273,18 @@ def run_server(args: argparse.Namespace) -> None:
     if args.verbose:
         server_cmd.append("--verbose=true")
 
+    # Fiber configuration
+    if args.enable_fibers:
+        server_cmd.append("--enable_fibers=true")
+    if args.fiber_stack_size != 65536:
+        server_cmd.append(f"--fiber_stack_size={args.fiber_stack_size}")
+    if args.fiber_max_pool_size != 1000:
+        server_cmd.append(f"--fiber_max_pool_size={args.fiber_max_pool_size}")
+    if args.fiber_pool_resize_period_ms != 1000:
+        server_cmd.append(
+            f"--fiber_pool_resize_period_ms={args.fiber_pool_resize_period_ms}"
+        )
+
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         delay = args.perf_record_delay
         print(f"DCPERF_PERF_RECORD=1, will start perf record after {delay}s delay")
@@ -574,6 +586,32 @@ def init_parser() -> argparse.ArgumentParser:
         help="Timeout in seconds for waiting for clients (0 = no timeout)",
     )
 
+    # Fiber configuration
+    server_parser.add_argument(
+        "--enable-fibers",
+        type=int,
+        default=0,
+        help="Enable fiber-based request processing (set to non-zero to enable)",
+    )
+    server_parser.add_argument(
+        "--fiber-stack-size",
+        type=int,
+        default=65536,
+        help="Stack size for IO thread fibers in bytes",
+    )
+    server_parser.add_argument(
+        "--fiber-max-pool-size",
+        type=int,
+        default=1000,
+        help="Maximum number of preallocated free fibers to keep around",
+    )
+    server_parser.add_argument(
+        "--fiber-pool-resize-period-ms",
+        type=int,
+        default=1000,
+        help="Period in ms for resizing the fiber pool (0 = disabled)",
+    )
+
     # Profiling configuration
     server_parser.add_argument(
         "--perf-record-delay",
@@ -584,7 +622,10 @@ def init_parser() -> argparse.ArgumentParser:
     )
 
     server_parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging"
+        "--verbose",
+        type=int,
+        default=0,
+        help="Enable verbose logging (set to non-zero to enable)",
     )
     server_parser.add_argument(
         "--real", action="store_true", help="Actually run the command"
@@ -741,7 +782,10 @@ def init_parser() -> argparse.ArgumentParser:
     )
 
     client_parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging"
+        "--verbose",
+        type=int,
+        default=0,
+        help="Enable verbose logging (set to non-zero to enable)",
     )
     client_parser.add_argument(
         "--real", action="store_true", help="Actually run the command"
