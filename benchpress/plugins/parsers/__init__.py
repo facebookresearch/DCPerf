@@ -38,7 +38,6 @@ from .health_check import HealthCheckParser
 from .iperf import IperfParser
 from .lmbench_lat_mem_rd import LmbenchLatMemRdParser
 from .ltp import LtpParser
-from .lzbench_perf import LzbenchPerfParser
 from .mediawiki import MediawikiParser
 from .memcached_bench import MemcachedBenchParser
 from .minebench import KMeansParser, PLSAParser, RSearchParser
@@ -118,7 +117,6 @@ def register_parsers(factory):
     factory.register("mlc", MlcParser)
     factory.register("iperf", IperfParser)
     factory.register("lmbench_lat_mem_rd", LmbenchLatMemRdParser)
-    factory.register("lzbench_perf", LzbenchPerfParser)
     factory.register("openssl_speed", OpensslSpeedParser)
     factory.register("ovs_ofperf", OvsOfperfParser)
     factory.register("checkmark", CheckmarkParser)
