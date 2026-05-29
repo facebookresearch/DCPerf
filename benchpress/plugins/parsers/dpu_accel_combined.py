@@ -94,25 +94,32 @@ _OVERHEAD_PAIRS = [
 
 
 def _split_sections(stdout):
-    """Yield (label, subparser_name, lines, failed) per leg."""
+    """Yield (label, subparser_name, lines, failed) per leg.
+
+    Failure is tracked per-section (on the leg whose marker most recently
+    opened), not by a stream-global label set, so a label reused across legs
+    can't have one leg's failure suppress another's metrics. Trailing CR is
+    stripped (DPU shell output often arrives CRLF) so leaf parsers that don't
+    themselves strip (e.g. stream, spdk_integrity) aren't tripped up.
+    """
     sections = []
     cur = None
-    failed = set()
     for raw in stdout:
-        line = raw.rstrip("\n")
+        line = raw.rstrip("\r\n")
         m = _LEG_RE.match(line)
         if m:
-            cur = {"label": m.group(1), "sub": m.group(2), "lines": []}
+            cur = {"label": m.group(1), "sub": m.group(2), "lines": [], "failed": False}
             sections.append(cur)
             continue
         mf = _FAIL_RE.match(line)
         if mf:
-            failed.add(mf.group(1))
+            if cur is not None and cur["label"] == mf.group(1):
+                cur["failed"] = True
             continue
         if cur is not None:
             cur["lines"].append(line)
     for s in sections:
-        yield s["label"], s["sub"], s["lines"], (s["label"] in failed)
+        yield s["label"], s["sub"], s["lines"], s["failed"]
 
 
 class DpuAccelCombinedParser(Parser):
@@ -124,6 +131,9 @@ class DpuAccelCombinedParser(Parser):
                 continue
             parser_cls = _SUBPARSERS.get(sub)
             if parser_cls is None:
+                # Surface a misconfigured leg (typo'd subparser in the wrapper)
+                # rather than silently dropping it.
+                metrics[f"{label}_unknown_subparser"] = sub
                 continue
             leg_metrics = parser_cls().parse(lines, [], 0)
             for k, v in leg_metrics.items():
