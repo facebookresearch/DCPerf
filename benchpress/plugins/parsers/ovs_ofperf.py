@@ -6,17 +6,23 @@
 
 # pyre-unsafe
 
-"""Parser for the dpu_perf `ovs_ofperf` wrapper.
+"""Parser for the dpu_perf vSwitch benches (run_ovs.sh).
 
-run_ovs.sh's `ovs_ofperf` mode prints parser-friendly key=value lines:
+Each tool in run_ovs.sh emits parser-friendly `<tool>: key=value` lines:
 
     ovs_ofperf: num_flows=10000
-    ovs_ofperf: bridge=dpu_perf_brX
     ovs_ofperf: elapsed_sec=2.345678
     ovs_ofperf: flows_per_sec=4263.45
 
-Emitted metrics: num_flows (int), elapsed_sec (float),
-flows_per_sec (float).
+    acl_scale: num_rules=10000
+    acl_scale: sender_mbps=8231.7
+    acl_scale: receiver_mbps=8228.1
+
+Values that parse as ints stay ints; values that parse as floats become
+floats; everything else stays a string. The class name is kept as
+`OvsOfperfParser` for backward compatibility with the existing
+benchmarks_dpu_perf.yml entry; new ovs_* benches reference the same
+parser key.
 """
 
 import re
@@ -24,7 +30,19 @@ import re
 from benchpress.lib.parser import Parser
 
 
-_KV_RE = re.compile(r"^\s*ovs_ofperf:\s*([a-z_]+)=([^\s]+)\s*$")
+_KV_RE = re.compile(r"^\s*[a-z_][a-z0-9_]*:\s*([a-z_][a-z0-9_]*)=([^\s]+)\s*$")
+
+
+def _coerce(s: str):
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return s
 
 
 class OvsOfperfParser(Parser):
@@ -34,18 +52,5 @@ class OvsOfperfParser(Parser):
             m = _KV_RE.match(raw)
             if not m:
                 continue
-            key = m.group(1)
-            raw_val = m.group(2)
-            if key == "num_flows":
-                try:
-                    metrics["num_flows"] = int(raw_val)
-                except ValueError:
-                    pass
-            elif key in ("elapsed_sec", "flows_per_sec"):
-                try:
-                    metrics[key] = float(raw_val)
-                except ValueError:
-                    pass
-            elif key == "bridge":
-                metrics["bridge"] = raw_val
+            metrics[m.group(1)] = _coerce(m.group(2))
         return metrics
