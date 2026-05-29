@@ -7,9 +7,12 @@
 
 #include "UcacheBenchServer.h"
 
+#include <folly/BenchmarkUtil.h>
 #include <folly/Format.h>
+#include <folly/hash/Hash.h>
 #include <folly/portability/GFlags.h>
 #include <chrono>
+#include <time.h>
 
 #include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
@@ -240,6 +243,72 @@ void UcacheBenchServer::setupCacheLib() {
   }
 }
 
+void UcacheBenchServer::simulatePerRequestOverhead(const std::string& key) {
+  if (config_.cpu_overhead_level == 0) {
+    return;
+  }
+
+  // Level 1+: Simulate ACL/identity hash checks and key construction
+  // Production ucache computes identity hashes for access control, constructs
+  // CacheTable keys with region/pool prefixes, and reads timestamps.
+  uint64_t hash = folly::hash::fnv64(key);
+  hash = folly::hash::twang_mix64(hash);
+  hash = folly::hash::fnv64_buf(key.data(), key.size(), hash);
+
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(CLOCK_REALTIME, &ts);
+
+  // Level 1+: Simulate per-request memory allocations
+  // Production ucache does string allocations for key construction,
+  // serialization buffers, identity objects, and ACL results. These
+  // allocations create jemalloc mutex contention under high concurrency,
+  // which is a major contributor to production kernel CPU (~7.5% from
+  // queued_spin_lock_slowpath in futex for jemalloc).
+  {
+    // Simulate key construction + identity string allocation
+    auto buf = std::make_unique<char[]>(256);
+    std::memcpy(buf.get(), key.data(), std::min(key.size(), size_t(256)));
+    folly::doNotOptimizeAway(buf.get());
+  }
+
+  if (config_.cpu_overhead_level >= 2) {
+    // Level 2+: More hash computation + larger allocations
+    hash = folly::hash::fnv64_buf(key.data(), key.size(), hash);
+    hash = folly::hash::twang_mix64(hash);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(CLOCK_REALTIME, &ts);
+
+    // Simulate serialization buffer allocation (attribute serialization,
+    // privacy logging buffer, Luna sampling context)
+    {
+      auto buf = std::make_unique<char[]>(512);
+      std::memset(buf.get(), 0, 512);
+      std::memcpy(buf.get(), key.data(), std::min(key.size(), size_t(512)));
+      folly::doNotOptimizeAway(buf.get());
+    }
+  }
+
+  if (config_.cpu_overhead_level >= 3) {
+    // Level 3: Heavy allocation pressure matching production
+    // Production creates multiple temporary objects per request:
+    // identity context, ACL result, privacy log entry, sampling decision,
+    // data access zone policy result, response attributes.
+    for (int i = 0; i < 3; ++i) {
+      hash = folly::hash::fnv64_buf(key.data(), key.size(), hash);
+      hash = folly::hash::twang_mix64(hash);
+      clock_gettime(CLOCK_MONOTONIC, &ts);
+
+      auto buf = std::make_unique<char[]>(1024);
+      std::memset(buf.get(), static_cast<int>(hash & 0xFF), 1024);
+      folly::doNotOptimizeAway(buf.get());
+    }
+  }
+
+  folly::doNotOptimizeAway(hash);
+  folly::doNotOptimizeAway(ts);
+}
+
 folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
     const UcbGetRequest& req) {
   UcbGetReply reply;
@@ -248,6 +317,9 @@ folly::SemiFuture<UcbGetReply> UcacheBenchServer::processUcbGet(
   try {
     // Extract key from Carbon Keys type - convert to string
     std::string keyStr = req.key()->fullKey().str();
+
+    // Simulate production per-request CPU overhead (ACL, hashing, timestamps)
+    simulatePerRequestOverhead(keyStr);
 
     auto item = cache_->find(keyStr);
     if (item) {
@@ -292,6 +364,9 @@ folly::SemiFuture<UcbSetReply> UcacheBenchServer::processUcbSet(
   try {
     // Extract key from Carbon Keys type - convert to string
     std::string keyStr = req.key()->fullKey().str();
+
+    // Simulate production per-request CPU overhead (ACL, hashing, timestamps)
+    simulatePerRequestOverhead(keyStr);
 
     // Extract value from IOBuf (need to work with the const IOBuf)
     const auto& valueIoBuf = req.value();

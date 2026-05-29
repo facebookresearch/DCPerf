@@ -11,6 +11,7 @@
 #include <folly/futures/Future.h>
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -104,6 +105,12 @@ struct UcacheBenchConfig {
   uint64_t cachelib_num_shards = 0; // 0 = use default
   uint32_t min_alloc_size = 64; // Minimum allocation size in bytes
 
+  // Per-request CPU overhead simulation
+  // Simulates production CPU work (ACL checks, key hashing, timestamps) that
+  // is absent from the minimal ucachebench request path.
+  // 0 = disabled, 1 = light (~3% CPU), 2 = medium (~5%), 3 = heavy (~8%)
+  uint32_t cpu_overhead_level = 0;
+
   // Navy (NVM/SSD cache) config (if navy_cache_size_mb > 0, hybrid mode is
   // enabled)
   std::string navy_cache_path = "/tmp/ucachebench_ssd";
@@ -173,6 +180,9 @@ class UcacheBenchServer {
 
  private:
   void setupCacheLib();
+
+  // Simulate per-request CPU overhead matching production ucache
+  void simulatePerRequestOverhead(const std::string& key);
 
   // Increment metrics based on current phase
   void recordGet(bool hit);
