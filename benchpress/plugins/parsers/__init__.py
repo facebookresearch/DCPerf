@@ -43,6 +43,7 @@ from .multichase_pingpong import MultichasePingpongParser
 from .multichase_pointer import MultichasePointerParser
 from .nginx_wrk_bench import NginxWrkParser
 from .nnpi_net4 import NNPINet4Parser
+from .perftest import PerftestParser
 from .pytorch_gemm_gpuless import PytorchGemmGpulessParser
 from .rebatch import RebatchParser
 from .returncode import ReturncodeParser
@@ -104,6 +105,7 @@ def register_parsers(factory):
     factory.register("lmbench_lat_mem_rd", LmbenchLatMemRdParser)
     factory.register("checkmark", CheckmarkParser)
     factory.register("nnpi_net4", NNPINet4Parser)
+    factory.register("perftest", PerftestParser)
     factory.register("feedsim", FeedSimParser)
     factory.register("feedsim_autoscale", FeedSimAutoscaleParser)
     factory.register("tailbench_imgdnn", TailBenchParser)
