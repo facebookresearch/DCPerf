@@ -179,6 +179,12 @@ apache::thrift::ThriftServer& UcacheBenchRpcServer::addThriftServer() {
   // No limit on concurrent active requests.
   thriftServer_->setMaxRequests(0);
 
+  // Large listen backlog to handle connection storms from clients using
+  // additional_fanout. With num_proxies=64 and additional_fanout=500,
+  // a single client creates ~32K connections. Default backlog (1024) is
+  // too small and causes connections to be refused, triggering mcrouter TKO.
+  thriftServer_->setListenBacklog(65536);
+
   // Disable per-request tracking overhead.
   thriftServer_->disableActiveRequestsTracking();
 
