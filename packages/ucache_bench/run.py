@@ -31,6 +31,7 @@ from typing import List, Optional
 
 BENCHPRESS_ROOT: pathlib.Path = pathlib.Path(os.path.abspath(__file__)).parents[2]
 UCACHE_BENCH_DIR: str = os.path.join(BENCHPRESS_ROOT, "benchmarks", "ucache_bench")
+AFFINITIZE_NIC_SYSTEM_PATH: str = "/usr/local/bin/affinitize_nic"
 
 # Constants
 MEM_USAGE_FACTOR = 0.75  # to prevent OOM
@@ -158,6 +159,78 @@ def profile_server() -> None:
     )
 
 
+def get_affinitize_nic_path() -> str:
+    """Get path to the affinitize_nic script.
+
+    Checks system path first, then common packages dir, falls back to
+    benchmark-local copy (created by install script for OSS builds).
+    """
+    if os.path.exists(AFFINITIZE_NIC_SYSTEM_PATH):
+        return AFFINITIZE_NIC_SYSTEM_PATH
+    # Internal fbpkg: shared utility in packages/common/affinitize/
+    common_path = os.path.join(
+        BENCHPRESS_ROOT, "packages", "common", "affinitize", "affinitize_nic.py"
+    )
+    if os.path.exists(common_path):
+        return common_path
+    # OSS: copied by install script to benchmark dir
+    return os.path.join(UCACHE_BENCH_DIR, "affinitize", "affinitize_nic.py")
+
+
+def affinitize_nic(args: argparse.Namespace) -> None:
+    """Configure NIC IRQ affinity to distribute interrupts across CPUs.
+
+    This prevents IRQ processing from bottlenecking on a few cores.
+    Ported from TaoBench's NIC affinity tuning.
+
+    Steps:
+    1. Set the number of NIC combined channels using ethtool
+    2. Redistribute IRQ affinity across CPUs using affinitize_nic.py
+    """
+    n_cores = len(os.sched_getaffinity(0))
+    n_channels = int(n_cores * args.nic_channel_ratio)
+
+    if n_channels <= 0:
+        print(
+            f"Skipping NIC affinity: n_channels={n_channels} "
+            f"(cores={n_cores}, ratio={args.nic_channel_ratio})"
+        )
+        return
+
+    # Step 1: Set NIC channel count
+    try:
+        cmd = ["ethtool", "-L", args.interface_name, "combined", str(n_channels)]
+        print(f"Setting NIC channels: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"Failed to set NIC channels to {n_channels}: {e}")
+
+    # Step 2: Set IRQ affinity
+    try:
+        cmd = [
+            get_affinitize_nic_path(),
+            "-f",
+            "-a",
+            "--xps",
+        ]
+        if args.hard_binding:
+            cmd += [
+                "--cpu",
+                " ".join(str(x) for x in range(n_channels)),
+            ]
+        else:
+            cmd += [
+                "-A",
+                "all-nodes",
+                "--max-cpus",
+                str(n_channels),
+            ]
+        print(f"Setting NIC IRQ affinity: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"Failed to set NIC IRQ affinity: {e}")
+
+
 def run_server(args: argparse.Namespace) -> None:
     """Run the UcacheBench server.
 
@@ -176,6 +249,10 @@ def run_server(args: argparse.Namespace) -> None:
     if args.hash_power == 20:  # Default value, likely not explicitly set
         hash_power = calculate_hash_power(memory_mb)
         print(f"Auto-calculated hash_power={hash_power} for {memory_mb}MB memory")
+
+    # Configure NIC IRQ affinity before starting server
+    if args.interface_name != "lo" and args.nic_channel_ratio > 0:
+        affinitize_nic(args)
 
     print(
         f"Starting UcacheBench server with {args.memory_mb}MB memory on port {args.port}"
@@ -235,6 +312,10 @@ def run_server(args: argparse.Namespace) -> None:
         server_cmd.append(
             f"--rpc_num_cpu_worker_threads={args.rpc_num_cpu_worker_threads}"
         )
+    if args.rpc_socket_max_reads_per_event != 1:
+        server_cmd.append(
+            f"--rpc_socket_max_reads_per_event={args.rpc_socket_max_reads_per_event}"
+        )
 
     # CPU pinning configuration
     if args.cpu_pinning_enabled:
@@ -268,6 +349,18 @@ def run_server(args: argparse.Namespace) -> None:
 
     if args.verbose:
         server_cmd.append("--verbose=true")
+
+    # Fiber configuration
+    if args.enable_fibers:
+        server_cmd.append("--enable_fibers=true")
+    if args.fiber_stack_size != 65536:
+        server_cmd.append(f"--fiber_stack_size={args.fiber_stack_size}")
+    if args.fiber_max_pool_size != 1000:
+        server_cmd.append(f"--fiber_max_pool_size={args.fiber_max_pool_size}")
+    if args.fiber_pool_resize_period_ms != 1000:
+        server_cmd.append(
+            f"--fiber_pool_resize_period_ms={args.fiber_pool_resize_period_ms}"
+        )
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         delay = args.perf_record_delay
@@ -461,6 +554,12 @@ def init_parser() -> argparse.ArgumentParser:
         default=1,
         help="Number of CPU worker threads for ThriftServer",
     )
+    server_parser.add_argument(
+        "--rpc-socket-max-reads-per-event",
+        type=int,
+        default=1,
+        help="Max reads per socket per event loop iteration (production uses 1, ThriftServer default is 16)",
+    )
 
     # CPU pinning configuration
     server_parser.add_argument(
@@ -498,6 +597,27 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Reduce IO thread count to match non-IRQ CPU count (set to non-zero to enable)",
+    )
+
+    # NIC IRQ affinity configuration (ported from TaoBench)
+    server_parser.add_argument(
+        "--nic-channel-ratio",
+        type=float,
+        default=0.0,
+        help="Ratio of NIC channels to logical cores (0.0 = disabled, 0.5 = TaoBench default). "
+        "Sets ethtool combined channels and redistributes IRQ affinity.",
+    )
+    server_parser.add_argument(
+        "--interface-name",
+        type=str,
+        default="eth0",
+        help="Network interface name for NIC IRQ affinity tuning",
+    )
+    server_parser.add_argument(
+        "--hard-binding",
+        type=int,
+        default=0,
+        help="Hard bind NIC channels to specific CPU cores (set to non-zero to enable)",
     )
 
     # Navy (hybrid mode) configuration
@@ -564,6 +684,32 @@ def init_parser() -> argparse.ArgumentParser:
         help="Timeout in seconds for waiting for clients (0 = no timeout)",
     )
 
+    # Fiber configuration
+    server_parser.add_argument(
+        "--enable-fibers",
+        type=int,
+        default=0,
+        help="Enable fiber-based request processing (set to non-zero to enable)",
+    )
+    server_parser.add_argument(
+        "--fiber-stack-size",
+        type=int,
+        default=65536,
+        help="Stack size for IO thread fibers in bytes",
+    )
+    server_parser.add_argument(
+        "--fiber-max-pool-size",
+        type=int,
+        default=1000,
+        help="Maximum number of preallocated free fibers to keep around",
+    )
+    server_parser.add_argument(
+        "--fiber-pool-resize-period-ms",
+        type=int,
+        default=1000,
+        help="Period in ms for resizing the fiber pool (0 = disabled)",
+    )
+
     # Profiling configuration
     server_parser.add_argument(
         "--perf-record-delay",
@@ -574,7 +720,10 @@ def init_parser() -> argparse.ArgumentParser:
     )
 
     server_parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging"
+        "--verbose",
+        type=int,
+        default=0,
+        help="Enable verbose logging (set to non-zero to enable)",
     )
     server_parser.add_argument(
         "--real", action="store_true", help="Actually run the command"
@@ -731,7 +880,10 @@ def init_parser() -> argparse.ArgumentParser:
     )
 
     client_parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging"
+        "--verbose",
+        type=int,
+        default=0,
+        help="Enable verbose logging (set to non-zero to enable)",
     )
     client_parser.add_argument(
         "--real", action="store_true", help="Actually run the command"

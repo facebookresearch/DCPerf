@@ -29,6 +29,7 @@
 #include <folly/io/async/ScopedEventBaseThread.h>
 #include <folly/portability/GFlags.h>
 #include <mcrouter/McrouterFiberContext.h>
+#include <mcrouter/lib/carbon/Result.h>
 #include <mcrouter/lib/network/CpuController.h>
 
 DECLARE_string(config);
@@ -747,6 +748,11 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
         localSuccesses++;
       } else {
         localErrors++;
+        if (FLAGS_verbose) {
+          printf(
+              "Warmup SET error: %s\n",
+              carbon::resultToString(*result.result_ref()));
+        }
       }
       co_return;
     };
@@ -1129,9 +1135,19 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           workerSetSuccesses[workerId]->fetch_add(1);
         } else {
           workerSetErrors[workerId]->fetch_add(1);
+          if (FLAGS_verbose) {
+            printf(
+                "Benchmark SET error (on GET miss): %s\n",
+                carbon::resultToString(*setResult.result_ref()));
+          }
         }
       } else {
         workerGetErrors[workerId]->fetch_add(1);
+        if (FLAGS_verbose) {
+          printf(
+              "Benchmark GET error: %s\n",
+              carbon::resultToString(*result.result_ref()));
+        }
       }
 
       co_return;
@@ -1188,6 +1204,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         workerSetSuccesses[workerId]->fetch_add(1);
       } else {
         workerSetErrors[workerId]->fetch_add(1);
+        if (FLAGS_verbose) {
+          printf(
+              "Benchmark SET error: %s\n",
+              carbon::resultToString(*result.result_ref()));
+        }
       }
 
       co_return;
