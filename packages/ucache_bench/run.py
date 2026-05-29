@@ -235,6 +235,10 @@ def run_server(args: argparse.Namespace) -> None:
         server_cmd.append(
             f"--rpc_num_cpu_worker_threads={args.rpc_num_cpu_worker_threads}"
         )
+    if args.rpc_socket_max_reads_per_event != 1:
+        server_cmd.append(
+            f"--rpc_socket_max_reads_per_event={args.rpc_socket_max_reads_per_event}"
+        )
 
     # CPU pinning configuration
     if args.cpu_pinning_enabled:
@@ -460,6 +464,12 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Number of CPU worker threads for ThriftServer",
+    )
+    server_parser.add_argument(
+        "--rpc-socket-max-reads-per-event",
+        type=int,
+        default=1,
+        help="Max reads per socket per event loop iteration (production uses 1, ThriftServer default is 16)",
     )
 
     # CPU pinning configuration
