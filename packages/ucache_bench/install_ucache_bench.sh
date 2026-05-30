@@ -747,6 +747,17 @@ else
     echo "  WARNING: ucachebench_client binary not found"
 fi
 
+# Copy affinitize NIC scripts for IRQ affinity tuning
+AFFINITIZE_SRC="$BENCHPRESS_ROOT/packages/common/affinitize"
+AFFINITIZE_DST="$UCACHE_BENCH_DIR/affinitize"
+if [ -d "$AFFINITIZE_SRC" ]; then
+    echo "Copying affinitize NIC scripts..."
+    mkdir -p "$AFFINITIZE_DST"
+    cp -r "$AFFINITIZE_SRC/"* "$AFFINITIZE_DST/"
+    chmod +x "$AFFINITIZE_DST/affinitize_nic.py" 2>/dev/null || true
+    echo "  Installed: $AFFINITIZE_DST/"
+fi
+
 echo ""
 echo "=============================================="
 echo "UCacheBench Installation Complete!"
