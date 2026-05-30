@@ -123,8 +123,12 @@ else
 fi
 pushd folly
 git checkout v2024.06.24.00
+git checkout -- .
 git apply "${BENCHPRESS_ROOT}/packages/tao_bench/folly_zlib_uri.patch"
 sed -i 's/FOLLY_ALWAYS_INLINE//g' "${TAO_BENCH_ROOT}/folly/folly/experimental/symbolizer/StackTrace.cpp"
+# Remove boost.log and boost.python from the build — they fail on aarch64 with GCC 14
+# (log: build failure; python: incompatible with NumPy 2.0) and neither is needed by folly
+sed -i '/^--with-log$/d;/^--with-python$/d' build/fbcode_builder/manifests/boost
 OPENSSL_ROOT_DIR="${TAO_BENCH_DEPS}" ./build/fbcode_builder/getdeps.py --allow-system-packages build \
     --extra-cmake-defines '{"CMAKE_LIBRARY_ARCHITECTURE": "aarch64"}' \
     --scratch-path "${FOLLY_BUILD_ROOT}"

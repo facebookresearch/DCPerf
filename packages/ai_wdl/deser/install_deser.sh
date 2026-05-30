@@ -145,6 +145,8 @@ build_folly() {
   pushd folly-${FOLLY_VERSION} || exit 1
   # Fix zlib download URL (zlib.net moved old releases to /fossils/)
   sed -i 's|url = https://zlib.net/zlib-|url = https://zlib.net/fossils/zlib-|' build/fbcode_builder/manifests/zlib
+  # Remove --with-python from boost manifest (not needed, avoids NumPy 2.x build failure on aarch64)
+  sed -i '/^--with-python$/d' build/fbcode_builder/manifests/boost
   # Install system dependencies required by Folly
   sudo ./build/fbcode_builder/getdeps.py install-system-deps --recursive
   # Build Folly with system packages allowed and using our build directory

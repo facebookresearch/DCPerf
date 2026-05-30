@@ -92,6 +92,17 @@ stop_nginx() {
   fi
 }
 
+# 0. Disable SELinux (required on CentOS 10 aarch64 for HHVM/nginx/MariaDB)
+ARCH="$(uname -m)"
+LINUX_VERSION_ID="$(awk -F "=" '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '"')"
+if [ "$LINUX_DIST_ID" = "centos" ] && [ "$ARCH" = "aarch64" ] && [[ "$LINUX_VERSION_ID" == 10* ]] && command -v getenforce &>/dev/null; then
+  if [ "$(getenforce)" != "Disabled" ]; then
+    echo "Disabling SELinux (required on CentOS 10 aarch64)..."
+    sudo setenforce 0
+    sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
+  fi
+fi
+
 # 1. Install prerequisite packages
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
   apt install -y libevent-dev zlib1g zlib1g-dev
@@ -100,7 +111,7 @@ if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
   dnf install -y libevent-devel zlib-devel
   dnf install -y php-common php-cli php-devel
-  dnf install -y unzip
+  dnf install -y unzip bc
 fi
 
 # 2. Make sure hhvm 3.30.12 is installed
@@ -171,6 +182,7 @@ mysql -u root --password="$MARIADB_PWD" $MYSQL_SOCKET_PARAM < "${TEMPLATES_DIR}/
 
 # 5. Install Siege
 if ! [ -x "$(command -v siege)" ]; then
+  rm -rf siege
   # shellcheck disable=SC2046
   git clone https://github.com/JoeDog/siege.git
   cd siege || exit 1

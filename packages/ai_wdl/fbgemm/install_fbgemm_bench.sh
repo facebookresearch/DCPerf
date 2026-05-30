@@ -1134,6 +1134,10 @@ cat > "${BENCHMARKS_DIR}/run.sh" <<'EOF'
 # Usage: ./run.sh <binary_name> [args...]
 set -e
 
+# Raise file descriptor limit to avoid "Too many open files" errors
+# when running multiprocessing benchmarks (e.g., tbe_inference_benchmark with --copies)
+ulimit -n 1000000 2>/dev/null || true
+
 BIN="$1"
 shift
 
