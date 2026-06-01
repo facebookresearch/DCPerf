@@ -76,6 +76,7 @@ register_benchmark_suite("system")
 register_benchmark_suite("ai")
 register_benchmark_suite("ehw")
 register_benchmark_suite("dpu_perf")
+register_benchmark_suite("mem")
 
 
 class BenchpressConfig:

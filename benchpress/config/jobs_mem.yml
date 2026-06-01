@@ -11,3 +11,76 @@
     - "history=500000"
     #- "size=Large" # XL 120GB, XXL 225GB
     #- "gridpoints=11303"
+
+# GAPBS jobs - default to a synthetic Kronecker graph (-g {scale}, 2^scale
+# vertices, ~16 avg degree) so the job is self-contained and avoids the
+# multi-GB twitter download. The graph and trials are exposed as `vars` so
+# they can be tuned per run by editing the values below.
+#
+# Default scale=25 -> 2^25 ≈ 33M vertices, ~530M edges, ~4-8 GB CSR
+# footprint (more for sssp/pr which keep additional per-vertex state).
+# Bump scale to 27-28 for >32 GB working sets; each +1 in scale roughly
+# doubles memory. To run against a pre-built real-world graph instead,
+# replace the args block with e.g.:
+#   args:
+#     - -f ./benchmarks/graphs/twitter.sg
+#     - -n {trials}
+- benchmark: gapbs_bc
+  name: gapbs_bc
+  description: GAP bc benchmark (betweenness centrality) on a synthetic Kronecker graph
+  args:
+    - -g {scale}
+    - -n {trials}
+  vars:
+    - "scale=25"
+    - "trials=3"
+
+- benchmark: gapbs_bfs
+  name: gapbs_bfs
+  description: GAP bfs benchmark on a synthetic Kronecker graph
+  args:
+    - -g {scale}
+    - -n {trials}
+  vars:
+    - "scale=25"
+    - "trials=3"
+
+- benchmark: gapbs_cc
+  name: gapbs_cc
+  description: GAP cc benchmark (connected components) on a synthetic Kronecker graph
+  args:
+    - -g {scale}
+    - -n {trials}
+  vars:
+    - "scale=25"
+    - "trials=3"
+
+- benchmark: gapbs_tc
+  name: gapbs_tc
+  description: GAP tc benchmark (triangle count, requires undirected graph; -g auto-undirects)
+  args:
+    - -g {scale}
+    - -n {trials}
+  vars:
+    - "scale=25"
+    - "trials=3"
+
+- benchmark: gapbs_pr
+  name: gapbs_pr
+  description: GAP pr benchmark (PageRank) on a synthetic Kronecker graph
+  args:
+    - -g {scale}
+    - -n {trials}
+  vars:
+    - "scale=25"
+    - "trials=3"
+
+- benchmark: gapbs_sssp
+  name: gapbs_sssp
+  description: GAP sssp benchmark on a synthetic Kronecker graph
+  args:
+    - -g {scale}
+    - -n {trials}
+  vars:
+    - "scale=25"
+    - "trials=3"
