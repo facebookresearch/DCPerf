@@ -11,3 +11,111 @@ xsbench:
       - Threads
       - Est. Memory Usage (MB)
       - Total XS Lookups
+
+gapbs_bc:
+  parser: gapbs
+  install_script: ./packages/gapbs/install_gapbs.sh
+  cleanup_script: ./packages/gapbs/cleanup_gapbs.sh
+  install_markers:
+    - ./benchmarks/gapbs/bc
+  path: ./benchmarks/gapbs/bc
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - generate_time
+    - build_time
+    - trial_time
+    - average_time
+
+gapbs_bfs:
+  parser: gapbs
+  install_script: ./packages/gapbs/install_gapbs.sh
+  cleanup_script: ./packages/gapbs/cleanup_gapbs.sh
+  install_markers:
+    - ./benchmarks/gapbs/bfs
+  path: ./benchmarks/gapbs/bfs
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - generate_time
+    - build_time
+    - trial_time
+    - average_time
+
+gapbs_cc:
+  parser: gapbs
+  install_script: ./packages/gapbs/install_gapbs.sh
+  cleanup_script: ./packages/gapbs/cleanup_gapbs.sh
+  install_markers:
+    - ./benchmarks/gapbs/cc
+  path: ./benchmarks/gapbs/cc
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - generate_time
+    - build_time
+    - trial_time
+    - average_time
+
+gapbs_pr:
+  parser: gapbs
+  install_script: ./packages/gapbs/install_gapbs.sh
+  cleanup_script: ./packages/gapbs/cleanup_gapbs.sh
+  install_markers:
+    - ./benchmarks/gapbs/pr
+  path: ./benchmarks/gapbs/pr
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - generate_time
+    - build_time
+    - trial_time
+    - average_time
+
+gapbs_sssp:
+  parser: gapbs
+  install_script: ./packages/gapbs/install_gapbs.sh
+  cleanup_script: ./packages/gapbs/cleanup_gapbs.sh
+  install_markers:
+    - ./benchmarks/gapbs/sssp
+  path: ./benchmarks/gapbs/sssp
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - generate_time
+    - build_time
+    - trial_time
+    - average_time
+
+gapbs_tc:
+  parser: gapbs
+  install_script: ./packages/gapbs/install_gapbs.sh
+  cleanup_script: ./packages/gapbs/cleanup_gapbs.sh
+  install_markers:
+    - ./benchmarks/gapbs/tc
+  path: ./benchmarks/gapbs/tc
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - generate_time
+    - build_time
+    - trial_time
+    - average_time
