@@ -204,6 +204,27 @@ DCPerf's system bench focuses on system performance metrics (kernel scheduler an
   </tr>
 </table>
 
+### Internal benchmarks
+
+DCPerf also includes Meta-internal benchmarks that are defined in `benchpress/config/benchmarks_internal.yml` / `jobs_internal.yml` and are not part of the public release. They share the same install / run / report interface as the public benchmarks.
+
+<table>
+  <tr>
+   <td>Benchmarks </td>
+   <td>Programming Languages</td>
+   <td>Libraries / SW Stack</td>
+   <td>Application domain they represent</td>
+  </tr>
+  <tr>
+   <td>
+    <a href="packages/silo/README.md">Silo</a>
+   </td>
+   <td>C++</td>
+   <td>Masstree, jemalloc, libnuma, BerkeleyDB, OpenSSL, lz4</td>
+   <td>In-memory OLTP database; runs TPC-C, YCSB (A/B/C/E/F), and a KV microbenchmark. From <a href="https://github.com/stephentu/silo">stephentu/silo</a> (Tu et al., SOSP 2013).</td>
+  </tr>
+</table>
+
 ## Representativeness
 
 When designing DCPerf, our goal is to have it represent real-world production
