@@ -11,6 +11,7 @@ from benchpress.lib import open_source
 from .copy import CopyMoveHook
 from .cpu_limit import CpuLimit
 from .cpu_mpstat import CpuMpstat
+from .cpu_pidstat import CpuPidstat
 from .emon import Emon
 from .file import FileHook
 from .perf import Perf
@@ -34,6 +35,7 @@ def register_hooks(factory):
     factory.register("emon", Emon)
     factory.register("file", FileHook)
     factory.register("perf", Perf)
+    factory.register("cpu-pidstat", CpuPidstat)
     factory.register("result", ResultHook)
     factory.register("shell", ShellHook)
     factory.register("tao_instruction", TaoInstructionHook)
