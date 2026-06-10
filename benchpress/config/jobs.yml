@@ -1859,6 +1859,12 @@
 
 - benchmark: graph500_omp_csr
   name: graph500_omp_csr
-  description: Graph500 v3 reference BFS (MPI). Single positional arg is SCALE (log2 vertices); run.sh wraps the binary with mpirun -np <largest pow2 <= nproc>.
+  description: >
+    Graph500 v3 reference BFS (MPI). Single positional arg is SCALE (log2
+    vertices); run.sh wraps the binary with mpirun -np <largest pow2 <= nproc>.
+    SCALE defaults to 20 and can be overridden per-run from the CLI, e.g.
+    `./benchpress run graph500_omp_csr --role_input='{"scale":"25"}'`.
   args:
-    - "20"
+    - "{scale}"
+  vars:
+    - "scale=20"

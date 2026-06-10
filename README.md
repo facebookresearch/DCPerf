@@ -223,6 +223,14 @@ DCPerf also includes Meta-internal benchmarks that are defined in `benchpress/co
    <td>Masstree, jemalloc, libnuma, BerkeleyDB, OpenSSL, lz4</td>
    <td>In-memory OLTP database; runs TPC-C, YCSB (A/B/C/E/F), and a KV microbenchmark. From <a href="https://github.com/stephentu/silo">stephentu/silo</a> (Tu et al., SOSP 2013).</td>
   </tr>
+  <tr>
+   <td>
+    <a href="packages/graph500/README.md">Graph500</a>
+   </td>
+   <td>C</td>
+   <td>OpenMPI</td>
+   <td>Data-intensive supercomputing benchmark; v3 reference BFS over a synthetic Kronecker graph, reported in TEPS. From <a href="https://github.com/graph500/graph500">graph500/graph500</a> (tag 3.0.1). Graph SCALE is user-configurable via <code>-i '{"scale":"&lt;N&gt;"}'</code>.</td>
+  </tr>
 </table>
 
 ## Representativeness
