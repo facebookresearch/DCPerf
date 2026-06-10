@@ -36,6 +36,7 @@ from .generic import JSONParser
 from .graph500 import Graph500Parser
 from .health_check import HealthCheckParser
 from .iperf import IperfParser
+from .liblinear import LibLinearParser
 from .loaded_latency import LoadedLatencyParser
 from .ltp import LtpParser
 from .mediawiki import MediawikiParser
@@ -116,6 +117,7 @@ def register_parsers(factory):
     factory.register("stream", StreamParser)
     factory.register("mlc", MlcParser)
     factory.register("iperf", IperfParser)
+    factory.register("liblinear", LibLinearParser)
     factory.register("loaded_latency", LoadedLatencyParser)
     factory.register("openssl_speed", OpensslSpeedParser)
     factory.register("ovs_ofperf", OvsOfperfParser)
