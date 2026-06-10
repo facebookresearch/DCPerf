@@ -29,8 +29,16 @@ Emitted metrics:
 """
 
 import json
+import re
 
 from benchpress.lib.parser import Parser
+
+# Optional marker the runner prints to label which backend produced the
+# numbers (e.g. "spdk-nvmf" = SPDK-computed digest; a vendor HW-digest path is
+# a vendor SPDK build under the same marker) so an SPDK-software result is
+# never mistaken for a DPU result. Stripped before json.loads; surfaced as
+# applied_backend.
+_BACKEND_RE = re.compile(r"^##DPU_PERF_BACKEND=(.+?)##\s*$")
 
 
 def _job_iops_bw(job):
@@ -47,7 +55,16 @@ def _job_iops_bw(job):
 class SpdkIntegrityParser(Parser):
     def parse(self, stdout, stderr, returncode):
         metrics = {}
-        text = "".join(stdout)
+        # Strip the optional backend marker (non-JSON) before parsing the fio
+        # JSON document; record it as applied_backend.
+        json_lines = []
+        for raw in stdout:
+            m = _BACKEND_RE.match(raw.strip())
+            if m:
+                metrics["applied_backend"] = m.group(1)
+                continue
+            json_lines.append(raw)
+        text = "".join(json_lines)
         try:
             results = json.loads(text)
         except (ValueError, TypeError):

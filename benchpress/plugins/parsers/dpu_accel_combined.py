@@ -42,6 +42,11 @@ from .stream import StreamParser
 
 _LEG_RE = re.compile(r"^##DPU_PERF_LEG=([a-z0-9_]+),([a-z0-9_]+)##\s*$")
 _FAIL_RE = re.compile(r"^##DPU_PERF_LEG_FAILED=([a-z0-9_]+)##\s*$")
+# Labels which backend actually produced a leg's numbers (driver name for the
+# DPDK legs, "host-openssl" for host legs, "spdk-accel" for the SPDK accel
+# legs) so a software-PMD / SPDK-software result is never mistaken for a DPU
+# result. Surfaced as <label>_applied_backend.
+_BACKEND_RE = re.compile(r"^##DPU_PERF_BACKEND=([a-z0-9_]+),(.+?)##\s*$")
 
 _SUBPARSERS = {
     "openssl_speed": OpensslSpeedParser,
@@ -108,8 +113,19 @@ def _split_sections(stdout):
         line = raw.rstrip("\r\n")
         m = _LEG_RE.match(line)
         if m:
-            cur = {"label": m.group(1), "sub": m.group(2), "lines": [], "failed": False}
+            cur = {
+                "label": m.group(1),
+                "sub": m.group(2),
+                "lines": [],
+                "failed": False,
+                "backend": None,
+            }
             sections.append(cur)
+            continue
+        mb = _BACKEND_RE.match(line)
+        if mb:
+            if cur is not None and cur["label"] == mb.group(1):
+                cur["backend"] = mb.group(2)
             continue
         mf = _FAIL_RE.match(line)
         if mf:
@@ -119,13 +135,15 @@ def _split_sections(stdout):
         if cur is not None:
             cur["lines"].append(line)
     for s in sections:
-        yield s["label"], s["sub"], s["lines"], s["failed"]
+        yield s["label"], s["sub"], s["lines"], s["failed"], s["backend"]
 
 
 class DpuAccelCombinedParser(Parser):
     def parse(self, stdout, stderr, returncode):
         metrics = {}
-        for label, sub, lines, failed in _split_sections(stdout):
+        for label, sub, lines, failed, backend in _split_sections(stdout):
+            if backend:
+                metrics[f"{label}_applied_backend"] = backend
             if failed:
                 metrics[f"{label}_failed"] = True
                 continue
