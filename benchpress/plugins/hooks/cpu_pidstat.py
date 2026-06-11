@@ -4,9 +4,12 @@
 # LICENSE file in the root directory of this source tree.
 
 # pyre-unsafe
+import csv
 import logging
 import os
+import re
 import signal
+import statistics
 import subprocess
 import threading
 import time
@@ -52,6 +55,161 @@ POLLER_STOP_TIMEOUT = 5  # seconds to wait for the poller thread to stop
 MAX_TRIES = 5  # number of attempts to terminate pidstat process
 PROCESS_TERMINATE_DELAY = 3  # seconds
 
+# Per-thread metrics parsed from `pidstat -t` output. `breakdown_keys` must be a
+# subset of these.
+SUPPORTED_METRICS = ["CPU", "usr", "system", "guest", "wait"]
+# Statistics computed per metric per timestamp bucket.
+DEFAULT_STATS = ["avg"]
+
+
+def normalize_thread_name(tname):
+    """Strip numeric suffixes so threads are grouped by pool.
+
+    Handles both 'srvIOThread24' -> 'srvIOThread' and 'dptworker_24' ->
+    'dptworker'.
+    """
+    tname = re.sub(r"\d+$", "", tname)
+    return tname.strip("_").strip("-").strip()
+
+
+def _variance(values):
+    """Population variance; 0.0 for fewer than two values (matches numpy.var)."""
+    if len(values) < 2:
+        return 0.0
+    return statistics.pvariance(values)
+
+
+_STAT_FUNCS = {
+    "avg": statistics.fmean,
+    "min": min,
+    "max": max,
+    "var": _variance,
+}
+
+
+def _format_stat(stat, values):
+    func = _STAT_FUNCS.get(stat)
+    if func is None:
+        return ""
+    return f"{func(values):.2f}"
+
+
+def _parse_pidstat_log(log_path, normalize_thread_names):
+    """Parse a raw `pidstat -t -h` log.
+
+    Returns (threads, ordered_timestamps), where threads is
+    {tname: {timestamp: {metric: [vals]}}} and ordered_timestamps preserves the
+    order timestamps first appear in the log. Relying on file order (rather than
+    parsing the time-of-day) keeps rows correctly ordered for runs that span
+    midnight.
+    """
+    threads = {}
+    # dict preserves insertion order and dedupes, acting as an ordered set.
+    ordered_timestamps = {}
+    with open(log_path, "r", encoding="utf-8") as f:
+        for line in f:
+            data = line.split()
+            # AM/PM format (>=12 cols): "HH:MM:SS AM UID TGID TID ... Command"
+            # 24h format    (>=11 cols): "HH:MM:SS    UID TGID TID ... Command"
+            # Only per-thread lines (TGID="-", TID=<int>) carry usable data;
+            # the parent process line has TID="-" and aggregate %CPU.
+            if len(data) >= 12 and data[3] == "-" and data[4].isdigit():
+                ts_offset = 2
+            elif len(data) >= 11 and data[2] == "-" and data[3].isdigit():
+                ts_offset = 1
+            else:
+                continue
+
+            # Skip pidstat's terminal "Average:" rollup lines.
+            if data[0].lower().startswith("average"):
+                continue
+
+            try:
+                timestamp = " ".join(data[:ts_offset])
+                usr = float(data[ts_offset + 3])
+                system = float(data[ts_offset + 4])
+                guest = float(data[ts_offset + 5])
+                wait = float(data[ts_offset + 6])
+                cpu = float(data[ts_offset + 7])
+                tname = data[ts_offset + 9].replace("|__", "")
+            except (ValueError, IndexError):
+                continue
+
+            if normalize_thread_names:
+                tname = normalize_thread_name(tname)
+
+            ordered_timestamps.setdefault(timestamp)
+            bucket = threads.setdefault(tname, {}).setdefault(
+                timestamp, {metric: [] for metric in SUPPORTED_METRICS}
+            )
+            bucket["usr"].append(usr)
+            bucket["system"].append(system)
+            bucket["guest"].append(guest)
+            bucket["wait"].append(wait)
+            bucket["CPU"].append(cpu)
+    return threads, list(ordered_timestamps)
+
+
+def _header_row(sorted_tnames, breakdown_keys, stats):
+    header = ["Timestamp"]
+    for tname in sorted_tnames:
+        header.append(f"{tname}:count")
+        for key in breakdown_keys:
+            for stat in stats:
+                header.append(f"{tname}:{key}.{stat}")
+    return header
+
+
+def _data_row(threads, timestamp, sorted_tnames, breakdown_keys, stats):
+    row = [timestamp]
+    empty_width = 1 + len(breakdown_keys) * len(stats)
+    for tname in sorted_tnames:
+        bucket = threads[tname].get(timestamp)
+        if bucket is None:
+            row.extend([""] * empty_width)
+            continue
+        row.append(len(bucket["CPU"]))
+        for key in breakdown_keys:
+            values = bucket[key]
+            row.extend(_format_stat(stat, values) for stat in stats)
+    return row
+
+
+def postprocess_pidstat_log(
+    log_path,
+    csv_path,
+    breakdown_keys=None,
+    stats=None,
+    normalize_thread_names=True,
+):
+    """Turn a raw pidstat log into a per-thread-pool CSV.
+
+    Returns True if a CSV was written, False if the log had no thread data.
+    """
+    breakdown_keys = breakdown_keys or list(SUPPORTED_METRICS)
+    stats = stats or list(DEFAULT_STATS)
+
+    threads, ordered_timestamps = _parse_pidstat_log(log_path, normalize_thread_names)
+    if not threads:
+        logger.warning("pidstat: no thread data found in %s; skipping CSV", log_path)
+        return False
+
+    sorted_tnames = sorted(threads.keys())
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(_header_row(sorted_tnames, breakdown_keys, stats))
+        for timestamp in ordered_timestamps:
+            writer.writerow(
+                _data_row(threads, timestamp, sorted_tnames, breakdown_keys, stats)
+            )
+    logger.info(
+        "pidstat: wrote post-processed CSV (%d thread pools) to %s",
+        len(sorted_tnames),
+        csv_path,
+    )
+    return True
+
 
 class CpuPidstat(Hook):
     """CpuPidstat collects per-process / per-thread CPU utilization in the
@@ -59,9 +217,8 @@ class CpuPidstat(Hook):
 
     A background `pidstat` command is run at the configured poll interval
     (default 5 seconds). The raw log is written under the benchmark metrics
-    directory for the job and can be post-processed offline (e.g. via
-    `ai_codesign/nonprod/aashvi/pidstat_postprocessing.py`) to produce a
-    per-thread-pool CSV.
+    directory for the job, and after_job post-processes it into a
+    per-thread-pool CSV (avg/min/max/var per metric) alongside the log.
 
     Instead of monitoring every process (`-p ALL`), which is slow on hosts with
     many processes, the hook looks up the benchmark in BENCHMARK_PROCESS_MAP to
@@ -78,6 +235,10 @@ class CpuPidstat(Hook):
           args:
             - '-t'           # per-thread stats
             - '-h'           # no per-sample headers
+          # Post-processing (CSV) options:
+          breakdown_keys: ['CPU', 'usr', 'system']  # subset of supported metrics
+          stats: ['avg', 'max']                     # avg / min / max / var
+          normalize_thread_names: true              # group threads by pool
     ```
 
     The sampling interval can be configured via the `interval` option (default
@@ -92,6 +253,11 @@ class CpuPidstat(Hook):
         self.stdout = None
         self._poller_thread = None
         self._stop_event = None
+        # Set in before_job; consumed by after_job's post-processing step.
+        self.log_path = None
+        self.breakdown_keys = list(SUPPORTED_METRICS)
+        self.stats = list(DEFAULT_STATS)
+        self.normalize_thread_names = True
 
     def before_job(self, opts, job):
         # Guard against instance reuse: if a prior job's resources are still
@@ -113,6 +279,25 @@ class CpuPidstat(Hook):
         args = list(opts.get("args", DEFAULT_OPTIONS))
         interval = str(opts.get("interval", DEFAULT_INTERVAL))
 
+        # Post-processing config (consumed in after_job).
+        self.breakdown_keys = list(opts.get("breakdown_keys", SUPPORTED_METRICS))
+        unsupported = [
+            key for key in self.breakdown_keys if key not in SUPPORTED_METRICS
+        ]
+        if unsupported:
+            raise ValueError(
+                f"Unsupported pidstat breakdown_keys {unsupported}; "
+                f"supported metrics are {SUPPORTED_METRICS}"
+            )
+        self.stats = list(opts.get("stats", DEFAULT_STATS))
+        unsupported_stats = [stat for stat in self.stats if stat not in _STAT_FUNCS]
+        if unsupported_stats:
+            raise ValueError(
+                f"Unsupported pidstat stats {unsupported_stats}; "
+                f"supported stats are {sorted(_STAT_FUNCS)}"
+            )
+        self.normalize_thread_names = opts.get("normalize_thread_names", True)
+
         metrics_dir = util.create_benchmark_metrics_dir(job.uuid)
         job_name = job.name.replace(" ", "_")
         iteration_num = job.iteration_num
@@ -121,6 +306,7 @@ class CpuPidstat(Hook):
         )
         # File descriptor closed in after_job(..)
         self.stdout = open(stdout_path, "w", encoding="utf-8")  # noqa P201
+        self.log_path = stdout_path
 
         cmd_prefix = list(DEFAULT_PATH) + args
 
@@ -244,8 +430,31 @@ class CpuPidstat(Hook):
         if self.stdout:
             self.stdout.close()
 
+        self._postprocess_log()
+
         # Reset state so the instance can be safely reused for another job.
         self.background_process = None
         self.stdout = None
         self._poller_thread = None
         self._stop_event = None
+        self.log_path = None
+
+    def _postprocess_log(self):
+        """Turn the raw pidstat log into a per-thread-pool CSV.
+
+        Failures here must not break teardown, so IO errors are swallowed after
+        logging.
+        """
+        if not self.log_path:
+            return
+        csv_path = os.path.splitext(self.log_path)[0] + ".csv"
+        try:
+            postprocess_pidstat_log(
+                self.log_path,
+                csv_path,
+                breakdown_keys=self.breakdown_keys,
+                stats=self.stats,
+                normalize_thread_names=self.normalize_thread_names,
+            )
+        except OSError as e:
+            logger.warning("pidstat: post-processing failed: %s", e)
