@@ -187,6 +187,25 @@ graph500_omp_csr:
     - harmonic_mean_TEPS
     - harmonic_stddev_TEPS
 
+liblinear:
+  parser: liblinear
+  install_script: ./packages/liblinear/install_liblinear.sh
+  cleanup_script: ./packages/liblinear/cleanup_liblinear.sh
+  install_markers:
+    - ./packages/liblinear/bin/train
+    - ./packages/liblinear/bin/predict
+  path: ./packages/liblinear/run_liblinear.sh
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+  metrics:
+    - train_time_sec
+    - throughput_instances_per_sec
+    - accuracy_pct
+    - train_instances
+
 sleep:
   path: /usr/bin/sleep
   parser: returncode

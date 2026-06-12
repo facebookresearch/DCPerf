@@ -1868,3 +1868,39 @@
     - "{scale}"
   vars:
     - "scale=20"
+
+- benchmark: liblinear
+  name: liblinear_synthetic
+  description: >
+    liblinear training + prediction on a synthetic arbitrary-size LIBSVM
+    dataset. Size/shape are overridable, e.g.
+    `./benchpress run liblinear_synthetic -i '{"samples": "500000"}'`.
+  args:
+    dataset: synthetic
+    samples: "{samples}"
+    features: "{features}"
+    density: "{density}"
+    noise: "{noise}"
+    seed: "{seed}"
+    solver: "{solver}"
+    cost: "{cost}"
+    bias: "{bias}"
+  vars:
+    - 'samples=200000'
+    - 'features=1000'
+    - 'density=0.1'
+    - 'noise=0.0'
+    - 'seed=42'
+    - 'solver=1'
+    - 'cost=1'
+    - 'bias=1'
+  hooks: []
+
+- benchmark: liblinear
+  name: liblinear_rcv1
+  description: liblinear training + prediction on the real rcv1.binary dataset
+  args:
+    dataset: rcv1
+    solver: 1
+    cost: 1
+  hooks: []
