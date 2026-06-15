@@ -676,8 +676,23 @@ def choose_perfspect():
         return DummyPerfUtil
 
 
+def _is_neoversev3_string(value: str) -> bool:
+    normalized = value.lower().replace("_", "-")
+    return "neoverse-v3" in normalized
+
+
 def is_neoversev3():
-    """Detect ARM Neoverse V3 platforms via DMI system-family or system-version."""
+    """Detect ARM Neoverse V3 platforms.
+
+    Phoenix/Rainier reports the CPU as `Neoverse-V3AE` in `lscpu`'s
+    `Model name`, while DMI fields may not include a Neoverse string. Check
+    the CPU model first so these hosts use the packaged Neoverse V3 perfutils
+    instead of falling back to the generic ARM topdown-tool path.
+    """
+    model_name = get_cpuinfo().get("Model name", "")
+    if _is_neoversev3_string(model_name):
+        return True
+
     for dmi_field in ("system-family", "system-version"):
         try:
             p = subprocess.Popen(
@@ -687,7 +702,7 @@ def is_neoversev3():
                 encoding="utf-8",
             )
             out, _ = p.communicate()
-            if "neoverse-v3" in out.lower() or "neoverse_v3" in out.lower():
+            if _is_neoversev3_string(out):
                 return True
         except Exception:
             pass
