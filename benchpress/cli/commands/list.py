@@ -13,6 +13,7 @@ from .command import BenchpressCommand, TABLE_FORMAT
 
 
 class ListCommand(BenchpressCommand):
+    # pyrefly: ignore [bad-override-param-name]
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser("list", help="list all configured jobs")
         parser.set_defaults(command=self)

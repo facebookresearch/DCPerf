@@ -84,7 +84,9 @@ def _read_cipher_block(lines: Iterable[str]) -> dict:
         rates_MBps = [r * 1000.0 / 1_000_000.0 for r in rates_kBps]  # → MB/s decimal
         for i, mbps in enumerate(rates_MBps):
             block = bytes_columns[i] if i < len(bytes_columns) else i
+            # pyrefly: ignore [unsupported-operation]
             out[f"cipher_throughput_MBps_at_{block}B"] = mbps
+        # pyrefly: ignore [unsupported-operation]
         out["cipher_throughput_MBps_max"] = max(rates_MBps)
         return out
     return out

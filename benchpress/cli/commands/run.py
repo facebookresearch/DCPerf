@@ -141,6 +141,7 @@ class RunCommand(BenchpressCommand):
 
         return version_info
 
+    # pyrefly: ignore [bad-override-param-name]
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser("run", help="run job(s)")
         parser.set_defaults(command=self)

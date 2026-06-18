@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class InstallCommand(BenchpressCommand):
+    # pyrefly: ignore [bad-override-param-name]
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser("install", help="install benchmarks")
         parser.set_defaults(command=self)

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReportCommand(BenchpressCommand):
+    # pyrefly: ignore [bad-override-param-name]
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser("report", help="report job results")
         parser.set_defaults(command=self)

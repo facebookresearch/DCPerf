@@ -17,6 +17,7 @@ from .command import BenchpressCommand, TABLE_FORMAT
 
 
 class InfoCommand(BenchpressCommand):
+    # pyrefly: ignore [bad-override-param-name]
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser(
             "info", help="Provides more details about specific job."
