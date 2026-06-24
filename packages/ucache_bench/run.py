@@ -401,6 +401,7 @@ def run_server(args: argparse.Namespace) -> None:
     print(stdout)
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
+        # pyrefly: ignore [unbound-name]
         t_prof.cancel()
 
 

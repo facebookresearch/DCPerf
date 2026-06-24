@@ -70,6 +70,7 @@ AVAIL_MONITORS = {
 }
 
 if not open_source:
+    # pyrefly: ignore [unbound-name]
     AVAIL_MONITORS["fb_power"] = fb_power.FBPower
 
 logger = logging.getLogger(__name__)

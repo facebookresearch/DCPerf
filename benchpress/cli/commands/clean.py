@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class CleanCommand(BenchpressCommand):
+    # pyrefly: ignore [bad-override-param-name]
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser("clean", help="remove benchmark dependencies")
         parser.set_defaults(command=self)

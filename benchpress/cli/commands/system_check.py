@@ -56,6 +56,7 @@ class SystemCheckCommand(BenchpressCommand):
         self.run_cmd = run_cmd
         self.fbk_version_regex: str = r"(\d+\.\d+\.\d+-\d+)_fbk(\d+)"
 
+    # pyrefly: ignore [bad-override-param-name]
     def populate_parser(self, subparsers):
         parser = subparsers.add_parser(
             "system_check",
@@ -368,6 +369,7 @@ class SystemCheckCommand(BenchpressCommand):
             result.value = "<not present>"
             self.fatal("Could not parse serf result as JSON")
 
+        # pyrefly: ignore [unbound-name]
         for item in result_json:
             match: bool = True
             for selector in selectors:

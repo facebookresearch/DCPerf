@@ -124,6 +124,7 @@ def _parse_dmihandle_record(
 
         if in_list_state:
             if not list_element_match or kv_record_match or list_record_match:
+                # pyrefly: ignore [unsupported-operation]
                 dmihandle_data[list_acc_name] = list_acc
                 in_list_state = False
                 list_acc_name = ""
