@@ -30,6 +30,15 @@ FEEDSIM_ROOT_SRC="${FEEDSIM_ROOT}/src"
 BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
 BREAKDOWN_FOLDER="$FEEDSIM_ROOT"
 
+# Load custom-built libraries from staging (for self-contained fbpkg)
+if [ -d "${FEEDSIM_ROOT}/staging/lib" ]; then
+    export LD_LIBRARY_PATH="${FEEDSIM_ROOT}/staging/lib:${FEEDSIM_ROOT}/staging/lib64:${LD_LIBRARY_PATH:-}"
+fi
+# LibTorch shared libs (needed unconditionally when built with DLRM support)
+if [ -d "${FEEDSIM_ROOT}/third_party/libtorch/lib" ]; then
+    export LD_LIBRARY_PATH="${FEEDSIM_ROOT}/third_party/libtorch/lib:${LD_LIBRARY_PATH:-}"
+fi
+
 # Source runtime breakdown utilities
 source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 

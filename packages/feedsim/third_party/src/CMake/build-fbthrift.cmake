@@ -7,18 +7,29 @@ set(FBTHRIFT_ROOT_DIR ${oldisim_SOURCE_DIR}/third_party/fbthrift)
 
 include(ExternalProject)
 
+# Escape semicolons in CMAKE_PREFIX_PATH for ExternalProject
+string(REPLACE ";" "|" _ESCAPED_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
+
+if(CMAKE_PREFIX_PATH)
+    set(_fbthrift_prefix_path_opt "-DCMAKE_PREFIX_PATH:PATH=<INSTALL_DIR>|${_ESCAPED_PREFIX_PATH}")
+else()
+    set(_fbthrift_prefix_path_opt "")
+endif()
+
 ExternalProject_Add(fbthrift
     SOURCE_DIR "${FBTHRIFT_ROOT_DIR}"
     DOWNLOAD_COMMAND ""
     INSTALL_DIR ${OLDISIM_STAGING_DIR}
+    LIST_SEPARATOR |
     CMAKE_ARGS
         -Dthriftpy3:BOOL=OFF
         -DCMAKE_BUILD_TYPE:STRING=Release
+        -DCMAKE_POLICY_VERSION_MINIMUM:STRING=${CMAKE_POLICY_VERSION_MINIMUM}
         -DCMAKE_C_COMPILER:STRING=${CMAKE_C_COMPILER}
         -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}
         -DCMAKE_CXX_FLAGS_RELEASE:STRING=${CMAKE_CXX_FLAGS_RELEASE}
         -DCMAKE_EXE_LINKER_FLAGS:STRING=${CMAKE_EXE_LINKER_FLAGS}
-        -DCMAKE_PREFIX_PATH:PATH=<INSTALL_DIR>
+        ${_fbthrift_prefix_path_opt}
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
         -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=True
         -DCXX_STD:STRING=gnu++17
@@ -39,11 +50,20 @@ ExternalProject_Add(fbthrift
         <INSTALL_DIR>/lib/libthrift-core.a
         <INSTALL_DIR>/lib/libcompiler_base.a
         <INSTALL_DIR>/lib/libconcurrency.a
+        <INSTALL_DIR>/lib/librpcmetadata.a
+        <INSTALL_DIR>/lib/libthriftmetadata.a
+        <INSTALL_DIR>/lib/libthrifttype.a
+        <INSTALL_DIR>/lib/libthrifttyperep.a
+        <INSTALL_DIR>/lib/libthriftanyrep.a
+        <INSTALL_DIR>/lib/libthriftannotation.a
+        <INSTALL_DIR>/lib/libcommon.a
+        <INSTALL_DIR>/lib/libruntime.a
+        <INSTALL_DIR>/lib/libserverdbginfo.a
     BUILD_COMMAND
-        cmake --build .
+        cmake --build . --parallel ${BUILD_PARALLEL_JOBS}
     )
 
-ExternalProject_Add_StepDependencies(fbthrift configure folly wangle fmt mvfst)
+ExternalProject_Add_StepDependencies(fbthrift configure folly wangle mvfst fmt mvfst)
 
 ExternalProject_Get_Property(fbthrift SOURCE_DIR)
 ExternalProject_Get_Property(fbthrift INSTALL_DIR)
@@ -61,9 +81,15 @@ set(FBTHRIFT_LIBRARIES
     ${INSTALL_DIR}/lib/libasync.a
     ${INSTALL_DIR}/lib/libconcurrency.a
     ${INSTALL_DIR}/lib/libthriftfrozen2.a
-    ${INSTALL_DIR}/lib/libcompiler_ast.a
-    ${INSTALL_DIR}/lib/libcompiler_lib.a
-    ${INSTALL_DIR}/lib/libcompiler_base.a
+    ${INSTALL_DIR}/lib/librpcmetadata.a
+    ${INSTALL_DIR}/lib/libthriftmetadata.a
+    ${INSTALL_DIR}/lib/libthrifttype.a
+    ${INSTALL_DIR}/lib/libthrifttyperep.a
+    ${INSTALL_DIR}/lib/libthriftanyrep.a
+    ${INSTALL_DIR}/lib/libthriftannotation.a
+    ${INSTALL_DIR}/lib/libcommon.a
+    ${INSTALL_DIR}/lib/libruntime.a
+    ${INSTALL_DIR}/lib/libserverdbginfo.a
 )
 
 set(FBTHRIFT_INCLUDE_DIR

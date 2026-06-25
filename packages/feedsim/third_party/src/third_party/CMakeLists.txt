@@ -13,9 +13,11 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/cereal/CMakeLists.txt" OR
 endif()
 
 
-# Apply gapbs patches
+# Apply gapbs patches (skip if `patch` command is not available, e.g., on RE hosts
+# where patches were pre-applied during the deps download stage)
+find_program(PATCH_EXECUTABLE patch)
 file(GLOB PATCHES "${CMAKE_SOURCE_DIR}/patches/*.patch")
-if(PATCHES)
+if(PATCHES AND PATCH_EXECUTABLE)
     message(STATUS "Patches: ${PATCHES}")
     foreach(PATCH ${PATCHES})
         message(STATUS "Applying ${PATCH}")

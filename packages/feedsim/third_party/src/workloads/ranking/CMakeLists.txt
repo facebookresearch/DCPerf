@@ -21,6 +21,15 @@ find_package(Boost 1.53.0
 find_package(OpenSSL REQUIRED)
 find_package(DoubleConversion REQUIRED)
 find_package(Glog REQUIRED)
+find_package(gflags REQUIRED)
+find_library(XXHASH_LIBRARY NAMES xxhash)
+# Use gflags_static when building the self-contained fbpkg (FEEDSIM_SELF_CONTAINED=ON).
+# The traditional install path uses system-installed shared gflags.
+if(FEEDSIM_SELF_CONTAINED)
+    set(GFLAGS_TARGET gflags_static)
+else()
+    set(GFLAGS_TARGET gflags)
+endif()
 find_package(BZip2 REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Zstd REQUIRED)
@@ -210,6 +219,23 @@ target_link_libraries(LeafNodeRank
 )
 target_compile_options(LeafNodeRank PUBLIC -fno-omit-frame-pointer -ffunction-sections -fdata-sections)
 target_link_options(LeafNodeRank PRIVATE -Wl,--gc-sections -Wl,--allow-multiple-definition)
+# Re-link libraries at the end to resolve circular static library dependencies
+# (folly/glog use gflags DEFINE_* macros, fbthrift has internal cross-lib refs)
+target_link_libraries(LeafNodeRank PRIVATE
+    ${FBTHRIFT_LIBRARIES}
+    ${FOLLY_LIBRARIES}
+    glog::glog
+    ${GFLAGS_TARGET}
+    ${XXHASH_LIBRARY}
+    ${DOUBLE_CONVERSION_LIBRARY}
+    ${FBTHRIFT_LIBRARIES}
+    ${FOLLY_LIBRARIES}
+    Boost::context Boost::filesystem Boost::system
+    OpenSSL::SSL OpenSSL::Crypto
+    ${FIZZ_LIBRARIES} ${WANGLE_LIBRARIES}
+    ${FMT_LIBRARIES} ${IBERTY_LIBRARIES}
+    ${CMAKE_DL_LIBS} Threads::Threads
+)
 
 
 # Generate getopts for ParentNodeRank
@@ -274,6 +300,29 @@ target_link_libraries(
         ${LIBEVENT_LIB}
         ${JEMALLOC_LIB}
         ${FBTHRIFT_LIBRARIES}
+)
+# Re-link to resolve circular deps (static libs need explicit transitive deps)
+target_link_libraries(ParentNodeRank PRIVATE
+    ${FBTHRIFT_LIBRARIES}
+    ${FOLLY_LIBRARIES}
+    glog::glog
+    ${GFLAGS_TARGET}
+    ${XXHASH_LIBRARY}
+    ${DOUBLE_CONVERSION_LIBRARY}
+    ${FBTHRIFT_LIBRARIES}
+    Boost::context
+    Boost::filesystem
+    Boost::atomic
+    Boost::system
+    Boost::program_options
+    Boost::regex
+    OpenSSL::SSL OpenSSL::Crypto
+    ${FIZZ_LIBRARIES}
+    ${WANGLE_LIBRARIES}
+    ${FBTHRIFT_LIBRARIES}
+    ${FOLLY_LIBRARIES}
+    ${IBERTY_LIBRARIES}
+    ${FMT_LIBRARIES}
 )
 
 # Generate getops for DriverNodeRank
@@ -374,4 +423,18 @@ target_link_libraries(
         ${FIZZ_LIBRARIES}
         ${WANGLE_LIBRARIES}
         ${FMT_LIBRARIES}
+)
+target_compile_options(DriverNodeRank PUBLIC -fno-omit-frame-pointer)
+target_link_options(DriverNodeRank PRIVATE -Wl,--gc-sections -Wl,--allow-multiple-definition)
+# Re-link to resolve circular deps (static libs need explicit ordering).
+# Use --whole-archive for OpenSSL to ensure all symbols are included.
+target_link_libraries(DriverNodeRank PRIVATE
+    ${FBTHRIFT_LIBRARIES} ${FOLLY_LIBRARIES} glog::glog ${GFLAGS_TARGET}
+    ${XXHASH_LIBRARY} ${DOUBLE_CONVERSION_LIBRARY} ${FBTHRIFT_LIBRARIES}
+    ${FOLLY_LIBRARIES}
+    Boost::context Boost::filesystem Boost::system
+    -Wl,--whole-archive OpenSSL::SSL OpenSSL::Crypto -Wl,--no-whole-archive
+    ${FIZZ_LIBRARIES} ${WANGLE_LIBRARIES}
+    ${FMT_LIBRARIES} ${IBERTY_LIBRARIES}
+    ${CMAKE_DL_LIBS} Threads::Threads
 )
