@@ -12,6 +12,7 @@ ExternalProject_Add(wangle
     DOWNLOAD_COMMAND ""
     CMAKE_ARGS
         -DCMAKE_BUILD_TYPE:STRING=Release
+        -DCMAKE_POLICY_VERSION_MINIMUM:STRING=${CMAKE_POLICY_VERSION_MINIMUM}
         -DCMAKE_PREFIX_PATH:STRING=${CMAKE_PREFIX_PATH}
         -DCMAKE_C_COMPILER:STRING=${CMAKE_C_COMPILER}
         -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}
@@ -25,7 +26,7 @@ ExternalProject_Add(wangle
     BINARY_DIR ${oldisim_BINARY_DIR}/third_party/wangle
     BUILD_BYPRODUCTS ${OLDISIM_STAGING_DIR}/lib/libwangle.a
     BUILD_COMMAND
-        cmake --build .
+        cmake --build . --parallel ${BUILD_PARALLEL_JOBS}
 )
 
 ExternalProject_Get_Property(wangle BINARY_DIR)

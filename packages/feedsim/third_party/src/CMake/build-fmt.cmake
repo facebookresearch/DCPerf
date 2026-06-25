@@ -12,6 +12,7 @@ ExternalProject_Add(fmt
     INSTALL_DIR ${OLDISIM_STAGING_DIR}
     CMAKE_ARGS
         -DCMAKE_BUILD_TYPE:STRING=Release
+        -DCMAKE_POLICY_VERSION_MINIMUM:STRING=${CMAKE_POLICY_VERSION_MINIMUM}
         -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=True
         -DCMAKE_CXX_STANDARD:BOOL=20
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
@@ -19,6 +20,8 @@ ExternalProject_Add(fmt
         -DFMT_TEST:BOOL=OFF
     BINARY_DIR ${oldisim_BINARY_DIR}/third_party/fmt
     BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libfmt.a
+    BUILD_COMMAND
+        cmake --build . --parallel ${BUILD_PARALLEL_JOBS}
     )
 
 # Specify include dir
