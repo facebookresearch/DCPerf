@@ -14,6 +14,14 @@ if [[ "$THIS_CMD" =~ -q.*[0-9]+ ]]; then
 fi
 
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
+# Load custom-built shared libraries from staging (for self-contained fbpkg).
+# Must be set before any feedsim binary (LeafNodeRank, DriverNodeRank) runs.
+if [ -d "${FEEDSIM_ROOT}/staging/lib" ]; then
+    export LD_LIBRARY_PATH="${FEEDSIM_ROOT}/staging/lib:${FEEDSIM_ROOT}/staging/lib64:${LD_LIBRARY_PATH:-}"
+fi
+if [ -d "${FEEDSIM_ROOT}/third_party/libtorch/lib" ]; then
+    export LD_LIBRARY_PATH="${FEEDSIM_ROOT}/third_party/libtorch/lib:${LD_LIBRARY_PATH:-}"
+fi
 FEEDSIM_LOG_PREFIX="${FEEDSIM_ROOT}/feedsim-multi-inst-${FIXQPS_SUFFIX}"
 # Calculate number of instances based on physical cores (1 instance per 50 physical cores).
 # nproc returns logical cores; divide by 2 when SMT is active to get physical cores.
