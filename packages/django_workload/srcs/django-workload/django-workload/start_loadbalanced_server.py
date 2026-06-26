@@ -53,6 +53,8 @@ class UWSGIManager:
         haproxy_config: Optional[str] = None,
         uwsgi_config: Optional[str] = None,
         log_dir: Optional[str] = None,
+        worker_transport: str = "tcp",
+        socket_dir: Optional[str] = None,
     ):
         """
         Initialize uWSGI manager.
@@ -66,6 +68,8 @@ class UWSGIManager:
             haproxy_config: Path to HAProxy config (auto-generated if None)
             uwsgi_config: Path to uWSGI config (default: uwsgi_loadbalanced.ini)
             log_dir: Directory for log files (None = logs to stdout only)
+            worker_transport: Worker backend transport (tcp or unix)
+            socket_dir: Directory for worker Unix sockets (auto-generated if None)
         """
         self.num_workers = num_workers
         self.base_port = base_port
@@ -75,6 +79,14 @@ class UWSGIManager:
         self.haproxy_config = haproxy_config
         self.uwsgi_config = uwsgi_config
         self.log_dir = Path(log_dir) if log_dir else None
+        self.worker_transport = worker_transport
+        if self.worker_transport not in ("tcp", "unix"):
+            raise ValueError("worker_transport must be 'tcp' or 'unix'")
+        self.socket_dir = (
+            Path(socket_dir)
+            if socket_dir
+            else Path(f"/tmp/django-proxygen-{os.getpid()}")
+        )
 
         # Process tracking
         self.uwsgi_process: Optional[subprocess.Popen] = None
@@ -99,6 +111,43 @@ class UWSGIManager:
         # Validate prerequisites
         self._validate_setup()
 
+    def _uses_unix_sockets(self) -> bool:
+        return self.worker_transport == "unix"
+
+    def _worker_socket_path(self, worker_id: int) -> Path:
+        return self.socket_dir / f"worker{worker_id}.sock"
+
+    def _prepare_socket_dir(self) -> None:
+        if not self._uses_unix_sockets():
+            return
+
+        self.socket_dir.mkdir(parents=True, exist_ok=True)
+        for worker_id in range(1, self.num_workers + 1):
+            socket_path = self._worker_socket_path(worker_id)
+            if not socket_path.exists():
+                continue
+            if socket_path.is_socket() or socket_path.is_file():
+                socket_path.unlink()
+                continue
+            raise RuntimeError(f"Refusing to remove non-socket path: {socket_path}")
+
+    def _cleanup_socket_dir(self) -> None:
+        if not self._uses_unix_sockets() or not self.socket_dir.exists():
+            return
+
+        for worker_id in range(1, self.num_workers + 1):
+            socket_path = self._worker_socket_path(worker_id)
+            if socket_path.exists() and (
+                socket_path.is_socket() or socket_path.is_file()
+            ):
+                socket_path.unlink()
+        try:
+            self.socket_dir.rmdir()
+        except OSError:
+            logger.info(
+                "Leaving non-empty socket directory in place: %s", self.socket_dir
+            )
+
     def start_uwsgi(self) -> None:
         """Start uWSGI with workers."""
         # Determine config path
@@ -117,9 +166,13 @@ class UWSGIManager:
 
         # Prepare environment variables
         env = os.environ.copy()
-        env["PROXYGEN_BASE_PORT"] = str(self.base_port)
         env["PROXYGEN_THREADS"] = str(self.threads_per_worker)
         env["PYTHONUNBUFFERED"] = "1"
+        env["PROXYGEN_WORKER_TRANSPORT"] = self.worker_transport
+        if self._uses_unix_sockets():
+            env["PROXYGEN_SOCKET_DIR"] = str(self.socket_dir)
+        else:
+            env["PROXYGEN_BASE_PORT"] = str(self.base_port)
 
         # Ensure LD_LIBRARY_PATH is set for Python 3.14 shared library
         # This is critical for uWSGI workers to find libpython3.14.so
@@ -144,10 +197,16 @@ class UWSGIManager:
             bufsize=1,
         )
 
+        worker_target = (
+            f"Unix sockets in {self.socket_dir}"
+            if self._uses_unix_sockets()
+            else f"Ports: {self.base_port}-{self.base_port + self.num_workers - 1}"
+        )
         logger.info(
             f"uWSGI started (PID: {self.uwsgi_process.pid})\n"
             f"  Workers: {self.num_workers}\n"
-            f"  Ports: {self.base_port}-{self.base_port + self.num_workers - 1}\n"
+            f"  Worker transport: {self.worker_transport}\n"
+            f"  {worker_target}\n"
             f"  Threads per worker: {self.threads_per_worker}"
         )
 
@@ -204,6 +263,8 @@ class UWSGIManager:
                 logger.warning(f"Error closing log file: {e}")
 
         logger.info("All processes stopped")
+
+        self._cleanup_socket_dir()
 
         if self.log_dir:
             logger.info(f"Logs saved to: {self.log_dir}")
@@ -299,10 +360,11 @@ class UWSGIManager:
             )
             raise RuntimeError("HAProxy not installed")
 
-        # Check port availability
-        ports_to_check = [self.lb_port, self.stats_port] + [
-            self.base_port + i for i in range(self.num_workers)
-        ]
+        # Check port availability. Unix worker mode only needs HAProxy's
+        # public frontend and stats ports. Worker backends are socket paths.
+        ports_to_check = [self.lb_port, self.stats_port]
+        if not self._uses_unix_sockets():
+            ports_to_check.extend(self.base_port + i for i in range(self.num_workers))
 
         unavailable_ports = []
         for port in ports_to_check:
@@ -324,6 +386,8 @@ class UWSGIManager:
             )
             raise RuntimeError("Required ports are not available")
 
+        self._prepare_socket_dir()
+
     def generate_haproxy_config(self) -> Path:
         """Generate HAProxy configuration dynamically."""
         config_path = self.script_dir / "haproxy_generated.cfg"
@@ -331,9 +395,12 @@ class UWSGIManager:
         # Generate server entries for all workers
         server_lines = []
         for i in range(1, self.num_workers + 1):
-            port = self.base_port + (i - 1)
+            if self._uses_unix_sockets():
+                backend_addr = str(self._worker_socket_path(i))
+            else:
+                backend_addr = f"127.0.0.1:{self.base_port + (i - 1)}"
             server_lines.append(
-                f"    server worker{i} 127.0.0.1:{port} "
+                f"    server worker{i} {backend_addr} "
                 f"check weight 1 maxconn 10000 inter 2s fall 3 rise 2"
             )
 
@@ -405,12 +472,16 @@ listen stats
             all_ready = True
 
             for i in range(self.num_workers):
-                port = self.base_port + i
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                if self._uses_unix_sockets():
+                    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    target = str(self._worker_socket_path(i + 1))
+                else:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    target = ("127.0.0.1", self.base_port + i)
                 sock.settimeout(0.5)
 
                 try:
-                    result = sock.connect_ex(("127.0.0.1", port))
+                    result = sock.connect_ex(target)
                     if result != 0:
                         all_ready = False
                 except Exception:
@@ -486,7 +557,7 @@ listen stats
                 "\n" + "=" * 60 + "\n"
                 f"Load-balanced Django server with uWSGI is running!\n"
                 f"  Access via: http://127.0.0.1:{self.lb_port}\n"
-                f"  uWSGI workers: {self.num_workers} (ports {self.base_port}-{self.base_port + self.num_workers - 1})\n"
+                f"  uWSGI workers: {self.num_workers} ({self.worker_transport} backends)\n"
                 f"  Stats UI: http://127.0.0.1:{self.stats_port}/stats\n"
                 f"  Threads per worker: {self.threads_per_worker}\n"
                 "\n"
@@ -1100,6 +1171,20 @@ def main():
     )
 
     parser.add_argument(
+        "--worker-transport",
+        choices=["tcp", "unix"],
+        default="tcp",
+        help="Transport for worker backends when using uWSGI",
+    )
+
+    parser.add_argument(
+        "--socket-dir",
+        type=str,
+        default=None,
+        help="Directory for worker Unix sockets (auto-generated if not provided)",
+    )
+
+    parser.add_argument(
         "--uwsgi-config",
         type=str,
         default=None,
@@ -1120,6 +1205,8 @@ def main():
             haproxy_config=args.haproxy_config,
             uwsgi_config=args.uwsgi_config,
             log_dir=args.log_dir,
+            worker_transport=args.worker_transport,
+            socket_dir=args.socket_dir,
         )
     else:
         # Direct Python worker processes

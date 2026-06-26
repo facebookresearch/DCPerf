@@ -60,11 +60,39 @@ logger = logging.getLogger(__name__)
 
 # Global server instance for this worker process
 _proxygen_server = None
-_server_thread = None
 _shutdown_event = threading.Event()
 
 
-def start_proxygen_server(port=None, threads=None):
+def _get_uwsgi_worker_id():
+    try:
+        import uwsgi
+
+        return uwsgi.worker_id()
+    except (ImportError, AttributeError):
+        return None
+
+
+def _get_unix_socket_path(explicit_path=None):
+    if explicit_path:
+        return explicit_path
+
+    if "PROXYGEN_UNIX_SOCKET" in os.environ:
+        return os.environ["PROXYGEN_UNIX_SOCKET"]
+
+    socket_dir = os.environ.get("PROXYGEN_SOCKET_DIR")
+    if not socket_dir:
+        return None
+
+    worker_id = _get_uwsgi_worker_id()
+    if worker_id is None or worker_id <= 0:
+        raise RuntimeError(
+            "PROXYGEN_SOCKET_DIR requires a positive uWSGI worker id; "
+            "set PROXYGEN_UNIX_SOCKET for explicit standalone Unix socket mode"
+        )
+    return os.path.join(socket_dir, f"worker{worker_id}.sock")
+
+
+def start_proxygen_server(port=None, threads=None, unix_socket_path=None):
     """
     Start Proxygen server in this uWSGI worker process or standalone.
 
@@ -75,12 +103,16 @@ def start_proxygen_server(port=None, threads=None):
     Args:
         port: Port to listen on (overrides environment variable and uWSGI worker_id calculation)
         threads: Number of threads (overrides environment variable, 0=auto-detect)
+        unix_socket_path: Unix socket path to listen on instead of a TCP port
 
-    Port Selection Logic (in order of precedence):
-        1. Explicit port argument (for standalone mode)
-        2. PROXYGEN_PORT environment variable
-        3. Calculate from uWSGI worker_id: PROXYGEN_BASE_PORT + worker_id - 1
-        4. Default to 8000
+    Listen Address Selection Logic (in order of precedence):
+        1. Explicit unix_socket_path argument
+        2. PROXYGEN_UNIX_SOCKET environment variable
+        3. PROXYGEN_SOCKET_DIR + uWSGI worker_id
+        4. Explicit port argument
+        5. PROXYGEN_PORT environment variable
+        6. Calculate from uWSGI worker_id: PROXYGEN_BASE_PORT + worker_id - 1
+        7. Default to 8000
 
     Architecture:
         Proxygen RequestData
@@ -91,43 +123,45 @@ def start_proxygen_server(port=None, threads=None):
             ↓
         Django views/middleware
     """
-    global _proxygen_server, _server_thread
+    global _proxygen_server
 
     # Get configuration from environment or arguments
     ip = os.environ.get("PROXYGEN_IP", "0.0.0.0")
+    unix_socket_path = _get_unix_socket_path(unix_socket_path)
 
-    # Determine port with precedence: argument > env > uWSGI worker_id > default
-    if port is not None:
+    # Determine port with precedence: argument > env > uWSGI worker_id > default.
+    # Unix socket mode still passes a placeholder port to the binding for
+    # backward-compatible constructor arguments, but the port is not bound.
+    if unix_socket_path:
+        port = port if port is not None else 0
+    elif port is not None:
         # Explicit port argument (standalone mode)
         port = port
     elif "PROXYGEN_PORT" in os.environ:
         # Environment variable (explicit port)
         port = int(os.environ["PROXYGEN_PORT"])
     else:
-        # Try to calculate from uWSGI worker_id
-        try:
-            import uwsgi
-
-            worker_id = uwsgi.worker_id()
+        worker_id = _get_uwsgi_worker_id()
+        if worker_id is not None:
             base_port = int(os.environ.get("PROXYGEN_BASE_PORT", "8001"))
             port = base_port + worker_id - 1
             logger.info(
                 f"uWSGI worker {worker_id}: calculated port {port} "
                 f"(base_port={base_port} + worker_id={worker_id} - 1)"
             )
-        except (ImportError, AttributeError):
+        else:
             # Not running under uWSGI or uwsgi.worker_id() not available
-            port = int(os.environ.get("PROXYGEN_PORT", "8000"))
+            port = 8000
 
     threads = (
         threads if threads is not None else int(os.environ.get("PROXYGEN_THREADS", "0"))
     )  # 0 = auto-detect
 
+    listen_target = unix_socket_path if unix_socket_path else f"{ip}:{port}"
     logger.info(
-        "Initializing Proxygen server in worker %d: %s:%d with %d threads",
+        "Initializing Proxygen server in worker %d: %s with %d threads",
         os.getpid(),
-        ip,
-        port,
+        listen_target,
         threads,
     )
 
@@ -153,12 +187,13 @@ def start_proxygen_server(port=None, threads=None):
             threads=threads,
             async_callback=django_handler,
             is_async=True,
+            unix_socket_path=unix_socket_path or "",
         )
 
         # Start server
         _proxygen_server.start()
         logger.info(
-            "Proxygen server started in worker %d on %s:%d", os.getpid(), ip, port
+            "Proxygen server started in worker %d on %s", os.getpid(), listen_target
         )
 
     except Exception as e:
@@ -222,10 +257,18 @@ if __name__ == "__main__":
         default=0,
         help="Number of threads (0 = auto-detect based on CPU cores)",
     )
+    parser.add_argument(
+        "--unix-socket",
+        type=str,
+        default=None,
+        help="Unix socket path to listen on instead of a TCP port",
+    )
 
     args = parser.parse_args()
 
-    start_proxygen_server(port=args.port, threads=args.threads)
+    start_proxygen_server(
+        port=args.port, threads=args.threads, unix_socket_path=args.unix_socket
+    )
 
     try:
         # Keep process alive
