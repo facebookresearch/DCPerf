@@ -70,6 +70,15 @@ sed -i 's|git://|https://|g' .gitmodules
 # shellcheck disable=SC2046
 git $(fwdproxy-config --git-command git) submodule update --init --recursive
 
+# Apply the cgroup-cpuset-awareness + no-NUMA patch (authored against the pinned
+# commit above). It (a) removes Silo's explicit NUMA memory hint so DB-pool
+# placement is pure first-touch, and (b) adds a `dbtest --cgroup-aware` runtime
+# flag (default off) that pins each worker to its inherited cgroup cpuset CPU.
+# Default behavior (no flag) matches stock Silo. Applied to the freshly-cloned
+# tree, so a plain check-then-apply is sufficient.
+SILO_PATCH="${SCRIPT_DIR}/patches/silo-cgroup-aware-no-numa.patch"
+git apply --check "${SILO_PATCH}" && git apply "${SILO_PATCH}"
+
 # GCC >= 7 elevates -Wmaybe-uninitialized to a fatal error in masstree's
 # str.hh; suppress just that warning when the compiler supports the flag.
 MAYBE_UNINIT="$(echo | gcc -Wmaybe-uninitialized -E - >/dev/null 2>&1 \

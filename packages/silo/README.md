@@ -88,6 +88,35 @@ Example: pin to NUMA node 0 for a single-socket TPC-C scan:
 SILO_NUMA_NODE=0 ./benchpress_cli.py run silo_tpcc_allcores
 ```
 
+### cgroup-cpuset awareness (`--cgroup-aware`)
+
+This package's `dbtest` differs from upstream Silo in two ways (see
+`packages/silo/patches/silo-cgroup-aware-no-numa.patch`):
+
+- **No explicit NUMA memory policy.** Upstream interleaves each per-core memory
+  region onto the logical core's NUMA node via `mbind`/`numa_interleave_memory`.
+  That hint is removed; the DB pool is placed by **first-touch** instead. For a
+  normal node-pinned run the resulting placement is effectively the same.
+- **`--cgroup-aware` runtime flag (default off).** Stock Silo derives each
+  worker's NUMA node from its *logical* core id (always node 0), so when confined
+  to a cgroup v2 `cpuset` that excludes node 0 it aborts in `numa_run_on_node`.
+  Pass `--cgroup-aware` to make each worker read the inherited affinity mask
+  (`sched_getaffinity`, i.e. the cgroup `cpuset.cpus`), pin to exactly its
+  granted physical CPU, and let memory follow by first-touch. Without the flag,
+  behavior is unchanged from stock Silo.
+
+The flag flows through `run.sh` verbatim (job `args:` or ad-hoc). It only affects
+worker pinning when pinning is active (i.e. with `--numa-memory`, which implies
+`--pin-cpus`), and with `--cgroup-aware` the binary additionally requires
+`num-threads <=` the number of CPUs the cgroup grants. Example — one instance
+confined to an off-node core range via a cgroup v2 leaf, honoring the cpuset:
+
+```bash
+./benchmarks/silo/dbtest --verbose true --bench ycsb \
+    --num-threads 32 --scale-factor 100000 --runtime 30 \
+    --numa-memory 64G --cgroup-aware --bench-opts '--workload-mix=50,0,50,0'
+```
+
 ## Reporting and measurement
 
 The Silo parser (`benchpress/plugins/parsers/silo.py`) extracts these metric groups from `dbtest`'s stderr:

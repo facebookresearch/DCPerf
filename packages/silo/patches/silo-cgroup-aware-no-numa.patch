@@ -1,0 +1,340 @@
+diff --git a/allocator.cc b/allocator.cc
+index 6c3067a..6308b8a 100644
+--- a/allocator.cc
++++ b/allocator.cc
+@@ -307,15 +307,6 @@ allocator::ReleaseArenas(void **arenas)
+   }
+ }
+ 
+-static void
+-numa_hint_memory_placement(void *px, size_t sz, unsigned node)
+-{
+-  struct bitmask *bm = numa_allocate_nodemask();
+-  numa_bitmask_setbit(bm, node);
+-  numa_interleave_memory(px, sz, bm);
+-  numa_free_nodemask(bm);
+-}
+-
+ void
+ allocator::FaultRegion(size_t cpu)
+ {
+@@ -350,10 +341,11 @@ allocator::FaultRegion(size_t cpu)
+     perror("madvise");
+     ALWAYS_ASSERT(false);
+   }
+-  numa_hint_memory_placement(
+-      pc.region_begin,
+-      (uintptr_t)pc.region_end - (uintptr_t)pc.region_begin,
+-      numa_node_of_cpu(cpu));
++  // No explicit NUMA mempolicy: the region is placed by first-touch below. With
++  // --cgroup-aware, the faulting thread is sched_setaffinity-pinned to this
++  // region's local core, so pages land on the local node; otherwise placement
++  // follows the thread's stock numa_run_on_node() scheduling. Either way we no
++  // longer steer memory with mbind/numa_interleave_memory.
+   const size_t nfaults =
+     ((uintptr_t)pc.region_end - (uintptr_t)pc.region_begin) / hugepgsize;
+   std::cerr << "cpu" << cpu << " starting faulting region ("
+diff --git a/benchmarks/bench.cc b/benchmarks/bench.cc
+index a1c12bb..1ab78d8 100644
+--- a/benchmarks/bench.cc
++++ b/benchmarks/bench.cc
+@@ -39,6 +39,7 @@ uint64_t ops_per_worker = 0;
+ int run_mode = RUNMODE_TIME;
+ int enable_parallel_loading = false;
+ int pin_cpus = 0;
++int cgroup_aware = 0;
+ int slow_exit = 0;
+ int retry_aborted_transaction = 0;
+ int no_reset_counters = 0;
+diff --git a/benchmarks/bench.h b/benchmarks/bench.h
+index 777cce0..3684ab5 100644
+--- a/benchmarks/bench.h
++++ b/benchmarks/bench.h
+@@ -37,6 +37,7 @@ extern uint64_t ops_per_worker;
+ extern int run_mode;
+ extern int enable_parallel_loading;
+ extern int pin_cpus;
++extern int cgroup_aware;
+ extern int slow_exit;
+ extern int retry_aborted_transaction;
+ extern int no_reset_counters;
+diff --git a/benchmarks/dbtest.cc b/benchmarks/dbtest.cc
+index 0605654..1050cba 100644
+--- a/benchmarks/dbtest.cc
++++ b/benchmarks/dbtest.cc
+@@ -10,9 +10,11 @@
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <sys/sysinfo.h>
++#include <numa.h>
+ 
+ #include "../allocator.h"
+ #include "../stats_server.h"
++#include "../core.h"
+ #include "bench.h"
+ #include "bdb_wrapper.h"
+ #include "ndb_wrapper.h"
+@@ -104,6 +106,7 @@ main(int argc, char **argv)
+       {"disable-snapshots"          , no_argument       , &disable_snapshots         , 1}   ,
+       {"stats-server-sockfile"      , required_argument , 0                          , 'x'} ,
+       {"no-reset-counters"          , no_argument       , &no_reset_counters         , 1}   ,
++      {"cgroup-aware"               , no_argument       , &cgroup_aware              , 1}   ,
+       {0, 0, 0, 0}
+     };
+     int option_index = 0;
+@@ -232,6 +235,22 @@ main(int argc, char **argv)
+   }
+ #endif
+ 
++  // Publish the runtime cgroup-cpuset-awareness toggle to the core layer before
++  // any worker is created. When on, force the allowed-CPU table to initialize
++  // now (before workers narrow their own affinity) and require one core per
++  // thread (strict per-core pinning).
++  coreid::set_cgroup_aware(cgroup_aware);
++  if (cgroup_aware) {
++    const unsigned allowed = coreid::num_allowed_cpus();
++    if (pin_cpus && nthreads > allowed) {
++      cerr << "[ERROR] --cgroup-aware: requested " << nthreads
++           << " threads but cgroup grants " << allowed
++           << " CPUs; strict per-core pinning requires num-threads <= allowed CPUs"
++           << endl;
++      return 1;
++    }
++  }
++
+   // initialize the numa allocator
+   if (numa_memory > 0) {
+     const size_t maxpercpu = util::iceil(
+@@ -339,6 +358,21 @@ main(int argc, char **argv)
+     cerr << "  scale       : " << scale_factor              << endl;
+     cerr << "  num-cpus    : " << ncpus                     << endl;
+     cerr << "  num-threads : " << nthreads                  << endl;
++    cerr << "  cgroup-aware: " << cgroup_aware              << endl;
++    if (cgroup_aware) {
++      cerr << "  allowed-cpus: " << coreid::num_allowed_cpus() << " [";
++      for (unsigned i = 0; i < coreid::num_allowed_cpus(); i++)
++        cerr << (i ? "," : "") << coreid::phys_cpu(i);
++      cerr << "]" << endl;
++      if (pin_cpus) {
++        cerr << "  worker pin map (logical -> phys_cpu -> numa_node):" << endl;
++        for (size_t i = 0; i < nthreads; i++) {
++          const unsigned p = coreid::phys_cpu(i);
++          cerr << "    " << i << " -> " << p
++               << " -> " << numa_node_of_cpu(p) << endl;
++        }
++      }
++    }
+     cerr << "  db-type     : " << db_type                   << endl;
+     cerr << "  basedir     : " << basedir                   << endl;
+     cerr << "  txn-flags   : " << hexify(txn_flags)         << endl;
+diff --git a/benchmarks/ycsb.cc b/benchmarks/ycsb.cc
+index 80313e1..1003c51 100644
+--- a/benchmarks/ycsb.cc
++++ b/benchmarks/ycsb.cc
+@@ -197,7 +197,9 @@ protected:
+   {
+     if (!pin_cpus)
+       return;
+-    const size_t a = worker_id % coreid::num_cpus_online();
++    const size_t ncpus =
++        coreid::cgroup_aware() ? coreid::num_allowed_cpus() : coreid::num_cpus_online();
++    const size_t a = worker_id % ncpus;
+     const size_t b = a % nthreads;
+     rcu::s_instance.pin_current_thread(b);
+   }
+@@ -348,7 +350,8 @@ protected:
+   make_loaders()
+   {
+     vector<bench_loader *> ret;
+-    const unsigned long ncpus = coreid::num_cpus_online();
++    const unsigned long ncpus =
++        coreid::cgroup_aware() ? coreid::num_allowed_cpus() : coreid::num_cpus_online();
+     if (enable_parallel_loading && nkeys >= nthreads) {
+       // divide the key space amongst all the loaders
+       const size_t nkeysperloader = nkeys / ncpus;
+@@ -387,9 +390,14 @@ protected:
+           for (size_t j = 0; j < nloaders; j++, loader_i++) {
+             const uint64_t kend = (loader_i + 1 == ncpus) ?
+               nkeys : (loader_i + 1) * nkeysperloader;
++            // cgroup-aware: pin loaders by logical id (translated to the granted
++            // physical CPU in pin_current_thread); else stock NUMA-RR physical cpu.
++            const unsigned loader_pin = coreid::cgroup_aware()
++                ? (unsigned)(loader_i % nthreads)
++                : cpus_avail[j % cpus_avail.size()];
+             ret.push_back(
+                 new ycsb_parallel_usertable_loader(
+-                  0, db, open_tables, cpus_avail[j % cpus_avail.size()],
++                  0, db, open_tables, loader_pin,
+                   loader_i * nkeysperloader, kend));
+           }
+         }
+@@ -403,7 +411,8 @@ protected:
+   virtual vector<bench_worker *>
+   make_workers()
+   {
+-    const unsigned alignment = coreid::num_cpus_online();
++    const unsigned alignment =
++        coreid::cgroup_aware() ? coreid::num_allowed_cpus() : coreid::num_cpus_online();
+     const int blockstart =
+       coreid::allocate_contiguous_aligned_block(nthreads, alignment);
+     ALWAYS_ASSERT(blockstart >= 0);
+diff --git a/core.cc b/core.cc
+index 8f91fde..09be290 100644
+--- a/core.cc
++++ b/core.cc
+@@ -1,4 +1,11 @@
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
++#include <sched.h>
++
+ #include <unistd.h>
++#include <atomic>
++#include <vector>
+ 
+ #include "amd64.h"
+ #include "core.h"
+@@ -7,6 +14,36 @@
+ using namespace std;
+ using namespace util;
+ 
++// The set of physical CPUs the process is allowed to run on, read once from
++// sched_getaffinity() (reflects cgroup cpuset / numactl / taskset). Sorted
++// ascending. Initialized lazily; thread-safe via C++11 function-local static.
++static const vector<unsigned> &
++allowed_cpus()
++{
++  static const vector<unsigned> cpus = []() {
++    vector<unsigned> v;
++    cpu_set_t set;
++    CPU_ZERO(&set);
++    if (sched_getaffinity(0, sizeof(set), &set) == 0) {
++      for (unsigned i = 0; i < unsigned(CPU_SETSIZE); i++)
++        if (CPU_ISSET(i, &set))
++          v.push_back(i);
++    }
++    if (v.empty()) {
++      // Fallback: identity over online CPUs (preserves legacy behavior if
++      // sched_getaffinity fails for any reason).
++      const long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
++      for (long i = 0; i < (nprocs > 0 ? nprocs : 1); i++)
++        v.push_back((unsigned) i);
++    }
++    return v;
++  }();
++  return cpus;
++}
++
++// Runtime toggle storage (set once from dbtest main before workers start).
++static atomic<bool> g_cgroup_aware(false);
++
+ int
+ coreid::allocate_contiguous_aligned_block(unsigned n, unsigned alignment)
+ {
+@@ -31,5 +68,33 @@ coreid::num_cpus_online()
+   return nprocs;
+ }
+ 
++unsigned
++coreid::phys_cpu(unsigned logical)
++{
++  const vector<unsigned> &cpus = allowed_cpus();
++  ALWAYS_ASSERT(!cpus.empty());
++  // Wrap defensively; callers (and a dbtest startup check) should ensure
++  // nthreads <= num_allowed_cpus(), but modulo avoids OOB regardless.
++  return cpus[logical % cpus.size()];
++}
++
++unsigned
++coreid::num_allowed_cpus()
++{
++  return allowed_cpus().size();
++}
++
++bool
++coreid::cgroup_aware()
++{
++  return g_cgroup_aware.load(memory_order_acquire);
++}
++
++void
++coreid::set_cgroup_aware(bool enabled)
++{
++  g_cgroup_aware.store(enabled, memory_order_release);
++}
++
+ __thread int coreid::tl_core_id = -1;
+ atomic<unsigned> coreid::g_core_count(0);
+diff --git a/core.h b/core.h
+index 1750ee3..908901b 100644
+--- a/core.h
++++ b/core.h
+@@ -59,6 +59,22 @@ public:
+   // actual number of CPUs online for the system
+   static unsigned num_cpus_online();
+ 
++  // Maps a logical core id to the physical CPU it should run on, honoring the
++  // process's CPU affinity mask (cgroup cpuset / numactl / taskset). For an
++  // unconfined process this is the identity map (logical i -> cpu i). Only
++  // consulted when cgroup_aware() is true.
++  static unsigned phys_cpu(unsigned logical);
++
++  // Number of CPUs the process is actually allowed to run on (size of the
++  // sched_getaffinity mask). Equals num_cpus_online() when unconfined.
++  static unsigned num_allowed_cpus();
++
++  // Runtime toggle (dbtest --cgroup-aware, default false). When true, worker
++  // pinning + sizing honor the inherited cgroup cpuset via phys_cpu()/
++  // num_allowed_cpus(); when false, stock Silo behavior is used.
++  static bool cgroup_aware();
++  static void set_cgroup_aware(bool enabled);
++
+ private:
+   // the core ID of this core: -1 if not set
+   static __thread int tl_core_id;
+diff --git a/rcu.cc b/rcu.cc
+index 946008e..ac8c466 100644
+--- a/rcu.cc
++++ b/rcu.cc
+@@ -1,3 +1,6 @@
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
+ #include <unistd.h>
+ #include <time.h>
+ #include <string.h>
+@@ -10,6 +13,7 @@
+ #include "rcu.h"
+ #include "macros.h"
+ #include "util.h"
++#include "core.h"
+ #include "thread.h"
+ #include "counter.h"
+ #include "lockguard.h"
+@@ -287,10 +291,22 @@ rcu::pin_current_thread(size_t cpu)
+ {
+   sync &s = mysync();
+   s.set_pin_cpu(cpu);
+-  auto node = numa_node_of_cpu(cpu);
+-  // pin to node
+-  ALWAYS_ASSERT(!numa_run_on_node(node));
+-  // is numa_run_on_node() guaranteed to take effect immediately?
++  if (coreid::cgroup_aware()) {
++    // cgroup-cpuset-aware: translate the logical core id to the physical CPU the
++    // inherited cpuset grants us, and confine this thread to exactly that one
++    // CPU. Memory then follows via first-touch (no explicit mempolicy). This is
++    // what lets Silo run under a cpuset that excludes node 0 without aborting.
++    const unsigned pcpu = coreid::phys_cpu(cpu);
++    cpu_set_t set;
++    CPU_ZERO(&set);
++    CPU_SET(pcpu, &set);
++    ALWAYS_ASSERT(!sched_setaffinity(0, sizeof(set), &set));
++  } else {
++    // Stock Silo: run on the NUMA node derived from the logical core id.
++    auto node = numa_node_of_cpu(cpu);
++    ALWAYS_ASSERT(!numa_run_on_node(node));
++  }
++  // is the affinity change guaranteed to take effect immediately?
+   ALWAYS_ASSERT(!sched_yield());
+   // release current thread-local cache back to allocator
+   s.do_release();
