@@ -372,8 +372,12 @@ set +u
 source ./venv_cpython/bin/activate
 set -u
 
+# CPython 3.14 is built as a shared library — pip3.14 needs libpython3.14.so
 export LD_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
 export CMAKE_LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
+
+# Python 3.14 venvs don't bundle setuptools by default — install it first
+pip3.14 install setuptools wheel
 export CPATH="${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build/include:${DJANGO_SERVER_ROOT}/Python-3.14.2/Include"
 # Set LIBRARY_PATH and LDFLAGS to ensure packages link against CPython's libpython
 export LIBRARY_PATH="${CPYTHON_INSTALL_PREFIX}/lib"
@@ -425,6 +429,9 @@ export LIBRARY_PATH="${CINDER_INSTALL_PREFIX}/lib"
 export LDFLAGS="-L${CINDER_INSTALL_PREFIX}/lib -Wl,-rpath,${CINDER_INSTALL_PREFIX}/lib"
 source ./venv_cinder/bin/activate
 set -u
+
+# Python 3.14 venvs don't bundle setuptools by default — install it first
+pip3.14 install setuptools wheel
 
 # Install pylibmc (required by django-workload)
 cd "${PYLIBMC_DIR}"

@@ -85,7 +85,11 @@ DATABASES = {
         "TEST_NAME": "test_db",
         "HOST": "localhost",
         "OPTIONS": {
-            "replication": {"strategy_class": "SimpleStrategy", "replication_factor": 1}
+            "replication": {
+                "strategy_class": "SimpleStrategy",
+                "replication_factor": 1,
+            },
+            "connection": {"protocol_version": 4},
         },
     }
 }
