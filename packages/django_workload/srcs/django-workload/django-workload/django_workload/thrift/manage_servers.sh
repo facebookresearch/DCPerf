@@ -288,10 +288,21 @@ generate_haproxy_config() {
 
 # Start HAProxy load balancer
 start_haproxy() {
-    # Check if HAProxy is already running
+    # Check if HAProxy is already running — verify BOTH the PID and the port
+    # Using kill -0 alone is unreliable because PIDs get recycled by other processes
     if [ -f "$HAPROXY_PID" ] && kill -0 "$(cat "$HAPROXY_PID")" 2>/dev/null; then
-        log_warn "HAProxy is already running (PID: $(cat "$HAPROXY_PID"))"
-        return 0
+        # Also verify port 9090 is actually listening (guards against recycled PIDs)
+        if ss -tln | grep -q ":${HAPROXY_FRONTEND_PORT} " 2>/dev/null; then
+            log_warn "HAProxy is already running (PID: $(cat "$HAPROXY_PID"))"
+            return 0
+        else
+            log_warn "Stale HAProxy PID file (PID $(cat "$HAPROXY_PID") alive but port $HAPROXY_FRONTEND_PORT not listening) — restarting"
+            kill "$(cat "$HAPROXY_PID")" 2>/dev/null || true
+            rm -f "$HAPROXY_PID"
+        fi
+    elif [ -f "$HAPROXY_PID" ]; then
+        log_warn "Removing stale HAProxy PID file (PID $(cat "$HAPROXY_PID") not running)"
+        rm -f "$HAPROXY_PID"
     fi
 
     # Generate config from running servers
