@@ -56,7 +56,7 @@ def download_dataset(args):
 
 
 def install_database(args):
-    metadata_dir = os.path.join(SPARK_DIR, "spark-4.0.2-bin-hadoop3", "metastore_db")
+    metadata_dir = os.path.join(SPARK_DIR, "spark-4.0.3-bin-hadoop3", "metastore_db")
     database_dir = os.path.join(args.warehouse_dir, f"{args.dataset_name.lower()}.db")
     if os.path.exists(metadata_dir):
         print("Removing stale metastore_db to ensure tables are recreated")
