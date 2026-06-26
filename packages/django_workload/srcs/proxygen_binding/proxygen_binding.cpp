@@ -39,13 +39,41 @@ class ProxygenServer {
       const std::string& ip,
       int port,
       int threads,
-      PythonRequestCallback callback)
+      PythonRequestCallback callback,
+      const std::string& unix_socket_path)
       : ip_(ip),
         port_(port),
         threads_(threads),
+        unix_socket_path_(unix_socket_path),
         sync_callback_(std::move(callback)),
         async_callback_(nullptr),
         is_async_(false),
+        server_(nullptr),
+        server_thread_(nullptr) {}
+
+  // Constructor for synchronous callback (deprecated)
+  ProxygenServer(
+      const std::string& ip,
+      int port,
+      int threads,
+      PythonRequestCallback callback)
+      : ProxygenServer(ip, port, threads, std::move(callback), "") {}
+
+  // Constructor for asynchronous callback (recommended)
+  ProxygenServer(
+      const std::string& ip,
+      int port,
+      int threads,
+      PythonAsyncRequestCallback async_callback,
+      bool is_async,
+      const std::string& unix_socket_path)
+      : ip_(ip),
+        port_(port),
+        threads_(threads),
+        unix_socket_path_(unix_socket_path),
+        sync_callback_(nullptr),
+        async_callback_(std::move(async_callback)),
+        is_async_(is_async),
         server_(nullptr),
         server_thread_(nullptr) {}
 
@@ -56,14 +84,13 @@ class ProxygenServer {
       int threads,
       PythonAsyncRequestCallback async_callback,
       bool is_async)
-      : ip_(ip),
-        port_(port),
-        threads_(threads),
-        sync_callback_(nullptr),
-        async_callback_(std::move(async_callback)),
-        is_async_(is_async),
-        server_(nullptr),
-        server_thread_(nullptr) {}
+      : ProxygenServer(
+            ip,
+            port,
+            threads,
+            std::move(async_callback),
+            is_async,
+            "") {}
 
   ~ProxygenServer() {
     stop();
@@ -76,18 +103,29 @@ class ProxygenServer {
 
     py::gil_scoped_release release;
 
-    // Configure socket options for robust port handling:
-    // - SO_REUSEPORT: Allows multiple worker processes to bind to the same port
-    //   (essential for uWSGI multi-worker setup)
-    // - SO_REUSEADDR: Allows binding to ports in TIME_WAIT state
-    //   (enables immediate restart without "Address already in use" errors)
-    folly::SocketOptionMap socket_options;
-    socket_options[{SOL_SOCKET, SO_REUSEPORT}] = 1;
-    socket_options[{SOL_SOCKET, SO_REUSEADDR}] = 1;
+    folly::SocketAddress address;
+    if (!unix_socket_path_.empty()) {
+      // AF_UNIX bind fails if a stale socket path is left from a previous run.
+      ::unlink(unix_socket_path_.c_str());
+      address = folly::SocketAddress::makeFromPath(unix_socket_path_);
+    } else {
+      address = folly::SocketAddress(ip_, port_, true);
+    }
 
-    HTTPServer::IPConfig ip_config(
-        folly::SocketAddress(ip_, port_, true), HTTPServer::Protocol::HTTP);
-    ip_config.acceptorSocketOptions = socket_options;
+    HTTPServer::IPConfig ip_config(address, HTTPServer::Protocol::HTTP);
+
+    if (unix_socket_path_.empty()) {
+      // Configure socket options for robust port handling:
+      // - SO_REUSEPORT: Allows multiple worker processes to bind to the same
+      // port
+      //   (essential for uWSGI multi-worker setup)
+      // - SO_REUSEADDR: Allows binding to ports in TIME_WAIT state
+      //   (enables immediate restart without "Address already in use" errors)
+      folly::SocketOptionMap socket_options;
+      socket_options[{SOL_SOCKET, SO_REUSEPORT}] = 1;
+      socket_options[{SOL_SOCKET, SO_REUSEADDR}] = 1;
+      ip_config.acceptorSocketOptions = socket_options;
+    }
 
     std::vector<HTTPServer::IPConfig> IPs = {ip_config};
 
@@ -133,9 +171,8 @@ class ProxygenServer {
     server_thread_ =
         std::make_unique<std::thread>([this]() { server_->start(); });
 
-    LOG(INFO) << "Proxygen server started on " << ip_ << ":" << port_
-              << " with " << actual_threads
-              << " threads (SO_REUSEPORT + SO_REUSEADDR enabled)";
+    LOG(INFO) << "Proxygen server started on " << address.describe() << " with "
+              << actual_threads << " threads";
   }
 
   void stop() {
@@ -150,6 +187,10 @@ class ProxygenServer {
 
       server_.reset();
       server_thread_.reset();
+
+      if (!unix_socket_path_.empty()) {
+        ::unlink(unix_socket_path_.c_str());
+      }
 
       LOG(INFO) << "Proxygen server stopped";
     }
@@ -184,6 +225,7 @@ class ProxygenServer {
   std::string ip_;
   int port_;
   int threads_;
+  std::string unix_socket_path_;
   PythonRequestCallback sync_callback_;
   PythonAsyncRequestCallback async_callback_;
   bool is_async_;
@@ -221,11 +263,17 @@ PYBIND11_MODULE(proxygen_binding, m) {
   py::class_<ProxygenServer>(m, "ProxygenServer")
       // Synchronous callback constructor (deprecated)
       .def(
-          py::init<const std::string&, int, int, PythonRequestCallback>(),
+          py::init<
+              const std::string&,
+              int,
+              int,
+              PythonRequestCallback,
+              const std::string&>(),
           py::arg("ip") = "127.0.0.1",
           py::arg("port") = 8000,
           py::arg("threads") = 0,
           py::arg("callback"),
+          py::arg("unix_socket_path") = "",
           "Create server with synchronous callback (deprecated - use async_callback)")
       // Asynchronous callback constructor (recommended)
       .def(
@@ -234,12 +282,14 @@ PYBIND11_MODULE(proxygen_binding, m) {
               int,
               int,
               PythonAsyncRequestCallback,
-              bool>(),
+              bool,
+              const std::string&>(),
           py::arg("ip") = "127.0.0.1",
           py::arg("port") = 8000,
           py::arg("threads") = 0,
           py::arg("async_callback"),
           py::arg("is_async") = true,
+          py::arg("unix_socket_path") = "",
           "Create server with asynchronous callback (recommended)")
       .def("start", &ProxygenServer::start, "Start the HTTP server")
       .def("stop", &ProxygenServer::stop, "Stop the HTTP server")

@@ -8,7 +8,7 @@
 SCRIPT_ROOT="$(dirname "$(readlink -f "$0")")"
 # Abs path to DCPerf root
 BENCHPRESS_ROOT="$(readlink -f "${SCRIPT_ROOT}/../../..")"
-DJANGO_PKG_SRC_ROOT="${BENCHPRESS_ROOT}/packages/django_workload/srcs"
+export DJANGO_PKG_SRC_ROOT="${BENCHPRESS_ROOT}/packages/django_workload/srcs"
 DJANGO_SERVER_ROOT="$(readlink -f "${SCRIPT_ROOT}/../django-workload/django-workload")"
 CPYTHON_PATH="${DJANGO_SERVER_ROOT}/Python-3.14.2/python-build"
 CINDER_PATH="${DJANGO_SERVER_ROOT}/cinder/cinder-build"
@@ -21,6 +21,7 @@ KEY_SPACE_NAME="db"
 BREAKDOWN_FOLDER="${SCRIPT_ROOT}/.."
 
 # Source runtime breakdown utilities
+# shellcheck disable=SC1091
 source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
 if [ -z "$JAVA_HOME" ]; then
@@ -207,7 +208,8 @@ check_port_available() {
   # Only check for LISTENING sockets — use ss -tln (not ss -tan which
   # also matches TIME_WAIT/CLOSE_WAIT sockets that don't block binding).
   # With SO_REUSEADDR, TIME_WAIT sockets won't prevent binding.
-  local pid=$(ss -tlnp | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1)
+  local pid
+  pid=$(ss -tlnp | grep ":${port} " | grep -oP 'pid=\K[0-9]+' | head -1)
 
   if [ -n "$pid" ]; then
     echo "ERROR: Port ${port} (${port_name}) has an active LISTENING socket!"
@@ -224,6 +226,7 @@ check_port_range_available() {
   local num_workers=$2
   local lb_port=8000
   local stats_port=$3
+  local worker_transport=${4:-tcp}
 
   echo "Checking port availability..."
 
@@ -237,15 +240,18 @@ check_port_range_available() {
     return 1
   fi
 
-  # Check worker ports (base_port to base_port + num_workers - 1)
-  for ((i=0; i<num_workers; i++)); do
-    local port=$((base_port + i))
-    if ! check_port_available "$port" "Worker $((i+1))"; then
-      return 1
-    fi
-  done
+  # Unix socket worker mode does not reserve one TCP port per worker.
+  if [ "${worker_transport}" != "unix" ]; then
+    # Check worker ports (base_port to base_port + num_workers - 1)
+    for ((i=0; i<num_workers; i++)); do
+      local port=$((base_port + i))
+      if ! check_port_available "$port" "Worker $((i+1))"; then
+        return 1
+      fi
+    done
+  fi
 
-  echo "All ports are available."
+  echo "All required ports are available."
   return 0
 }
 
@@ -255,7 +261,8 @@ Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] 
 [-d duration of workload] [-p number of repetitions] [-l siege logfile path] \
 [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] \
 [-t snapshot taking] [--interpreter cpython|cinder] [--base-port port] [-T stats port] \
-[--thrift-server-workers num] [--use-async 0|1] [--use-jit 0|1] [--skip-datagen 0|1]
+[--worker-transport unix|tcp] [--thrift-server-workers num] [--use-async 0|1] \
+[--use-jit 0|1] [--skip-datagen 0|1]
 
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
@@ -266,7 +273,9 @@ For role "server", "clientserver":
     --interpreter
                 python interpreter to use (cpython or cinder, default is cpython)
     --base-port
-                base port for Proxygen workers (default 16668)
+                base port for Proxygen workers when --worker-transport=tcp (default 16668)
+    --worker-transport
+                backend transport for Proxygen workers (unix or tcp, default unix)
     -T          HAProxy stats port (default 8001)
     --use-async
                 set to 1 to enable async mode with load balancing (default 1)
@@ -375,6 +384,7 @@ load_snapshot(){
   #echo "Refreshing tables in ${KEY_SPACE_NAME}..."
   for table in ${TABLE_NAMES}; do
     #echo "Refreshing table: ${table}"
+    # shellcheck disable=SC2086
     "${BENCHPRESS_ROOT}"/benchmarks/django_workload/apache-cassandra/bin/nodetool \
       ${extra_options} refresh -- "${KEY_SPACE_NAME}" "${table}" || exit 1
   done
@@ -443,8 +453,10 @@ take_snapshot(){
   command_options="-t ${snapshot_name}"
   # Our nodetool is v3, so unfortunately the new nodetool commands for taking a snapshot and importing a snapshot does not work, so we need to use the following commands based on the following documentation
   #https://docs.datastax.com/en/cassandra-oss/3.0/cassandra/operations/opsBackupTakesSnapshot.html
+  # shellcheck disable=SC2086
   "${BENCHPRESS_ROOT}"/benchmarks/django_workload/apache-cassandra/bin/nodetool \
     ${extra_options} cleanup "${KEY_SPACE_NAME}" || exit 1
+  # shellcheck disable=SC2086
   "${BENCHPRESS_ROOT}"/benchmarks/django_workload/apache-cassandra/bin/nodetool \
     ${extra_options} snapshot "${KEY_SPACE_NAME}" "${command_options}" || exit 1
 
@@ -516,6 +528,7 @@ start_django_server() {
   local interpreter=${3:-cpython}
   local use_async=${4:-0}
   local use_jit=${5:-0}
+  local worker_transport=${6:-unix}
 
   # Export FBTHRIFT_PREFIX for thrift Python bindings
   export FBTHRIFT_PREFIX="${SCRIPT_ROOT}/../proxygen/proxygen/_build/deps"
@@ -561,7 +574,7 @@ start_django_server() {
   # shellcheck disable=SC1090,SC1091
   source "${DJANGO_SERVER_ROOT}/${venv_dir}/bin/activate"
 
-  wait_for_cassandra_to_start
+  wait_for_cassandra_to_start "${cassandra_addr}"
 
   # Create database schema
   export PYTHONPATH="${SCRIPT_ROOT}/../django-workload/django-workload/"
@@ -592,13 +605,14 @@ ${python_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
     echo "Running django server with uWSGI + HAProxy load balancing"
     echo "  Workers: ${num_server_workers}"
     echo "  Interpreter: ${interpreter}"
+    echo "  Worker transport: ${worker_transport}"
     echo "  Base port: ${base_port}"
     echo "  Stats port: ${stats_port}"
     echo "  Load balancer: http://127.0.0.1:8000"
     echo "  HAProxy stats: http://127.0.0.1:${stats_port}/stats"
 
     # Check port availability before starting
-    if ! check_port_range_available "${base_port}" "${num_server_workers}" "${stats_port}"; then
+    if ! check_port_range_available "${base_port}" "${num_server_workers}" "${stats_port}" "${worker_transport}"; then
       echo "ERROR: Cannot start server due to port conflicts"
       exit 1
     fi
@@ -610,6 +624,7 @@ ${python_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
         --workers "${num_server_workers}" \
         --stats-port "${stats_port}" \
         --base-port "${base_port}" \
+        --worker-transport "${worker_transport}" \
         --log-dir load_balancer_logs \
         > lb.log 2>&1
   else
@@ -647,18 +662,21 @@ start_client() {
   python_libs="${CPYTHON_PATH}/lib"
   export LD_LIBRARY_PATH="${python_libs}:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-  # Wait for load balancer to be ready (try to connect to the server)
-  local retries=60
-  echo "Waiting for server to be ready at http://localhost:8000..."
-  while ! curl -s -f http://localhost:8000/feed_timeline > /dev/null 2>&1; do
-    sleep 1
-    retries=$((retries-1))
-    if [[ "$retries" -le 0 ]]; then
-      echo "Server did not become ready within 60 seconds"
+  # Wait for the load balancer and Django workers to accept HTTP traffic.
+  # Use the cheap index endpoint here; workload endpoints can spend their
+  # first request doing CPU-heavy interpreter/JIT warmup on slower hosts.
+  local readiness_timeout=120
+  local readiness_start
+  readiness_start=$(date +%s)
+  echo "Waiting for server to accept HTTP traffic at http://localhost:8000..."
+  while ! curl -s -f --max-time 2 http://localhost:8000/ > /dev/null 2>&1; do
+    if [[ "$(($(date +%s) - readiness_start))" -ge "$readiness_timeout" ]]; then
+      echo "Server did not become ready within ${readiness_timeout} seconds"
       exit 1
     fi
+    sleep 1
   done
-  echo "Server is ready!"
+  echo "Server is accepting HTTP traffic!"
 
   # Wait for HAProxy to mark all backend workers as healthy
   # HAProxy health checks run every 2s and need 2 successful checks (rise 2)
@@ -722,11 +740,12 @@ start_clientserver() {
   local interpreter="${9:-cpython}"
   local use_async="${10:-0}"
   local use_jit="${11:-0}"
+  local worker_transport="${12:-unix}"
 
   create_breakdown_csv "$BREAKDOWN_FOLDER"
   log_preprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
-  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" "${use_async}" "${use_jit}" &
+  start_django_server "${cassandra_addr}" "${num_server_workers}" "${interpreter}" "${use_async}" "${use_jit}" "${worker_transport}" &
   server_pid="$!"
 
   # Wait for the server to start
@@ -851,6 +870,9 @@ main() {
   local use_jit
   use_jit=0
 
+  local worker_transport
+  worker_transport=unix
+
   local skip_datagen
   skip_datagen=0
 
@@ -904,6 +926,14 @@ main() {
         ;;
       --skip-datagen=*)
         skip_datagen="${1#*=}"
+        shift
+        ;;
+      --worker-transport)
+        worker_transport="$2"
+        shift 2
+        ;;
+      --worker-transport=*)
+        worker_transport="${1#*=}"
         shift
         ;;
       --)
@@ -1007,6 +1037,11 @@ main() {
   done
   shift "$((OPTIND - 1))"
 
+  if [ "${worker_transport}" != "unix" ] && [ "${worker_transport}" != "tcp" ]; then
+    echo "Invalid --worker-transport '${worker_transport}', expected 'unix' or 'tcp'"
+    exit 1
+  fi
+
   # Check if $cassandra_addr is in IPv4 format, if so convert to IPv6 format
   if [[ $cassandra_addr =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     # IPv4 format detected, convert to IPv6 format
@@ -1032,6 +1067,7 @@ main() {
   readonly load_a_snapshot
   readonly use_async
   readonly use_jit
+  readonly worker_transport
   readonly skip_datagen
 
   # Export skip_datagen as environment variable for use in start_django_server
@@ -1043,12 +1079,12 @@ main() {
     start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
   elif [ "$role" = "clientserver" ]; then
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
-      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}" "${use_async}" "${use_jit}";
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}" "${use_async}" "${use_jit}" "${worker_transport}";
   elif [ "$role" = "client" ]; then
     start_client "$num_client_workers" "$duration" "$siege_logs_path" \
       "$urls_path" "$server_addr" "$iterations" "$reps";
   elif [ "$role" = "server" ]; then
-    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter" "${use_async}" "${use_jit}";
+    start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter" "${use_async}" "${use_jit}" "${worker_transport}";
     # Report interpreter type
     echo "Interpreter: ${interpreter}"
   elif [ "$role" = "standalone" ]; then
@@ -1056,7 +1092,7 @@ main() {
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
       "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter" \
-      "${use_async}" "${use_jit}";
+      "${use_async}" "${use_jit}" "${worker_transport}";
     pgrep -f cassandra | xargs kill
 
   else

@@ -46,10 +46,9 @@ In addition, we require a series of ports to be available:
   * Main HTTP server port: 8000
   * Load balancer stats port: 8001 (configurable via `-T`)
   * Memcached port: 11811
-  * Server worker ports: The range of \[`base_port`, `base_port` \+ `server_workers`)
-    (`server_workers` is equal to the number of CPU logical cores).
-  * Base port (default 16668) and stats port are adjustable via `--base-port` and `-T`,
-    but the continuous range of server worker ports must be available.
+  * Server worker backends use Unix sockets by default, so the `base_port` worker range
+    is not required. TCP worker mode is still available with `--worker-transport tcp`
+    and uses the range \[`base_port`, `base_port` + `server_workers`).
 
 ## Install django workload
 
