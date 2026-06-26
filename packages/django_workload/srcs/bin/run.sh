@@ -327,7 +327,11 @@ run_benchmark() {
       collect_perf_record &
   fi
 
+  # Use 5x connections vs threads to increase pipeline depth and CPU utilization
+  local _wrk_connections
+  _wrk_connections=${WRK_CONNECTIONS:-$(( _num_workers * 5 ))}
   WORKERS="$_num_workers" \
+  WRK_CONNECTIONS="$_wrk_connections" \
   DURATION="$_duration" \
   LOG="$_siege_logs_path" \
   SOURCE="$_urls_path" \

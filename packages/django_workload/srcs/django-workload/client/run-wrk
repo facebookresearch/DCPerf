@@ -158,7 +158,10 @@ def run_wrk(options):
         exit(1)
 
     # Build wrk command
-    cmd = [wrk_path, '-c', str(WORKERS), '-t', str(WORKERS)]
+    # WRK_CONNECTIONS allows setting more connections than threads to increase
+    # concurrency without proportionally increasing thread count.
+    connections = os.environ.get("WRK_CONNECTIONS", str(WORKERS))
+    cmd = [wrk_path, '-c', str(connections), '-t', str(WORKERS)]
 
     if options.reps > 0:
         cmd.extend(['-r', str(options.reps)])

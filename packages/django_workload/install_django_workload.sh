@@ -148,6 +148,9 @@ set +u
 source ./venv_cpython/bin/activate
 set -u
 
+# Python 3.14 venvs don't bundle setuptools by default — install it first
+pip install setuptools wheel
+
 sed -i 's/django-cassandra-engine/django-cassandra-engine >= 1.5, < 1.6/' setup.py
 
 # Install dependencies using third_party pip dependencies from manifold
@@ -164,6 +167,9 @@ pushd "${OUT}/django-workload/django-workload"  # Make sure we're in the right d
 export CPATH="${OUT}/django-workload/django-workload/cinder/cinder-build/include:${OUT}/django-workload/django-workload/cinder/Include"
 source ./venv_cinder/bin/activate
 set -u
+
+# Python 3.14 venvs don't bundle setuptools by default — install it first
+pip install setuptools wheel
 
 # Install dependencies using third_party pip dependencies from manifold
 pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
