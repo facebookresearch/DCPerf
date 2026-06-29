@@ -427,7 +427,7 @@ def init_parser():
         type=int,
         default=None,
         help="Set the number of partitions for Spark SQL shuffle operations. "
-        "If set to 0 or negative, automatically scales to 4 * number of available CPU cores.",
+        "If set to 0 or negative, automatically scales to 3 * number of available CPU cores.",
     )
     run_parser.add_argument(
         "--query",

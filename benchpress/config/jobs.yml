@@ -1042,7 +1042,7 @@
 
 - benchmark: spark_standalone
   name: spark_standalone_remote_3x
-  description: Spark standalone using remote SSDs with 3x query load (2 more joins) and auto-scaled shuffle partitions
+  description: Spark standalone using remote SSDs with 3x query load (2 more joins) and auto-scaled shuffle partitions (3 * CPU cores)
   args:
     - 'run'
     - '--dataset-path /flash23/'

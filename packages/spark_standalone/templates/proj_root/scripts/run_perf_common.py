@@ -93,11 +93,11 @@ def write_sql_create_tables(args) -> List[str]:
         # Set spark.sql.shuffle.partitions if specified
         if hasattr(args, "shuffle_partitions") and args.shuffle_partitions is not None:
             shuffle_partitions = args.shuffle_partitions
-            # Auto-scale to 4 * CPU cores if set to 0 or negative
+            # Auto-scale to 3 * CPU cores if set to 0 or negative
             if shuffle_partitions <= 0:
-                shuffle_partitions = 4 * os.cpu_count()
+                shuffle_partitions = 3 * os.cpu_count()
                 print(
-                    f"Auto-scaling shuffle partitions to {shuffle_partitions} (4 * {os.cpu_count()} CPU cores)"
+                    f"Auto-scaling shuffle partitions to {shuffle_partitions} (3 * {os.cpu_count()} CPU cores)"
                 )
             fp.write(f"""SET spark.sql.shuffle.partitions = {shuffle_partitions};\n""")
         fp.write(f"""USE {args.database};""")
@@ -631,7 +631,7 @@ def init_parser():
             type=int,
             default=None,
             help="Set the number of partitions for Spark SQL shuffle operations. "
-            "If set to 0 or negative, automatically scales to 4 * number of available CPU cores.",
+            "If set to 0 or negative, automatically scales to 3 * number of available CPU cores.",
         )
     # custom query option (for run_parser and exp_parser since they run queries)
     for x in [run_parser, exp_parser]:
