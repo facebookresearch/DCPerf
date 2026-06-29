@@ -25,6 +25,7 @@ import argparse
 import os
 import pathlib
 import subprocess
+import sys
 import threading
 from typing import List, Optional
 
@@ -133,14 +134,12 @@ def run_cmd(
             stderr=subprocess.STDOUT,
         )
         try:
-            if timeout:
-                proc.wait(timeout=timeout)
-            else:
-                proc.wait()
+            # Use communicate() instead of wait() to actively read stdout
+            # and avoid pipe deadlock when the child produces verbose output
+            stdout, _ = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.terminate()
-            proc.wait()
-        stdout, _ = proc.communicate()
+            stdout, _ = proc.communicate()
         return stdout.decode("utf-8")
     else:
         return ""
@@ -398,7 +397,26 @@ def run_server(args: argparse.Namespace) -> None:
         t_prof.start()
 
     stdout = run_cmd(server_cmd, timeout=None, for_real=args.real)
-    print(stdout)
+
+    # Write full output to a log file for debugging, then only print
+    # the tail to stdout. This prevents pipe deadlock with the parent
+    # process (benchpress) which may use proc.wait() before reading
+    # stdout — if output exceeds the 64KB pipe buffer, both processes
+    # deadlock. The results JSON is always at the end of the output.
+    log_path = os.path.join(UCACHE_BENCH_DIR, "server_output.log")
+    try:
+        with open(log_path, "w") as f:
+            f.write(stdout)
+        print(f"Full server output written to {log_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"Warning: could not write server log: {e}", file=sys.stderr)
+
+    # Print only the last 200 lines to stdout (results JSON + summary)
+    lines = stdout.split("\n")
+    if len(lines) > 200:
+        print(f"[...truncated {len(lines) - 200} lines of verbose output...]")
+    tail = lines[-200:] if len(lines) > 200 else lines
+    print("\n".join(tail))
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         # pyrefly: ignore [unbound-name]
@@ -435,10 +453,18 @@ def run_client(args: argparse.Namespace) -> None:
     if args.admin_port > 0:
         client_cmd.append(f"--admin_port={args.admin_port}")
 
+    # Connection ramp-up configuration
+    if args.connection_ramp_seconds != 10:
+        client_cmd.append(f"--connection_ramp_seconds={args.connection_ramp_seconds}")
+    if not args.warmup_adaptive_load:
+        client_cmd.append("--warmup_adaptive_load=false")
+    if args.warmup_initial_inflight != 2:
+        client_cmd.append(f"--warmup_initial_inflight={args.warmup_initial_inflight}")
+
     # Timeout configuration
-    if args.connection_timeout_ms != 1000:
+    if args.connection_timeout_ms != 5000:
         client_cmd.append(f"--connection_timeout_ms={args.connection_timeout_ms}")
-    if args.send_timeout_ms != 1000:
+    if args.send_timeout_ms != 5000:
         client_cmd.append(f"--send_timeout_ms={args.send_timeout_ms}")
 
     # Security configuration
@@ -463,11 +489,30 @@ def run_client(args: argparse.Namespace) -> None:
     if args.enable_random_source_ip:
         client_cmd.append("--enable_random_source_ip=true")
 
+    if args.failures_until_tko > 0:
+        client_cmd.append(f"--failures_until_tko={args.failures_until_tko}")
+
     if args.verbose:
         client_cmd.append("--verbose=true")
 
     stdout = run_cmd(client_cmd, timeout=None, for_real=args.real)
-    print(stdout)
+
+    # Write full output to a log file for debugging, then only print
+    # the tail to stdout to prevent pipe deadlock with parent process.
+    log_path = os.path.join(UCACHE_BENCH_DIR, "client_output.log")
+    try:
+        with open(log_path, "w") as f:
+            f.write(stdout)
+        print(f"Full client output written to {log_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"Warning: could not write client log: {e}", file=sys.stderr)
+
+    # Print only the last 200 lines to stdout (results JSON + summary)
+    lines = stdout.split("\n")
+    if len(lines) > 200:
+        print(f"[...truncated {len(lines) - 200} lines of verbose output...]")
+    tail = lines[-200:] if len(lines) > 200 else lines
+    print("\n".join(tail))
 
 
 def init_parser() -> argparse.ArgumentParser:
@@ -779,13 +824,13 @@ def init_parser() -> argparse.ArgumentParser:
     client_parser.add_argument(
         "--connection-timeout-ms",
         type=int,
-        default=1000,
+        default=5000,
         help="Connection timeout in milliseconds",
     )
     client_parser.add_argument(
         "--send-timeout-ms",
         type=int,
-        default=1000,
+        default=5000,
         help="Send timeout in milliseconds",
     )
     client_parser.add_argument(
@@ -839,6 +884,24 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Enable random source IP addresses for connection fanout (set to non-zero to enable)",
+    )
+    client_parser.add_argument(
+        "--connection-ramp-seconds",
+        type=int,
+        default=10,
+        help="Seconds to gradually ramp up connections before warmup (0 = disabled)",
+    )
+    client_parser.add_argument(
+        "--warmup-adaptive-load",
+        type=int,
+        default=1,
+        help="Enable adaptive load control during warmup (1=enabled, 0=disabled)",
+    )
+    client_parser.add_argument(
+        "--warmup-initial-inflight",
+        type=int,
+        default=2,
+        help="Initial max inflight per thread when adaptive load is enabled",
     )
 
     # Workload configuration
@@ -907,6 +970,14 @@ def init_parser() -> argparse.ArgumentParser:
         default=0,
         help="Admin server port for multi-client coordination (0 = disabled). "
         "Uses server_host since admin server runs on same machine as cache server.",
+    )
+
+    client_parser.add_argument(
+        "--failures-until-tko",
+        type=int,
+        default=0,
+        help="Number of consecutive failures before mcrouter marks server as TKO "
+        "(0 = mcrouter default of 3). Production typically uses 12-32.",
     )
 
     client_parser.add_argument(
