@@ -390,6 +390,10 @@ def run_server(args: argparse.Namespace) -> None:
             f"--fiber_pool_resize_period_ms={args.fiber_pool_resize_period_ms}"
         )
 
+    # Per-request CPU overhead simulation
+    if args.cpu_overhead_level > 0:
+        server_cmd.append(f"--cpu_overhead_level={args.cpu_overhead_level}")
+
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         delay = args.perf_record_delay
         print(f"DCPERF_PERF_RECORD=1, will start perf record after {delay}s delay")
@@ -786,6 +790,14 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=1000,
         help="Period in ms for resizing the fiber pool (0 = disabled)",
+    )
+
+    # Per-request CPU overhead simulation
+    server_parser.add_argument(
+        "--cpu-overhead-level",
+        type=int,
+        default=0,
+        help="Per-request CPU overhead simulation level (0=disabled, 1=light ~3%%, 2=medium ~5%%, 3=heavy ~8%%)",
     )
 
     # Profiling configuration
