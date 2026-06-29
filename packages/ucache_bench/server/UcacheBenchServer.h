@@ -294,6 +294,30 @@ class UcacheBenchServer {
   folly::ThreadLocal<HotKeyDetectors> hotKeyDetectors_;
   void runHotKeyDetection(uint64_t keyHash);
 
+  // Egress rate limiting simulation (matches NetworkOverloadProtector)
+  // Production tracks per-key egress via ConcurrentLRUHashMap with
+  // SlidingWindowCounter + DynamicTokenBucket per entry.
+  // We simulate with a thread-local F14 map doing hash lookups + counter
+  // updates.
+  struct EgressTracker {
+    folly::F14FastMap<uint64_t, std::pair<uint64_t, uint64_t>> keyEgress;
+    uint64_t totalBytes{0};
+    uint32_t cleanupCounter{0};
+  };
+  folly::ThreadLocal<EgressTracker> egressTrackers_;
+  void runEgressRateLimiting(uint64_t keyHash, size_t responseSize);
+
+  // KCB double-lookup simulation (matches production Key Client Binding)
+  void runKcbDoubleLookup(const std::string& key);
+
+  // Per-thread CPU load measurement (matches shouldLoadShed)
+  struct alignas(64) CpuLoadCounters {
+    std::atomic<uint64_t> requestsProcessed{0};
+    std::atomic<uint64_t> totalProcessingNs{0};
+  };
+  folly::ThreadLocal<CpuLoadCounters> cpuLoadCounters_;
+  void runCpuLoadMeasurement();
+
   // Phase-based metric tracking
   std::atomic<TrackingPhase> currentPhase_{TrackingPhase::NONE};
   PhaseMetrics warmupMetrics_;

@@ -402,6 +402,88 @@ void UcacheBenchServer::runHotKeyDetection(uint64_t keyHash) {
   folly::doNotOptimizeAway(egressResult);
 }
 
+// Egress rate limiting simulation matching production NetworkOverloadProtector.
+// Production tracks per-key egress via ConcurrentLRUHashMap with
+// SlidingWindowCounter + DynamicTokenBucket per entry. On every response:
+// 1. Hash map lookup by key hash (ConcurrentLRUHashMap::find)
+// 2. Sliding window counter read (getValue across time buckets)
+// 3. Token bucket consume check (DynamicTokenBucket::consume)
+// 4. Sliding window counter write (add response size)
+// We simulate with a thread-local F14 map doing equivalent work.
+void UcacheBenchServer::runEgressRateLimiting(
+    uint64_t keyHash,
+    size_t responseSize) {
+  auto& tracker = *egressTrackers_;
+
+  // Simulate ConcurrentLRUHashMap::find + potential insert
+  auto it = tracker.keyEgress.find(keyHash);
+  if (it == tracker.keyEgress.end()) {
+    // Simulate insert with SlidingWindowCounter + TokenBucket allocation
+    tracker.keyEgress[keyHash] = {responseSize, 1};
+  } else {
+    // Simulate sliding window read (sum across buckets)
+    auto& [totalBytes, count] = it->second;
+    uint64_t windowValue = totalBytes;
+    folly::doNotOptimizeAway(windowValue);
+
+    // Simulate token bucket consume check
+    bool hasTokens = (count < 10000); // simplified rate check
+    folly::doNotOptimizeAway(hasTokens);
+
+    // Simulate sliding window write
+    totalBytes += responseSize;
+    count++;
+  }
+
+  tracker.totalBytes += responseSize;
+
+  // Periodic cleanup matching LRU eviction (every 8192 requests)
+  if (++tracker.cleanupCounter >= 8192) {
+    tracker.cleanupCounter = 0;
+    // Simulate LRU eviction: remove entries exceeding maxKeysToTrack
+    if (tracker.keyEgress.size() > 4096) {
+      auto eraseIt = tracker.keyEgress.begin();
+      for (size_t i = 0; i < 1024 && eraseIt != tracker.keyEgress.end(); i++) {
+        eraseIt = tracker.keyEgress.erase(eraseIt);
+      }
+    }
+  }
+}
+
+// KCB (Key Client Binding) double-lookup simulation.
+// Production does TWO CacheLib lookups when KCB IDs mismatch:
+// first findSlow() for master item, then another findSlow() for derived item.
+// This happens for a significant fraction of requests (~20-30%).
+// We simulate by doing an additional CacheLib find with a modified key.
+void UcacheBenchServer::runKcbDoubleLookup(const std::string& key) {
+  // Build derived key (production appends KCB version suffix)
+  std::string derivedKey = key + ":kcb:v2";
+
+  // Second CacheLib lookup (matches production findSlow for derived item)
+  auto derivedHandle = cache_->find(derivedKey);
+  folly::doNotOptimizeAway(derivedHandle != nullptr);
+}
+
+// Per-thread CPU load measurement matching production shouldLoadShed().
+// Production reads thread-local timing counters to estimate per-thread CPU
+// load, comparing against a threshold to decide if load shedding is needed.
+void UcacheBenchServer::runCpuLoadMeasurement() {
+  auto& counters = *cpuLoadCounters_;
+
+  struct timespec ts;
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+  uint64_t cpuNs = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+
+  counters.requestsProcessed.fetch_add(1, std::memory_order_relaxed);
+  counters.totalProcessingNs.store(cpuNs, std::memory_order_relaxed);
+
+  // Simulate the load comparison (read previous + compute ratio)
+  auto reqs = counters.requestsProcessed.load(std::memory_order_relaxed);
+  auto totalNs = counters.totalProcessingNs.load(std::memory_order_relaxed);
+  bool shouldShed = (reqs > 0 && totalNs / reqs > 50000); // 50us threshold
+  folly::doNotOptimizeAway(shouldShed);
+}
+
 // Build compound key matching production McStoredKey construction.
 // Production builds: UcacheStoredKey(key, hashAlias, kcbId, ticket)
 // This involves string concatenation, hashing, and memory allocation.
@@ -490,6 +572,21 @@ void UcacheBenchServer::runProductionGetOverhead(
   // Production bumps two thread-local HotHashDetectors per request
   runHotKeyDetection(keyHash);
 
+  // 9c. Egress rate limiting (matches NetworkOverloadProtector::checkStatus)
+  // Production tracks per-key egress via ConcurrentLRUHashMap + sliding window
+  if (hit && valueLen > 0) {
+    runEgressRateLimiting(keyHash, valueLen);
+  }
+
+  // 9d. KCB double-lookup (matches production Key Client Binding)
+  // Production does a second CacheLib find for ~20-30% of requests
+  if ((keyHash & 0x3) == 0) { // ~25% of requests
+    runKcbDoubleLookup(key);
+  }
+
+  // 9e. Per-thread CPU load measurement (matches shouldLoadShed)
+  runCpuLoadMeasurement();
+
   // 10. CRC32C checksum on value data (matches production integrity checks)
   // Production computes CRC32C on item data for integrity verification.
   // Uses hardware-accelerated CRC32C (SSE4.2 on x86).
@@ -554,6 +651,19 @@ void UcacheBenchServer::runProductionSetOverhead(
 
   // Hot key detection (same as GET path)
   runHotKeyDetection(keyHash);
+
+  // Egress rate limiting (SET responses also tracked in production)
+  if (valueLen > 0) {
+    runEgressRateLimiting(keyHash, valueLen);
+  }
+
+  // KCB double-lookup (~25% of requests)
+  if ((keyHash & 0x3) == 0) {
+    runKcbDoubleLookup(key);
+  }
+
+  // Per-thread CPU load measurement
+  runCpuLoadMeasurement();
 
   // Stats
   auto inflight =
