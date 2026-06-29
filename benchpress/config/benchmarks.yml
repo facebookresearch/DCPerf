@@ -171,6 +171,9 @@ health_check:
   parser: health_check
   install_script: ./packages/health_check/install_health_check.sh
   cleanup_script: ./packages/health_check/cleanup_health_check.sh
+  install_markers:
+    - ./benchmarks/health_check/run.sh
+    - ./benchmarks/health_check/sleepbench/sleepbench
   path: ./benchmarks/health_check/run.sh
   metrics: []
 
