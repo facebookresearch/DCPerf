@@ -387,6 +387,21 @@ std::string UcacheBenchServer::serializeIdentityAttributes(
   return serialized;
 }
 
+// Hot key detection matching production TLHotKeyTracker::check().
+// Production calls bumpHash() on two thread-local HotHashDetectors per request
+// (one for QPS hotness, one for egress hotness) and again on the egress
+// detector per response. This drives L1 counter increments, conditional L2
+// probes, and periodic maintenance (counter decay, threshold adjustment).
+void UcacheBenchServer::runHotKeyDetection(uint64_t keyHash) {
+  auto& detectors = *hotKeyDetectors_;
+  // QPS detector bump (matches TLHotKeyTracker::checkHotKeyOnly)
+  auto qpsResult = detectors.qpsDetector.bumpHash(keyHash);
+  folly::doNotOptimizeAway(qpsResult);
+  // Egress detector bump (matches TLHotKeyTracker::check egress path)
+  auto egressResult = detectors.egressDetector.bumpHash(keyHash);
+  folly::doNotOptimizeAway(egressResult);
+}
+
 // Build compound key matching production McStoredKey construction.
 // Production builds: UcacheStoredKey(key, hashAlias, kcbId, ticket)
 // This involves string concatenation, hashing, and memory allocation.
@@ -471,6 +486,10 @@ void UcacheBenchServer::runProductionGetOverhead(
   folly::doNotOptimizeAway(egressHash);
   prodStats_.overloadChecks.fetch_add(1, std::memory_order_relaxed);
 
+  // 9b. Hot key detection (matches TLHotKeyTracker::check per request)
+  // Production bumps two thread-local HotHashDetectors per request
+  runHotKeyDetection(keyHash);
+
   // 10. CRC32C checksum on value data (matches production integrity checks)
   // Production computes CRC32C on item data for integrity verification.
   // Uses hardware-accelerated CRC32C (SSE4.2 on x86).
@@ -532,6 +551,9 @@ void UcacheBenchServer::runProductionSetOverhead(
 
   // Thrift deserialization simulation (production deserializes SET request)
   simulateThriftSerialization(key, valueData, valueLen, /*hit=*/true);
+
+  // Hot key detection (same as GET path)
+  runHotKeyDetection(keyHash);
 
   // Stats
   auto inflight =
