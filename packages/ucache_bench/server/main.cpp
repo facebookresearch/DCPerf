@@ -86,6 +86,15 @@ DEFINE_uint64(
     "Number of CacheLib shards (0 = use default)");
 DEFINE_uint32(min_alloc_size, 64, "Minimum allocation size in bytes");
 
+// Per-request CPU overhead simulation
+DEFINE_uint32(
+    cpu_overhead_level,
+    0,
+    "Per-request CPU overhead simulation level to match production ucache. "
+    "0=disabled, 1=light (ACL hash + timestamps ~3%), "
+    "2=medium (+ CacheTable + serialization ~5%), "
+    "3=heavy (+ identity verification + sampling ~8%)");
+
 // Navy (NVM/SSD cache) configuration (if navy_cache_size_mb > 0, hybrid mode
 // is enabled)
 DEFINE_string(
@@ -197,6 +206,9 @@ UcacheBenchConfig createConfigFromFlags() {
   config.lru_rebalancing_hits_max_age_sec =
       FLAGS_lru_rebalancing_hits_max_age_sec;
   config.lru_hits_victim_by_free_mem = FLAGS_lru_hits_victim_by_free_mem;
+
+  // Per-request CPU overhead simulation
+  config.cpu_overhead_level = FLAGS_cpu_overhead_level;
 
   // Hash table settings
   config.hashtable_lock_power = FLAGS_hashtable_lock_power;
