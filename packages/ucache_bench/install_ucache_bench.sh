@@ -714,10 +714,43 @@ fi
 # by mcrouter's config file when resolving transitive dependencies
 FBCMAKE_MODULE_DIR="$DEPS_DIR/mcrouter/build/fbcode_builder/CMake"
 
+# Fix Thrift API compatibility issue with getWriteTransforms()
+# The generated code calls getWriteTransforms() which returns std::vector<uint16_t>&
+# (non-const reference), but payload.transform() expects a const reference.
+# This causes a compilation error with newer fbthrift versions.
+# We patch the generated files to use const_cast to fix the const-correctness issue.
+echo "  Patching generated protocol files for Thrift API compatibility..."
+for f in "$PROTOCOL_GEN_DIR"/*.cpp; do
+    if [ -f "$f" ]; then
+        # Fix getWriteTransforms() calls to use const_cast for const-correctness
+        # The API returns non-const reference but transform() expects const reference
+        sed -i 's/getWriteTransforms()/const_cast<const std::vector<uint16_t>\&>(getWriteTransforms())/g' "$f"
+        # Also fix with reqCtx->getHeader() prefix
+        sed -i 's/reqCtx->getHeader()->getWriteTransforms()/const_cast<const std::vector<uint16_t>\&>(reqCtx->getHeader()->getWriteTransforms())/g' "$f"
+        sed -i 's/reqCtx_->getHeader()->getWriteTransforms()/const_cast<const std::vector<uint16_t>\&>(reqCtx_->getHeader()->getWriteTransforms())/g' "$f"
+        sed -i 's/context->getHeader()->getWriteTransforms()/const_cast<const std::vector<uint16_t>\&>(context->getHeader()->getWriteTransforms())/g' "$f"
+        sed -i 's/context_->getHeader()->getWriteTransforms()/const_cast<const std::vector<uint16_t>\&>(context_->getHeader()->getWriteTransforms())/g' "$f"
+    fi
+done
+
+# Remove internal-only API calls (getPrivacyLibAgenticContext, getKcbIdentity)
+# from generated ThriftTransport code. These methods exist in Meta's internal
+# mcrouter but are not available in the OSS release at the same tag.
+# We remove the entire if-blocks since they're optional metadata headers.
+echo "  Removing internal-only API calls from UcacheBenchThriftTransport.h..."
+THRIFT_TRANSPORT_H="$PROTOCOL_GEN_DIR/UcacheBenchThriftTransport.h"
+if [ -f "$THRIFT_TRANSPORT_H" ] && grep -q "getKcbIdentity" "$THRIFT_TRANSPORT_H"; then
+    # Remove getPrivacyLibAgenticContext blocks (3 lines each: if, setWriteHeader, close-brace)
+    sed -i '/getPrivacyLibAgenticContext/,+3d' "$THRIFT_TRANSPORT_H"
+    # Remove getKcbIdentity blocks (3 lines each: if, setWriteHeader, close-brace)
+    sed -i '/getKcbIdentity/,+3d' "$THRIFT_TRANSPORT_H"
+fi
+
 cmake "$SCRIPT_DIR" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$STAGING_DIR" \
     -DCMAKE_MODULE_PATH="$FBCMAKE_MODULE_DIR" \
+    -DCMAKE_CXX_FLAGS="-Wno-error=deprecated-declarations" \
     -DBUILD_SERVER=ON \
     -DBUILD_CLIENT=ON
 

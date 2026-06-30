@@ -19,7 +19,20 @@ centos10() {
         $SUDO dnf install -y 'dnf-command(config-manager)'
         $SUDO dnf config-manager --set-enabled crb
     fi
-    $SUDO dnf group install -y "Development Tools" --exclude="texlive*"
+    # Remove perf first to avoid file conflict with kernel-headers
+    # Both packages provide /usr/include/perf/perf_dlfilter.h
+    $SUDO dnf remove -y perf || true
+    # Exclude rpm-build to avoid rpm version conflicts between hsx.el10 and BaseOS
+    # Also exclude el10 packages that conflict with installed hsx.el10 versions
+    # Exclude rpm-sign packages which depend on conflicting rpm-libs
+    # Note: kernel-headers is required by glibc-devel (which is required by gcc),
+    # so we cannot exclude it.
+    # Use --skip-broken to skip packages with broken dependencies
+    $SUDO dnf group install -y "Development Tools" --exclude="texlive*" --exclude="rpm-build" --exclude="rpm-sign*" --exclude="rpm-4.19.1.1-23*" --exclude="rpm-libs-4.19.1.1-23*" --allowerasing --skip-broken
+    # Reinstall perf to handle the file conflict with kernel-headers
+    # Both packages provide /usr/include/perf/perf_dlfilter.h
+    # Use --setopt=tsflags=replacefiles to allow overwriting files from kernel-headers
+    $SUDO dnf install -y perf --setopt=tsflags=replacefiles || true
 
     $SUDO dnf install -y openssl-devel
 }
@@ -36,7 +49,21 @@ centos9() {
         $SUDO dnf install -y 'dnf-command(config-manager)'
         $SUDO dnf config-manager --set-enabled crb
     fi
-    $SUDO dnf group install -y "Development Tools" --exclude="texlive*"
+    # Remove perf first to avoid file conflict with kernel-headers
+    # Both packages provide /usr/include/perf/perf_dlfilter.h
+    $SUDO dnf remove -y perf || true
+    # Exclude rpm-build to avoid rpm version conflicts between hsx.el10 and BaseOS
+    # Also exclude el10 packages to prevent repository metadata issues on Sandcastle
+    # Exclude specific rpm versions that conflict with installed hsx.el10 packages
+    # Exclude rpm-sign packages which depend on conflicting rpm-libs
+    # Note: kernel-headers is required by glibc-devel (which is required by gcc),
+    # so we cannot exclude it.
+    # Use --skip-broken to skip packages with broken dependencies
+    $SUDO dnf group install -y "Development Tools" --exclude="texlive*" --exclude="rpm-build" --exclude="rpm-sign*" --exclude="*.el10*" --exclude="rpm-4.19*" --exclude="rpm-libs-4.19*" --exclude="rpm-plugin-*4.19*" --allowerasing --skip-broken
+    # Reinstall perf to handle the file conflict with kernel-headers
+    # Both packages provide /usr/include/perf/perf_dlfilter.h
+    # Use --setopt=tsflags=replacefiles to allow overwriting files from kernel-headers
+    $SUDO dnf install -y perf --setopt=tsflags=replacefiles || true
 
     $SUDO dnf install -y openssl-devel
 }
