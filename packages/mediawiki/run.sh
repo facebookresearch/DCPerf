@@ -320,7 +320,9 @@ function main() {
         fi
         ;;
       m)
-        MEMCACHE_THREADS="${OPTARG}"
+        if [[ "${OPTARG}" -gt 0 ]]; then
+          MEMCACHE_THREADS="${OPTARG}"
+        fi
         ;;
       p)
         disable_perf_record=true
