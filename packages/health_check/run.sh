@@ -9,6 +9,12 @@ set -Eeo pipefail
 
 
 HEALTH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
+
+# Add bundled binaries to PATH (for self-contained builds)
+if [ -d "${HEALTH_ROOT}/bin" ]; then
+    export PATH="${HEALTH_ROOT}/bin:${PATH}"
+    export LD_LIBRARY_PATH="${HEALTH_ROOT}/lib:${LD_LIBRARY_PATH:-}"
+fi
 show_help() {
 cat <<EOF
 Usage: ${0##*/} [-h] [-r server|client] [-c clients] [-b benchmark] [-- extra_args]
