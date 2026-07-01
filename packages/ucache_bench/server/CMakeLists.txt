@@ -35,6 +35,9 @@ target_include_directories(ucachebench_server PRIVATE
     ${STAGING_DIR}/include
 )
 
+# Suppress deprecation warnings from generated Thrift headers
+target_compile_options(ucachebench_server PRIVATE -Wno-deprecated-declarations)
+
 # CacheLib libraries - order matters for static linking
 set(CACHELIB_LIBS
     ${STAGING_DIR}/lib/libcachelib_allocator.a

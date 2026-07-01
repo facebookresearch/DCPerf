@@ -23,6 +23,9 @@ target_include_directories(ucachebench_client PRIVATE
     ${STAGING_DIR}/include
 )
 
+# Suppress deprecation warnings from generated Thrift headers
+target_compile_options(ucachebench_client PRIVATE -Wno-deprecated-declarations)
+
 # Google Test/Mock libraries (needed by mcrouter headers)
 # Try lib64 first, then lib (some systems install to lib64)
 if(EXISTS "${STAGING_DIR}/lib64/libgmock.a")

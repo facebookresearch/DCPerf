@@ -189,6 +189,13 @@ target_link_libraries(ucachebench_protocol PUBLIC
     fmt::fmt
 )
 
+# Suppress deprecation warnings in generated Thrift code (thrift1 generates
+# calls to getWriteTransforms() which is deprecated in favor of
+# getWriteTTransforms() in the same version's headers)
+target_compile_options(ucachebench_protocol PRIVATE
+    -Wno-deprecated-declarations
+)
+
 # Install target
 install(TARGETS ucachebench_protocol
     ARCHIVE DESTINATION lib
