@@ -709,6 +709,9 @@ def process_metrics(
             db_fields["metrics"] = bm_metrics["metrics"][
                 "throughput_all_levels_hmean_MBps"
             ]
+    elif "hackperf" in bm_name:
+        if "Requests/sec" in bm_metrics["metrics"]:
+            db_fields["metrics"] = bm_metrics["metrics"]["Requests/sec"]
     db_fields["others"] = f"'{json.dumps(bm_metrics['metrics'])}'"
 
     # This is assigning value to res variable
@@ -814,10 +817,12 @@ def process_metrics(
         "TopDown FrontendBound %": "frontend_bound",
         "Topdown Level 1/Frontend Bound": "frontend_bound",
         "metric_TMA_Frontend_Bound(%)": "frontend_bound",
+        "Frontend Bound %": "frontend_bound",
         "Topdown Level 1/Backend Bound": "backend_bound",
         "Backend Stalls": "backend_bound",
         "TopDown BackendBound %": "backend_bound",
         "metric_TMA_Backend_Bound(%)": "backend_bound",
+        "Backend Bound %": "backend_bound",
         "Avg. IPC": "IPC",
         "IPC": "IPC",
         "General/Instructions Per Cycle": "IPC",
@@ -825,14 +830,17 @@ def process_metrics(
         "Branch Mispred %": "branch_mispred",
         "Branch Effectiveness/Branch Misprediction Ratio": "branch_mispred",
         "metric_TMA_..Branch_Mispredicts(%)": "branch_mispred",
+        "Branch Retired Mispred PKI": "branch_mispred",
         "L1 ICache MPKI (w/ prefetches)": "L1_icache_mpki",
         "L1 ICache MPKI": "L1_icache_mpki",
         "L1 Instruction Cache Effectiveness/L1I Cache MPKI": "L1_icache_mpki",
         "metric_L1-I code read misses (w/ prefetches) per instr": "L1_icache_mpki",
+        "Any L1 IC Fills PKI": "L1_icache_mpki",
         "L1 DCache MPKI (w/ prefetches)": "L1_dcache_mpki",
         "L1 DCache MPKI": "L1_dcache_mpki",
         "Misses Per Kilo Instructions/L1D Cache MPKI": "L1_dcache_mpki",
         "metric_L1D MPI (includes data+rfo w/ prefetches)": "L1_dcache_mpki",
+        "Any L1 DC Fills PKI": "L1_dcache_mpki",
         "L2 Cache MPKI": "L2_cache_mpki",
         "L2 Unified Cache Effectiveness/L2 Cache MPKI": "L2_cache_mpki",
         "metric_L2 MPI (includes code+data+rfo w/ prefetches)": "L2_cache_mpki",
@@ -844,17 +852,21 @@ def process_metrics(
         "iTLB Walk MPKI": "iTLB_mpki",
         "Instruction TLB Effectiveness/ITLB MPKI": "iTLB_mpki",
         "metric_ITLB MPI": "iTLB_mpki",
+        "L1 iTLB Miss PKI": "iTLB_mpki",
         "dTLB MPKI": "dTLB_mpki",
         "dTLB Walk MPKI": "dTLB_mpki",
         "Data TLB Effectiveness/DTLB MPKI": "dTLB_mpki",
         "metric_DTLB load MPI": "dTLB_mpki",
+        "L1 dTLB Miss PKI": "dTLB_mpki",
         "TopDown Retiring %": "retiring",
         "Topdown Level 1/Retiring": "retiring",
         "metric_TMA_Retiring(%)": "retiring",
+        "Retiring %": "retiring",
         "Topdown Level 1/Bad Speculation": "bad_speculation",
         "metric_TMA_Bad_Speculation(%)": "bad_speculation",
         "TopDown bad Speculation %": "bad_speculation",
         "TopDown Bad Speculation %": "bad_speculation",
+        "Bad Speculation %": "bad_speculation",
         "L1 iCache MPKI": "L1_icache_mpki",
         "L1 dCache MPKI": "L1_dcache_mpki",
         "L2 Code MPKI": "L2_code_mpki",
