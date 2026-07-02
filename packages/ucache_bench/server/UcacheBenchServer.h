@@ -318,6 +318,23 @@ class UcacheBenchServer {
   // Configurable CPU busy-work per request
   void runCpuBusyWork(const std::string& key);
 
+  // Per-request heap allocations matching production ucache.
+  // Production allocates per request:
+  // - UcacheStoredKey: std::string for cachelib key (key_len+1 bytes)
+  // - McStoredKey: 3 std::strings (ukey, hashAlias, ticket)
+  // - Fiber task lambda capture (~200-500 bytes heap via FiberManager)
+  // - Egress hash vector: std::vector<std::optional<uint64_t>> (16*N bytes)
+  // - KCB derived key: fmt::format string allocation
+  // These drive jemalloc pressure → mmap/munmap syscalls → %sys
+  void runPerRequestAllocations(const std::string& key, size_t valueLen);
+
+  // FiberToken global atomic contention matching production.
+  // Production increments/decrements a global atomic<uint64_t> on every
+  // request entry/exit via UcacheIOThreadContext::FiberToken.
+  // This creates cross-thread cache-line bouncing → %sys.
+  static std::atomic<uint64_t> activeFibersTotal_;
+  void runFiberTokenContention();
+
   // Per-thread CPU load measurement (matches shouldLoadShed)
   struct alignas(64) CpuLoadCounters {
     std::atomic<uint64_t> requestsProcessed{0};
