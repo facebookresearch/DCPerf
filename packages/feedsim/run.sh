@@ -249,6 +249,19 @@ main() {
     local client_num_sparse
     client_num_sparse="26"
 
+    # Feature extraction options
+    local feature_extractors
+    feature_extractors=""
+
+    local feature_complexity
+    feature_complexity="5"
+
+    local num_stories
+    num_stories="100"
+
+    local extractors_per_story
+    extractors_per_story="50"
+
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
     fi
@@ -460,6 +473,36 @@ main() {
             --client-num-sparse=*)
                 client_num_sparse="${1#*=}"
                 ;;
+            --feature-extractors)
+                feature_extractors="1"
+                ;;
+            --feature-extractors=*)
+                local val="${1#*=}"
+                if [ "$val" != "0" ] && [ -n "$val" ]; then
+                    feature_extractors="1"
+                fi
+                ;;
+            --feature-complexity)
+                feature_complexity="$2"
+                shift
+                ;;
+            --feature-complexity=*)
+                feature_complexity="${1#*=}"
+                ;;
+            --num-stories)
+                num_stories="$2"
+                shift
+                ;;
+            --num-stories=*)
+                num_stories="${1#*=}"
+                ;;
+            --extractors-per-story)
+                extractors_per_story="$2"
+                shift
+                ;;
+            --extractors-per-story=*)
+                extractors_per_story="${1#*=}"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -536,6 +579,13 @@ main() {
         fi
     fi
 
+    # Build feature extraction options
+    local feature_opts=""
+    if [ "$feature_extractors" = "1" ]; then
+        feature_opts="--feature_extractors --feature_complexity=$feature_complexity --num_stories=$num_stories --extractors_per_story=$extractors_per_story"
+        echo "Feature extraction pipeline: ENABLED (complexity=$feature_complexity, stories=$num_stories, extractors/story=$extractors_per_story)"
+    fi
+
     # Starting leaf node service
     monitor_port=$((port-1000))
     # shellcheck disable=SC2086
@@ -556,6 +606,7 @@ main() {
         --min_icache_iterations="$icache_iterations" \
         $dlrm_opts \
         $async_io_opts \
+        $feature_opts \
         $store_graph \
         $load_graph \
         $instrument_graph \

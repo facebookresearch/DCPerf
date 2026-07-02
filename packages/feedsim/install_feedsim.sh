@@ -242,6 +242,16 @@ if [ -f "third_party/fizz/fizz/tool/FizzServerCommand.cpp" ]; then
     sed -i 's/EVP_PKEY_cmp(pubKey.get(), key.get()) == 1/EVP_PKEY_eq(pubKey.get(), key.get())/g' "third_party/fizz/fizz/tool/FizzServerCommand.cpp"
 fi
 
+# Generate feature extractor variants (1M+ unique functions for I-cache pressure)
+msg "Generating feature extractor variants..."
+CODEGEN_DIR="${FEEDSIM_ROOT_SRC}/src/workloads/ranking/feature_extractors/generated"
+if [ -f "${CODEGEN_DIR}/generate_extractors.py" ]; then
+    python3 "${CODEGEN_DIR}/generate_extractors.py" --output-dir "${CODEGEN_DIR}"
+    msg "Feature extractor codegen complete"
+else
+    msg "[SKIPPED] No codegen script found at ${CODEGEN_DIR}/generate_extractors.py"
+fi
+
 mkdir -p build && cd build/
 
 # Build FeedSim with DLRM support
@@ -261,7 +271,14 @@ cmake -G Ninja \
     -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/libtorch" \
     ../
 
-ninja -v -j1
+# Dependencies (fmt, folly, fbthrift, etc.) are already installed above via
+# separate make commands in their own build directories. This ninja step only
+# builds FeedSim itself (LeafNodeRank, DriverNodeRank, feature extractors),
+# so parallel builds are safe here. Use nproc/2 to avoid OOM.
+NINJA_JOBS="${BP_NINJA_JOBS:-$(( $(nproc) / 2 ))}"
+[ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
+msg "Building FeedSim with ninja -j${NINJA_JOBS} (set BP_NINJA_JOBS to override)"
+ninja -j"${NINJA_JOBS}"
 
 msg ""
 msg "=== FeedSim Installation Complete ==="

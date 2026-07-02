@@ -235,6 +235,16 @@ if [ -f "third_party/fizz/fizz/tool/FizzServerCommand.cpp" ]; then
     sed -i 's/EVP_PKEY_cmp(pubKey.get(), key.get()) == 1/EVP_PKEY_eq(pubKey.get(), key.get())/g' "third_party/fizz/fizz/tool/FizzServerCommand.cpp"
 fi
 
+# Generate feature extractor variants (1M+ unique functions for I-cache pressure)
+msg "Generating feature extractor variants..."
+CODEGEN_DIR="${FEEDSIM_ROOT_SRC}/src/workloads/ranking/feature_extractors/generated"
+if [ -f "${CODEGEN_DIR}/generate_extractors.py" ]; then
+    python3 "${CODEGEN_DIR}/generate_extractors.py" --output-dir "${CODEGEN_DIR}"
+    msg "Feature extractor codegen complete"
+else
+    msg "[SKIPPED] No codegen script found at ${CODEGEN_DIR}/generate_extractors.py"
+fi
+
 mkdir -p build && cd build/
 
 # Build FeedSim with DLRM support
