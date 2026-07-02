@@ -22,11 +22,8 @@ DEFINE_uint32(
     4,
     "Number of acceptor threads for handling new connections. "
     "Production ucache defaults to 4. Set to 0 to use CPU count");
-DEFINE_uint32(
-    rpc_num_cpu_worker_threads,
-    1,
-    "Number of CPU worker threads for ThriftServer. "
-    "Production ucache uses 1. These handle CPU-bound work separate from IO");
+// rpc_num_cpu_worker_threads is defined in UcacheBenchIOThreadContext.cpp
+DECLARE_uint32(rpc_num_cpu_worker_threads);
 DEFINE_uint32(
     rpc_socket_max_reads_per_event,
     1,

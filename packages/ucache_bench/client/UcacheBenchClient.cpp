@@ -385,6 +385,12 @@ DEFINE_uint32(
     "Seconds to gradually ramp up connections before warmup. "
     "Prevents connection storm when additional_fanout is large. "
     "0 = disabled (all connections established at once)");
+DEFINE_uint32(
+    warmup_max_inflight,
+    0,
+    "Max inflight per thread during warmup (0 = use --max_inflight). "
+    "Set higher than --max_inflight to populate the cache faster during warmup "
+    "while using low inflight during measurement for realistic packet patterns.");
 DEFINE_bool(
     warmup_adaptive_load,
     true,
@@ -740,7 +746,9 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     numThreads = std::max(1u, std::thread::hardware_concurrency() / 2);
   }
 
-  uint32_t maxInflight = FLAGS_max_inflight;
+  uint32_t maxInflight = FLAGS_warmup_max_inflight > 0
+      ? FLAGS_warmup_max_inflight
+      : FLAGS_max_inflight;
   if (maxInflight < 1) {
     maxInflight = 1;
   }

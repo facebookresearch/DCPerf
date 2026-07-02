@@ -133,6 +133,7 @@ struct UcacheBenchConfig {
   // Used to simulate aggregate production CPU overhead that can't be
   // individually replicated (e.g., NVM admission, complex routing, etc.)
   uint32_t cpu_work_us = 0; // 0 = disabled
+  uint32_t io_latency_us = 0; // 0 = disabled, yields fiber to simulate I/O
 
   // Navy (NVM/SSD cache) config (if navy_cache_size_mb > 0, hybrid mode is
   // enabled)
@@ -323,6 +324,7 @@ class UcacheBenchServer {
 
   // Configurable CPU busy-work per request
   void runCpuBusyWork(const std::string& key);
+  void simulateIOLatency();
 
   // Per-request heap allocations matching production ucache.
   // Production allocates per request:

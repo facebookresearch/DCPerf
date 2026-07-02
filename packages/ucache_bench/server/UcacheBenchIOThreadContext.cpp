@@ -12,6 +12,13 @@ DEFINE_uint32(
     64 * 1024,
     "Stack size for IO thread fibers in bytes");
 
+DEFINE_uint32(
+    rpc_num_cpu_worker_threads,
+    1,
+    "Number of CPU worker threads. When > 1, requests are dispatched from IO "
+    "threads to this pool, generating kernel context switches matching "
+    "production's tao:slow thread pool pattern.");
+
 DEFINE_uint32(fiber_max_pool_size, 1000, "Maximum size of the fiber pool");
 
 DEFINE_uint32(
