@@ -103,6 +103,13 @@ DEFINE_uint32(
     "Number of locks = 2^bucket_lock_power. Production default is 20 (1M locks). "
     "0 = disabled.");
 
+// Configurable per-request CPU work
+DEFINE_uint32(
+    cpu_work_us,
+    50,
+    "Microseconds of CPU busy-work per request. Simulates aggregate production "
+    "overhead. 0 = disabled.");
+
 // Production-like per-request features
 DEFINE_bool(
     production_features,
@@ -229,6 +236,9 @@ UcacheBenchConfig createConfigFromFlags() {
 
   // CacheTable-style bucket locking
   config.bucket_lock_power = FLAGS_bucket_lock_power;
+
+  // Configurable per-request CPU work
+  config.cpu_work_us = FLAGS_cpu_work_us;
 
   // Production-like per-request features
   config.production_features_enabled = FLAGS_production_features;
