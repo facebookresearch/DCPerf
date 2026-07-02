@@ -30,8 +30,10 @@
 #include <folly/io/async/ScopedEventBaseThread.h>
 #include <folly/portability/GFlags.h>
 #include <mcrouter/McrouterFiberContext.h>
+#include <mcrouter/ProxyBase.h>
 #include <mcrouter/lib/carbon/Result.h>
 #include <mcrouter/lib/network/CpuController.h>
+#include <mcrouter/stats.h>
 
 DECLARE_string(config);
 DECLARE_uint32(warmup_ops);
@@ -372,6 +374,14 @@ DEFINE_uint32(
     "With many proxy threads, a low value causes premature TKO because the "
     "counter is global across all threads");
 DEFINE_bool(verbose, false, "Enable verbose logging");
+DEFINE_bool(
+    use_same_thread_client,
+    false,
+    "Use createSameThreadClient() to eliminate cross-thread message queue hops. "
+    "Workers run directly on McRouter proxy EventBases instead of a separate "
+    "thread pool. This matches production's same-thread dispatch pattern and "
+    "can significantly improve throughput by eliminating 2 cross-thread hops "
+    "per request");
 DEFINE_bool(
     use_distribution,
     false,
@@ -1175,23 +1185,59 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   std::vector<double> allLatencies;
   allLatencies.reserve(100000 * numThreads);
 
-  // Create IO thread pool for coroutine execution - matches production pattern
-  folly::IOThreadPoolExecutor workerPool(numThreads);
-  auto workerEvbs = workerPool.getAllEventBases();
-
-  // Create clients for each worker with maxInflight - matches production
-  // pattern McRouter's maximumOutstanding will handle backpressure via internal
-  // semaphore
+  // Create clients and get EventBases for worker coroutines.
+  // Two modes:
+  //   1. Same-thread mode: workers run on proxy EventBases, bypassing the
+  //      cross-thread message queue. One worker per proxy.
+  //   2. Remote-thread mode (default): workers run on a separate thread pool,
+  //      requests are dispatched to proxy threads via message queue.
+  std::unique_ptr<folly::IOThreadPoolExecutor> workerPool;
+  std::vector<folly::EventBase*> workerEvbs;
   std::vector<
       memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>::Pointer>
       clients;
-  clients.reserve(numThreads);
-  for (uint32_t i = 0; i < numThreads; ++i) {
-    // Use maxInflight as maximumOutstanding - McRouter will block if limit
-    // reached
-    auto client = routerInstance_->createClient(maxInflight);
-    if (client) {
-      clients.push_back(std::move(client));
+
+  if (FLAGS_use_same_thread_client) {
+    // Same-thread mode: one worker per proxy, running on proxy EventBases.
+    // This eliminates the worker->proxy->worker cross-thread hops.
+    size_t numProxies = routerInstance_->opts().num_proxies;
+    clients.reserve(numProxies);
+    workerEvbs.reserve(numProxies);
+
+    for (size_t i = 0; i < numProxies; ++i) {
+      auto* proxy = routerInstance_->getProxyBase(i);
+      if (!proxy) {
+        continue;
+      }
+      workerEvbs.push_back(&proxy->eventBase().getEventBase());
+
+      auto client = routerInstance_->createSameThreadClient(maxInflight);
+      if (client) {
+        client->setProxyIndex(i);
+        clients.push_back(std::move(client));
+      }
+    }
+
+    if (FLAGS_verbose) {
+      printf(
+          "Using same-thread client mode: %zu workers on proxy EventBases\n",
+          clients.size());
+      fflush(stdout);
+    }
+  } else {
+    // Remote-thread mode (original): separate worker thread pool.
+    workerPool = std::make_unique<folly::IOThreadPoolExecutor>(numThreads);
+    auto evbKeepAlives = workerPool->getAllEventBases();
+    for (auto& ka : evbKeepAlives) {
+      workerEvbs.push_back(ka.get());
+    }
+
+    clients.reserve(numThreads);
+    for (uint32_t i = 0; i < numThreads; ++i) {
+      auto client = routerInstance_->createClient(maxInflight);
+      if (client) {
+        clients.push_back(std::move(client));
+      }
     }
   }
 
@@ -1549,6 +1595,122 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   }
 
   results.latencies = std::move(allLatencies);
+
+  // Dump mcrouter pipeline stats for profiling
+  if (routerInstance_) {
+    using facebook::memcache::mcrouter::num_stats;
+    using facebook::memcache::mcrouter::prepare_stats;
+    using facebook::memcache::mcrouter::stat_t;
+
+    stat_t stats[num_stats];
+    facebook::memcache::mcrouter::init_stats(stats);
+    prepare_stats(*routerInstance_, stats);
+
+    printf("\n=== McRouter Pipeline Stats ===\n");
+
+    // Key timing stats
+    auto printDoubleStat = [&](const char* label,
+                               facebook::memcache::mcrouter::stat_name_t s) {
+      double val = folly::make_atomic_ref(stats[s].data.dbl)
+                       .load(std::memory_order_relaxed);
+      printf("  %-40s: %.2f\n", label, val);
+    };
+    auto printUint64Stat = [&](const char* label,
+                               facebook::memcache::mcrouter::stat_name_t s) {
+      uint64_t val = folly::make_atomic_ref(stats[s].data.uint64)
+                         .load(std::memory_order_relaxed);
+      printf("  %-40s: %lu\n", label, val);
+    };
+
+    printDoubleStat(
+        "duration_us (avg RPC latency)",
+        facebook::memcache::mcrouter::duration_us_stat);
+    printDoubleStat(
+        "duration_get_us", facebook::memcache::mcrouter::duration_get_us_stat);
+    printDoubleStat(
+        "duration_update_us",
+        facebook::memcache::mcrouter::duration_update_us_stat);
+    printDoubleStat(
+        "processing_time_us (mcrouter only)",
+        facebook::memcache::mcrouter::processing_time_us_stat);
+    printDoubleStat(
+        "destination_batch_size",
+        facebook::memcache::mcrouter::destination_batch_size_stat);
+    printUint64Stat(
+        "destination_pending_reqs",
+        facebook::memcache::mcrouter::destination_pending_reqs_stat);
+    printUint64Stat(
+        "destination_inflight_reqs",
+        facebook::memcache::mcrouter::destination_inflight_reqs_stat);
+    printUint64Stat(
+        "destination_max_pending_reqs",
+        facebook::memcache::mcrouter::destination_max_pending_reqs_stat);
+    printUint64Stat(
+        "destination_max_inflight_reqs",
+        facebook::memcache::mcrouter::destination_max_inflight_reqs_stat);
+    printUint64Stat(
+        "outstanding_route_get_reqs_queued",
+        facebook::memcache::mcrouter::outstanding_route_get_reqs_queued_stat);
+    printUint64Stat(
+        "outstanding_route_update_reqs_queued",
+        facebook::memcache::mcrouter::
+            outstanding_route_update_reqs_queued_stat);
+
+    printf("=== End McRouter Pipeline Stats ===\n\n");
+
+    // Also write to file for retrieval via sush2
+    FILE* statsFile = fopen("/tmp/mcrouter_stats.txt", "w");
+    if (statsFile) {
+      auto writeDoubleStat = [&](const char* label,
+                                 facebook::memcache::mcrouter::stat_name_t s) {
+        double val = folly::make_atomic_ref(stats[s].data.dbl)
+                         .load(std::memory_order_relaxed);
+        fprintf(statsFile, "%-40s: %.2f\n", label, val);
+      };
+      auto writeUint64Stat = [&](const char* label,
+                                 facebook::memcache::mcrouter::stat_name_t s) {
+        uint64_t val = folly::make_atomic_ref(stats[s].data.uint64)
+                           .load(std::memory_order_relaxed);
+        fprintf(statsFile, "%-40s: %lu\n", label, val);
+      };
+
+      writeDoubleStat(
+          "duration_us (avg RPC latency)",
+          facebook::memcache::mcrouter::duration_us_stat);
+      writeDoubleStat(
+          "duration_get_us",
+          facebook::memcache::mcrouter::duration_get_us_stat);
+      writeDoubleStat(
+          "duration_update_us",
+          facebook::memcache::mcrouter::duration_update_us_stat);
+      writeDoubleStat(
+          "processing_time_us (mcrouter only)",
+          facebook::memcache::mcrouter::processing_time_us_stat);
+      writeDoubleStat(
+          "destination_batch_size",
+          facebook::memcache::mcrouter::destination_batch_size_stat);
+      writeUint64Stat(
+          "destination_pending_reqs",
+          facebook::memcache::mcrouter::destination_pending_reqs_stat);
+      writeUint64Stat(
+          "destination_inflight_reqs",
+          facebook::memcache::mcrouter::destination_inflight_reqs_stat);
+      writeUint64Stat(
+          "destination_max_pending_reqs",
+          facebook::memcache::mcrouter::destination_max_pending_reqs_stat);
+      writeUint64Stat(
+          "destination_max_inflight_reqs",
+          facebook::memcache::mcrouter::destination_max_inflight_reqs_stat);
+      writeUint64Stat(
+          "outstanding_route_get_reqs_queued",
+          facebook::memcache::mcrouter::outstanding_route_get_reqs_queued_stat);
+      writeUint64Stat(
+          "outstanding_route_update_reqs_queued",
+          facebook::memcache::mcrouter::
+              outstanding_route_update_reqs_queued_stat);
+      fclose(statsFile);
+    }
+  }
 
   // Notify admin server that benchmark is done (if connected)
   if (hasAdminConnection()) {
