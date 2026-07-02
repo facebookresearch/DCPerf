@@ -262,11 +262,17 @@ target_link_libraries(FeedSimFramework
 add_subdirectory(mock_services)
 
 # Build LeafNodeRank binary
+#
+# Phase 5: MockServicesClient.cc is compiled into LeafNodeRank so the
+# request handlers can dispatch outbound Thrift RPCs to the mock_services
+# server. RpcDistRegistry.h and PercentileSampler.h are header-only.
 
 add_executable(LeafNodeRank
     LeafNodeRank.cc
+    MockServicesClient.cc
     TimekeeperPool.cpp
 )
+add_dependencies(LeafNodeRank MockService-cpp2-target)
 target_include_directories(LeafNodeRank
     PUBLIC
         ${CMAKE_CURRENT_BINARY_DIR}
@@ -295,6 +301,7 @@ set(LEAF_NODE_RANK_LIBS
     ${IBERTY_LIBRARIES}
     ranking-cpp2
     rankingThriftDataGen
+    MockService-cpp2
     ${CMAKE_DL_LIBS}
     glog::glog
     ${DOUBLE_CONVERSION_LIBRARY}
@@ -321,6 +328,10 @@ target_link_libraries(LeafNodeRank
         ${LIBEVENT_LIB}
         ${JEMALLOC_LIB}
         ${LIBLZMA_LIBRARIES}
+        # libthriftcpp2's ChecksumGenerator.cpp references XXH3_* from
+        # libxxhash (system /usr/lib64/libxxhash.so on CentOS9). install
+        # script already lists xxhash-devel in the rpm package set.
+        xxhash
 )
 target_compile_options(LeafNodeRank PUBLIC -fno-omit-frame-pointer -ffunction-sections -fdata-sections ${FEEDSIM_MCMODEL_FLAG} -fno-plt)
 # --whole-archive for featureExtractors prevents --gc-sections from stripping
@@ -543,6 +554,9 @@ target_link_libraries(
         ${FIZZ_LIBRARIES}
         ${WANGLE_LIBRARIES}
         ${FMT_LIBRARIES}
+        # libthriftcpp2's ChecksumGenerator references XXH3_*; link the
+        # system xxhash (rpm xxhash-devel installed by install_feedsim.sh).
+        xxhash
 )
 target_compile_options(DriverNodeRank PUBLIC -fno-omit-frame-pointer)
 target_link_options(DriverNodeRank PRIVATE -Wl,--gc-sections -Wl,--allow-multiple-definition)

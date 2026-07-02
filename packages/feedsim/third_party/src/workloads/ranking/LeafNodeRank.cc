@@ -72,6 +72,8 @@
 #include "../search/PointerChase.h"
 
 #include "SilesiaLoader.h"
+#include "MockServicesClient.h"
+#include "RpcDistRegistry.h"
 #include "generators/RankingGenerators.h"
 #include "generators/SilesiaResponseGenerator.h"
 
@@ -115,6 +117,24 @@ struct ThreadData {
   std::shared_ptr<folly::IOThreadPoolExecutor> ioThreadPool;
   std::shared_ptr<folly::IOThreadPoolExecutor> srEventBasePool;
   std::shared_ptr<ranking::TimekeeperPool> timekeeperPool;
+
+  // Phase 5: outbound RPC fanout to mock_services. Populated only when
+  // --rpc_dist_path is set; nullptr otherwise (in which case the legacy
+  // folly::futures::sleep path is used).
+  //
+  // mock_client is per-thread because each MockServiceAsyncClient is
+  // pinned to one folly::EventBase (see MockServicesClient.h). registry
+  // and silesia are shared (read-only after load) — held here as raw
+  // pointers to globals to avoid shared_ptr churn on the request path.
+  ranking::RpcDistRegistry* rpc_registry = nullptr;
+  ranking::SilesiaLoader* rpc_silesia = nullptr;
+  std::unique_ptr<ranking::MockServicesClient> mock_client;
+  std::mt19937 rpc_rng;
+  // rpc_rng is sampled from issueOutboundFanout which runs inside .thenValue
+  // continuations on the multi-threaded ioThreadPool — multiple concurrent
+  // pipelines can hit the same ThreadData. mt19937 is not thread-safe, so
+  // serialize with this mutex.
+  std::mutex rpc_rng_mutex;
   std::unique_ptr<ranking::dwarfs::PageRank> page_ranker;
 #ifdef FEEDSIM_USE_DLRM
   std::shared_ptr<ranking::dwarfs::DLRM> dlrm_ranker;
@@ -181,6 +201,15 @@ static std::unique_ptr<ranking::SilesiaLoader> g_silesia_loader;
 static std::unique_ptr<ranking::generators::SilesiaResponseGenerator>
     g_silesia_response_gen;
 
+// Phase 5: process-wide RPC fanout state. Loaded once in main() if
+// --rpc_dist_path is set; nullptr otherwise. ThreadStartup grabs raw
+// pointers into ThreadData so the request path doesn't pay for atomic
+// shared_ptr ops on every call.
+static std::unique_ptr<ranking::RpcDistRegistry> g_rpc_registry;
+// Reused for fanout request body padding when --silesia_dir is also set.
+// When --silesia_dir is unset, fanout request bodies are zero-filled.
+static ranking::SilesiaLoader* g_rpc_silesia = nullptr;
+
 // Helper that returns either a Silesia-generated or RNG-generated
 // RankingResponse, depending on whether --silesia_dir was provided.
 static ranking::RankingResponse generateResponse(int num_objects) {
@@ -209,6 +238,36 @@ void ThreadStartup(
   this_thread.ioThreadPool = ioThreadPool;
   this_thread.srEventBasePool = srEventBasePool;
   this_thread.timekeeperPool = timekeeperPool;
+
+  // Phase 5: populate per-thread RPC fanout state. registry / silesia
+  // pointers are global (initialized in main() if --rpc_dist_path was
+  // set); mock_client is constructed lazily here so it lives on a
+  // thread from the SREventBase pool. Seed the fanout RNG with
+  // hardware_destructive seed mixing so each thread gets independent
+  // sample sequences without sharing the std::default_random_engine
+  // used elsewhere in this struct.
+  this_thread.rpc_registry = g_rpc_registry.get();
+  this_thread.rpc_silesia = g_rpc_silesia;
+  this_thread.rpc_rng.seed(
+      std::random_device{}() ^ static_cast<unsigned>(thread_id + 1));
+  if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
+    auto* evb = srEventBasePool->getEventBase();
+    try {
+      this_thread.mock_client =
+          std::make_unique<ranking::MockServicesClient>(
+              evb,
+              args.mock_services_host_arg,
+              static_cast<uint16_t>(args.mock_services_port_arg));
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to connect to mock_services on "
+                << args.mock_services_host_arg << ":"
+                << args.mock_services_port_arg
+                << " (thread " << thread_id << "): " << e.what()
+                << ". Falling back to legacy folly::futures::sleep path."
+                << std::endl;
+      this_thread.mock_client.reset();
+    }
+  }
 
   // Store shared DLRM ranker
   this_thread.dlrm_ranker = shared_dlrm_ranker;
@@ -323,6 +382,36 @@ void ThreadStartup(
   this_thread.ioThreadPool = ioThreadPool;
   this_thread.srEventBasePool = srEventBasePool;
   this_thread.timekeeperPool = timekeeperPool;
+
+  // Phase 5: populate per-thread RPC fanout state. registry / silesia
+  // pointers are global (initialized in main() if --rpc_dist_path was
+  // set); mock_client is constructed lazily here so it lives on a
+  // thread from the SREventBase pool. Seed the fanout RNG with
+  // hardware_destructive seed mixing so each thread gets independent
+  // sample sequences without sharing the std::default_random_engine
+  // used elsewhere in this struct.
+  this_thread.rpc_registry = g_rpc_registry.get();
+  this_thread.rpc_silesia = g_rpc_silesia;
+  this_thread.rpc_rng.seed(
+      std::random_device{}() ^ static_cast<unsigned>(thread_id + 1));
+  if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
+    auto* evb = srEventBasePool->getEventBase();
+    try {
+      this_thread.mock_client =
+          std::make_unique<ranking::MockServicesClient>(
+              evb,
+              args.mock_services_host_arg,
+              static_cast<uint16_t>(args.mock_services_port_arg));
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to connect to mock_services on "
+                << args.mock_services_host_arg << ":"
+                << args.mock_services_port_arg
+                << " (thread " << thread_id << "): " << e.what()
+                << ". Falling back to legacy folly::futures::sleep path."
+                << std::endl;
+      this_thread.mock_client.reset();
+    }
+  }
   unsigned noderank_seed;
   if (args.node_rank_seed_given) {
     noderank_seed = static_cast<unsigned>(args.node_rank_seed_arg);
@@ -501,6 +590,160 @@ ranking::RankingResponse deserializePayload(const folly::IOBuf* buf) {
   ranking::RankingResponse resp;
   apache::thrift::CompactSerializer::deserialize(buf, resp);
   return resp;
+}
+
+// ============================================================================
+// Phase 5: outbound RPC fanout to mock_services.
+//
+// When --rpc_dist_path is set, request handlers replace
+// folly::futures::sleep(io_latency_ms) with a real fanout of Thrift RPCs to
+// a co-located mock_services Thrift server. Per-method call counts are
+// calibrated from production (ranking::perSessionCounts(), see
+// ~/feedsim_v2/docs/phase5_researcher_notes.md §4) and scaled by
+// --rpc_fanout_scale (default 0.025, ~94 RPCs/session).
+//
+// Each RPC carries a payload sampled from the request_size percentile
+// distribution; the first 4 bytes are a big-endian uint32_t encoding the
+// desired response_size sampled from the response_size percentile
+// distribution (see mock_services/MockService.thrift wire contract). The
+// server uses that header to size its response, so client and server stay
+// in sync without an out-of-band agreement.
+// ============================================================================
+
+namespace {
+
+// Build a single RPC request body of `req_size` bytes:
+//   [4 bytes: big-endian response_size][padding bytes]
+// The padding is zero-filled if no Silesia corpus is available; otherwise
+// it is sliced from a random Silesia file (cheap mmap-backed read).
+std::string buildFanoutRequest(
+    size_t req_size,
+    uint32_t response_size,
+    ranking::SilesiaLoader* silesia,
+    std::mt19937& rng) {
+  // Always reserve at least 4 bytes for the header.
+  size_t actual_size = std::max<size_t>(req_size, sizeof(uint32_t));
+  std::string buf;
+  buf.resize(actual_size);
+  ranking::writeBigEndianResponseSize(buf.data(), response_size);
+
+  size_t padding = actual_size - sizeof(uint32_t);
+  if (padding == 0) {
+    return buf;
+  }
+  if (silesia != nullptr && silesia->isLoaded()) {
+    char* dst = buf.data() + sizeof(uint32_t);
+    size_t remaining = padding;
+    while (remaining > 0) {
+      const uint8_t* snippet = nullptr;
+      size_t snippet_size = 0;
+      std::string filename;
+      silesia->getRandomSnippet(
+          rng, /*min_size=*/1, remaining, snippet, snippet_size, filename);
+      if (snippet_size == 0) {
+        std::memset(dst, 0, remaining);
+        break;
+      }
+      std::memcpy(dst, snippet, snippet_size);
+      dst += snippet_size;
+      remaining -= snippet_size;
+    }
+  } else {
+    std::memset(buf.data() + sizeof(uint32_t), 0, padding);
+  }
+  return buf;
+}
+
+} // namespace
+
+// Issue the full per-session outbound RPC fanout. Iterates the 20
+// outbound methods, computes how many calls each gets at `scale`,
+// samples request_size / response_size / latency_us per call, and
+// dispatches via the per-thread MockServicesClient.
+//
+// Returns a Future<int> that resolves to the total number of completed
+// RPCs once all are done (regardless of success — we count attempts so
+// caller code can keep the same shape as before).
+static folly::Future<int> issueOutboundFanout(
+    ThreadData& td, double scale) {
+  if (td.mock_client == nullptr || td.rpc_registry == nullptr) {
+    // Defensive: caller should have checked --rpc_dist_path.
+    return folly::makeFuture<int>(0);
+  }
+
+  std::vector<folly::Future<int>> futs;
+  futs.reserve(128);
+
+  for (size_t i = 0; i < ranking::kNumMethods; ++i) {
+    auto m = static_cast<ranking::MethodIdx>(i);
+    int n = std::max(
+        1,
+        static_cast<int>(
+            std::round(ranking::perSessionCounts()[i] * scale)));
+
+    const auto& req_sampler = td.rpc_registry->requestSize(m);
+    const auto& resp_sampler = td.rpc_registry->responseSize(m);
+    const auto& lat_sampler = td.rpc_registry->latencyUs(m);
+
+    for (int k = 0; k < n; ++k) {
+      size_t req_size;
+      uint32_t resp_size;
+      int32_t lat_us;
+      // Sampling and buildFanoutRequest both mutate rpc_rng; serialize
+      // to avoid concurrent-pipeline data race on RNG state.
+      std::string req;
+      {
+        std::lock_guard<std::mutex> lock(td.rpc_rng_mutex);
+        req_size = req_sampler.sample(td.rpc_rng);
+        resp_size = static_cast<uint32_t>(resp_sampler.sample(td.rpc_rng));
+        lat_us = static_cast<int32_t>(lat_sampler.sampleI64(td.rpc_rng));
+        req = buildFanoutRequest(
+            req_size, resp_size, td.rpc_silesia, td.rpc_rng);
+      }
+
+      futs.push_back(td.mock_client
+                         ->dispatchByEnum(m, req, lat_us)
+                         .via(td.srEventBasePool.get())
+                         .thenValue([](std::string&&) { return 1; })
+                         .thenError(
+                             folly::tag_t<std::exception>{},
+                             [](const std::exception&) { return 0; }));
+    }
+  }
+
+  return folly::collectAll(std::move(futs))
+      .via(td.srEventBasePool.get())
+      .thenValue([](std::vector<folly::Try<int>> results) {
+        int total = 0;
+        for (auto& r : results) {
+          if (r.hasValue()) total += r.value();
+        }
+        return total;
+      });
+}
+
+// Drop-in replacement for folly::futures::sleep at the I/O simulation
+// callsites in the request handlers. When --rpc_dist_path is set,
+// dispatches the full per-session outbound fanout (94 RPCs at default
+// scale=0.025) instead of sleeping. When unset, falls back to the legacy
+// folly::futures::sleep so the previous behavior is preserved verbatim
+// (regression-safety A/B path).
+//
+// Returns Future<folly::Unit> so the existing .thenValue([... ](folly::Unit)
+// continuations need no change.
+static folly::Future<folly::Unit> simulateIoOrFanout(
+    ThreadData& td,
+    int io_latency_ms,
+    folly::Timekeeper* tk,
+    folly::Executor* via_executor) {
+  if (td.mock_client != nullptr && td.rpc_registry != nullptr) {
+    return issueOutboundFanout(td, args.rpc_fanout_scale_arg)
+        .via(via_executor)
+        .thenValue([](int /*completed*/) { return folly::unit; });
+  }
+  return folly::futures::sleep(std::chrono::milliseconds(io_latency_ms), tk)
+      .via(via_executor)
+      .thenValue([](folly::Unit) { return folly::unit; });
 }
 
 #ifdef FEEDSIM_USE_DLRM
@@ -782,10 +1025,12 @@ void AsyncPageRankRequestHandler(
       ? (num_io_stages * io_stage_latency_ms)
       : io_latency_ms;
 
-  // Start async chain with I/O sleep
-  folly::futures::sleep(
-      std::chrono::milliseconds(total_io_latency_ms), timekeeper.get())
-      .via(ioThreadPool.get())
+  // Start async chain. Phase 5: when --rpc_dist_path is set, fan out
+  // real RPCs to mock_services in place of the synthetic sleep. When
+  // unset, this still degenerates to folly::futures::sleep so the
+  // legacy behavior is preserved verbatim.
+  simulateIoOrFanout(
+      this_thread, total_io_latency_ms, timekeeper.get(), ioThreadPool.get())
       .thenValue([ranking_result, random_string, srvIOThreadPool,
                   srv_io_threads, num_objects](folly::Unit) {
         // Stage 4: Compression and serialization
@@ -966,19 +1211,24 @@ void DLRMRequestHandler(
       ? (num_io_stages * io_stage_latency_ms)
       : io_latency_ms;
 
-  // Pipeline: DLRM inference -> I/O sleep -> compression -> pointer chase
-  // -> generate+send response. Everything chains via futures so the
-  // handler thread returns immediately and the request is processed
-  // entirely off the dispatcher thread.
+  // Pipeline: DLRM inference -> I/O sleep (or RPC fanout) -> compression
+  // -> pointer chase -> generate+send response. Everything chains via
+  // futures so the handler thread returns immediately and the request
+  // is processed entirely off the dispatcher thread.
+  //
+  // Phase 5: when --rpc_dist_path is set, the I/O sleep is replaced by
+  // an outbound RPC fanout to mock_services (see simulateIoOrFanout).
   auto timekeeper = timekeeperPool->getTimekeeper();
+  ThreadData* this_thread_ptr = &this_thread;
   std::move(inference_future)
       .via(ioThreadPool.get())
-      .thenValue([total_io_latency_ms, timekeeper, ioThreadPool](
+      .thenValue([this_thread_ptr, total_io_latency_ms, timekeeper, ioThreadPool](
                      int prediction_result) {
-        return folly::futures::sleep(
-                   std::chrono::milliseconds(total_io_latency_ms),
-                   timekeeper.get())
-            .via(ioThreadPool.get())
+        return simulateIoOrFanout(
+                   *this_thread_ptr,
+                   total_io_latency_ms,
+                   timekeeper.get(),
+                   ioThreadPool.get())
             .thenValue([prediction_result](folly::Unit) {
               return prediction_result;
             });
@@ -1103,14 +1353,16 @@ void PageRankRequestHandler(
   auto fs = folly::collect(futures).get();
   result = std::accumulate(fs.begin(), fs.end(), 0);
 
-  // I/O simulation stage
+  // I/O simulation stage. Phase 5: when --rpc_dist_path is set, replaced
+  // with an outbound RPC fanout to mock_services. .get() blocks the
+  // request handler in this sync path (preserves existing behavior).
   auto timekeeper = this_thread.timekeeperPool->getTimekeeper();
-  auto s = folly::futures::sleep(
-               std::chrono::milliseconds(args.io_time_ms_arg), timekeeper.get())
-               .via(this_thread.ioThreadPool.get())
-               .thenValue([&](auto&& _) {
-                 return result + 1;
-               });
+  auto s = simulateIoOrFanout(
+               this_thread,
+               args.io_time_ms_arg,
+               timekeeper.get(),
+               this_thread.ioThreadPool.get())
+               .thenValue([&](folly::Unit) { return result + 1; });
   result = std::move(s).get();
 
   auto compressed = compressPayload(this_thread.random_string, result);
@@ -1354,6 +1606,43 @@ int main(int argc, char** argv) {
   } else {
     std::cout << "Server response generator: xor128 RNG (no --silesia_dir)"
               << std::endl;
+  }
+
+  // Phase 5: load rpc_dist.json and instantiate the RpcDistRegistry. When
+  // --rpc_dist_path is empty (default) OR --use_legacy_sleep is set, the
+  // legacy folly::futures::sleep I/O simulation is used everywhere --
+  // preserving the regression-safety A/B comparison path. Otherwise,
+  // request handlers issue real outbound RPCs to the mock_services Thrift
+  // server (must already be running on
+  // --mock_services_host:--mock_services_port).
+  //
+  // --use_legacy_sleep wins over --rpc_dist_path so later diffs in the
+  // stack can run end-to-end integration tests without the mock_services
+  // side process. The g_rpc_registry stays null in that case, which makes
+  // every ThreadStartup skip MockServicesClient construction (gate at
+  // `rpc_registry != nullptr`) and simulateIoOrFanout fall through to
+  // folly::futures::sleep (gate at `mock_client != nullptr`).
+  if (args.use_legacy_sleep_flag) {
+    std::cout << "RPC fanout: disabled (--use_legacy_sleep override);"
+              << " using legacy folly::futures::sleep" << std::endl;
+  } else if (args.rpc_dist_path_given &&
+             std::string(args.rpc_dist_path_arg).size() > 0) {
+    auto registry = std::make_unique<ranking::RpcDistRegistry>();
+    if (!registry->load(args.rpc_dist_path_arg)) {
+      std::cerr << "Failed to load rpc_dist.json from: "
+                << args.rpc_dist_path_arg << std::endl;
+      return 1;
+    }
+    g_rpc_registry = std::move(registry);
+    g_rpc_silesia = g_silesia_loader.get(); // may be nullptr; that's fine
+    std::cout << "RPC fanout: enabled (target "
+              << args.mock_services_host_arg << ":"
+              << args.mock_services_port_arg
+              << ", scale=" << args.rpc_fanout_scale_arg << ")"
+              << std::endl;
+  } else {
+    std::cout << "RPC fanout: disabled (no --rpc_dist_path); using legacy"
+              << " folly::futures::sleep" << std::endl;
   }
 
   int fake_argc = 1;

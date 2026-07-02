@@ -61,6 +61,8 @@ chmod u+x "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 # Copy production size distribution JSONs (consumed by run.sh / DriverNodeRank).
 cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_req_sizes.json" "${FEEDSIM_ROOT_SRC}/feed_aggregator_req_sizes.json"
 cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_resp_sizes.json" "${FEEDSIM_ROOT_SRC}/feed_aggregator_resp_sizes.json"
+# Phase 6 session-mode driver loads rpc_dist.json from the FEEDSIM_ROOT runtime dir.
+cp "${BENCHPRESS_ROOT}/packages/feedsim/rpc_dist.json" "${FEEDSIM_ROOT_SRC}/rpc_dist.json"
 
 msg "Installing third-party dependencies..."
 cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party" "${FEEDSIM_ROOT_SRC}"
