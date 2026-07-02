@@ -29,12 +29,16 @@
 #include "DriverNodeRankCmdline.h"
 #include "FeatureGenerator.h"
 #include "RequestTypes.h"
+#include "SilesiaLoader.h"
 
 #include "if/gen-cpp2/ranking_types.h"
 
 #include "utils.h"
 
 static gengetopt_args_info args;
+
+// Global Silesia corpus loader (shared across threads, read-only after init)
+static std::unique_ptr<ranking::SilesiaLoader> g_silesia_loader;
 
 const int kMaxRequestSize = 8192;
 const int kRecomputeQPSPeriod = 1;  // Reduced from 5 to 1 second for faster feedback
@@ -62,6 +66,9 @@ struct ThreadData {
   // Client-side feature generation
   std::unique_ptr<ranking::FeatureGenerator> feature_generator;
   std::string serialized_request;  // Pre-allocated buffer for serialized request
+
+  // Silesia story generation
+  std::mt19937 silesia_rng;
 };
 
 // Specific timer handler to recompute inter-request delays for QPS
@@ -151,6 +158,12 @@ void ThreadStartup(int thread_id,
         std::make_unique<ranking::FeatureGenerator>(config, thread_id);
   }
 
+  // Initialize Silesia RNG per thread
+  if (g_silesia_loader && g_silesia_loader->isLoaded()) {
+    this_thread.silesia_rng.seed(
+        static_cast<unsigned>(std::random_device{}()) + thread_id);
+  }
+
   // If user gave QPS target, initialize QPS modulation
   if (args.qps_arg != 0) {
     this_thread.qps_per_thread =
@@ -164,49 +177,91 @@ void ThreadStartup(int thread_id,
   }
 }
 
+// Add Silesia story snippets to a RankingRequest
+void PopulateStories(ranking::RankingRequest& request,
+                     ThreadData& this_thread) {
+  if (!g_silesia_loader || !g_silesia_loader->isLoaded()) return;
+
+  int num_stories = args.stories_per_request_arg;
+  size_t min_size = static_cast<size_t>(args.story_size_min_arg);
+  size_t max_size = static_cast<size_t>(args.story_size_max_arg);
+
+  ranking::StoryBatch batch;
+  std::vector<ranking::StoryContent>& stories = *batch.stories_ref();
+  stories.reserve(num_stories);
+
+  for (int i = 0; i < num_stories; ++i) {
+    const uint8_t* data;
+    size_t size;
+    std::string filename;
+    g_silesia_loader->getRandomSnippet(
+        this_thread.silesia_rng, min_size, max_size, data, size, filename);
+
+    ranking::StoryContent story;
+    story.story_id() = static_cast<int64_t>(i);
+    story.content() = std::string(reinterpret_cast<const char*>(data), size);
+    story.source_file() = std::move(filename);
+    story.content_length() = static_cast<int32_t>(size);
+    stories.push_back(std::move(story));
+  }
+
+  request.story_batch() = std::move(batch);
+}
+
 void MakeRequest(int thread_id, feedsim::TestDriver &test_driver,
                  std::vector<ThreadData> &thread_data) {
   ThreadData &this_thread = thread_data[thread_id];
 
-  if (args.client_side_features_given) {
-    // Client-side feature generation mode
-    // Generate features and serialize into RankingRequest
-    int batch_size = args.client_dlrm_batch_size_arg;
-    int num_inferences = args.client_dlrm_inferences_arg;
+  bool use_serialized_request =
+      args.client_side_features_given || args.silesia_dir_given;
 
-    // Generate features
-    auto dense_features = this_thread.feature_generator->generateDenseFeatures(batch_size);
-    auto sparse_features = this_thread.feature_generator->generateSparseFeatures(batch_size);
-
-    // Create RankingRequest with DLRMFeatures
+  if (use_serialized_request) {
+    // Serialized RankingRequest mode (client features and/or stories)
     ranking::RankingRequest request;
     request.request_id() = static_cast<int64_t>(thread_id);
-    request.num_inferences() = num_inferences;
 
-    // Populate DLRMFeatures
-    ranking::DLRMFeatures features;
-    features.batch_size() = batch_size;
-    features.num_dense_features() = args.client_num_dense_features_arg;
-    features.num_sparse_features() = args.client_num_sparse_features_arg;
+    // Add DLRM features if client-side feature generation is enabled
+    if (args.client_side_features_given) {
+      int batch_size = args.client_dlrm_batch_size_arg;
+      int num_inferences = args.client_dlrm_inferences_arg;
 
-    // Convert float vector to double for Thrift
-    ranking::DenseFeatureVector dense_vec;
-    dense_vec.reserve(dense_features.size());
-    for (float f : dense_features) {
-      dense_vec.push_back(static_cast<double>(f));
+      auto dense_features =
+          this_thread.feature_generator->generateDenseFeatures(batch_size);
+      auto sparse_features =
+          this_thread.feature_generator->generateSparseFeatures(batch_size);
+
+      request.num_inferences() = num_inferences;
+
+      ranking::DLRMFeatures features;
+      features.batch_size() = batch_size;
+      features.num_dense_features() = args.client_num_dense_features_arg;
+      features.num_sparse_features() = args.client_num_sparse_features_arg;
+
+      ranking::DenseFeatureVector dense_vec;
+      dense_vec.reserve(dense_features.size());
+      for (float f : dense_features) {
+        dense_vec.push_back(static_cast<double>(f));
+      }
+      features.dense_features() = std::move(dense_vec);
+      features.sparse_features() = std::move(sparse_features);
+
+      request.dlrm_features() = std::move(features);
     }
-    features.dense_features() = std::move(dense_vec);
-    features.sparse_features() = std::move(sparse_features);
 
-    request.dlrm_features() = std::move(features);
+    // Always set num_inferences for the server's DLRM inference stage
+    if (!request.num_inferences().has_value()) {
+      request.num_inferences() = args.client_dlrm_inferences_arg;
+    }
+
+    // Add Silesia stories if enabled
+    if (args.silesia_dir_given) {
+      PopulateStories(request, this_thread);
+    }
 
     // Serialize the request
     folly::IOBufQueue bufq;
     apache::thrift::CompactSerializer::serialize(request, &bufq);
     auto buf = bufq.move();
-    // Coalesce the IOBuf chain into a single contiguous buffer.
-    // Without this, data() and length() only return the first segment,
-    // causing truncated payloads and deserialization underflow errors.
     buf->coalesce();
 
     // Send request with serialized RankingRequest
@@ -235,6 +290,23 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  // Load Silesia corpus if specified
+  if (args.silesia_dir_given) {
+    g_silesia_loader = std::make_unique<ranking::SilesiaLoader>();
+    if (!g_silesia_loader->loadDirectory(args.silesia_dir_arg)) {
+      std::cerr << "Failed to load Silesia corpus from: "
+                << args.silesia_dir_arg << std::endl;
+      return 1;
+    }
+    std::cout << "Silesia corpus loaded: " << g_silesia_loader->numFiles()
+              << " files, " << (g_silesia_loader->totalSize() / (1024 * 1024))
+              << " MB" << std::endl;
+    std::cout << "  Stories per request: " << args.stories_per_request_arg
+              << std::endl;
+    std::cout << "  Story size: " << args.story_size_min_arg << "-"
+              << args.story_size_max_arg << " bytes" << std::endl;
+  }
+
   auto host_port = ranking::utils::parseHostnameAndPort(args.server_arg);
 
   // Make storage for thread variables
@@ -251,7 +323,7 @@ int main(int argc, char **argv) {
 
   // Register only the request type that will be used
   // This ensures stats are collected for a single type, avoiding output parsing issues
-  if (args.client_side_features_given) {
+  if (args.client_side_features_given || args.silesia_dir_given) {
     driver_node.registerRequestType(ranking::kDLRMRequestType);
   } else {
     driver_node.registerRequestType(ranking::kPageRankRequestType);
@@ -268,6 +340,16 @@ int main(int argc, char **argv) {
     std::cout << "  Dense features: " << args.client_num_dense_features_arg << std::endl;
     std::cout << "  Sparse features: " << args.client_num_sparse_features_arg << std::endl;
     std::cout << "  Seed: " << args.client_feature_seed_arg << std::endl;
+  }
+
+  // Log Silesia mode
+  if (args.silesia_dir_given) {
+    std::cout << "Silesia story generation enabled:" << std::endl;
+    std::cout << "  Directory: " << args.silesia_dir_arg << std::endl;
+    std::cout << "  Stories per request: " << args.stories_per_request_arg
+              << std::endl;
+    std::cout << "  Story size: " << args.story_size_min_arg << "-"
+              << args.story_size_max_arg << " bytes" << std::endl;
   }
 
   driver_node.run(args.threads_arg, args.affinity_given, args.connections_arg,

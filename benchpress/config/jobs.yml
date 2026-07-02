@@ -743,6 +743,8 @@
     - '--feature-complexity={feature_complexity}'
     - '--num-stories={num_stories}'
     - '--extractors-per-story={extractors_per_story}'
+    - '--silesia-dir={silesia_dir}'
+    - '--stories-per-request={stories_per_request}'
     - '{extra_args}'
   vars:
     - 'num_instances=-1'
@@ -763,6 +765,8 @@
     - 'feature_complexity=5'
     - 'num_stories=100'
     - 'extractors_per_story=50'
+    - 'silesia_dir=silesia'
+    - 'stories_per_request=10'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat

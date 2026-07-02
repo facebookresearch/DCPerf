@@ -128,10 +128,28 @@ struct DLRMFeatures {
   5: i32 num_sparse_features;
 }
 
+// ============================================================================
+// Phase 3 (Plan): Client-Server Story Content Types (Silesia Dataset)
+// ============================================================================
+
+// A single story containing raw bytes from the Silesia corpus
+struct StoryContent {
+  1: i64 story_id;
+  2: binary content;        // Raw bytes from Silesia files
+  3: string source_file;    // Which Silesia file this snippet came from
+  4: i32 content_length;    // Length of content in bytes
+}
+
+// A batch of stories sent per request
+struct StoryBatch {
+  1: list<StoryContent> stories;
+}
+
 // Request structure for DLRM inference with client-provided features
 struct RankingRequest {
   1: i64 request_id;
   2: optional DLRMFeatures dlrm_features;
   3: i32 num_inferences = 1;
   4: map<string, string> metadata;
+  5: optional StoryBatch story_batch;
 }
