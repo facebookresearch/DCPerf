@@ -62,6 +62,44 @@ enum class MethodIdx : uint8_t {
 
 constexpr size_t kNumMethods = static_cast<size_t>(MethodIdx::COUNT);
 
+// Five inbound RPC methods served by the FeedSim leaf, mirroring the
+// production multifeed_aggregator surface area. The order MUST match the
+// JSON keys consumed by RpcDistRegistry::load() below and the registration
+// order in LeafNodeRank.cc::main().
+//
+// Phase 6: response sizes loaded from rpc_dist.json drive how big the
+// per-method server handlers should make their outbound responses (mirrors
+// how mock_services handlers consume the wire `response_size` header).
+// Request and latency samplers are exposed for the driver-side request
+// padding (see DriverNodeRank::RunSession in Programmer-A's diff).
+//
+// Programmer-A may also introduce an InboundIdx enum with different
+// naming conventions for the driver side; if both land, Programmer-C
+// deduplicates during Phase 6-C cleanup.
+enum class InboundIdx : uint8_t {
+  kCreateAndPrimeSession = 0,
+  kGetStoriesUncompressed = 1,
+  kGetAllStories = 2,
+  kStreamData = 3,
+  kStreamIfrPriorityRanking = 4,
+  kCount = 5,
+};
+
+constexpr size_t kNumInboundMethods = static_cast<size_t>(InboundIdx::kCount);
+
+// Inbound JSON keys, indexed by InboundIdx. Mirrors the keys present
+// under the top-level "inbound" object in rpc_dist.json.
+inline const std::array<const char*, kNumInboundMethods>& inboundMethodNames() {
+  static const std::array<const char*, kNumInboundMethods> kNames = {
+      "createAndPrimeSession",
+      "getStoriesUncompressed",
+      "getAllStories",
+      "streamData",
+      "streamIfrPriorityRanking",
+  };
+  return kNames;
+}
+
 // Method name strings, indexed by MethodIdx. Used for JSON lookup,
 // logging, and string-keyed test introspection.
 inline const std::array<const char*, kNumMethods>& methodNames() {
@@ -191,12 +229,32 @@ class RpcDistRegistry {
       all_ok &= loadMetric(method_obj, "latency_us", lat_[i], name);
     }
 
-    // Inbound section is optional for fanout but useful for future tooling
-    // (e.g., DriverNode shaping inbound payloads). We do not require it.
+    // Phase 6: parse the inbound section into 5 inbound samplers x 3
+    // metrics. Inbound entries are optional — when absent, the per-method
+    // server handlers in LeafNodeRank.cc fall back to fixed response
+    // sizes and the driver skips request-size shaping. This keeps OSS
+    // CMake builds working with a partial rpc_dist.json.
     auto inbound_it = root.find("inbound");
     if (inbound_it != root.items().end() && inbound_it->second.isObject()) {
-      // No-op for now; reserved for future use. Silently parse to validate.
-      (void)inbound_it;
+      const folly::dynamic& inbound = inbound_it->second;
+      for (size_t i = 0; i < kNumInboundMethods; ++i) {
+        const char* name = inboundMethodNames()[i];
+        auto method_it = inbound.find(name);
+        if (method_it == inbound.items().end() ||
+            !method_it->second.isObject()) {
+          // Missing inbound entries are not fatal — outbound is the
+          // contract for this loader. Leave the sampler in its empty
+          // state so isInboundFullyLoaded() returns false.
+          continue;
+        }
+        const folly::dynamic& method_obj = method_it->second;
+        // Best-effort: log on parse failure but do not flip all_ok.
+        (void)loadMetric(
+            method_obj, "request_sizes", inbound_req_[i], name);
+        (void)loadMetric(
+            method_obj, "response_sizes", inbound_resp_[i], name);
+        (void)loadMetric(method_obj, "latency_us", inbound_lat_[i], name);
+      }
     }
 
     if (all_ok) {
@@ -240,6 +298,37 @@ class RpcDistRegistry {
     return true;
   }
 
+  // Phase 6: per-inbound-method accessors. The leaf handlers consult
+  // inboundResponseSize() to decide how big a response to generate
+  // (mirroring the wire `response_size` header used by mock_services
+  // outbound calls). The driver consults inboundRequestSize() to pad
+  // typed requests to match the production wire distribution.
+  // Returns the empty fallback sampler when the inbound section was
+  // absent from rpc_dist.json or did not include the requested method.
+  const PercentileSampler& inboundRequestSize(InboundIdx m) const {
+    return inbound_req_[static_cast<size_t>(m)];
+  }
+  const PercentileSampler& inboundResponseSize(InboundIdx m) const {
+    return inbound_resp_[static_cast<size_t>(m)];
+  }
+  const PercentileSampler& inboundLatencyUs(InboundIdx m) const {
+    return inbound_lat_[static_cast<size_t>(m)];
+  }
+
+  // True if every inbound metric loaded successfully (5 methods x 3).
+  // Driver / leaf flows treat false as "skip size-shaping pad", not as
+  // a fatal error — keeps OSS flows working when rpc_dist.json lacks
+  // the "inbound" section.
+  bool isInboundFullyLoaded() const {
+    for (size_t i = 0; i < kNumInboundMethods; ++i) {
+      if (!inbound_req_[i].isLoaded() || !inbound_resp_[i].isLoaded() ||
+          !inbound_lat_[i].isLoaded()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
  private:
   static bool loadMetric(
       const folly::dynamic& method_obj,
@@ -275,6 +364,11 @@ class RpcDistRegistry {
   std::array<PercentileSampler, kNumMethods> req_;
   std::array<PercentileSampler, kNumMethods> resp_;
   std::array<PercentileSampler, kNumMethods> lat_;
+  // Phase 6: parallel inbound arrays (5 methods x 3 metrics). Empty when
+  // rpc_dist.json's "inbound" section is absent.
+  std::array<PercentileSampler, kNumInboundMethods> inbound_req_;
+  std::array<PercentileSampler, kNumInboundMethods> inbound_resp_;
+  std::array<PercentileSampler, kNumInboundMethods> inbound_lat_;
   PercentileSampler empty_;
 };
 

@@ -201,8 +201,18 @@ run_loadtest() {
     exit 1;
   fi
 
-  if grep -q "$latency_type: [0-9]\+.\([0-9]\+\)\? ms" $tmp_file; then
-    local latency=$(cat $tmp_file | grep $latency_type | awk '{print $2}')
+  # Phase 6: support `fs_<percentile>` (first-story) targets by greppng
+  # the prefixed line. Anchor non-fs targets on a leading space so the
+  # `fs_*` block doesn't accidentally satisfy a `95p:` query when the
+  # caller actually wanted the per-response block.
+  local latency_grep_pattern="$latency_type: [0-9]\+.\([0-9]\+\)\? ms"
+  if [[ "$latency_type" == fs_* ]]; then
+    : # already prefixed
+  else
+    latency_grep_pattern="  $latency_type: [0-9]\+.\([0-9]\+\)\? ms"
+  fi
+  if grep -q "$latency_grep_pattern" $tmp_file; then
+    local latency=$(cat $tmp_file | grep -- "$latency_grep_pattern" | head -n1 | awk '{print $2}')
   else
     echo "Could not find latency in loadtest output" >&2
     echo "Contents of loadtest output:" >&2
@@ -231,18 +241,33 @@ run_loadtest() {
 
     local total_queries=$(cat $tmp_file | awk '/QPS/ {print substr($4,2);}')
 
-    local min_ms=$(cat $tmp_file | awk '/min:/ {print $2;}')
-    local avg_ms=$(cat $tmp_file | awk '/avg:/ {print $2;}')
-    local p50_ms=$(cat $tmp_file | awk '/50p:/ {print $2;}')
-    local p90_ms=$(cat $tmp_file | awk '/90p:/ {print $2;}')
-    local p95_ms=$(cat $tmp_file | awk '/95p:/ {print $2;}')
-    local p99_ms=$(cat $tmp_file | awk '/99p:/ {print $2;}')
-    local p99_9_ms=$(cat $tmp_file | awk '/99\.9p:/ {print $2;}')
+    # Per-response latency block. Anchor on a leading space so the
+    # first-story `fs_*` block (which uses `fs_50p:` etc.) doesn't
+    # bleed into these matches.
+    local min_ms=$(cat $tmp_file | awk '/  min:/ {print $2;}')
+    local avg_ms=$(cat $tmp_file | awk '/  avg:/ {print $2;}')
+    local p50_ms=$(cat $tmp_file | awk '/  50p:/ {print $2;}')
+    local p90_ms=$(cat $tmp_file | awk '/  90p:/ {print $2;}')
+    local p95_ms=$(cat $tmp_file | awk '/  95p:/ {print $2;}')
+    local p99_ms=$(cat $tmp_file | awk '/  99p:/ {print $2;}')
+    local p99_9_ms=$(cat $tmp_file | awk '/  99\.9p:/ {print $2;}')
+
+    # Phase 6 first-story latency block. Always present in driver output
+    # (zeros if no samples), so unconditional capture is safe.
+    local fs_p50_ms=$(cat $tmp_file | awk '/fs_50p:/ {print $2;}')
+    local fs_p90_ms=$(cat $tmp_file | awk '/fs_90p:/ {print $2;}')
+    local fs_p95_ms=$(cat $tmp_file | awk '/fs_95p:/ {print $2;}')
+    local fs_p99_ms=$(cat $tmp_file | awk '/fs_99p:/ {print $2;}')
+    fs_p50_ms=${fs_p50_ms:-0.000}
+    fs_p90_ms=${fs_p90_ms:-0.000}
+    fs_p95_ms=${fs_p95_ms:-0.000}
+    fs_p99_ms=${fs_p99_ms:-0.000}
 
     printf '%d,%d,%.2f,%.2f,' "$experiment_time" "$total_queries" "$3" "$qps" >> $output_csv_file
     printf '%d,%d,%.2f,%.2f,' "$total_bytes_rx" "$total_bytes_tx" "$rx_mbps" "$tx_mbps" >> $output_csv_file
     printf '%.3f,%.3f,%.3f,%.3f,' "$min_ms" "$avg_ms" "$p50_ms" "$p90_ms" >> $output_csv_file
-    printf '%.3f,%.3f,%.3f\n' "$p95_ms" "$p99_ms" "$p99_9_ms" >> $output_csv_file
+    printf '%.3f,%.3f,%.3f,' "$p95_ms" "$p99_ms" "$p99_9_ms" >> $output_csv_file
+    printf '%.3f,%.3f,%.3f,%.3f\n' "$fs_p50_ms" "$fs_p90_ms" "$fs_p95_ms" "$fs_p99_ms" >> $output_csv_file
 
   fi
 
@@ -344,11 +369,16 @@ if [[ -z "$fixed_qps" ]] && ( [[ $latency_type = "" ]] || [[ $latency_target = "
   echo 'error: -s metric:target must be specified' >&2; exit 1
 fi
 
-# make sure latency_type is a recognized type
+# make sure latency_type is a recognized type. Phase 6 adds `fs_*`
+# (first-story) variants so search_qps can search against the new
+# session-mode SLA.
 if [[ $latency_type != "avg" ]] && [[ $latency_type != "50p" ]] && \
    [[ $latency_type != "90p" ]] && [[ $latency_type != "95p" ]] && \
-   [[ $latency_type != "99p" ]] && [[ $latency_type != "99.9p" ]]; then
-  echo 'error: metric must be avg|50p|90p|95p|99p|99.9p' >&2; exit 1
+   [[ $latency_type != "99p" ]] && [[ $latency_type != "99.9p" ]] && \
+   [[ $latency_type != "fs_avg" ]] && [[ $latency_type != "fs_50p" ]] && \
+   [[ $latency_type != "fs_90p" ]] && [[ $latency_type != "fs_95p" ]] && \
+   [[ $latency_type != "fs_99p" ]] && [[ $latency_type != "fs_99.9p" ]]; then
+  echo 'error: metric must be (avg|50p|90p|95p|99p|99.9p) or fs_(avg|50p|90p|95p|99p|99.9p)' >&2; exit 1
 fi
 
 # check to make sure experiment_time is an integer
@@ -380,7 +410,11 @@ avg_ms,\
 90p_ms,\
 95p_ms,\
 99p_ms,\
-99.9p_ms"
+99.9p_ms,\
+fs_50p_ms,\
+fs_90p_ms,\
+fs_95p_ms,\
+fs_99p_ms"
 
   echo $header > $output_csv_file
 fi
