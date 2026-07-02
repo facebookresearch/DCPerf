@@ -588,8 +588,16 @@ main() {
 
     # Starting leaf node service
     monitor_port=$((port-1000))
+
+    # On aarch64, preload Miniconda's protobuf to resolve version conflict
+    # between system libprotobuf.so.25 and libtorch's libprotobuf.so.33
+    local preload_env=""
+    if [ "$(uname -m)" = "aarch64" ] && [ -f "${FEEDSIM_ROOT}/third_party/miniconda3/lib/libprotobuf.so" ]; then
+        preload_env="LD_PRELOAD=${FEEDSIM_ROOT}/third_party/miniconda3/lib/libprotobuf.so"
+    fi
+
     # shellcheck disable=SC2086
-    MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
+    env $preload_env MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
         --monitor_port="$monitor_port" \
         --graph_scale=21 \
@@ -618,7 +626,7 @@ main() {
 
     # Wait for server to be fully ready using monitoring endpoint
     echo "Waiting for LeafNodeRank server to be ready on monitor port $monitor_port..."
-    max_attempts=30
+    max_attempts=120
     attempt=0
     while [ $attempt -lt $max_attempts ]; do
         if curl -f -s "http://localhost:$monitor_port/topology" > /dev/null 2>&1; then

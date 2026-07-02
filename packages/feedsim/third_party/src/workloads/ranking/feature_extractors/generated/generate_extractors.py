@@ -68,9 +68,14 @@ PATTERN_DISTRIBUTION = [
 ]
 
 TRANSFORMS = [
-    "r", "std::abs(r)", "std::tanh(r)",
-    "std::log1p(std::abs(r))", "(1.0f / (1.0f + std::exp(-r)))",
-    "std::sqrt(std::abs(r))", "(r * r * 0.01f)", "std::sin(r * 0.1f)",
+    "r",
+    "static_cast<float>(static_cast<int32_t>(r * 1000.0f) & 0x7FFFFFFF)",
+    "static_cast<float>(__builtin_popcount(static_cast<uint32_t>(r * 1e6f)))",
+    "static_cast<float>((static_cast<int64_t>(r * 1e4f) ^ 0x5BD1E995LL) >> 13)",
+    "(r > 0.5f ? r : -r)",
+    "static_cast<float>((static_cast<uint64_t>(r * 1e6f) * 0x9E3779B97F4A7C15ULL) >> 48)",
+    "static_cast<float>(static_cast<int32_t>(r) << 3)",
+    "static_cast<float>((static_cast<int32_t>(r * 256.0f) ^ (static_cast<int32_t>(r * 65536.0f) >> 7)) & 0xFFFF)",
 ]
 
 
@@ -90,8 +95,18 @@ class VariantSpec:
 # ============================================================================
 
 def fhdr(vid, cid):
+    """Function header with context preparation call and validity pre-check."""
+    seed = vid * 1000 + cid
+    guard_off = (seed * 7 + 13) % 256
+    guard_thr = (seed % 16)
     return (f"__attribute__((noinline)) static void "
-            f"vc_{vid:04d}_{cid:04d}(CopyContext* c) {{\n")
+            f"vc_{vid:04d}_{cid:04d}(CopyContext* c) {{\n"
+            f"  using namespace dcperf::feature_extractors;\n"
+            f"  helpers::prepareExtractContext(c, {seed});\n"
+            f"  if ((static_cast<int>(c->structData[{guard_off} % c->structSize]) & 0xF) < {guard_thr}) {{\n"
+            f"    c->structData[0] += 1e-10f;\n"
+            f"    return;\n"
+            f"  }}\n")
 
 
 def sr(off):
@@ -100,23 +115,125 @@ def sr(off):
 
 
 def yd(fi, val):
-    """Yield dense feature."""
+    """Yield dense feature — INLINE unique code (I-cache pressure) + helper validation."""
+    # Keep the original inline code for unique instruction footprint,
+    # AND call helper for additional non-inline hops.
     return (f"    {{ int _fi = {fi} % c->numFeatures;\n"
             f"      int32_t _i = c->features[_fi].raw_feature_index;\n"
-            f"      if (_i >= 0 && _i < (int32_t)c->example->denseValues.size())\n"
-            f"        c->example->denseValues[_i] = {val}; }}\n")
+            f"      if (_i >= 0 && _i < (int32_t)c->example->denseValues.size()) {{\n"
+            f"        float _v = {val};\n"
+            f"        if (dcperf::feature_extractors::helpers::validateFeatureValue(_v, {fi % 3}))\n"
+            f"          c->example->denseValues[_i] = _v;\n"
+            f"      }} }}\n")
 
 
 def yi(fi, idx, val):
-    """Yield indexed feature (sparse)."""
+    """Yield indexed feature — INLINE unique code + helper validation."""
     return (f"    {{ int _fi = {fi} % c->numFeatures;\n"
-            f"      if (_fi >= 0 && _fi < (int)c->example->idScoreLists.size())\n"
+            f"      float _v = {val};\n"
+            f"      if (_fi >= 0 && _fi < (int)c->example->idScoreLists.size()\n"
+            f"          && dcperf::feature_extractors::helpers::validateFeatureValue(_v, {fi % 3}))\n"
             f"        c->example->idScoreLists[_fi].emplace_back(\n"
-            f"          IdScorePair{{{idx}, {val}}}); }}\n")
+            f"          IdScorePair{{{idx}, _v}}); }}\n")
+
+
+def hl(table_idx, key_expr, fallback="0.0f"):
+    """Hash lookup via mock hash table (adds 5-7 non-inline hops)."""
+    return (f"dcperf::mock_hash::hashLookupWithFallback("
+            f"c->hashTables[{table_idx} % c->numHashTables], "
+            f"static_cast<int64_t>({key_expr}), {fallback})")
+
+
+def hj(tA, tB, key_expr, scale="1000.0f"):
+    """Cross-table hash join (adds 7-10 non-inline hops)."""
+    return (f"dcperf::mock_hash::crossTableLookup("
+            f"c->hashTables[{tA} % c->numHashTables], "
+            f"c->hashTables[{tB} % c->numHashTables], "
+            f"static_cast<int64_t>({key_expr}), {scale})")
+
+
+def ls(table_idx, stat_type):
+    """Lookup stats via helper (adds 6-8 non-inline hops)."""
+    return (f"dcperf::feature_extractors::helpers::lookupStats("
+            f"c->hashTables[{table_idx} % c->numHashTables], "
+            f"c->queryKeys, c->numKeys, {stat_type})")
+
+
+def cr(num, den, bucket_type):
+    """Compute rate via helper (adds 3-4 non-inline hops)."""
+    return (f"dcperf::feature_extractors::helpers::computeRate("
+            f"{num}, {den}, {bucket_type})")
 
 
 def pick_transform(rng):
     return rng.choice(TRANSFORMS)
+
+
+def int_hash_expr(rng, input_var):
+    """Generate a unique integer hash computation that replaces FP math."""
+    magic1 = hex(rng.randint(0, 0xFFFFFFFF))
+    magic2 = hex(rng.randint(0, 0xFFFFFFFF))
+    shift = rng.randint(7, 19)
+    return (f"static_cast<float>((static_cast<uint32_t>({input_var} * 1e4f) "
+            f"* {magic1}u ^ {magic2}u) >> {shift})")
+
+
+def hash_block(rng, input_off, num_ops=20, num_guards=0):
+    """Generate a block of integer hash computations to increase BB size.
+
+    When num_guards > 0, interleaves rarely-taken guard branches throughout
+    the computation.  These branches count as conditional-branch instructions
+    (increasing br_inst_retired.cond) but are almost never taken (~1/256),
+    so they do NOT split LBR-measured basic blocks — matching production's
+    pattern of many not-taken data-dependent checks within straight-line code.
+    """
+    c = ""
+    c += f"  uint64_t _h = static_cast<uint64_t>(c->structData[{input_off} % c->structSize] * 1e6f);\n"
+    guard_interval = max(1, num_ops // (num_guards + 1)) if num_guards > 0 else num_ops + 1
+    guard_idx = 0
+    for i in range(num_ops):
+        magic = hex(rng.randint(0x10000000, 0xFFFFFFFFFFFFFFFF))
+        shift = rng.randint(11, 23)
+        next_off = (input_off + i + 1) % 512
+        op = rng.choice([
+            f"  _h = _h * {magic}ULL; _h ^= _h >> {shift};\n",
+            f"  _h += static_cast<uint64_t>(c->structData[{next_off} % c->structSize] * 1e4f); _h *= {magic}ULL;\n",
+            f"  _h ^= _h >> {shift}; _h *= {magic}ULL; _h ^= _h >> {shift + 3};\n",
+        ])
+        c += op
+        # Insert rarely-taken guard branch every guard_interval ops
+        if num_guards > 0 and (i + 1) % guard_interval == 0 and guard_idx < num_guards:
+            rare_val = hex(rng.randint(0x80, 0xFF))
+            sd_off = (input_off + guard_idx) % 256
+            c += (f"  if ((_h & 0xFF) == {rare_val}) "
+                  f"c->structData[{sd_off} % c->structSize] += 1e-15f;\n")
+            guard_idx += 1
+    c += f"  float _hf = static_cast<float>(_h >> 32) * 1e-9f;\n"
+    return c
+
+
+def guard_cascade(rng, num_guards=12):
+    """Generate a cascade of rarely-taken guard branches with computation.
+
+    Each guard adds a conditional branch instruction (~1/256 taken) plus
+    2-3 hash ops between guards.  Combined with hash_block, this raises
+    conditional-branch % toward production's 14% without splitting LBR BBs.
+    Requires _h and _hf to already be declared (call after hash_block).
+    """
+    c = ""
+    for g in range(num_guards):
+        # 2-3 hash ops between guards (keeps _h changing so guards are independent)
+        for _ in range(rng.randint(2, 3)):
+            magic = hex(rng.randint(0x10000000, 0xFFFFFFFFFFFFFFFF))
+            shift = rng.randint(7, 23)
+            c += f"  _h = _h * {magic}ULL; _h ^= _h >> {shift};\n"
+        # Guard branch: true ~1/256 of the time
+        rare_val = hex(rng.randint(0x00, 0xFF))
+        sd_off = rng.randint(0, 255)
+        c += (f"  if ((_h & 0xFF) == {rare_val}) "
+              f"c->structData[{sd_off} % c->structSize] += 1e-15f;\n")
+    c += f"  _hf += static_cast<float>(_h >> 48) * 1e-12f;\n"
+    return c
 
 
 # ============================================================================
@@ -128,17 +245,22 @@ def gen_P01(vid, cid, rng, pvid):
     num_yields = 1 + (pvid % 3)
     has_null = (pvid + cid) % 2 == 0
     c = fhdr(vid, cid)
+    # Hash block with guards to increase BB size and conditional branch %
+    c += hash_block(rng, rng.randint(0, 255), num_ops=50)
     off0 = rng.randint(0, 255)
     sc0 = rng.uniform(0.5, 3.0)
     if has_null:
-        c += f"  float v0 = {sr(off0)} * {sc0:.4f}f;\n"
+        c += f"  float v0 = {sr(off0)} * {sc0:.4f}f + _hf;\n"
         c += f"  if (v0 == 0.0f) return;\n"
     for i in range(num_yields):
         off = rng.randint(0, 255)
         fi = rng.randint(0, 49)
         sc = rng.uniform(0.3, 4.0)
         c += f"  {{ float val = {sr(off)} * {sc:.4f}f;\n"
+        # Feature validity check branch
+        c += f"    if (c->features[{fi} % c->numFeatures].raw_feature_index >= 0) {{\n"
         c += yd(fi, "val")
+        c += f"    }}\n"
         c += f"  }}\n"
     c += "}\n\n"
     return c
@@ -154,6 +276,8 @@ def gen_P02(vid, cid, rng, pvid):
     num_branches = 3 + (pvid % 6)  # 3-8
     has_cross = (pvid % 3) == 0
     c = fhdr(vid, cid)
+    # Hash block with guards to increase BB size and conditional branch %
+    c += hash_block(rng, rng.randint(0, 255), num_ops=35)
     # Read from 1-2 "sources" (different struct offset regions)
     src_base = [rng.randint(0, 127), rng.randint(128, 255)]
     for i in range(num_fields):
@@ -182,7 +306,11 @@ def gen_P02(vid, cid, rng, pvid):
         fi = rng.randint(0, 49)
         c += f"  {{ float a = {sr(oA)}; float b = {sr(oB)};\n"
         c += f"    if (b != 0.0f) {{\n"
-        c += f"      float cross = a / b;\n"
+        # Integer bit manipulation for reciprocal approximation
+        c += f"      int32_t _den_bits = *reinterpret_cast<int32_t*>(&b);\n"
+        c += f"      _den_bits = 0x7EF311C2 - _den_bits;\n"
+        c += f"      float _inv_b = *reinterpret_cast<float*>(&_den_bits);\n"
+        c += f"      float cross = a * _inv_b + _hf;\n"
         c += yd(fi, "cross")
         c += f"    }}\n"
         c += f"  }}\n"
@@ -201,6 +329,7 @@ def gen_P03(vid, cid, rng, pvid):
     has_default = (pvid + cid) % 2 == 0
     type_off = rng.randint(0, 255)
     c = fhdr(vid, cid)
+    c += hash_block(rng, rng.randint(0, 127), num_ops=30)
     c += f"  int type_val = static_cast<int>({sr(type_off)}) & 0xF;\n"
     c += f"  switch (type_val) {{\n"
     for case_i in range(num_cases):
@@ -256,15 +385,17 @@ def gen_P04(vid, cid, rng, pvid):
     c += f"  float storyTime = {sr(t1_off)} * 1e6f;\n"
     c += f"  float age = viewerTime - storyTime;\n"
     c += yd(fi_base, "age")
-    c += f"  float ageHours = age / {divisor:.1f}f;\n"
+    inv_divisor = 1.0 / divisor
+    c += f"  float ageHours = age * {inv_divisor:.10f}f;\n"
     c += yd(fi_base + 1, "ageHours")
     if has_bucket:
         c += f"  if (age > 0.0f) {{\n"
         if bucket_type == 0:  # linear
             bsize = rng.uniform(100.0, 10000.0)
-            c += f"    int bucket = static_cast<int>(age / {bsize:.1f}f);\n"
-        elif bucket_type == 1:  # log
-            c += f"    int bucket = static_cast<int>(std::log2(ageHours + 1.0f));\n"
+            inv_bsize = 1.0 / bsize
+            c += f"    int bucket = static_cast<int>(age * {inv_bsize:.10f}f);\n"
+        elif bucket_type == 1:  # log — integer approximation
+            c += f"    int bucket = static_cast<int>(31 - __builtin_clz(static_cast<uint32_t>(ageHours + 1.0f)));\n"
         else:  # custom thresholds
             thresholds = sorted([rng.uniform(0.1, 100.0) for _ in range(4)])
             c += f"    int bucket = 0;\n"
@@ -294,7 +425,9 @@ def gen_P05(vid, cid, rng, pvid):
     num_counters = [3, 7, 11, 13][pvid % 4]
     num_rates = [5, 10, 15, 20][pvid % 4]
     has_imp_bucket = (pvid + cid) % 2 == 0
+    has_hash_lookup = (pvid + cid) % 3 != 0
     c = fhdr(vid, cid)
+    c += hash_block(rng, rng.randint(0, 255), num_ops=35)
     base_off = rng.randint(0, 100)
     fi_c = rng.randint(0, 30)
     fi_r = rng.randint(0, 30)
@@ -302,36 +435,39 @@ def gen_P05(vid, cid, rng, pvid):
     thr = rng.uniform(0.001, 0.1)
     c += f"  float null_chk = {sr(null_off)};\n"
     c += f"  if (null_chk < {thr:.4f}f) return;\n"
-    # Counter loop
+    # Hash lookup for additional data (adds 5-7 noinline hops)
+    if has_hash_lookup:
+        tbl = rng.randint(0, 3)
+        c += f"  float hashBoost = {hl(tbl, sr(base_off))};\n"
+    else:
+        c += f"  float hashBoost = 1.0f;\n"
+    # Counter loop — original inline code kept
     c += f"  for (int i = 0; i < {num_counters}; ++i) {{\n"
     c += f"    float cnt = {sr(base_off)} + c->structData[({base_off} + i) % c->structSize];\n"
+    c += f"    cnt *= hashBoost;\n"
     c += f"    if (cnt > 0.0f) {{\n"
-    c += f"      int fi = ({fi_c} + i) % c->numFeatures;\n"
-    c += f"      int32_t idx = c->features[fi].raw_feature_index;\n"
-    c += f"      if (idx >= 0 && idx < (int32_t)c->example->denseValues.size())\n"
-    c += f"        c->example->denseValues[idx] = cnt;\n"
+    c += yd(fi_c, "cnt")
     c += f"    }}\n"
     c += f"  }}\n"
-    # Rate loop with impression bucketing
+    # Rate loop — original inline + computeRate helper
     imp_off = rng.randint(0, 255)
     c += f"  float denom = {sr(imp_off)};\n"
     c += f"  if (denom <= 0.0f) return;\n"
-    c += f"  float invDenom = 1.0f / denom;\n"
+    c += f"  int32_t _den_b = *reinterpret_cast<int32_t*>(&denom);\n"
+    c += f"  _den_b = 0x7EF311C2 - _den_b;\n"
+    c += f"  float invDenom = *reinterpret_cast<float*>(&_den_b);\n"
     if has_imp_bucket:
-        c += f"  int64_t impBkt = static_cast<int64_t>(std::log2(denom + 1.0f));\n"
+        c += f"  int64_t impBkt = static_cast<int64_t>(31 - __builtin_clz(static_cast<uint32_t>(denom + 1.0f)));\n"
     else:
         bucket_val = rng.randint(0, 15)
         c += f"  int64_t impBkt = {bucket_val}LL;\n"
+    bucket_type = rng.randint(0, 3)
     c += f"  for (int i = 0; i < {num_rates}; ++i) {{\n"
     rate_off = rng.randint(0, 200)
     sc = rng.uniform(0.5, 2.0)
     c += f"    float rate = c->structData[({rate_off} + i) % c->structSize] * invDenom * {sc:.4f}f;\n"
-    c += f"    if (rate != 0.0f && std::isfinite(rate)) {{\n"
-    c += f"      int fi = ({fi_r} + i) % c->numFeatures;\n"
-    c += f"      if (fi >= 0 && fi < (int)c->example->idScoreLists.size())\n"
-    c += f"        c->example->idScoreLists[fi].emplace_back(\n"
-    c += f"          IdScorePair{{impBkt, rate}});\n"
-    c += f"    }}\n"
+    c += f"    rate = {cr('rate', '1.0f', bucket_type)};\n"  # Extra helper call
+    c += yi(fi_r, "impBkt", "rate")
     c += f"  }}\n"
     c += "}\n\n"
     return c
@@ -346,6 +482,8 @@ def gen_P06(vid, cid, rng, pvid):
     num_dims = [2, 4, 7][pvid % 3]
     num_rates = [5, 10, 15][pvid % 3]
     c = fhdr(vid, cid)
+    # Hash block with guards to increase BB size and conditional branch %
+    c += hash_block(rng, rng.randint(0, 511), num_ops=35)
     dim_off = rng.randint(0, 255)
     c += f"  int dim = static_cast<int>({sr(dim_off)}) & 0x7;\n"
     c += f"  if (dim < 0 || dim >= {num_dims}) return;\n"
@@ -353,8 +491,10 @@ def gen_P06(vid, cid, rng, pvid):
     imp_base = rng.randint(0, 200)
     c += f"  float dimImp = c->structData[({imp_base} + dim) % c->structSize];\n"
     c += f"  if (dimImp <= 0.0f) return;\n"
-    c += f"  float invImp = 1.0f / dimImp;\n"
-    c += f"  int64_t impBkt = static_cast<int64_t>(std::log2(dimImp + 1.0f));\n"
+    c += f"  int32_t _di_b = *reinterpret_cast<int32_t*>(&dimImp);\n"
+    c += f"  _di_b = 0x7EF311C2 - _di_b;\n"
+    c += f"  float invImp = *reinterpret_cast<float*>(&_di_b);\n"
+    c += f"  int64_t impBkt = static_cast<int64_t>(31 - __builtin_clz(static_cast<uint32_t>(dimImp + 1.0f)));\n"
     # Rate loop
     rate_base = rng.randint(0, 150)
     fi_base = rng.randint(0, 30)
@@ -407,8 +547,10 @@ def gen_P07(vid, cid, rng, pvid):
     imp_off = rng.randint(0, 255)
     c += f"  float imp = {sr(imp_off)};\n"
     c += f"  if (imp <= 0.0f) return;\n"
-    c += f"  float invImp = 1.0f / imp;\n"
-    c += f"  int64_t impBkt = static_cast<int64_t>(std::log2(imp + 1.0f));\n"
+    c += f"  int32_t _im_b = *reinterpret_cast<int32_t*>(&imp);\n"
+    c += f"  _im_b = 0x7EF311C2 - _im_b;\n"
+    c += f"  float invImp = *reinterpret_cast<float*>(&_im_b);\n"
+    c += f"  int64_t impBkt = static_cast<int64_t>(31 - __builtin_clz(static_cast<uint32_t>(imp + 1.0f)));\n"
     if has_calib:
         calib_off = rng.randint(0, 255)
         c += f"  float calibFactor = 1.0f + {sr(calib_off)} * 0.01f;\n"
@@ -446,45 +588,43 @@ def gen_P07(vid, cid, rng, pvid):
 
 def gen_P08(vid, cid, rng, pvid):
     num_lookups = [1, 3, 5][pvid % 3]
-    num_rates = [3, 5, 10][pvid % 3]
     table_idx = pvid % 4
     c = fhdr(vid, cid)
+    c += hash_block(rng, rng.randint(0, 127), num_ops=35)
     fi_base = rng.randint(0, 30)
     for lk in range(num_lookups):
         ki = rng.randint(0, 9)
         magic = rng.getrandbits(48)
         c += f"  {{ // lookup {lk}\n"
         c += f"    int64_t k = c->queryKeys[{ki} % c->numKeys] ^ 0x{magic:012x}LL;\n"
+        # BOTH: original unordered_map lookup + mock hash table lookup
         c += f"    auto it = c->tables[{table_idx}].find(k);\n"
+        c += f"    float baseVal = (it != c->tables[{table_idx}].end()) ? it->second : 0.0f;\n"
+        c += f"    baseVal += {hl(table_idx, 'k')};\n"  # Add hash table call chain
         if lk == 0 and num_lookups == 1:
-            c += f"    if (it == c->tables[{table_idx}].end()) {{ return; }}\n"
-        else:
-            c += f"    if (it != c->tables[{table_idx}].end()) {{\n"
-        c += f"    float baseVal = it->second;\n"
-        # Time slice loop
+            c += f"    if (baseVal == 0.0f) return;\n"
+        # Time slice loop — original inline + engagement stat helper
         ts_count = rng.randint(3, 7)
         c += f"    for (int ts = 0; ts < {ts_count}; ++ts) {{\n"
         thr = rng.uniform(0.01, 0.5)
         sc = rng.uniform(0.5, 3.0)
+        stat_type = rng.randint(0, 7)
         c += f"      float sliceVal = baseVal * c->structData[({rng.randint(0, 200)}"
         c += f" + ts) % c->structSize] * {sc:.4f}f;\n"
+        c += f"      sliceVal += helpers::computeEngagementStat("
+        c += f"c->structData, c->structSize, ts, {stat_type}) * 0.01f;\n"
         c += f"      if (sliceVal > {thr:.4f}f) {{\n"
-        c += f"        int fi = ({fi_base} + {lk} * {ts_count} + ts) % c->numFeatures;\n"
-        c += f"        int32_t idx = c->features[fi].raw_feature_index;\n"
-        c += f"        if (idx >= 0 && idx < (int32_t)c->example->denseValues.size())\n"
-        c += f"          c->example->denseValues[idx] = sliceVal;\n"
+        fi_slot = rng.randint(0, 49)
+        c += yd(fi_slot, "sliceVal")
         c += f"      }}\n"
         c += f"    }}\n"
-        # Rate computation
+        # Rate via helper
         rate_off = rng.randint(0, 255)
-        c += f"    float weeks = {sr(rate_off)} * {rng.uniform(0.0001, 0.01):.6f}f;\n"
-        c += f"    if (weeks > 0.0f) {{\n"
         fi_rate = rng.randint(0, 49)
-        c += f"      float rate = baseVal / weeks;\n"
+        bucket_type = rng.randint(0, 3)
+        c += f"    float weeks = {sr(rate_off)} * {rng.uniform(0.0001, 0.01):.6f}f;\n"
+        c += f"    float rate = {cr('baseVal', 'weeks', bucket_type)};\n"
         c += yd(fi_rate, "rate")
-        c += f"    }}\n"
-        if not (lk == 0 and num_lookups == 1):
-            c += f"    }} // end if found\n"
         c += f"  }}\n"
     c += "}\n\n"
     return c
@@ -504,6 +644,7 @@ def gen_P09(vid, cid, rng, pvid):
     max_emit = 16
     max_agg = num_ts * max_emit
     c = fhdr(vid, cid)
+    c += hash_block(rng, rng.randint(0, 255), num_ops=30)
     fi_base = rng.randint(0, 20)
     # Key derivation
     c += f"  int64_t keys[{num_keys}];\n"
@@ -561,7 +702,10 @@ def gen_P09(vid, cid, rng, pvid):
     c += f"    float wks = {sr(rate_off)} * {rng.uniform(0.0001, 0.01):.6f}f;\n"
     c += f"    if (wks > 0.0f) {{\n"
     fi_rate = rng.randint(0, 49)
-    c += yd(fi_rate, f"baseVal / wks")
+    c += f"      int32_t _wks_bits = *reinterpret_cast<int32_t*>(&wks);\n"
+    c += f"      _wks_bits = 0x7EF311C2 - _wks_bits;\n"
+    c += f"      float _inv_wks = *reinterpret_cast<float*>(&_wks_bits);\n"
+    c += yd(fi_rate, f"baseVal * _inv_wks")
     c += f"    }}\n"
     c += f"  }}\n"  # end key loop
     # Yield aggregated
@@ -580,7 +724,10 @@ def gen_P09(vid, cid, rng, pvid):
         c += f"    for (int i = 0; i < {max_agg // 2}; ++i) sum1 += "
         c += f"c->structData[(i + {rng.randint(0, 200)}) % c->structSize];\n"
         c += f"    if (sum1 > 0.0f) {{\n"
-        c += yd(fi_rat, "sum0 / sum1")
+        c += f"      int32_t _s1_bits = *reinterpret_cast<int32_t*>(&sum1);\n"
+        c += f"      _s1_bits = 0x7EF311C2 - _s1_bits;\n"
+        c += f"      float _inv_s1 = *reinterpret_cast<float*>(&_s1_bits);\n"
+        c += yd(fi_rat, "sum0 * _inv_s1")
         c += f"    }}\n"
         c += f"  }}\n"
     c += "}\n\n"
@@ -683,7 +830,11 @@ def gen_P11(vid, cid, rng, pvid):
     # Summary yields
     c += f"  if (treeCount > 0) {{\n"
     c += yd(fi_base, "treeSum")
-    c += yd(fi_base + 1, f"treeSum / static_cast<float>(treeCount)")
+    c += f"    float _tcf = static_cast<float>(treeCount);\n"
+    c += f"    int32_t _tc_bits = *reinterpret_cast<int32_t*>(&_tcf);\n"
+    c += f"    _tc_bits = 0x7EF311C2 - _tc_bits;\n"
+    c += f"    float _inv_tc = *reinterpret_cast<float*>(&_tc_bits);\n"
+    c += yd(fi_base + 1, f"treeSum * _inv_tc")
     c += f"  }}\n"
     # Additional chains
     for ch in range(1, num_chains):
@@ -719,21 +870,31 @@ def gen_P12(vid, cid, rng, pvid):
     num_stats = [5, 10, 15, 20, 25, 30][pvid % 6]
     window_off = rng.randint(0, 200)
     c = fhdr(vid, cid)
+    # Hash block (P12 is most frequent: 130 variants)
+    c += hash_block(rng, rng.randint(0, 255), num_ops=35)
     fi_base = rng.randint(0, 30)
     null_off = rng.randint(0, 255)
     thr = rng.uniform(0.0, 0.05)
     c += f"  constexpr int kVariantId = {vid};\n"
-    c += f"  float null_chk = {sr(null_off)};\n"
+    c += f"  float null_chk = {sr(null_off)} + _hf;\n"
     c += f"  if (null_chk < {thr:.4f}f) return;\n"
+    # Hash lookup for base multiplier (5-7 noinline hops)
+    use_hash = (pvid + cid) % 3 != 0
+    if use_hash:
+        tbl = rng.randint(0, 3)
+        c += f"  float statBase = {ls(tbl, pvid % 8)};\n"
+    else:
+        c += f"  float statBase = 1.0f;\n"
     sc = rng.uniform(0.5, 3.0)
+    # Original inline stat loop + helper validation
     c += f"  for (int i = 0; i < {num_stats}; ++i) {{\n"
     c += f"    float val = c->structData[({window_off} + kVariantId * {num_stats}"
     c += f" + i) % c->structSize] * {sc:.4f}f;\n"
+    c += f"    val *= statBase;\n"
+    c += f"    val += helpers::computeEngagementStat("
+    c += f"c->structData, c->structSize, i, ({window_off} + kVariantId) % 8) * 0.01f;\n"
     c += f"    if (val != 0.0f) {{\n"
-    c += f"      int fi = ({fi_base} + i) % c->numFeatures;\n"
-    c += f"      int32_t idx = c->features[fi].raw_feature_index;\n"
-    c += f"      if (idx >= 0 && idx < (int32_t)c->example->denseValues.size())\n"
-    c += f"        c->example->denseValues[idx] = val;\n"
+    c += yd(fi_base, "val")
     c += f"    }}\n"
     c += f"  }}\n"
     c += "}\n\n"
@@ -754,9 +915,13 @@ def gen_P13(vid, cid, rng, pvid):
     imp_off = rng.randint(0, 255)
     c += f"  float imp = {sr(imp_off)};\n"
     c += f"  if (imp <= 0.0f) return;\n"
-    c += f"  float invImp = 1.0f / (imp + {rng.uniform(0.001, 0.1):.6f}f);\n"
+    eps = rng.uniform(0.001, 0.1)
+    c += f"  float _imp_d = imp + {eps:.6f}f;\n"
+    c += f"  int32_t _imp_b = *reinterpret_cast<int32_t*>(&_imp_d);\n"
+    c += f"  _imp_b = 0x7EF311C2 - _imp_b;\n"
+    c += f"  float invImp = *reinterpret_cast<float*>(&_imp_b);\n"
     bucket_magic = rng.getrandbits(16)
-    c += f"  int64_t impBkt = static_cast<int64_t>(std::log2(imp + 1.0f))"
+    c += f"  int64_t impBkt = static_cast<int64_t>(31 - __builtin_clz(static_cast<uint32_t>(imp + 1.0f)))"
     c += f" ^ 0x{bucket_magic:04x}LL;\n"
     # Block 1: impression-indexed rates (unrolled)
     c += f"  // Block 1: {num_imp_feats} impression-indexed yields\n"
@@ -764,7 +929,7 @@ def gen_P13(vid, cid, rng, pvid):
         off = rng.randint(0, 1023)
         fi = rng.randint(0, 49)
         sc = rng.uniform(0.1, 5.0)
-        # Vary the computation between yields
+        # Vary the computation between yields — integer ops only
         comp = rng.randint(0, 3)
         if comp == 0:
             val_expr = f"c->structData[{off} % c->structSize] * invImp * {sc:.4f}f"
@@ -773,7 +938,7 @@ def gen_P13(vid, cid, rng, pvid):
             val_expr = (f"(c->structData[{off} % c->structSize] - "
                        f"c->structData[{off2} % c->structSize]) * invImp * {sc:.4f}f")
         elif comp == 2:
-            val_expr = f"std::log1p(std::abs(c->structData[{off} % c->structSize] * invImp)) * {sc:.4f}f"
+            val_expr = int_hash_expr(rng, f"c->structData[{off} % c->structSize] * invImp")
         else:
             val_expr = f"c->structData[{off} % c->structSize] * invImp * invImp * {sc:.4f}f"
         c += f"  {{ float r = {val_expr};\n"
@@ -789,8 +954,10 @@ def gen_P13(vid, cid, rng, pvid):
         vpv_off = rng.randint(0, 255)
         c += f"  float vpv = {sr(vpv_off)};\n"
         c += f"  if (vpv > 0.0f) {{\n"
-        c += f"    float invVpv = 1.0f / vpv;\n"
-        c += f"    int64_t vpvBkt = static_cast<int64_t>(std::log2(vpv + 1.0f));\n"
+        c += f"    int32_t _vpv_b = *reinterpret_cast<int32_t*>(&vpv);\n"
+        c += f"    _vpv_b = 0x7EF311C2 - _vpv_b;\n"
+        c += f"    float invVpv = *reinterpret_cast<float*>(&_vpv_b);\n"
+        c += f"    int64_t vpvBkt = static_cast<int64_t>(31 - __builtin_clz(static_cast<uint32_t>(vpv + 1.0f)));\n"
         for i in range(num_vpv_feats):
             off = rng.randint(0, 1023)
             fi = rng.randint(0, 49)
@@ -822,18 +989,32 @@ def gen_P14(vid, cid, rng, pvid):
     time_off = rng.randint(0, 255)
     c += f"  float imp = {sr(imp_off)};\n"
     c += f"  if (imp <= 0.0f) return;\n"
-    c += f"  float invImp = 1.0f / imp;\n"
-    c += f"  float timeSince = std::abs({sr(time_off)}) * {rng.uniform(0.01, 10.0):.4f}f;\n"
-    # Decay factor
+    c += f"  int32_t _i14_b = *reinterpret_cast<int32_t*>(&imp);\n"
+    c += f"  _i14_b = 0x7EF311C2 - _i14_b;\n"
+    c += f"  float invImp = *reinterpret_cast<float*>(&_i14_b);\n"
+    time_sc = rng.uniform(0.01, 10.0)
+    c += f"  float _ts_raw = {sr(time_off)};\n"
+    c += f"  float timeSince = (_ts_raw > 0.0f ? _ts_raw : -_ts_raw) * {time_sc:.4f}f;\n"
+    # Decay factor — integer approximation replacing std::exp
     if decay_type == 0:
         decay_rate = rng.uniform(0.001, 0.1)
-        c += f"  float decay = std::exp(-{decay_rate:.6f}f * timeSince);\n"
+        c += f"  float _dec_den = 1.0f + {decay_rate:.6f}f * timeSince;\n"
+        c += f"  int32_t _dec_b = *reinterpret_cast<int32_t*>(&_dec_den);\n"
+        c += f"  _dec_b = 0x7EF311C2 - _dec_b;\n"
+        c += f"  float decay = *reinterpret_cast<float*>(&_dec_b);\n"
     elif decay_type == 1:
-        c += f"  float decay = 1.0f / (1.0f + timeSince * {rng.uniform(0.01, 0.5):.4f}f);\n"
+        ts_sc = rng.uniform(0.01, 0.5)
+        c += f"  float _dec_den = 1.0f + timeSince * {ts_sc:.4f}f;\n"
+        c += f"  int32_t _dec_b = *reinterpret_cast<int32_t*>(&_dec_den);\n"
+        c += f"  _dec_b = 0x7EF311C2 - _dec_b;\n"
+        c += f"  float decay = *reinterpret_cast<float*>(&_dec_b);\n"
     else:
         half_life = rng.uniform(1.0, 168.0)
-        c += f"  float decay = std::exp(-0.693147f * timeSince / {half_life:.2f}f);\n"
-    c += f"  int64_t impBkt = static_cast<int64_t>(std::log2(imp + 1.0f));\n"
+        c += f"  float _dec_den = 1.0f + 0.693147f * timeSince * {1.0/half_life:.6f}f;\n"
+        c += f"  int32_t _dec_b = *reinterpret_cast<int32_t*>(&_dec_den);\n"
+        c += f"  _dec_b = 0x7EF311C2 - _dec_b;\n"
+        c += f"  float decay = *reinterpret_cast<float*>(&_dec_b);\n"
+    c += f"  int64_t impBkt = static_cast<int64_t>(31 - __builtin_clz(static_cast<uint32_t>(imp + 1.0f)));\n"
     # Feature yields with decay
     for i in range(num_feats):
         off = rng.randint(0, 511)
@@ -922,14 +1103,23 @@ def gen_P16(vid, cid, rng, pvid):
         c += f"    float diff = a - b;\n"
         c += f"    l2sum += diff * diff;\n"
     c += f"  }}\n"
-    # Compute similarity
+    # Compute similarity — integer approximations replacing std::sqrt
     if sim_type == 0:
         c += f"  float similarity = dotProduct;\n"
     elif sim_type == 1:
-        c += f"  float similarity = dotProduct / (std::sqrt(normA) * std::sqrt(normB)"
-        c += f" + 1e-8f);\n"
+        # Use integer bit manipulation for fast inverse sqrt approximation
+        c += f"  float normProd = normA * normB + 1e-8f;\n"
+        c += f"  int32_t _npi = *reinterpret_cast<int32_t*>(&normProd);\n"
+        c += f"  _npi = 0x5F3759DF - (_npi >> 1);\n"
+        c += f"  float invSqrtNorm = *reinterpret_cast<float*>(&_npi);\n"
+        c += f"  float similarity = dotProduct * invSqrtNorm;\n"
     else:
-        c += f"  float similarity = std::sqrt(l2sum + 1e-8f);\n"
+        # fast sqrt via inverse sqrt: sqrt(x) = x * rsqrt(x)
+        c += f"  float _l2t = l2sum + 1e-8f;\n"
+        c += f"  int32_t _l2i = *reinterpret_cast<int32_t*>(&_l2t);\n"
+        c += f"  _l2i = 0x5F3759DF - (_l2i >> 1);\n"
+        c += f"  float _l2r = *reinterpret_cast<float*>(&_l2i);\n"
+        c += f"  float similarity = _l2t * _l2r;\n"
     c += yd(fi_base, "similarity")
     # Optional dimension yield
     if yield_dims:
@@ -1031,7 +1221,11 @@ def gen_P19(vid, cid, rng, pvid):
     c += yd(fi_base, "1.0f")
     c += yd(fi_base + 1, f"static_cast<float>(matchPos)")
     recency_sc = rng.uniform(0.5, 2.0)
-    c += yd(fi_base + 2, f"{recency_sc:.4f}f / (1.0f + static_cast<float>(matchPos))")
+    c += f"    float _mp_den = 1.0f + static_cast<float>(matchPos);\n"
+    c += f"    int32_t _mp_bits = *reinterpret_cast<int32_t*>(&_mp_den);\n"
+    c += f"    _mp_bits = 0x7EF311C2 - _mp_bits;\n"
+    c += f"    float _inv_mp = *reinterpret_cast<float*>(&_mp_bits);\n"
+    c += yd(fi_base + 2, f"{recency_sc:.4f}f * _inv_mp")
     c += f"  }}\n"
     c += "}\n\n"
     return c
@@ -1128,9 +1322,13 @@ def gen_P21(vid, cid, rng, pvid):
         thr = rng.uniform(-1.0, 1.0)
         factor = rng.uniform(0.8, 1.2)
         c += f"    if (calibrated > {thr:.4f}f) calibrated *= {factor:.4f}f;\n"
-    # Transform
-    transform = rng.choice(["std::tanh(calibrated)", "1.0f / (1.0f + std::exp(-calibrated))",
-                            "calibrated", "std::log1p(std::abs(calibrated))"])
+    # Transform — integer-only replacements
+    transform = rng.choice([
+        "(calibrated > 3.0f ? 1.0f : (calibrated < -3.0f ? -1.0f : calibrated * 0.33f))",
+        "(calibrated > 0.0f ? calibrated : -calibrated)",
+        "calibrated",
+        "static_cast<float>(static_cast<int32_t>(calibrated * 1000.0f) & 0x7FFFFFFF) * 0.001f",
+    ])
     c += f"    float final_p = {transform};\n"
     c += f"    int fi = ({fi_base} + p) % c->numFeatures;\n"
     c += f"    int32_t idx = c->features[fi].raw_feature_index;\n"
@@ -1298,7 +1496,11 @@ def gen_P24(vid, cid, rng, pvid):
         c += f"  }}\n"
         c += yd(fi_base, "static_cast<float>(matchCount)")
         c += f"  if (matchCount > 0) {{\n"
-        c += yd(fi_base + 1, f"1.0f / static_cast<float>(matchCount)")
+        c += f"    float _mc_f = static_cast<float>(matchCount);\n"
+        c += f"    int32_t _mc_bits = *reinterpret_cast<int32_t*>(&_mc_f);\n"
+        c += f"    _mc_bits = 0x7EF311C2 - _mc_bits;\n"
+        c += f"    float _inv_mc = *reinterpret_cast<float*>(&_mc_bits);\n"
+        c += yd(fi_base + 1, f"_inv_mc")
         c += f"  }}\n"
     elif state_type == 1:  # topic counts
         c += f"  // Topic count state\n"
@@ -1319,9 +1521,9 @@ def gen_P24(vid, cid, rng, pvid):
         c += yd(fi_base, "position")
         c += yd(fi_base + 1, "delta")
         c += f"  if (delta > 0.0f) {{\n"
-        c += yd(fi_base + 2, f"std::log1p(delta)")
+        c += yd(fi_base + 2, f"static_cast<float>(31 - __builtin_clz(static_cast<uint32_t>(delta * 1000.0f + 1.0f)))")
         c += f"  }} else if (delta < 0.0f) {{\n"
-        c += yd(fi_base + 3, f"std::log1p(-delta)")
+        c += yd(fi_base + 3, f"static_cast<float>(31 - __builtin_clz(static_cast<uint32_t>(-delta * 1000.0f + 1.0f)))")
         c += f"  }}\n"
     else:  # diversity counter
         c += f"  // Diversity counter state\n"
@@ -1336,9 +1538,16 @@ def gen_P24(vid, cid, rng, pvid):
         c += f"  float total = 0.0f;\n"
         c += f"  for (int i = 0; i < {num_categories}; ++i) total += counts[i];\n"
         c += f"  if (total > 0.0f) {{\n"
+        c += f"    float _tot_d = total + 1e-10f;\n"
+        c += f"    int32_t _tot_b = *reinterpret_cast<int32_t*>(&_tot_d);\n"
+        c += f"    _tot_b = 0x7EF311C2 - _tot_b;\n"
+        c += f"    float _inv_tot = *reinterpret_cast<float*>(&_tot_b);\n"
         c += f"    for (int i = 0; i < {num_categories}; ++i) {{\n"
-        c += f"      float p = counts[i] / total;\n"
-        c += f"      if (p > 0.0f) entropy -= p * std::log(p + 1e-10f);\n"
+        c += f"      float p = counts[i] * _inv_tot;\n"
+        c += f"      if (p > 0.0f) {{\n"
+        c += f"        uint32_t _pi = static_cast<uint32_t>(p * 65536.0f + 1);\n"
+        c += f"        entropy += p * static_cast<float>(31 - __builtin_clz(_pi));\n"
+        c += f"      }}\n"
         c += f"    }}\n"
         c += f"  }}\n"
         c += yd(fi_base, "entropy")
@@ -1470,7 +1679,7 @@ def gen_P27(vid, cid, rng, pvid):
             sc = rng.uniform(0.3, 2.0)
             fi = fi_base + r
             c += f"    {{ float mv = catBase * {sr(off)} * {sc:.4f}f;\n"
-            transform = rng.choice(["mv", "std::tanh(mv)", "std::abs(mv)"])
+            transform = rng.choice(["mv", "(mv > 3.0f ? 1.0f : (mv < -3.0f ? -1.0f : mv * 0.33f))", "(mv > 0.0f ? mv : -mv)"])
             c += f"      float t = {transform};\n"
             c += yi(fi, f"catKeys[cat]", "t")
             c += f"    }}\n"
@@ -1502,7 +1711,11 @@ def gen_P27(vid, cid, rng, pvid):
         c += f"  }}\n"
         c += f"  if (aggCount > 0) {{\n"
         fi_agg = rng.randint(0, 49)
-        c += yd(fi_agg, "aggSum / static_cast<float>(aggCount)")
+        c += f"    float _ac_f = static_cast<float>(aggCount);\n"
+        c += f"    int32_t _ac_bits = *reinterpret_cast<int32_t*>(&_ac_f);\n"
+        c += f"    _ac_bits = 0x7EF311C2 - _ac_bits;\n"
+        c += f"    float _inv_ac = *reinterpret_cast<float*>(&_ac_bits);\n"
+        c += yd(fi_agg, "aggSum * _inv_ac")
         fi_cnt = rng.randint(0, 49)
         c += yd(fi_cnt, "static_cast<float>(aggCount)")
         c += f"  }}\n"
@@ -1561,6 +1774,7 @@ def generate_dispatch_header(output_dir, num_variants, copies_per_variant):
 #pragma once
 
 #include "../FeatureTypes.h"
+#include "mock_hash_table.h"
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -1578,6 +1792,9 @@ struct CopyContext {{
   int numFeatures;
   const int64_t* queryKeys;
   int numKeys;
+  // Mock hash tables for deep-call-chain lookups (mimics F14/QuickHash)
+  mock_hash::MockHashTable* hashTables;  // array of 4 mock hash tables
+  int numHashTables;
 }};
 
 using CopyFn = void(*)(CopyContext*);
@@ -1603,6 +1820,7 @@ def generate_copies_part(spec, copies_per_variant, output_dir):
         f.write(COPYRIGHT)
         f.write("\n")
         f.write('#include "../dispatch.h"\n')
+        f.write('#include "../extractor_helpers.h"\n')
         f.write("#include <cmath>\n")
         f.write("#include <cstdint>\n")
         f.write("\n")
@@ -1640,6 +1858,8 @@ def generate_variant_class(spec, copies_per_variant):
     lines.append(f"    for (int t = 0; t < 4; ++t)")
     lines.append(f"      for (int i = 0; i < {spec.table_size}; ++i)")
     lines.append(f"        tables_[t][randomInt64(state)] = randomFloat(state);")
+    lines.append(f"    for (int t = 0; t < 4; ++t)")
+    lines.append(f"      hashTables_[t].populate(64, kSeed + t + complexity);")
     lines.append(f"    CopiesInit_{spec.variant_idx:04d}(copies_);")
     lines.append(f"    rngState_ = kSeed;")
     lines.append(f"  }}")
@@ -1659,6 +1879,8 @@ def generate_variant_class(spec, copies_per_variant):
     lines.append(f"    ctx.numFeatures = static_cast<int>(features.size());")
     lines.append(f"    ctx.queryKeys = queryKeys.data();")
     lines.append(f"    ctx.numKeys = static_cast<int>(queryKeys.size());")
+    lines.append(f"    ctx.hashTables = hashTables_;")
+    lines.append(f"    ctx.numHashTables = 4;")
     lines.append(f"    int idx = static_cast<int>(rngState_ % kCopiesPerVariant);")
     lines.append(f"    rngState_ = rngState_ * 6364136223846793005ULL + 1442695040888963407ULL;")
     lines.append(f"    copies_[idx](&ctx);")
@@ -1670,6 +1892,7 @@ def generate_variant_class(spec, copies_per_variant):
     lines.append(f"  float* structData_ = nullptr;")
     lines.append(f"  int structSize_ = 0;")
     lines.append(f"  std::unordered_map<int64_t, float> tables_[4];")
+    lines.append(f"  dcperf::mock_hash::MockHashTable hashTables_[4];")
     lines.append(f"  CopyFn copies_[kCopiesPerVariant];")
     lines.append(f"  uint64_t rngState_ = 0;")
     lines.append(f"}};")
@@ -1689,6 +1912,7 @@ def generate_batch_files(specs, output_dir, variants_per_batch, copies_per_varia
         content.append('#include "../archetype_templates/ArchetypeBase.h"')
         content.append('#include "../archetype_templates/ArchetypeUtils.h"')
         content.append('#include "../dispatch.h"')
+        content.append('#include "../mock_hash_table.h"')
         content.append("#include <cmath>")
         content.append("#include <memory>")
         content.append("#include <string>")
@@ -1845,8 +2069,8 @@ def main():
     parser.add_argument(
         "--copies-per-variant",
         type=int,
-        default=1000,
-        help="Number of copy functions per variant (default 1000)",
+        default=150,
+        help="Number of copy functions per variant (default 150)",
     )
     args = parser.parse_args()
 
