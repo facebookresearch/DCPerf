@@ -26,6 +26,7 @@
 #include <folly/coro/BlockingWait.h>
 #include <folly/coro/Promise.h>
 #include <folly/coro/Sleep.h>
+#include <folly/coro/Timeout.h>
 #include <folly/fibers/FiberManagerMap.h>
 #include <folly/io/async/ScopedEventBaseThread.h>
 #include <folly/portability/GFlags.h>
@@ -1000,14 +1001,40 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
               p.setValue(std::move(reply));
             });
 
-        co_await std::move(future);
-        scanOps++;
+        try {
+          co_await folly::coro::timeout(
+              std::move(future), std::chrono::seconds(10));
+          scanOps++;
+        } catch (const std::exception&) {
+          // Request timed out or failed (e.g. send() returned false and the
+          // callback never fired). Skip it rather than hang the scan join.
+        }
       }
       co_return;
     };
 
-    // Launch all scan coroutines across all proxies
+    // Launch scan coroutines across all proxies. When connection_ramp_seconds
+    // > 0, stagger the per-proxy launches so connections open GRADUALLY rather
+    // than all at once. Each proxy opens ~scanOutstanding connections per
+    // batch; spreading the batches over the ramp window keeps each burst under
+    // the server's accept queue (somaxconn/backlog), so connections come up
+    // healthy and able to serve traffic — mirroring how production accumulates
+    // connections over time instead of in a storm. Without this, all
+    // connections are forced open simultaneously, overwhelming the accept queue
+    // and leaving many connections half-open/unable to carry requests.
     folly::coro::AsyncScope scanScope;
+    const uint32_t rampMs = FLAGS_connection_ramp_seconds * 1000;
+    const uint32_t perProxyDelayMs = (rampMs > 0 && effectiveNumProxies_ > 1)
+        ? rampMs / effectiveNumProxies_
+        : 0;
+    if (FLAGS_verbose && perProxyDelayMs > 0) {
+      printf(
+          "Connection ramp: staggering %u proxy batches over %us (%ums/proxy)\n",
+          effectiveNumProxies_,
+          FLAGS_connection_ramp_seconds,
+          perProxyDelayMs);
+      fflush(stdout);
+    }
     for (uint32_t p = 0; p < effectiveNumProxies_; ++p) {
       auto* clientPtr = scanClients[p].get();
       for (uint32_t i = 0; i < scanOutstanding; ++i) {
@@ -1015,6 +1042,14 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
             folly::coro::co_withExecutor(
                 workerEvbs.at(p % workerEvbs.size()),
                 scanWorker(clientPtr, i)));
+      }
+      // Gradually ramp: pause between proxy batches so connections establish
+      // over time instead of storming the accept queue all at once. This runs
+      // on the launching (non-EventBase) thread under blockingWait, so a real
+      // sleep is intended here, not a coroutine yield.
+      if (perProxyDelayMs > 0 && p + 1 < effectiveNumProxies_) {
+        // @lint-ignore CLANGTIDY facebook-hte-BadCall-sleep_for
+        std::this_thread::sleep_for(std::chrono::milliseconds(perProxyDelayMs));
       }
     }
 
@@ -1115,7 +1150,19 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
             p.setValue(std::move(reply));
           });
 
-      UcbSetReply result = co_await std::move(future);
+      UcbSetReply result;
+      try {
+        result = co_await folly::coro::timeout(
+            std::move(future), std::chrono::seconds(10));
+      } catch (const std::exception&) {
+        // Request never completed (send() rejected without callback, or stuck
+        // pre-send during the connection storm). Count as error and return so
+        // the worker's scope.joinAsync() can't hang -> warmup completes and
+        // WARMUP_DONE is sent.
+        localOps++;
+        localErrors++;
+        co_return;
+      }
 
       localOps++;
       if (*result.result() == carbon::Result::STORED) {
@@ -1613,7 +1660,18 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             p.setValue(std::move(reply));
           });
 
-      UcbGetReply result = co_await std::move(future);
+      UcbGetReply result;
+      try {
+        result = co_await folly::coro::timeout(
+            std::move(future), std::chrono::seconds(10));
+      } catch (const std::exception&) {
+        // Request never completed; count as a GET error and return so the
+        // measurement worker's scope.joinAsync() can't hang.
+        workerTotalOps[workerId]->fetch_add(1);
+        workerGetOps[workerId]->fetch_add(1);
+        workerGetErrors[workerId]->fetch_add(1);
+        co_return;
+      }
 
       auto opEndTime = std::chrono::steady_clock::now();
       auto latencyMs =
@@ -1663,7 +1721,15 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
               p.setValue(std::move(reply));
             });
 
-        UcbSetReply setResult = co_await std::move(setFuture);
+        UcbSetReply setResult;
+        try {
+          setResult = co_await folly::coro::timeout(
+              std::move(setFuture), std::chrono::seconds(10));
+        } catch (const std::exception&) {
+          workerSetOps[workerId]->fetch_add(1);
+          workerSetErrors[workerId]->fetch_add(1);
+          co_return;
+        }
 
         workerSetOps[workerId]->fetch_add(1);
         if (*setResult.result() == carbon::Result::STORED) {
@@ -1721,7 +1787,16 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             p.setValue(std::move(reply));
           });
 
-      UcbSetReply result = co_await std::move(future);
+      UcbSetReply result;
+      try {
+        result = co_await folly::coro::timeout(
+            std::move(future), std::chrono::seconds(10));
+      } catch (const std::exception&) {
+        workerTotalOps[workerId]->fetch_add(1);
+        workerSetOps[workerId]->fetch_add(1);
+        workerSetErrors[workerId]->fetch_add(1);
+        co_return;
+      }
 
       auto opEndTime = std::chrono::steady_clock::now();
       auto latencyMs =
@@ -1750,42 +1825,47 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       co_return;
     };
 
-    // Main loop - continuously spawn requests
-    // When auto_concurrency is enabled, we throttle via dynamicMaxInflight.
-    // Otherwise, McRouter's maximumOutstanding handles backpressure.
+    // Main loop - mirrors the warmup worker's proven pattern: self-throttle to
+    // a bounded number of outstanding requests, then pace with a 1ms sleep.
+    // This is CRITICAL in same-thread mode: workers run ON the proxy event
+    // base, and McRouter's send() BLOCKS the calling (event-base) thread when
+    // its maximumOutstanding limit is hit (counting semaphore wait). If we
+    // spawn unbounded (relying on McRouter backpressure), that block deadlocks
+    // the event base — it can't process responses, the semaphore never
+    // releases, and the measurement goes idle. By capping our own outstanding
+    // count below the client's maximumOutstanding, send() never blocks and load
+    // flows.
     auto& myInflight = *workerInflight[workerId];
 
     while (std::chrono::steady_clock::now() < endTime) {
-      // When auto_concurrency is on, wait if we're at the dynamic limit
-      if (FLAGS_auto_concurrency) {
-        while (myInflight.load() >= dynamicMaxInflight.load() &&
-               std::chrono::steady_clock::now() < endTime) {
-          co_await folly::coro::co_reschedule_on_current_executor;
+      uint32_t limit =
+          FLAGS_auto_concurrency ? dynamicMaxInflight.load() : maxInflight;
+      size_t cur = myInflight.load();
+      size_t n = (cur < limit) ? (limit - cur) : 0;
+      for (size_t i = 0; i < n && myInflight.load() < limit; i++) {
+        myInflight.fetch_add(1);
+        bool isGet = (folly::Random::randDouble01() < getRatio);
+        if (isGet) {
+          scope.add(
+              folly::coro::co_withExecutor(
+                  exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
+                    co_await sendGetRequest();
+                    myInflight.fetch_sub(1);
+                    co_return;
+                  })));
+        } else {
+          scope.add(
+              folly::coro::co_withExecutor(
+                  exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
+                    co_await sendSetRequest();
+                    myInflight.fetch_sub(1);
+                    co_return;
+                  })));
         }
       }
 
-      myInflight.fetch_add(1);
-
-      bool isGet = (folly::Random::randDouble01() < getRatio);
-      if (isGet) {
-        scope.add(
-            folly::coro::co_withExecutor(
-                exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
-                  co_await sendGetRequest();
-                  myInflight.fetch_sub(1);
-                  co_return;
-                })));
-      } else {
-        scope.add(
-            folly::coro::co_withExecutor(
-                exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
-                  co_await sendSetRequest();
-                  myInflight.fetch_sub(1);
-                  co_return;
-                })));
-      }
-
-      co_await folly::coro::co_reschedule_on_current_executor;
+      // Pace like the warmup loop so responses get processed between batches.
+      co_await folly::futures::sleep(std::chrono::milliseconds(1));
     }
 
     co_await scope.joinAsync();
