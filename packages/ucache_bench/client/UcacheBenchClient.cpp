@@ -32,8 +32,10 @@
 #include <mcrouter/McrouterFiberContext.h>
 #include <mcrouter/ProxyBase.h>
 #include <mcrouter/lib/carbon/Result.h>
+#include <mcrouter/lib/fbi/hash.h>
 #include <mcrouter/lib/network/CpuController.h>
 #include <mcrouter/stats.h>
+#include <set>
 
 DECLARE_string(config);
 DECLARE_uint32(warmup_ops);
@@ -668,6 +670,11 @@ UcacheBenchClient::UcacheBenchClient() {
     options.failures_until_tko = FLAGS_failures_until_tko;
   }
 
+  // Disable idle connection pruning so fanout connections stay open.
+  options.reset_inactive_connection_interval = 0;
+
+  // Set source IP for local address binding (IP aliasing).
+  // When set, all outbound connections bind to this address to bypass
   // Create CarbonRouterInstance with UcacheBench RouterInfo
   auto routerPtr = facebook::memcache::mcrouter::CarbonRouterInstance<
       UcacheBenchRouterInfo>::init("ucache_bench_client", options);
@@ -768,96 +775,6 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   // ProxyDestination objects. Without ramp-up, all connections are established
   // simultaneously on first request, causing a connection storm that TKOs the
   // server.
-  if (FLAGS_connection_ramp_seconds > 0 && effectiveAdditionalFanout_ > 0) {
-    uint32_t totalDestinations =
-        effectiveNumProxies_ * (1 + effectiveAdditionalFanout_);
-    if (FLAGS_verbose) {
-      printf(
-          "Connection ramp-up: establishing ~%u connections over %u seconds\n",
-          totalDestinations,
-          FLAGS_connection_ramp_seconds);
-      fflush(stdout);
-    }
-
-    // Use a small thread pool for connection ramp-up (1 thread per proxy)
-    uint32_t rampThreads = std::min(numThreads, effectiveNumProxies_);
-    folly::IOThreadPoolExecutor rampPool(rampThreads);
-    auto rampEvbs = rampPool.getAllEventBases();
-
-    // Create one client with low maxOutstanding for connection ramp-up
-    auto rampClient = routerInstance_->createClient(1);
-
-    auto rampDuration = std::chrono::seconds(FLAGS_connection_ramp_seconds);
-    auto rampStart = std::chrono::steady_clock::now();
-    auto rampEnd = rampStart + rampDuration;
-
-    // Send requests with diverse keys to trigger lazy connection creation
-    // across different hash destinations. Each unique key hashes to a different
-    // ProxyDestination, establishing a new TCP connection.
-    std::atomic<uint64_t> rampOps{0};
-    std::atomic<uint64_t> rampSuccesses{0};
-    std::atomic<uint64_t> rampErrors{0};
-
-    auto rampWorker = [&](size_t /*threadIdx*/) -> folly::coro::Task<void> {
-      while (std::chrono::steady_clock::now() < rampEnd) {
-        std::string key = generateKey();
-        std::string value = generateValue();
-
-        UcbSetRequest request;
-        request.key_ref() = carbon::Keys<folly::IOBuf>(
-            std::move(*folly::IOBuf::copyBuffer(key)));
-        request.value_ref() = *folly::IOBuf::copyBuffer(value);
-        request.exptime_ref() = 3600;
-
-        auto [promise, future] =
-            folly::coro::makePromiseContract<UcbSetReply>();
-
-        rampClient->send(
-            request,
-            [p = std::move(promise)](
-                const UcbSetRequest&, UcbSetReply&& reply) mutable {
-              p.setValue(std::move(reply));
-            });
-
-        UcbSetReply result = co_await std::move(future);
-        rampOps++;
-
-        if (*result.result_ref() == carbon::Result::STORED) {
-          rampSuccesses++;
-        } else {
-          rampErrors++;
-        }
-
-        // Pace the ramp-up: sleep briefly between requests to spread
-        // connection creation over the ramp-up period
-        co_await folly::coro::sleep(std::chrono::milliseconds(1));
-      }
-      co_return;
-    };
-
-    // Start ramp-up workers
-    folly::coro::AsyncScope rampScope;
-    for (size_t i = 0; i < rampThreads; ++i) {
-      rampScope.add(
-          folly::coro::co_withExecutor(
-              rampEvbs.at(i % rampEvbs.size()), rampWorker(i)));
-    }
-
-    if (!rampEvbs.empty()) {
-      folly::coro::blockingWait(
-          folly::coro::co_withExecutor(
-              rampEvbs.front(), rampScope.joinAsync()));
-    }
-
-    if (FLAGS_verbose) {
-      printf(
-          "Connection ramp-up complete: %lu ops (%lu success, %lu errors)\n",
-          rampOps.load(),
-          rampSuccesses.load(),
-          rampErrors.load());
-      fflush(stdout);
-    }
-  }
 
   auto startTime = std::chrono::steady_clock::now();
   auto endTime = startTime + std::chrono::seconds(FLAGS_warmup_seconds);
@@ -1023,6 +940,131 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     auto client = routerInstance_->createClient(maxInflight);
     if (client) {
       clients.push_back(std::move(client));
+    }
+  }
+
+  // Connection activation: for each proxy, send a burst of concurrent
+  // requests to force McRouter to open TCP connections to all fanout
+  // destinations. Each CarbonRouterClient is pinned to one proxy, so we
+  // create one client per proxy to ensure full coverage.
+  if (effectiveAdditionalFanout_ > 0) {
+    uint32_t scanOutstanding = effectiveAdditionalFanout_ + 1;
+    uint32_t totalConns = effectiveNumProxies_ * scanOutstanding;
+
+    if (FLAGS_verbose) {
+      printf(
+          "Connection activation: scanning %u proxies x %u destinations = %u total\n",
+          effectiveNumProxies_,
+          scanOutstanding,
+          totalConns);
+      fflush(stdout);
+    }
+
+    std::atomic<uint64_t> scanOps{0};
+
+    // Create one scan client per proxy. Each createClient() call assigns
+    // the client to the next proxy via round-robin (nextProxyIndex()).
+    std::vector<
+        memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>::Pointer>
+        scanClients;
+    for (uint32_t p = 0; p < effectiveNumProxies_; ++p) {
+      scanClients.push_back(routerInstance_->createClient(scanOutstanding));
+    }
+
+    // For each proxy's client, launch scanOutstanding concurrent coroutines.
+    // Each coroutine sends enough requests (with random keys) to cover all
+    // destination slots via the coupon collector effect.
+    // Need ~D*ln(D) ≈ 4000 requests for D=625 destinations to get 99% coverage.
+    uint32_t requestsPerCoroutine = 100;
+    auto scanWorker =
+        [&](memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>*
+                clientPtr,
+            size_t) -> folly::coro::Task<void> {
+      for (uint32_t i = 0; i < requestsPerCoroutine; ++i) {
+        std::string key = generateKey();
+        std::string value = generateValue();
+
+        UcbSetRequest request;
+        request.key_ref() = carbon::Keys<folly::IOBuf>(
+            std::move(*folly::IOBuf::copyBuffer(key)));
+        request.value_ref() = *folly::IOBuf::copyBuffer(value);
+        request.exptime_ref() = 3600;
+
+        auto [promise, future] =
+            folly::coro::makePromiseContract<UcbSetReply>();
+
+        clientPtr->send(
+            request,
+            [p = std::move(promise)](
+                const UcbSetRequest&, UcbSetReply&& reply) mutable {
+              p.setValue(std::move(reply));
+            });
+
+        co_await std::move(future);
+        scanOps++;
+      }
+      co_return;
+    };
+
+    // Launch all scan coroutines across all proxies
+    folly::coro::AsyncScope scanScope;
+    for (uint32_t p = 0; p < effectiveNumProxies_; ++p) {
+      auto* clientPtr = scanClients[p].get();
+      for (uint32_t i = 0; i < scanOutstanding; ++i) {
+        scanScope.add(
+            folly::coro::co_withExecutor(
+                workerEvbs.at(p % workerEvbs.size()),
+                scanWorker(clientPtr, i)));
+      }
+    }
+
+    folly::coro::blockingWait(
+        scanScope.joinAsync().scheduleOn(workerEvbs.front()));
+
+    printf(
+        "Connection activation complete: %lu requests sent across %u proxies "
+        "(expected %u per proxy x %u rounds = %u total)\n",
+        scanOps.load(),
+        effectiveNumProxies_,
+        scanOutstanding,
+        requestsPerCoroutine,
+        effectiveNumProxies_ * scanOutstanding * requestsPerCoroutine);
+    fflush(stdout);
+
+    // Write scan count and router diagnostics for remote debugging
+    FILE* f = fopen("/tmp/ucache_scan_debug.txt", "w");
+    if (f) {
+      fprintf(
+          f,
+          "scanOps=%lu expected=%u proxies=%u coroutines=%u rounds=%u\n",
+          scanOps.load(),
+          effectiveNumProxies_ * scanOutstanding * requestsPerCoroutine,
+          effectiveNumProxies_,
+          scanOutstanding,
+          requestsPerCoroutine);
+      auto& proxies = routerInstance_->getProxies();
+      fprintf(f, "router_proxies=%zu\n", proxies.size());
+
+      // Test furc_hash distribution with our exact key format
+      fprintf(f, "--- furc_hash distribution test ---\n");
+      std::set<uint32_t> bucketsHit;
+      for (uint32_t i = 0; i < 62500; i++) {
+        std::string key = generateKey();
+        uint32_t h = furc_hash(key.c_str(), key.size(), scanOutstanding);
+        bucketsHit.insert(h);
+      }
+      fprintf(
+          f,
+          "furc_hash: 62500 keys -> %zu/%u buckets (%.1f%%)\n",
+          bucketsHit.size(),
+          scanOutstanding,
+          100.0 * bucketsHit.size() / scanOutstanding);
+
+      // Run ss to check connection count right after scan
+      fprintf(f, "--- ss output after scan ---\n");
+      fflush(f);
+      system("ss -s 2>/dev/null | grep estab >> /tmp/ucache_scan_debug.txt");
+      fclose(f);
     }
   }
 
