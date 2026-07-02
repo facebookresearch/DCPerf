@@ -332,11 +332,13 @@ DEFINE_string(
 DEFINE_uint32(
     num_proxies,
     0,
-    "Number of mcrouter proxy threads (0 = auto-detect using hardware_concurrency)");
+    "Number of mcrouter proxy threads (0 = auto-detect using hardware_concurrency). "
+    "Ignored when --num_connections is set.");
 DEFINE_uint32(
     max_inflight,
     1,
-    "Maximum number of concurrent in-flight requests (higher = better throughput, requires more memory)");
+    "Maximum number of concurrent in-flight requests (higher = better throughput, requires more memory). "
+    "Ignored when --auto_concurrency is enabled.");
 DEFINE_uint32(
     num_threads,
     0,
@@ -346,7 +348,33 @@ DEFINE_uint32(
     0,
     "Number of additional connections per server for fanout (0 = disabled). "
     "Limited by ephemeral port range per source IP (~64K). Use LD_PRELOAD=bind_source.so "
-    "with multiple source IPs for higher connection counts.");
+    "with multiple source IPs for higher connection counts. "
+    "Ignored when --num_connections is set.");
+DEFINE_uint32(
+    num_connections,
+    0,
+    "Target number of TCP connections to the server (0 = disabled, use num_proxies/additional_fanout directly). "
+    "When set, automatically derives num_proxies and additional_fanout. "
+    "Enforces the mcrouter limit of 32768 ProxyDestinations per instance. "
+    "Examples: 16000 for 16K connections, 64000 for 64K connections.");
+DEFINE_bool(
+    auto_concurrency,
+    false,
+    "Automatically discover optimal concurrency during the benchmark phase using AIMD. "
+    "Splits the benchmark into a ramp phase (finds peak throughput) and a steady phase "
+    "(holds optimal concurrency, collects measurements). When enabled, --max_inflight "
+    "is treated as the upper bound, and the controller finds the best value below it.");
+DEFINE_uint32(
+    ramp_seconds,
+    30,
+    "Duration of the AIMD ramp phase when --auto_concurrency is enabled. "
+    "The controller searches for optimal concurrency during this period.");
+DEFINE_double(
+    target_utilization,
+    1.0,
+    "Target fraction of peak concurrency to use during steady state (0.0-1.0). "
+    "1.0 = use peak concurrency found by AIMD. 0.9 = back off to 90%% of peak. "
+    "Only used when --auto_concurrency is enabled.");
 DEFINE_bool(
     enable_random_source_ip,
     false,
@@ -378,12 +406,12 @@ DEFINE_uint32(
 DEFINE_bool(verbose, false, "Enable verbose logging");
 DEFINE_bool(
     use_same_thread_client,
-    false,
+    true,
     "Use createSameThreadClient() to eliminate cross-thread message queue hops. "
     "Workers run directly on McRouter proxy EventBases instead of a separate "
     "thread pool. This matches production's same-thread dispatch pattern and "
     "can significantly improve throughput by eliminating 2 cross-thread hops "
-    "per request");
+    "per request. Set to false for legacy remote-thread mode.");
 DEFINE_bool(
     use_distribution,
     false,
@@ -527,10 +555,50 @@ UcacheBenchClient::UcacheBenchClient() {
   // Create mcrouter options for Thrift transport
   facebook::memcache::McrouterOptions options;
 
+  // Derive num_proxies and additional_fanout from --num_connections if set
+  uint32_t effectiveNumProxies = FLAGS_num_proxies;
+  uint32_t effectiveAdditionalFanout = FLAGS_additional_fanout;
+
+  if (FLAGS_num_connections > 0) {
+    constexpr uint32_t kMaxProxyDestinations = 32768;
+    uint32_t hwConcurrency = std::thread::hardware_concurrency();
+    uint32_t numProxies = std::min(FLAGS_num_connections, hwConcurrency);
+    numProxies = std::max(1u, numProxies);
+
+    uint32_t fanoutPerProxy =
+        (FLAGS_num_connections + numProxies - 1) / numProxies;
+    uint32_t additionalFanout = fanoutPerProxy > 0 ? fanoutPerProxy - 1 : 0;
+
+    if (numProxies * (additionalFanout + 1) > kMaxProxyDestinations) {
+      numProxies = std::min(numProxies, kMaxProxyDestinations);
+      fanoutPerProxy = kMaxProxyDestinations / numProxies;
+      additionalFanout = fanoutPerProxy > 0 ? fanoutPerProxy - 1 : 0;
+      uint32_t actualConnections = numProxies * (additionalFanout + 1);
+      printf(
+          "[num_connections] Clamped to %u connections (mcrouter limit: %u ProxyDestinations). "
+          "Use multiple client instances for higher counts.\n",
+          actualConnections,
+          kMaxProxyDestinations);
+    }
+
+    effectiveNumProxies = numProxies;
+    effectiveAdditionalFanout = additionalFanout;
+
+    uint32_t actualConnections =
+        effectiveNumProxies * (effectiveAdditionalFanout + 1);
+    printf(
+        "[num_connections] %u requested -> num_proxies=%u, additional_fanout=%u, actual=%u\n",
+        FLAGS_num_connections,
+        effectiveNumProxies,
+        effectiveAdditionalFanout,
+        actualConnections);
+    fflush(stdout);
+  }
+
   // Configure for Thrift transport to ucache server
   // Build pool config with optional additional_fanout for high connection count
   std::string poolConfig;
-  if (FLAGS_additional_fanout > 0) {
+  if (effectiveAdditionalFanout > 0) {
     poolConfig = folly::sformat(
         R"json({{
     "pools": {{
@@ -553,7 +621,7 @@ UcacheBenchClient::UcacheBenchClient() {
         FLAGS_security_mech,
         FLAGS_connection_timeout_ms,
         FLAGS_send_timeout_ms,
-        FLAGS_additional_fanout);
+        effectiveAdditionalFanout);
   } else {
     poolConfig = folly::sformat(
         R"json({{
@@ -580,12 +648,10 @@ UcacheBenchClient::UcacheBenchClient() {
   options.config_str = poolConfig;
 
   // Set num_proxies to use multiple threads for sending traffic
-  // This allows mcrouter to distribute work across multiple proxy threads
-  if (FLAGS_num_proxies == 0) {
-    // Auto-detect using hardware concurrency
+  if (effectiveNumProxies == 0) {
     options.num_proxies = std::thread::hardware_concurrency();
   } else {
-    options.num_proxies = FLAGS_num_proxies;
+    options.num_proxies = effectiveNumProxies;
   }
 
   // Configure TKO behavior to match production settings.
@@ -622,11 +688,12 @@ UcacheBenchClient::UcacheBenchClient() {
         FLAGS_server_port);
     printf("  McRouter proxy threads: %zu\n", options.num_proxies);
     printf("  Using per-thread clients for maximum QPS performance\n");
-    if (FLAGS_additional_fanout > 0) {
-      uint32_t totalConnections = FLAGS_additional_fanout + options.num_proxies;
+    if (effectiveAdditionalFanout > 0) {
+      uint32_t totalConnections =
+          options.num_proxies * (effectiveAdditionalFanout + 1);
       printf(
-          "  Connection fanout enabled: %u additional connections (total: %u)\n",
-          FLAGS_additional_fanout,
+          "  Connection fanout enabled: additional_fanout=%u (total connections: %u)\n",
+          effectiveAdditionalFanout,
           totalConnections);
     } else {
       printf("  Connection fanout disabled (using default connections)\n");
@@ -642,6 +709,9 @@ UcacheBenchClient::UcacheBenchClient() {
     }
     fflush(stdout);
   }
+
+  effectiveNumProxies_ = options.num_proxies;
+  effectiveAdditionalFanout_ = effectiveAdditionalFanout;
 }
 
 UcacheBenchClient::~UcacheBenchClient() {
@@ -690,9 +760,9 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   // ProxyDestination objects. Without ramp-up, all connections are established
   // simultaneously on first request, causing a connection storm that TKOs the
   // server.
-  if (FLAGS_connection_ramp_seconds > 0 && FLAGS_additional_fanout > 0) {
+  if (FLAGS_connection_ramp_seconds > 0 && effectiveAdditionalFanout_ > 0) {
     uint32_t totalDestinations =
-        FLAGS_num_proxies * (1 + FLAGS_additional_fanout);
+        effectiveNumProxies_ * (1 + effectiveAdditionalFanout_);
     if (FLAGS_verbose) {
       printf(
           "Connection ramp-up: establishing ~%u connections over %u seconds\n",
@@ -702,7 +772,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     }
 
     // Use a small thread pool for connection ramp-up (1 thread per proxy)
-    uint32_t rampThreads = std::min(numThreads, FLAGS_num_proxies);
+    uint32_t rampThreads = std::min(numThreads, effectiveNumProxies_);
     folly::IOThreadPoolExecutor rampPool(rampThreads);
     auto rampEvbs = rampPool.getAllEventBases();
 
@@ -1168,12 +1238,38 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     maxInflight = 1;
   }
 
+  // Auto-concurrency: use large maxInflight for mcrouter (we control
+  // concurrency via our own atomic counter), and split duration into ramp +
+  // steady phases
+  uint32_t mcrouterMaxOutstanding = maxInflight;
+  std::atomic<uint32_t> dynamicMaxInflight{maxInflight};
+  std::atomic<bool> inSteadyPhase{false};
+  std::atomic<uint32_t> discoveredOptimalInflight{maxInflight};
+
+  if (FLAGS_auto_concurrency) {
+    mcrouterMaxOutstanding = std::max(maxInflight, 500u);
+    uint32_t initialInflight = std::max(1u, maxInflight / 10);
+    dynamicMaxInflight.store(initialInflight);
+
+    printf(
+        "[auto_concurrency] Ramp phase: %us, then steady for remaining %us. "
+        "Searching from %u to %u max_inflight.\n",
+        FLAGS_ramp_seconds,
+        FLAGS_duration_seconds > FLAGS_ramp_seconds
+            ? FLAGS_duration_seconds - FLAGS_ramp_seconds
+            : 0,
+        initialInflight,
+        maxInflight);
+    fflush(stdout);
+  }
+
   if (FLAGS_verbose) {
     printf(
-        "Starting benchmark for %u seconds with %u worker threads, max_inflight=%u per client\n",
+        "Starting benchmark for %u seconds with %u worker threads, max_inflight=%u per client%s\n",
         FLAGS_duration_seconds,
         numThreads,
-        maxInflight);
+        maxInflight,
+        FLAGS_auto_concurrency ? " (auto-concurrency enabled)" : "");
     fflush(stdout);
   }
 
@@ -1213,7 +1309,8 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
       workerEvbs.push_back(&proxy->eventBase().getEventBase());
 
-      auto client = routerInstance_->createSameThreadClient(maxInflight);
+      auto client =
+          routerInstance_->createSameThreadClient(mcrouterMaxOutstanding);
       if (client) {
         client->setProxyIndex(i);
         clients.push_back(std::move(client));
@@ -1236,7 +1333,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
     clients.reserve(numThreads);
     for (uint32_t i = 0; i < numThreads; ++i) {
-      auto client = routerInstance_->createClient(maxInflight);
+      auto client = routerInstance_->createClient(mcrouterMaxOutstanding);
       if (client) {
         clients.push_back(std::move(client));
       }
@@ -1334,6 +1431,97 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             sSucc,
             sErrs);
         fflush(stdout);
+      }
+    });
+  }
+
+  // Per-worker inflight counters for auto-concurrency throttling
+  std::vector<std::unique_ptr<std::atomic<uint32_t>>> workerInflight;
+  for (size_t i = 0; i < clients.size(); ++i) {
+    workerInflight.push_back(std::make_unique<std::atomic<uint32_t>>(0));
+  }
+
+  // AIMD auto-concurrency controller thread
+  std::thread autoConcurrencyThread;
+  if (FLAGS_auto_concurrency) {
+    autoConcurrencyThread = std::thread([&]() {
+      constexpr auto kCheckInterval = std::chrono::seconds(2);
+      auto rampEnd = startTime + std::chrono::seconds(FLAGS_ramp_seconds);
+
+      uint64_t prevOps = 0;
+      double bestQps = 0;
+      uint32_t bestInflight = dynamicMaxInflight.load();
+      uint32_t peakInflight = dynamicMaxInflight.load();
+
+      while (!shouldStop.load() && std::chrono::steady_clock::now() < endTime) {
+        std::this_thread::sleep_for(kCheckInterval);
+        if (shouldStop.load()) {
+          break;
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        bool ramping = now < rampEnd;
+
+        // Calculate current window QPS
+        uint64_t curOps = 0;
+        for (size_t i = 0; i < clients.size(); ++i) {
+          curOps += workerTotalOps[i]->load();
+        }
+        uint64_t windowOps = curOps - prevOps;
+        prevOps = curOps;
+        double windowQps = windowOps / 2.0; // 2-second window
+
+        uint32_t cur = dynamicMaxInflight.load();
+
+        if (ramping) {
+          // Track best QPS and corresponding inflight
+          if (windowQps > bestQps) {
+            bestQps = windowQps;
+            bestInflight = cur;
+          }
+
+          // Additive increase during ramp: grow by 10% or at least 1
+          uint32_t increment = std::max(1u, cur / 10);
+          uint32_t next = std::min(maxInflight, cur + increment);
+          dynamicMaxInflight.store(next);
+
+          if (windowQps < bestQps * 0.9 && cur > bestInflight) {
+            // QPS dropped >10% — we overshot, snap back
+            next = bestInflight;
+            dynamicMaxInflight.store(next);
+            printf(
+                "[auto_concurrency] QPS dropped (%.0f < %.0f), snapping back to %u\n",
+                windowQps,
+                bestQps,
+                next);
+          } else if (FLAGS_verbose) {
+            printf(
+                "[auto_concurrency] ramp: inflight=%u, QPS=%.0f (best=%.0f@%u)\n",
+                cur,
+                windowQps,
+                bestQps,
+                bestInflight);
+          }
+          fflush(stdout);
+        } else if (!inSteadyPhase.load()) {
+          // Transition to steady state
+          peakInflight = bestInflight;
+          uint32_t steadyInflight =
+              static_cast<uint32_t>(peakInflight * FLAGS_target_utilization);
+          steadyInflight = std::max(1u, steadyInflight);
+          dynamicMaxInflight.store(steadyInflight);
+          discoveredOptimalInflight.store(steadyInflight);
+          inSteadyPhase.store(true);
+
+          printf(
+              "[auto_concurrency] Steady state: peak inflight=%u (%.0f QPS), "
+              "target_utilization=%.0f%%, using inflight=%u\n",
+              peakInflight,
+              bestQps,
+              FLAGS_target_utilization * 100.0,
+              steadyInflight);
+          fflush(stdout);
+        }
       }
     });
   }
@@ -1513,16 +1701,28 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     };
 
     // Main loop - continuously spawn requests
-    // McRouter's maximumOutstanding handles backpressure - it will block
-    // when too many requests are in flight
+    // When auto_concurrency is enabled, we throttle via dynamicMaxInflight.
+    // Otherwise, McRouter's maximumOutstanding handles backpressure.
+    auto& myInflight = *workerInflight[workerId];
+
     while (std::chrono::steady_clock::now() < endTime) {
-      // Decide GET vs SET based on ratio
+      // When auto_concurrency is on, wait if we're at the dynamic limit
+      if (FLAGS_auto_concurrency) {
+        while (myInflight.load() >= dynamicMaxInflight.load() &&
+               std::chrono::steady_clock::now() < endTime) {
+          co_await folly::coro::co_reschedule_on_current_executor;
+        }
+      }
+
+      myInflight.fetch_add(1);
+
       bool isGet = (folly::Random::randDouble01() < getRatio);
       if (isGet) {
         scope.add(
             folly::coro::co_withExecutor(
                 exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
                   co_await sendGetRequest();
+                  myInflight.fetch_sub(1);
                   co_return;
                 })));
       } else {
@@ -1530,11 +1730,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             folly::coro::co_withExecutor(
                 exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
                   co_await sendSetRequest();
+                  myInflight.fetch_sub(1);
                   co_return;
                 })));
       }
 
-      // Yield to allow other coroutines to run
       co_await folly::coro::co_reschedule_on_current_executor;
     }
 
@@ -1560,6 +1760,9 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   shouldStop = true;
   if (progressThread.joinable()) {
     progressThread.join();
+  }
+  if (autoConcurrencyThread.joinable()) {
+    autoConcurrencyThread.join();
   }
 
   // Merge all worker latencies
