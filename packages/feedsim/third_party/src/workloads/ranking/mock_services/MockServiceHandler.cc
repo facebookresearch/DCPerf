@@ -25,7 +25,18 @@
 #include <folly/futures/Future.h>
 #include <folly/portability/Asm.h>
 
+#include "LatencyHistogram.h"
+
 namespace mock_services {
+
+// Debug histograms exposed to MockServiceMain so it can dump them on
+// a periodic timer. Defined in this TU because runSimulatedRpc records
+// into them on every call. requested_us = the latency_us argument
+// supplied by the client (sampled from rpc_dist.json). actual_us =
+// elapsed wall time inside runSimulatedRpc, including spin/sleep and
+// response generation.
+feedsim::LatencyHistogram g_handler_requested_us;
+feedsim::LatencyHistogram g_handler_actual_us;
 
 namespace {
 
@@ -99,7 +110,12 @@ MockServiceHandler::runSimulatedRpc(
   uint32_t response_size = parseResponseSize(request.get());
   request.reset();
 
+  // Debug: record the requested latency before any clamp/spin/sleep.
+  g_handler_requested_us.record(static_cast<uint64_t>(std::max(0, latency_us)));
+  uint64_t handler_start_us = feedsim::nowUs();
+
   if (latency_us <= 0) {
+    g_handler_actual_us.record(feedsim::nowUs() - handler_start_us);
     return folly::makeSemiFuture(generateResponseBytes(response_size));
   }
   if (latency_us < kSpinThresholdUs) {
@@ -108,13 +124,16 @@ MockServiceHandler::runSimulatedRpc(
     while (std::chrono::steady_clock::now() < deadline) {
       folly::asm_volatile_pause();
     }
+    g_handler_actual_us.record(feedsim::nowUs() - handler_start_us);
     return folly::makeSemiFuture(generateResponseBytes(response_size));
   }
   auto silesia = silesia_;
   return folly::futures::sleep(std::chrono::microseconds(latency_us))
       .via(folly::getGlobalCPUExecutor().get())
-      .thenValue([silesia, response_size](folly::Unit) {
-        return generateResponseBytesStandalone(silesia, response_size);
+      .thenValue([silesia, response_size, handler_start_us](folly::Unit) {
+        auto resp = generateResponseBytesStandalone(silesia, response_size);
+        g_handler_actual_us.record(feedsim::nowUs() - handler_start_us);
+        return resp;
       })
       .semi();
 }
