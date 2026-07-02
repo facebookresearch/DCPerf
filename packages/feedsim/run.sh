@@ -624,13 +624,13 @@ main() {
 
     LEAF_PID=$!
 
-    # Wait for server to be fully ready using monitoring endpoint
-    echo "Waiting for LeafNodeRank server to be ready on monitor port $monitor_port..."
+    # Wait for server to be fully ready by checking if data port is accepting connections
+    echo "Waiting for LeafNodeRank server to be ready on port $port..."
     max_attempts=120
     attempt=0
     while [ $attempt -lt $max_attempts ]; do
-        if curl -f -s "http://localhost:$monitor_port/topology" > /dev/null 2>&1; then
-            echo "LeafNodeRank server is ready (monitor port responding)"
+        if (echo > /dev/tcp/localhost/$port) 2>/dev/null; then
+            echo "LeafNodeRank server is ready (port $port accepting connections)"
             break
         fi
         attempt=$((attempt + 1))

@@ -36,11 +36,8 @@
 #include <thrift/lib/cpp2/protocol/CompactProtocol.h>
 #include <thrift/lib/cpp2/protocol/Serializer.h>
 
-#include "oldisim/LeafNodeServer.h"
-#include "oldisim/NodeThread.h"
-#include "oldisim/ParentConnection.h"
-#include "oldisim/QueryContext.h"
-#include "oldisim/Util.h"
+#include "FeedSimServer.h"
+#include "FeedSimProtocol.h"
 
 #include "LeafNodeRankCmdline.h"
 #include "RequestTypes.h"
@@ -152,7 +149,7 @@ CSRGraph<int32_t> g_shared_graph;
 
 #ifdef FEEDSIM_USE_DLRM
 void ThreadStartup(
-    oldisim::NodeThread& thread,
+    int thread_id,
     std::vector<ThreadData>& thread_data,
     ranking::dwarfs::PageRankParams& params,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& cpuThreadPool,
@@ -161,7 +158,7 @@ void ThreadStartup(
     const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
     const std::shared_ptr<ranking::TimekeeperPool>& timekeeperPool,
     const std::shared_ptr<ranking::dwarfs::DLRM>& shared_dlrm_ranker) {
-  auto& this_thread = thread_data[thread.get_thread_num()];
+  auto& this_thread = thread_data[thread_id];
   this_thread.cpuThreadPool = cpuThreadPool;
   this_thread.srvCPUThreadPool = srvCPUThreadPool;
   this_thread.srvIOThreadPool = srvIOThreadPool;
@@ -260,7 +257,7 @@ void ThreadStartup(
 #endif
 
 void ThreadStartup(
-    oldisim::NodeThread& thread,
+    int thread_id,
     std::vector<ThreadData>& thread_data,
     ranking::dwarfs::PageRankParams& params,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& cpuThreadPool,
@@ -268,7 +265,7 @@ void ThreadStartup(
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvIOThreadPool,
     const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
     const std::shared_ptr<ranking::TimekeeperPool>& timekeeperPool) {
-  auto& this_thread = thread_data[thread.get_thread_num()];
+  auto& this_thread = thread_data[thread_id];
   auto graph = params.makeGraphCopy(g_shared_graph);
   this_thread.cpuThreadPool = cpuThreadPool;
   this_thread.srvCPUThreadPool = srvCPUThreadPool;
@@ -466,21 +463,19 @@ static void runFeatureExtraction(ThreadData& this_thread) {
  * 3. All I/O stages are chained via .thenValue()/.thenVia()
  * 4. Uses configurable I/O latency distributions
  *
- * CRITICAL: The QueryContext is moved into a shared_ptr to extend its lifetime
- * beyond the handler return. The oldisim framework destroys the context after
+ * CRITICAL: The RequestContext is moved into a shared_ptr to extend its lifetime
+ * beyond the handler return. The server framework destroys the context after
  * the handler returns, but we need it to survive until the async callback.
  */
 void AsyncPageRankRequestHandler(
-    oldisim::NodeThread& thread,
-    oldisim::QueryContext& context,
+    int thread_id,
+    feedsim::RequestContext& context,
     std::vector<ThreadData>& thread_data) {
-  auto& this_thread = thread_data[thread.get_thread_num()];
-  int thread_id = thread.get_thread_num();
+  auto& this_thread = thread_data[thread_id];
 
-  // CRITICAL: Move the QueryContext into a shared_ptr to extend its lifetime.
-  // The oldisim framework destroys the stack-allocated context after this
-  // handler returns, but we need it alive until the async callback completes.
-  auto context_ptr = std::make_shared<oldisim::QueryContext>(std::move(context));
+  // Move the RequestContext into a shared_ptr to extend its lifetime
+  // beyond the handler return for async work.
+  auto context_ptr = std::make_shared<feedsim::RequestContext>(std::move(context));
 
   // Stage 1: ICacheBuster (synchronous, lightweight) - only for PageRank
   if (g_workload_type == WorkloadType::PAGERANK) {
@@ -630,12 +625,12 @@ void AsyncPageRankRequestHandler(
         auto payloadiobufq = serializePayload(resp);
         auto buf = payloadiobufq.move();
 
-        context_ptr->SendResponse(buf->data(), buf->length());
+        context_ptr->sendResponse(buf->data(), buf->length());
       })
       .thenError(folly::tag_t<std::exception>{}, [context_ptr](const std::exception& e) {
         // Error handling
         std::cerr << "Async request handler error: " << e.what() << std::endl;
-        context_ptr->SendResponse(nullptr, 0);
+        context_ptr->sendResponse(nullptr, 0);
       });
 
   // NO .get() here! Handler returns immediately, work continues asynchronously
@@ -650,11 +645,10 @@ void AsyncPageRankRequestHandler(
  * inference using DLRM::inferWithFeatures().
  */
 void DLRMRequestHandler(
-    oldisim::NodeThread& thread,
-    oldisim::QueryContext& context,
+    int thread_id,
+    feedsim::RequestContext& context,
     std::vector<ThreadData>& thread_data) {
-  auto& this_thread = thread_data[thread.get_thread_num()];
-  int thread_id = thread.get_thread_num();
+  auto& this_thread = thread_data[thread_id];
 
   // Deserialize RankingRequest from payload
   ranking::RankingRequest request;
@@ -666,7 +660,7 @@ void DLRMRequestHandler(
     apache::thrift::CompactSerializer::deserialize(&buf, request);
   } catch (const std::exception& e) {
     std::cerr << "Failed to deserialize RankingRequest: " << e.what() << std::endl;
-    context.SendResponse(nullptr, 0);
+    context.sendResponse(nullptr, 0);
     return;
   }
 
@@ -728,15 +722,15 @@ void DLRMRequestHandler(
   apache::thrift::CompactSerializer::serialize(resp, &bufq);
   auto buf = bufq.move();
 
-  context.SendResponse(buf->data(), buf->length());
+  context.sendResponse(buf->data(), buf->length());
 }
 #endif // FEEDSIM_USE_DLRM
 
 void PageRankRequestHandler(
-    oldisim::NodeThread& thread,
-    oldisim::QueryContext& context,
+    int thread_id,
+    feedsim::RequestContext& context,
     std::vector<ThreadData>& thread_data) {
-  auto& this_thread = thread_data[thread.get_thread_num()];
+  auto& this_thread = thread_data[thread_id];
   search::PointerChase& chaser = *this_thread.pointer_chaser;
 
   // ICacheBuster stage (only for PageRank mode)
@@ -846,21 +840,17 @@ void PageRankRequestHandler(
   auto uncompressed = decompressPayload(compressed);
   auto resp1 = deserializePayload(buf.get());
 
-  context.SendResponse(buf->data(), buf->length());
+  context.sendResponse(buf->data(), buf->length());
 }
 
 int main(int argc, char** argv) {
   if (cmdline_parser(argc, argv, &args) != 0) {
-    DIE("cmdline_parser failed"); // NOLINT
+    std::cerr << "cmdline_parser failed" << std::endl;
+    return 1;
   }
 
-  // Set logging level
-  for (unsigned int i = 0; i < args.verbose_given; i++) {
-    log_level = (log_level_t)(static_cast<int>(log_level) - 1);
-  }
-  if (args.quiet_given != 0u) {
-    log_level = QUIET;
-  }
+  // Logging level is no longer used (oldisim log macros removed).
+  // Verbose/quiet flags are parsed but have no effect.
 
   // Determine workload type
   std::string workload_type_str = args.workload_type_arg;
@@ -869,8 +859,9 @@ int main(int argc, char** argv) {
     g_workload_type = WorkloadType::DLRM;
     std::cout << "Using DLRM workload type" << std::endl;
 #else
-    DIE("DLRM workload requested but FEEDSIM_USE_DLRM is not defined. "
-        "Rebuild with LibTorch support.");
+    std::cerr << "DLRM workload requested but FEEDSIM_USE_DLRM is not defined. "
+                 "Rebuild with LibTorch support." << std::endl;
+    return 1;
 #endif
   } else {
     g_workload_type = WorkloadType::PAGERANK;
@@ -966,7 +957,8 @@ int main(int argc, char** argv) {
   std::shared_ptr<ranking::dwarfs::DLRM> shared_dlrm_ranker;
   if (g_workload_type == WorkloadType::DLRM) {
     if (!args.dlrm_model_path_given) {
-      DIE("DLRM workload requires --dlrm_model_path");
+      std::cerr << "DLRM workload requires --dlrm_model_path" << std::endl;
+      return 1;
     }
     ranking::dwarfs::DLRMParams dlrm_params;
     dlrm_params.model_path = args.dlrm_model_path_arg;
@@ -1041,11 +1033,11 @@ int main(int argc, char** argv) {
     }
   }
 
-  oldisim::LeafNodeServer server(args.port_arg);
-  server.SetThreadStartupCallback([&](auto&& thread) {
+  feedsim::FeedSimServer server(args.port_arg);
+  server.setThreadStartupCallback([&](int thread_id) {
 #ifdef FEEDSIM_USE_DLRM
     return ThreadStartup(
-        thread,
+        thread_id,
         thread_data,
         params,
         cpuThreadPool,
@@ -1056,7 +1048,7 @@ int main(int argc, char** argv) {
         shared_dlrm_ranker);
 #else
     return ThreadStartup(
-        thread,
+        thread_id,
         thread_data,
         params,
         cpuThreadPool,
@@ -1079,38 +1071,38 @@ int main(int argc, char** argv) {
       std::cout << "  I/O stages: " << args.io_stages_arg << " x " << args.io_stage_latency_ms_arg << " ms" << std::endl;
     }
 
-    server.RegisterQueryCallback(
+    server.registerQueryCallback(
         ranking::kPageRankRequestType,
-        [&thread_data](auto&& thread, auto&& context) {
-          return AsyncPageRankRequestHandler(thread, context, thread_data);
+        [&thread_data](int thread_id, feedsim::RequestContext& context) {
+          return AsyncPageRankRequestHandler(thread_id, context, thread_data);
         });
   } else {
     std::cout << "Using BLOCKING I/O mode (original behavior)" << std::endl;
-    server.RegisterQueryCallback(
+    server.registerQueryCallback(
         ranking::kPageRankRequestType,
-        [&thread_data](auto&& thread, auto&& context) {
-          return PageRankRequestHandler(thread, context, thread_data);
+        [&thread_data](int thread_id, feedsim::RequestContext& context) {
+          return PageRankRequestHandler(thread_id, context, thread_data);
         });
   }
 
 #ifdef FEEDSIM_USE_DLRM
-  // Phase 7: Register DLRM request handler for client-side feature generation
+  // Register DLRM request handler for client-side feature generation
   if (g_workload_type == WorkloadType::DLRM) {
     std::cout << "Registering DLRM request handler for client-side features" << std::endl;
-    server.RegisterQueryCallback(
+    server.registerQueryCallback(
         ranking::kDLRMRequestType,
-        [&thread_data](auto&& thread, auto&& context) {
-          return DLRMRequestHandler(thread, context, thread_data);
+        [&thread_data](int thread_id, feedsim::RequestContext& context) {
+          return DLRMRequestHandler(thread_id, context, thread_data);
         });
   }
 #endif
-  server.SetNumThreads(args.threads_arg);
-  server.SetThreadPinning(args.noaffinity_given == 0u);
-  server.SetThreadLoadBalancing(args.noloadbalance_given == 0u);
+  server.setNumThreads(args.threads_arg);
+  server.setThreadPinning(args.noaffinity_given == 0u);
+  server.setThreadLoadBalancing(args.noloadbalance_given == 0u);
 
-  server.EnableMonitoring(args.monitor_port_arg);
+  server.enableMonitoring(args.monitor_port_arg);
 
-  server.Run();
+  server.run();
 
   return 0;
 }
