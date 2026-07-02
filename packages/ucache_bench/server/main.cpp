@@ -109,6 +109,12 @@ DEFINE_uint32(
     50,
     "Microseconds of CPU busy-work per request. Simulates aggregate production "
     "overhead. 0 = disabled.");
+DEFINE_uint32(
+    io_latency_us,
+    0,
+    "Simulate downstream I/O by yielding the fiber once per request. "
+    "Generates fiber context switches matching production's pattern. "
+    "Requires --enable_fibers=true. 0 = disabled.");
 
 // Production-like per-request features
 DEFINE_bool(
@@ -239,6 +245,13 @@ UcacheBenchConfig createConfigFromFlags() {
 
   // Configurable per-request CPU work
   config.cpu_work_us = FLAGS_cpu_work_us;
+  config.io_latency_us = FLAGS_io_latency_us;
+  if (config.io_latency_us == 0) {
+    const char* env = std::getenv("IO_LATENCY_US");
+    if (env) {
+      config.io_latency_us = std::atoi(env);
+    }
+  }
 
   // Production-like per-request features
   config.production_features_enabled = FLAGS_production_features;

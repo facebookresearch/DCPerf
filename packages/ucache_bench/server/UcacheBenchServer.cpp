@@ -16,6 +16,8 @@
 #include <time.h>
 #include <chrono>
 
+#include <folly/fibers/Baton.h>
+#include <folly/fibers/FiberManager.h>
 #include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
 #include "cachelib/allocator/LruTailAgeStrategy.h"
@@ -591,6 +593,22 @@ void UcacheBenchServer::runCpuBusyWork(const std::string& key) {
   }
 }
 
+// Simulate downstream I/O by yielding the fiber for io_latency_us microseconds.
+// Each yield causes a fiber context switch, matching production's pattern where
+// request handlers make downstream service calls that suspend the fiber.
+void UcacheBenchServer::simulateIOLatency() {
+  if (config_.io_latency_us == 0) {
+    return;
+  }
+  if (folly::fibers::onFiber()) {
+    // Use Baton::try_wait_for which suspends the fiber and schedules a timer.
+    // This generates real kernel context switches (futex) matching production's
+    // pattern where fibers wait on downstream I/O.
+    folly::fibers::Baton baton;
+    baton.try_wait_for(std::chrono::microseconds(config_.io_latency_us));
+  }
+}
+
 // Build compound key matching production McStoredKey construction.
 // Production builds: UcacheStoredKey(key, hashAlias, kcbId, ticket)
 // This involves string concatenation, hashing, and memory allocation.
@@ -942,6 +960,7 @@ UcbGetReply UcacheBenchServer::processUcbGetSync(const UcbGetRequest& req) {
     }
 
     runCpuBusyWork(keyStr);
+    simulateIOLatency();
 
     if (hit) {
       reply.result() = carbon::Result::FOUND;
@@ -985,6 +1004,7 @@ UcbSetReply UcacheBenchServer::processUcbSetSync(const UcbSetRequest& req) {
     }
 
     runCpuBusyWork(keyStr);
+    simulateIOLatency();
 
     std::optional<BucketLocks::WriteLockHolder> bucketLock;
     if (bucketLocks_) {
