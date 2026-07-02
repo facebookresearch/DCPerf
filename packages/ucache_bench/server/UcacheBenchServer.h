@@ -10,6 +10,7 @@
 #include <cachelib/allocator/CacheAllocator.h>
 #include <cachelib/common/Hash.h>
 #include <cachelib/common/Mutex.h>
+#include <folly/String.h>
 #include <folly/container/F14Map.h>
 #include <folly/fibers/TimedMutex.h>
 #include <folly/futures/Future.h>
@@ -202,8 +203,24 @@ class UcacheBenchServer {
   // Production-like per-request processing
   // Returns a compound key string (like McStoredKey in production)
   std::string buildCompoundKey(const std::string& key);
-  void runProductionGetOverhead(const std::string& key, bool hit);
-  void runProductionSetOverhead(const std::string& key);
+  void runProductionGetOverhead(
+      const std::string& key,
+      bool hit,
+      const void* valueData = nullptr,
+      size_t valueLen = 0);
+  void runProductionSetOverhead(
+      const std::string& key,
+      const void* valueData = nullptr,
+      size_t valueLen = 0);
+
+  // Additional production-like CPU work
+  uint32_t computeValueChecksum(const void* data, size_t len);
+  void simulateThriftSerialization(
+      const std::string& key,
+      const void* valueData,
+      size_t valueLen,
+      bool hit);
+  void simulateIoBufProcessing(const void* valueData, size_t valueLen);
 
   // Increment metrics based on current phase
   void recordGet(bool hit);
@@ -246,6 +263,18 @@ class UcacheBenchServer {
 
   // ACL prefix table (simulates production granular ACL categories)
   folly::F14FastMap<uint64_t, uint32_t> aclPrefixTable_;
+
+  // Production auth attribute serialization
+  // Production calls security::authn::attributes::serializer::serialize()
+  // per request, which URI-escapes identity attributes into query strings.
+  // This showed up as ~1% CPU per thread in production perf profiles.
+  struct IdentityAttribute {
+    std::string key;
+    std::string value;
+  };
+  std::vector<IdentityAttribute> mockIdentityAttributes_;
+  void initMockIdentityAttributes();
+  std::string serializeIdentityAttributes(const std::string& requestKey);
 
   // Phase-based metric tracking
   std::atomic<TrackingPhase> currentPhase_{TrackingPhase::NONE};
