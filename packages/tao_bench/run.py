@@ -320,6 +320,20 @@ def run_server(args):
         t_prof = threading.Timer(profiler_wait_time, profile_server)
         t_prof.start()
 
+    # Set LD_LIBRARY_PATH to include the lib/ directory containing bundled
+    # shared libraries (e.g., libgflags.so.2.2). The fbpkg build includes
+    # these libraries in benchmarks/tao_bench/lib/ but they may not be
+    # installed system-wide on the target machine.
+    lib_dir = os.path.join(TAO_BENCH_DIR, "lib")
+    if os.path.isdir(lib_dir):
+        # Prepend our lib directory to LD_LIBRARY_PATH so the bundled
+        # libraries are found before system libraries
+        existing_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+        if existing_ld_path:
+            os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{existing_ld_path}"
+        else:
+            os.environ["LD_LIBRARY_PATH"] = lib_dir
+
     # If running on Ubuntu, we should explicitly export LD_LIBRARY_PATH
     # to be benchmarks/tao_bench/build-deps/lib to workaround a bug that
     # TaoBench server will try to load the libcrypto in system even though we

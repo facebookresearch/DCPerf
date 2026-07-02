@@ -66,6 +66,9 @@ tao_bench_autoscale:
   parser: tao_bench_autoscale
   install_script: ./packages/tao_bench/install_tao_bench.sh
   cleanup_script: ./packages/tao_bench/cleanup_tao_bench.sh
+  install_markers:
+    - ./benchmarks/tao_bench/tao_bench_server
+    - ./benchmarks/tao_bench/tao_bench_client
   path: ./packages/tao_bench/run_autoscale.py
   tags:
     scope:
@@ -81,6 +84,9 @@ tao_bench_standalone:
   install_script: ./packages/tao_bench/install_tao_bench.sh
   cleanup_script: ./packages/tao_bench/cleanup_tao_bench.sh
   path: ./packages/tao_bench/run_standalone.py
+  install_markers:
+    - ./benchmarks/tao_bench/tao_bench_server
+    - ./benchmarks/tao_bench/tao_bench_client
   tags:
     scope:
       - app
