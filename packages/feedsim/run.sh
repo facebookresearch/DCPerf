@@ -653,6 +653,18 @@ main() {
         echo "Feature extraction pipeline: ENABLED (complexity=$feature_complexity, stories=$num_stories, extractors/story=$extractors_per_story)"
     fi
 
+    # Resolve silesia_dir up-front so both LeafNodeRank and DriverNodeRank
+    # can use it (Silesia path used by server response generators and by
+    # the driver's story batch).
+    if [ -n "$silesia_dir" ]; then
+        if [[ "$silesia_dir" != /* ]]; then
+            silesia_dir="${FEEDSIM_ROOT}/${silesia_dir}"
+        fi
+        if [ ! -d "$silesia_dir" ]; then
+            die "Silesia directory does not exist: $silesia_dir"
+        fi
+    fi
+
     # Starting leaf node service
     monitor_port=$((port-1000))
 
@@ -661,6 +673,13 @@ main() {
     local preload_env=""
     if [ "$(uname -m)" = "aarch64" ] && [ -f "${FEEDSIM_ROOT}/third_party/miniconda3/lib/libprotobuf.so" ]; then
         preload_env="LD_PRELOAD=${FEEDSIM_ROOT}/third_party/miniconda3/lib/libprotobuf.so"
+    fi
+
+    # Pass --silesia_dir to LeafNodeRank too, so server-side response
+    # generation reads bytes from Silesia instead of running xor128 RNG.
+    local server_silesia_opts=""
+    if [ -n "$silesia_dir" ] && [ -d "$silesia_dir" ]; then
+        server_silesia_opts="--silesia_dir=$silesia_dir"
     fi
 
     # shellcheck disable=SC2086
@@ -686,6 +705,7 @@ main() {
         $load_graph \
         $instrument_graph \
         $feature_opts \
+        $server_silesia_opts \
         $leafnoderank_seed \
         $pagerank_seed \
         $pointerchase_seed >> $BREPS_LFILE 2>&1 &
@@ -731,16 +751,10 @@ main() {
         client_feature_opts="--client_side_features --client_dlrm_batch_size=$client_batch_size --client_dlrm_inferences=$client_inferences --client_feature_seed=$client_feature_seed --client_num_dense_features=$client_num_dense --client_num_sparse_features=$client_num_sparse"
     fi
 
-    # Build Silesia story options for DriverNodeRank
+    # Build Silesia story options for DriverNodeRank (silesia_dir already
+    # resolved earlier).
     local silesia_opts=""
-    if [ -n "$silesia_dir" ]; then
-        # Resolve silesia_dir: if relative, prepend FEEDSIM_ROOT
-        if [[ "$silesia_dir" != /* ]]; then
-            silesia_dir="${FEEDSIM_ROOT}/${silesia_dir}"
-        fi
-        if [ ! -d "$silesia_dir" ]; then
-            die "Silesia directory does not exist: $silesia_dir"
-        fi
+    if [ -n "$silesia_dir" ] && [ -d "$silesia_dir" ]; then
         silesia_opts="--silesia_dir=$silesia_dir --stories_per_request=$stories_per_request --story_size_min=$story_size_min --story_size_max=$story_size_max"
         echo "Silesia story generation: ENABLED (dir=$silesia_dir, stories/req=$stories_per_request, size=$story_size_min-$story_size_max)"
     fi

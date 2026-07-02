@@ -54,7 +54,9 @@
 #include "../search/ICacheBuster.h"
 #include "../search/PointerChase.h"
 
+#include "SilesiaLoader.h"
 #include "generators/RankingGenerators.h"
+#include "generators/SilesiaResponseGenerator.h"
 
 #include "feature_extractors/FeatureExtractorSuite.h"
 #include "feature_extractors/HashLookupExtractor.h"
@@ -146,6 +148,23 @@ static WorkloadType g_workload_type = WorkloadType::PAGERANK;
 
 // Global graph that will be shared across threads
 CSRGraph<int32_t> g_shared_graph;
+
+// Server-side Silesia corpus + response generator. When --silesia_dir is
+// given, response generation pulls bytes from the corpus instead of running
+// xor128() RNG, removing ~15% of CPU that would otherwise be wasted on RNG
+// (no production analog).
+static std::unique_ptr<ranking::SilesiaLoader> g_silesia_loader;
+static std::unique_ptr<ranking::generators::SilesiaResponseGenerator>
+    g_silesia_response_gen;
+
+// Helper that returns either a Silesia-generated or RNG-generated
+// RankingResponse, depending on whether --silesia_dir was provided.
+static ranking::RankingResponse generateResponse(int num_objects) {
+  if (g_silesia_response_gen) {
+    return g_silesia_response_gen->generateRankingResponse(num_objects);
+  }
+  return ranking::generators::generateRandomRankingResponse(num_objects);
+}
 
 #ifdef FEEDSIM_USE_DLRM
 void ThreadStartup(
@@ -402,31 +421,68 @@ ranking::RankingResponse deserializePayload(const folly::IOBuf* buf) {
 }
 
 #ifdef FEEDSIM_USE_DLRM
-static int dlrmInferenceServerSideDataGeneration(ThreadData& this_thread,
-                                                 int total_num_inferences) {
-  int num_inferences_max =
-      (total_num_inferences + args.cpu_threads_arg - 1)
-      / args.cpu_threads_arg;
-  int batch_size = args.dlrm_batch_size_arg;
+// Distribute `total_num_inferences` across cpu_threads_arg fan-out
+// futures and return how many inferences each shard should run. The last
+// shard absorbs any remainder so the sum equals total_num_inferences.
+static std::vector<int> shardInferences(int total_num_inferences) {
+  std::vector<int> shards;
+  int per_shard =
+      (total_num_inferences + args.cpu_threads_arg - 1) / args.cpu_threads_arg;
+  for (int i = 0; i < args.cpu_threads_arg && total_num_inferences > 0; ++i) {
+    int n = std::min(per_shard, total_num_inferences);
+    shards.push_back(n);
+    total_num_inferences -= n;
+  }
+  return shards;
+}
 
+// Run DLRM inference where features are generated INSIDE DLRM::infer (server
+// side). Returns a future so the caller can chain the rest of the request
+// pipeline asynchronously instead of blocking.
+static folly::Future<int> dlrmInferenceServerSide(
+    ThreadData& this_thread, int total_num_inferences) {
+  int batch_size = args.dlrm_batch_size_arg;
   std::vector<folly::Future<int>> futures;
-  for (int i = 0; i < args.cpu_threads_arg; i++) {
-    int num_inferences = std::min(num_inferences_max, total_num_inferences);
-    auto f = folly::via(
+  for (int n : shardInferences(total_num_inferences)) {
+    futures.push_back(folly::via(
         this_thread.cpuThreadPool.get(),
-        [num_inferences, batch_size, &this_thread]() {
-          return this_thread.dlrm_ranker->infer(num_inferences, batch_size);
-        });
-    futures.push_back(std::move(f));
-    total_num_inferences -= num_inferences;
-    if (total_num_inferences <= 0) break;
+        [n, batch_size, &this_thread]() {
+          return this_thread.dlrm_ranker->infer(n, batch_size);
+        }));
   }
-  auto fs = folly::collectAll(std::move(futures)).get();
-  int result = 0;
-  for (auto& f : fs) {
-    result += f.value();
+  return folly::collect(std::move(futures))
+      .via(this_thread.cpuThreadPool.get())
+      .thenValue([](std::vector<int>&& results) {
+        return std::accumulate(results.begin(), results.end(), 0);
+      });
+}
+
+// Run DLRM inference where dense+sparse features are provided by the client
+// (DLRM::inferWithFeatures). The client_features pointer must outlive the
+// returned future — typically the caller keeps it alive in a shared_ptr.
+static folly::Future<int> dlrmInferenceClientSide(
+    ThreadData& this_thread,
+    std::shared_ptr<std::vector<float>> dense_features,
+    std::shared_ptr<std::vector<int64_t>> sparse_features,
+    int batch_size,
+    int total_num_inferences) {
+  std::vector<folly::Future<int>> futures;
+  for (int n : shardInferences(total_num_inferences)) {
+    futures.push_back(folly::via(
+        this_thread.cpuThreadPool.get(),
+        [n, batch_size, &this_thread, dense_features, sparse_features]() {
+          return this_thread.dlrm_ranker->inferWithFeatures(
+              dense_features->data(),
+              sparse_features->data(),
+              batch_size,
+              n);
+        }));
   }
-  return result;
+  return folly::collect(std::move(futures))
+      .via(this_thread.cpuThreadPool.get())
+      .thenValue([](std::vector<int>&& results) {
+        return std::accumulate(results.begin(), results.end(), 0);
+      });
 }
 #endif
 
@@ -589,37 +645,29 @@ void AsyncPageRankRequestHandler(
   // Run feature extraction if enabled
   runFeatureExtraction(this_thread);
 
-  // Stage 2: Ranking workload (CPU-intensive, parallelized)
-  // This stage blocks briefly for CPU work, which is acceptable
+  // Stage 2: PageRank ranking workload (CPU-intensive, parallelized).
+  // This handler is for kPageRankRequestType only — DLRM workload is
+  // routed to DLRMRequestHandler in main(), so no DLRM branch here.
   int ranking_result = 0;
-  if (g_workload_type == WorkloadType::PAGERANK) {
-    auto per_thread_subset = args.graph_subset_arg / args.cpu_threads_arg;
-
-    std::vector<folly::Future<int>> futures;
-    for (int i = 0; i < args.cpu_threads_arg; i++) {
-      auto f = folly::via(
-          this_thread.cpuThreadPool.get(),
-          [i, &this_thread, per_thread_subset]() {
-            return this_thread.page_ranker->rank(
-                i,
-                args.graph_max_iters_arg,
-                kPageRankThreshold,
-                args.rank_trials_per_thread_arg,
-                per_thread_subset);
-          });
-      futures.push_back(std::move(f));
-    }
-    auto fs = folly::collectAll(std::move(futures)).get();
-    for (auto& f : fs) {
-      ranking_result += f.value();
-    }
+  auto per_thread_subset = args.graph_subset_arg / args.cpu_threads_arg;
+  std::vector<folly::Future<int>> futures;
+  for (int i = 0; i < args.cpu_threads_arg; i++) {
+    auto f = folly::via(
+        this_thread.cpuThreadPool.get(),
+        [i, &this_thread, per_thread_subset]() {
+          return this_thread.page_ranker->rank(
+              i,
+              args.graph_max_iters_arg,
+              kPageRankThreshold,
+              args.rank_trials_per_thread_arg,
+              per_thread_subset);
+        });
+    futures.push_back(std::move(f));
   }
-#ifdef FEEDSIM_USE_DLRM
-  else if (g_workload_type == WorkloadType::DLRM) {
-    ranking_result = dlrmInferenceServerSideDataGeneration(
-        this_thread, args.dlrm_inferences_per_request_arg);
+  auto fs = folly::collectAll(std::move(futures)).get();
+  for (auto& f : fs) {
+    ranking_result += f.value();
   }
-#endif
 
   // Capture data needed for async stages by value
   auto random_string = this_thread.random_string;
@@ -664,8 +712,7 @@ void AsyncPageRankRequestHandler(
         std::vector<folly::Future<int>> compressionFutures;
         for (int i = 0; i < srv_io_threads; i++) {
           auto f = folly::via(srvIOThreadPool.get(), [per_thread_num_objects]() {
-            auto resp = ranking::generators::generateRandomRankingResponse(
-                per_thread_num_objects);
+            auto resp = generateResponse(per_thread_num_objects);
             auto payloadiobufq = serializePayload(resp);
             auto buf = payloadiobufq.move();
             const auto compress_length = buf->computeChainDataLength() / 2;
@@ -717,9 +764,7 @@ void AsyncPageRankRequestHandler(
       .thenValue([context_ptr, srv_io_threads, num_objects](int final_result) {
         // Stage 6: Generate and send response
         auto per_thread_num_objects = num_objects / srv_io_threads;
-        auto r = ranking::generators::generateRandomRankingResponse(
-            per_thread_num_objects);
-        ranking::RankingResponse resp = r;
+        ranking::RankingResponse resp = generateResponse(per_thread_num_objects);
 
         auto payloadiobufq = serializePayload(resp);
         auto buf = payloadiobufq.move();
@@ -787,21 +832,39 @@ void DLRMRequestHandler(
         temp_struct.data(), static_cast<int>(temp_struct.size()));
   }
 
-  int result = 0;
-
-  // DLRM inference uses server-side feature generation (same CPU work as baseline)
-  // to maintain comparable QPS. Story content influences feature extractors above,
-  // not the DLRM inference inputs.
+  // Choose DLRM inference path. If the client included DLRMFeatures,
+  // run inferWithFeatures (no server-side RNG for inputs). Otherwise
+  // fall back to server-side feature generation inside DLRM::infer.
+  folly::Future<int> inference_future = folly::makeFuture<int>(0);
   if (this_thread.dlrm_ranker) {
-    result = dlrmInferenceServerSideDataGeneration(
-        this_thread, *request.num_inferences());
+    int num_inferences = *request.num_inferences();
+    if (request.dlrm_features().has_value()) {
+      const auto& features = request.dlrm_features().value();
+      int batch_size = *features.batch_size();
+      // Copy into shared_ptrs so they outlive the async chain.
+      auto dense = std::make_shared<std::vector<float>>();
+      const auto& src_dense = *features.dense_features();
+      dense->reserve(src_dense.size());
+      for (double v : src_dense) {
+        dense->push_back(static_cast<float>(v));
+      }
+      auto sparse = std::make_shared<std::vector<int64_t>>(
+          features.sparse_features()->begin(),
+          features.sparse_features()->end());
+      inference_future = dlrmInferenceClientSide(
+          this_thread, std::move(dense), std::move(sparse),
+          batch_size, num_inferences);
+    } else {
+      inference_future =
+          dlrmInferenceServerSide(this_thread, num_inferences);
+    }
   }
 
-  // Move context into shared_ptr for async lifetime (same pattern as async handler)
-  auto context_ptr = std::make_shared<feedsim::RequestContext>(std::move(context));
+  // Move context into shared_ptr for async lifetime
+  auto context_ptr =
+      std::make_shared<feedsim::RequestContext>(std::move(context));
 
   // Capture values needed for async stages
-  auto random_string = this_thread.random_string;
   auto srvCPUThreadPool = this_thread.srvCPUThreadPool;
   auto srvIOThreadPool = this_thread.srvIOThreadPool;
   auto ioThreadPool = this_thread.ioThreadPool;
@@ -820,39 +883,52 @@ void DLRMRequestHandler(
       ? (num_io_stages * io_stage_latency_ms)
       : io_latency_ms;
 
-  // Async I/O simulation + compression + pointer chase (matches async handler)
+  // Pipeline: DLRM inference -> I/O sleep -> compression -> pointer chase
+  // -> generate+send response. Everything chains via futures so the
+  // handler thread returns immediately and the request is processed
+  // entirely off the dispatcher thread.
   auto timekeeper = timekeeperPool->getTimekeeper();
-  folly::futures::sleep(
-      std::chrono::milliseconds(total_io_latency_ms), timekeeper.get())
+  std::move(inference_future)
       .via(ioThreadPool.get())
-      .thenValue([result, random_string, srvIOThreadPool,
-                  srv_io_threads, num_objects](folly::Unit) {
-        auto compressed = compressPayload(random_string, result);
+      .thenValue([total_io_latency_ms, timekeeper, ioThreadPool](
+                     int prediction_result) {
+        return folly::futures::sleep(
+                   std::chrono::milliseconds(total_io_latency_ms),
+                   timekeeper.get())
+            .via(ioThreadPool.get())
+            .thenValue([prediction_result](folly::Unit) {
+              return prediction_result;
+            });
+      })
+      .thenValue([srvIOThreadPool, srv_io_threads, num_objects](
+                     int prediction_result) {
         auto per_thread_num_objects = num_objects / srv_io_threads;
-
         std::vector<folly::Future<int>> compressionFutures;
         for (int i = 0; i < srv_io_threads; i++) {
-          auto f = folly::via(srvIOThreadPool.get(), [per_thread_num_objects]() {
-            auto resp = ranking::generators::generateRandomRankingResponse(
-                per_thread_num_objects);
-            auto payloadiobufq = serializePayload(resp);
-            auto buf = payloadiobufq.move();
-            const auto compress_length = buf->computeChainDataLength() / 2;
-            size_t total_size = 0;
-            for (auto range : *buf) {
-              if (total_size >= compress_length) break;
-              auto iobuf = folly::IOBuf::copyBuffer(range.data(), range.size());
-              auto c = compressThrift(std::move(iobuf));
-              total_size += range.size();
-            }
-            return 1;
-          });
+          auto f = folly::via(
+              srvIOThreadPool.get(), [per_thread_num_objects]() {
+                auto resp = generateResponse(per_thread_num_objects);
+                auto payloadiobufq = serializePayload(resp);
+                auto buf = payloadiobufq.move();
+                const auto compress_length =
+                    buf->computeChainDataLength() / 2;
+                size_t total_size = 0;
+                for (auto range : *buf) {
+                  if (total_size >= compress_length) break;
+                  auto iobuf = folly::IOBuf::copyBuffer(
+                      range.data(), range.size());
+                  auto c = compressThrift(std::move(iobuf));
+                  total_size += range.size();
+                }
+                return 1;
+              });
           compressionFutures.push_back(std::move(f));
         }
         return folly::collectAll(std::move(compressionFutures))
             .via(srvIOThreadPool.get())
-            .thenValue([result](std::vector<folly::Try<int>> results) {
-              int total = result;
+            .thenValue([prediction_result](
+                           std::vector<folly::Try<int>> results) {
+              int total = prediction_result;
               for (auto& r : results) {
                 if (r.hasValue()) total += r.value();
               }
@@ -864,7 +940,8 @@ void DLRMRequestHandler(
         auto per_thread_chase_iterations = chase_iterations / srv_threads;
         std::vector<folly::Future<int>> chaseFutures;
         for (int i = 0; i < srv_threads; i++) {
-          auto f = folly::via(srvCPUThreadPool.get(),
+          auto f = folly::via(
+              srvCPUThreadPool.get(),
               [pointer_chaser, per_thread_chase_iterations]() {
                 pointer_chaser->Chase(per_thread_chase_iterations);
                 return 1;
@@ -881,22 +958,21 @@ void DLRMRequestHandler(
               return total;
             });
       })
-      .thenValue([context_ptr, srv_io_threads, num_objects](int final_result) {
+      .thenValue([context_ptr, srv_io_threads, num_objects](
+                     int /*final_result*/) {
         auto per_thread_num_objects = num_objects / srv_io_threads;
-        auto r = ranking::generators::generateRandomRankingResponse(
-            per_thread_num_objects);
-        ranking::RankingResponse resp = r;
-
+        auto resp = generateResponse(per_thread_num_objects);
         folly::IOBufQueue bufq;
         apache::thrift::CompactSerializer::serialize(resp, &bufq);
         auto buf = bufq.move();
-
         context_ptr->sendResponse(buf->data(), buf->length());
       })
-      .thenError(folly::tag_t<std::exception>{}, [context_ptr](const std::exception& e) {
-        std::cerr << "DLRM request handler error: " << e.what() << std::endl;
-        context_ptr->sendResponse(nullptr, 0);
-      });
+      .thenError(folly::tag_t<std::exception>{},
+                 [context_ptr](const std::exception& e) {
+                   std::cerr << "DLRM request handler error: " << e.what()
+                             << std::endl;
+                   context_ptr->sendResponse(nullptr, 0);
+                 });
 }
 #endif // FEEDSIM_USE_DLRM
 
@@ -923,36 +999,26 @@ void PageRankRequestHandler(
   // Run feature extraction if enabled
   runFeatureExtraction(this_thread);
 
+  // PageRank ranking stage. This handler is for kPageRankRequestType only —
+  // DLRM workload is routed to DLRMRequestHandler in main().
   int result = 0;
-
-  // Ranking stage - either PageRank or DLRM
-  if (g_workload_type == WorkloadType::PAGERANK) {
-    // PageRank workload
-    auto per_thread_subset = args.graph_subset_arg / args.cpu_threads_arg;
-
-    std::vector<folly::Future<int>> futures;
-    for (int i = 0; i < args.cpu_threads_arg; i++) {
-      auto f = folly::via(
-          this_thread.cpuThreadPool.get(),
-          [i, &this_thread, per_thread_subset]() {
-            return this_thread.page_ranker->rank(
-                i,
-                args.graph_max_iters_arg,
-                kPageRankThreshold,
-                args.rank_trials_per_thread_arg,
-                per_thread_subset);
-          });
-      futures.push_back(std::move(f));
-    }
-    auto fs = folly::collect(futures).get();
-    result = std::accumulate(fs.begin(), fs.end(), 0);
+  auto per_thread_subset = args.graph_subset_arg / args.cpu_threads_arg;
+  std::vector<folly::Future<int>> futures;
+  for (int i = 0; i < args.cpu_threads_arg; i++) {
+    auto f = folly::via(
+        this_thread.cpuThreadPool.get(),
+        [i, &this_thread, per_thread_subset]() {
+          return this_thread.page_ranker->rank(
+              i,
+              args.graph_max_iters_arg,
+              kPageRankThreshold,
+              args.rank_trials_per_thread_arg,
+              per_thread_subset);
+        });
+    futures.push_back(std::move(f));
   }
-#ifdef FEEDSIM_USE_DLRM
-  else if (g_workload_type == WorkloadType::DLRM) {
-    result = dlrmInferenceServerSideDataGeneration(
-        this_thread, args.dlrm_inferences_per_request_arg);
-  }
-#endif
+  auto fs = folly::collect(futures).get();
+  result = std::accumulate(fs.begin(), fs.end(), 0);
 
   // I/O simulation stage
   auto timekeeper = this_thread.timekeeperPool->getTimekeeper();
@@ -971,8 +1037,7 @@ void PageRankRequestHandler(
   std::vector<folly::Future<int>> compressionFutures;
   for (int i = 0; i < args.srv_io_threads_arg; i++) {
     auto f = folly::via(this_thread.srvIOThreadPool.get(), [&]() {
-      auto resp = ranking::generators::generateRandomRankingResponse(
-          per_thread_num_objects);
+      auto resp = generateResponse(per_thread_num_objects);
       auto payloadiobufq = serializePayload(resp);
       auto buf = payloadiobufq.move();
       const auto compress_length = buf->computeChainDataLength() / 2;
@@ -1006,8 +1071,7 @@ void PageRankRequestHandler(
   int chaseResult = std::accumulate(chaseFs.begin(), chaseFs.end(), 0);
 
   // Generate a response
-  auto r = ranking::generators::generateRandomRankingResponse(
-      per_thread_num_objects);
+  auto r = generateResponse(per_thread_num_objects);
   ranking::RankingResponse resp = r;
 
   // Serialize into FBThrift
@@ -1043,6 +1107,29 @@ int main(int argc, char** argv) {
   } else {
     g_workload_type = WorkloadType::PAGERANK;
     std::cout << "Using PageRank workload type" << std::endl;
+  }
+
+  // Load Silesia corpus if --silesia_dir was given. Server-side response
+  // generation will then pull bytes from the corpus instead of running
+  // xor128() RNG (which previously consumed ~15% of CPU with no production
+  // analog).
+  if (args.silesia_dir_given) {
+    g_silesia_loader = std::make_unique<ranking::SilesiaLoader>();
+    if (!g_silesia_loader->loadDirectory(args.silesia_dir_arg)) {
+      std::cerr << "Failed to load Silesia corpus from: "
+                << args.silesia_dir_arg << std::endl;
+      return 1;
+    }
+    g_silesia_response_gen =
+        std::make_unique<ranking::generators::SilesiaResponseGenerator>(
+            g_silesia_loader.get());
+    std::cout << "Server response generator: Silesia ("
+              << g_silesia_loader->numFiles() << " files, "
+              << (g_silesia_loader->totalSize() / (1024 * 1024)) << " MB)"
+              << std::endl;
+  } else {
+    std::cout << "Server response generator: xor128 RNG (no --silesia_dir)"
+              << std::endl;
   }
 
   int fake_argc = 1;
