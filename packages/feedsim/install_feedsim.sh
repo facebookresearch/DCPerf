@@ -58,6 +58,10 @@ cp "${BENCHPRESS_ROOT}/packages/feedsim/run-feedsim-multi.sh" "${FEEDSIM_ROOT_SR
 chmod u+x "${FEEDSIM_ROOT_SRC}/run.sh"
 chmod u+x "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 
+# Copy production size distribution JSONs (consumed by run.sh / DriverNodeRank).
+cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_req_sizes.json" "${FEEDSIM_ROOT_SRC}/feed_aggregator_req_sizes.json"
+cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_resp_sizes.json" "${FEEDSIM_ROOT_SRC}/feed_aggregator_resp_sizes.json"
+
 msg "Installing third-party dependencies..."
 cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party" "${FEEDSIM_ROOT_SRC}"
 mv "${FEEDSIM_THIRD_PARTY_SRC}/src" "${FEEDSIM_ROOT_SRC}/src"

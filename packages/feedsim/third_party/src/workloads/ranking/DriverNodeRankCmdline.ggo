@@ -46,3 +46,6 @@ option "silesia_dir" - "Path to Silesia corpus directory. When specified, storie
 option "story_size_min" - "Minimum story snippet size in bytes." int default="1024"
 option "story_size_max" - "Maximum story snippet size in bytes." int default="4096"
 option "stories_per_request" - "Number of story snippets to include per request." int default="10"
+
+# Phase 4 (Plan): Request size distribution matching production
+option "req_size_dist" - "Path to JSON file with request size percentile distribution. Pads each request to a sampled size matching the distribution." string typestr="json_file" optional

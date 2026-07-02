@@ -109,6 +109,7 @@ Usage: ${0##*/} [OPTION]...
     --stories-per-request Number of story snippets per request. Default: 10
     --story-size-min Minimum story snippet size in bytes. Default: 1024
     --story-size-max Maximum story snippet size in bytes. Default: 4096
+    --req-size-dist Path to JSON file with request size percentile distribution. Auto-detect: feed_aggregator_req_sizes.json next to run.sh.
     --client-side-features Enable client-side DLRM feature generation (0=disabled, non-zero=enabled). Default: 0
     --client-batch-size Batch size for client-side feature generation. Default: 256
     --client-inferences Number of DLRM inferences per request (client-side). Default: 1
@@ -269,6 +270,10 @@ main() {
 
     local story_size_max
     story_size_max="4096"
+
+    # Phase 4: Request size distribution
+    local req_size_dist
+    req_size_dist=""
 
     # Feature extraction options
     local feature_extractors
@@ -522,6 +527,13 @@ main() {
             --story-size-max=*)
                 story_size_max="${1#*=}"
                 ;;
+            --req-size-dist)
+                req_size_dist="$2"
+                shift
+                ;;
+            --req-size-dist=*)
+                req_size_dist="${1#*=}"
+                ;;
             --feature-extractors)
                 feature_extractors="1"
                 ;;
@@ -733,6 +745,24 @@ main() {
         echo "Silesia story generation: ENABLED (dir=$silesia_dir, stories/req=$stories_per_request, size=$story_size_min-$story_size_max)"
     fi
 
+    # Build request size distribution option for DriverNodeRank.
+    # Auto-detect a default JSON file next to run.sh if not explicitly given.
+    local req_size_opts=""
+    if [ -z "$req_size_dist" ] && [ -f "${FEEDSIM_ROOT}/feed_aggregator_req_sizes.json" ]; then
+        req_size_dist="${FEEDSIM_ROOT}/feed_aggregator_req_sizes.json"
+    fi
+    if [ -n "$req_size_dist" ]; then
+        # Resolve to absolute path if relative
+        if [[ "$req_size_dist" != /* ]]; then
+            req_size_dist="${FEEDSIM_ROOT}/${req_size_dist}"
+        fi
+        if [ ! -f "$req_size_dist" ]; then
+            die "Request size distribution JSON not found: $req_size_dist"
+        fi
+        req_size_opts="--req_size_dist=$req_size_dist"
+        echo "Request size distribution: ENABLED (file=$req_size_dist)"
+    fi
+
     # Construct no retry mode parameter if specified
     no_retry_args=""
     if [ -n "$no_retry_mode" ]; then
@@ -749,7 +779,8 @@ main() {
                 --threads="${driver_threads}" \
                 --connections=4 \
                 $client_feature_opts \
-                $silesia_opts
+                $silesia_opts \
+                $req_size_opts
         benchreps_tell_state "after search_qps"
     elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
         benchreps_tell_state "before search_qps"
@@ -759,7 +790,8 @@ main() {
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port" \
                 $client_feature_opts \
-                $silesia_opts
+                $silesia_opts \
+                $req_size_opts
         benchreps_tell_state "after search_qps"
     else
         # Adjust the number of workers according to QPS
@@ -786,7 +818,8 @@ main() {
                 --threads="${num_workers}" \
                 --connections="${num_connections}" \
                 $client_feature_opts \
-                $silesia_opts
+                $silesia_opts \
+                $req_size_opts
         benchreps_tell_state "after fixed_qps_exp"
     fi
 
