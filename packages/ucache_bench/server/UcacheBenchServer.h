@@ -167,6 +167,12 @@ class UcacheBenchServer {
   folly::SemiFuture<UcbDeleteReply> processUcbDelete(
       const UcbDeleteRequest& req);
 
+  // Synchronous request handlers — no SemiFuture overhead.
+  // Matches production ucache's inline processing path.
+  UcbGetReply processUcbGetSync(const UcbGetRequest& req);
+  UcbSetReply processUcbSetSync(const UcbSetRequest& req);
+  UcbDeleteReply processUcbDeleteSync(const UcbDeleteRequest& req);
+
   void printStats();
 
   // Phase-based metric tracking for multi-client coordination
