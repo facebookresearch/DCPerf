@@ -401,6 +401,13 @@ def run_server(args: argparse.Namespace) -> None:
     # Configurable per-request CPU work
     if args.cpu_work_us > 0:
         server_cmd.append(f"--cpu_work_us={args.cpu_work_us}")
+    io_latency_us = getattr(args, "io_latency_us", None)
+    if io_latency_us is None:
+        io_latency_us = getattr(args, "io_latency_us", 0)
+    if io_latency_us and int(io_latency_us) > 0:
+        server_cmd.append(f"--io_latency_us={io_latency_us}")
+    elif getattr(args, "enable_fibers", False):
+        server_cmd.append("--io_latency_us=10")
 
     # Production-like per-request features
     if args.production_features:
@@ -465,6 +472,14 @@ def run_client(args: argparse.Namespace) -> None:
         f"--additional_fanout={args.additional_fanout}",
     ]
 
+    warmup_max_inflight = getattr(args, "warmup_max_inflight", 0)
+    if warmup_max_inflight > 0:
+        client_cmd.append(f"--warmup_max_inflight={warmup_max_inflight}")
+        client_cmd.append("--warmup_adaptive_load=false")
+    elif args.max_inflight <= 5:
+        client_cmd.append("--warmup_max_inflight=50")
+        client_cmd.append("--warmup_adaptive_load=false")
+
     # Admin server coordination (uses server_host since admin runs on same machine)
     if args.admin_port > 0:
         client_cmd.append(f"--admin_port={args.admin_port}")
@@ -472,7 +487,8 @@ def run_client(args: argparse.Namespace) -> None:
     # Connection ramp-up configuration
     if args.connection_ramp_seconds != 10:
         client_cmd.append(f"--connection_ramp_seconds={args.connection_ramp_seconds}")
-    if not args.warmup_adaptive_load:
+    warmup_adaptive = getattr(args, "warmup_adaptive_load", 1)
+    if not warmup_adaptive:
         client_cmd.append("--warmup_adaptive_load=false")
     if args.warmup_initial_inflight != 2:
         client_cmd.append(f"--warmup_initial_inflight={args.warmup_initial_inflight}")
@@ -866,6 +882,12 @@ def init_parser() -> argparse.ArgumentParser:
     server_parser.add_argument(
         "--real", action="store_true", help="Actually run the command"
     )
+    server_parser.add_argument(
+        "--io_latency_us",
+        type=int,
+        default=0,
+        help="Simulate I/O by yielding fiber per request (0 = disabled)",
+    )
 
     # =========================================================================
     # Client arguments (aligned with UcacheBenchClient.cpp)
@@ -1082,6 +1104,18 @@ def init_parser() -> argparse.ArgumentParser:
     )
     client_parser.add_argument(
         "--real", action="store_true", help="Actually run the command"
+    )
+    client_parser.add_argument(
+        "--warmup_max_inflight",
+        type=int,
+        default=0,
+        help="Max inflight during warmup (0 = use max_inflight)",
+    )
+    client_parser.add_argument(
+        "--warmup_adaptive_load",
+        type=int,
+        default=1,
+        help="Enable adaptive load control during warmup (0 = disabled)",
     )
 
     # Set default functions
