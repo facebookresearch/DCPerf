@@ -8,7 +8,6 @@
 #include "UcacheBenchClient.h"
 
 #include <netdb.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <algorithm>
@@ -18,16 +17,13 @@
 #include <fstream>
 #include <iostream>
 #include <random>
-#include <sstream>
 #include <thread>
 
 #include <folly/Random.h>
 #include <folly/coro/AsyncScope.h>
 #include <folly/coro/BlockingWait.h>
 #include <folly/coro/Promise.h>
-#include <folly/coro/Sleep.h>
 #include <folly/coro/Timeout.h>
-#include <folly/fibers/FiberManagerMap.h>
 #include <folly/io/async/ScopedEventBaseThread.h>
 #include <folly/portability/GFlags.h>
 #include <mcrouter/McrouterFiberContext.h>
