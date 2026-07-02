@@ -344,7 +344,9 @@ DEFINE_uint32(
 DEFINE_uint32(
     additional_fanout,
     0,
-    "Number of additional connections per server for fanout (0 = disabled, must be <= 32768 - num_proxies)");
+    "Number of additional connections per server for fanout (0 = disabled). "
+    "Limited by ephemeral port range per source IP (~64K). Use LD_PRELOAD=bind_source.so "
+    "with multiple source IPs for higher connection counts.");
 DEFINE_bool(
     enable_random_source_ip,
     false,
