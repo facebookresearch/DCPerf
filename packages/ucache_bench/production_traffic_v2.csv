@@ -1,0 +1,11 @@
+operation,Hits,Samples,request_wire_bytes (avg),request_wire_value_bytes (avg),request_wire_value_bytes (p50),request_wire_value_bytes (p75),request_wire_value_bytes (p95),request_wire_value_bytes (p99),reply_size_before_compression (avg),reply_wire_value_bytes (avg),reply_wire_value_bytes (p50),reply_wire_value_bytes (p75),reply_wire_value_bytes (p95),reply_wire_value_bytes (p99),key_size (avg)
+get,1042120000,104212,0,0,0,0,0,0,0,1567.0159290676697,24,533,7045,17263,63.78330710474801
+lease-get,460320000,46032,0,0,0,0,0,0,0,939.8208637469586,8,78,650,10728,52.91288668752173
+set,142820000,14282,0,2942.158241142697,47,178,4884,37757,0,0,0,0,0,0,66.87634785044112
+lease-set,90820000,9082,0,1460.301035014314,13,86,1891,34042,0,0,0,0,0,0,67.8887910151949
+delete,940000,94,0,0,0,0,0,0,0,0,0,0,0,0,45.255319148936174
+gets,760000,76,0,0,0,0,0,0,0,14.473684210526315,14,14,55,55,69.55263157894737
+add,220000,22,0,17.363636363636363,9,9,55,55,0,0,0,0,0,0,106.63636363636364
+cas,100000,10,0,4,1,9,9,9,0,0,0,0,0,0,89.2
+incr,40000,4,0,0,0,0,0,0,0,0,0,0,0,0,85.5
+metaget,40000,4,0,0,0,0,0,0,0,0,0,0,0,0,27
