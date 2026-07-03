@@ -99,6 +99,21 @@ inline ranking::RankingPayloadVecMap generateRandomVecMap(size_t length) {
   return map;
 }
 
+// Per-payload-map entry count. Cut from 5 to 2 to bring the response
+// wire-size and serialization CPU closer to prod multifeed/aggregator_main:
+// before, FS-side RPC-Serialization was 21% of CPU with
+// `RankingObject::write` self-time = 54% of that bucket; prod's analogous
+// `GetStoriesResponse` averages ~12 simple fields per story plus one binary
+// blob, not 3 typed maps × N entries. See the t30 hot-func breakdown
+// comparison (2026-06-01) for the source data.
+constexpr size_t kPayloadEntriesPerMap = 2;
+// Actions per RankingObject. Was 5; reduced to 2 (same rationale).
+constexpr size_t kActionsPerObject = 2;
+// RankingObjects per RankingStory. Was 20; reduced to 10 to roughly
+// halve the per-story serialization work without changing the request
+// fanout shape.
+constexpr size_t kObjectsPerStory = 10;
+
 inline ranking::RankingObject generateRandomRankingObject(
     size_t actions_length) {
   ranking::RankingObject obj;
@@ -109,10 +124,9 @@ inline ranking::RankingObject generateRandomRankingObject(
   obj.actorID() = static_cast<int64_t>(rand_int);
   obj.createTime() = static_cast<int64_t>(rand_int);
 
-  // FIXME(cltorres): Populate with realistic sizes
-  obj.payloadIntMap() = generateRandomIntMap(5);
-  obj.payloadStrMap() = generateRandomStringMap(5);
-  obj.payloadVecMap() = generateRandomVecMap(5);
+  obj.payloadIntMap() = generateRandomIntMap(kPayloadEntriesPerMap);
+  obj.payloadStrMap() = generateRandomStringMap(kPayloadEntriesPerMap);
+  obj.payloadVecMap() = generateRandomVecMap(kPayloadEntriesPerMap);
 
   auto actions_ref = obj.actions();
   auto& actions = *actions_ref;
@@ -132,11 +146,10 @@ inline ranking::RankingStory generateRandomRankingStory(
   auto objects_ref = story.objects();
   auto& objects = *objects_ref;
   objects.reserve(ranking_objects_length);
-  // TODO(cltorres): Determine distribution of Actions per ranking object
   std::generate_n(
       std::back_inserter(objects),
       ranking_objects_length,
-      std::bind(generateRandomRankingObject, 5));
+      std::bind(generateRandomRankingObject, kActionsPerObject));
   story.weight() = static_cast<double>(rand_int);
   story.storyType() = static_cast<ranking::RankingStoryType>(
       rand_int %
@@ -152,11 +165,10 @@ inline ranking::RankingResponse generateRandomRankingResponse(
   auto rankingStories_ref = resp.rankingStories();
   auto& rankingStories = *rankingStories_ref;
   rankingStories.reserve(ranking_stories_length);
-  // TODO(cltorres): Determine distribution of ranking objects per story
   std::generate_n(
       std::back_inserter(rankingStories),
       ranking_stories_length,
-      std::bind(generateRandomRankingStory, 20));
+      std::bind(generateRandomRankingStory, kObjectsPerStory));
   auto objectCounts_ref = resp.objectCounts();
   auto& objectCounts = *objectCounts_ref;
   objectCounts.reserve(ranking_stories_length);

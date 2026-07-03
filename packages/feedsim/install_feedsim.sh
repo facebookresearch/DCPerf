@@ -45,7 +45,7 @@ dnf install -y bc ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \
     zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq \
-    xxhash xxhash-devel unzip
+    xxhash xxhash-devel unzip liburing-devel
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -246,6 +246,21 @@ else
     msg "[SKIPPED] Silesia corpus already present at $SILESIA_DIR"
 fi
 
+# Extract example TLS certs for mock_services (used when --tls_cert/--tls_key
+# are passed; see run-feedsim-multi.sh). The tarball ships example.crt and
+# example.key suitable for benchmark use only (no peer verification).
+CERTS_DIR="${FEEDSIM_ROOT_SRC}/certs"
+CERTS_TARBALL="${BENCHPRESS_ROOT}/packages/common/certs.tar.gz"
+if [ -f "$CERTS_TARBALL" ]; then
+    mkdir -p "$CERTS_DIR"
+    # --strip-components=1 drops the top-level `certs/` directory inside the
+    # tarball so the files land directly at $CERTS_DIR/example.{crt,key}.
+    tar -xzf "$CERTS_TARBALL" -C "$CERTS_DIR" --strip-components=1
+    msg "Extracted TLS certs to $CERTS_DIR"
+else
+    msg "[WARNING] $CERTS_TARBALL not found; TLS for mock_services will be unavailable"
+fi
+
 # Installing FeedSim
 cd "${FEEDSIM_ROOT_SRC}"
 
@@ -289,7 +304,12 @@ mkdir -p build && cd build/
 # Build FeedSim with DLRM support
 FS_CFLAGS="${BP_CFLAGS:--O3 -DNDEBUG}"
 FS_CXXFLAGS="${BP_CXXFLAGS:--O3 -DNDEBUG }"
-FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic"
+# -luring: folly's IoUringZeroCopyBufferPool/IoUringEvent reference io_uring
+# symbols but folly's CMake doesn't propagate liburing as a transitive link
+# dependency. On RHEL9 + liburing 2.12 the static libfolly.a otherwise fails
+# to link LeafNodeRank with undefined references to io_uring_register_ifq /
+# io_uring_register_eventfd. Force the link explicitly.
+FS_LDFLAGS="${BP_LDFLAGS:-} -luring -latomic -Wl,--export-dynamic"
 
 cmake -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \

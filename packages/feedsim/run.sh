@@ -729,6 +729,16 @@ main() {
         mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${MOCK_KEEPALIVE_INTERVAL_MS}"
         echo "MockServicesClient keepalive: ENABLED (interval=${MOCK_KEEPALIVE_INTERVAL_MS} ms)"
     fi
+    # Wire compression on the outbound MockServicesClient channel.
+    # LeafNodeRank uses gengetopt (rejects unknown flags), so the knob is
+    # plumbed via the MOCK_COMPRESS_ZSTD env var read inside
+    # MockServicesClient.cc — not as a CLI flag. FEEDSIM_NO_RPC_ZSTD=1 turns
+    # ZSTD off (binary default is on); leave unset for default-on parity with
+    # prod's wire-compressed channels.
+    if [ "${FEEDSIM_NO_RPC_ZSTD:-0}" = "1" ]; then
+        export MOCK_COMPRESS_ZSTD=0
+        echo "MockServicesClient ZSTD: DISABLED (via MOCK_COMPRESS_ZSTD env)"
+    fi
 
     # OMP_NUM_THREADS=1: cap PyTorch's OpenMP parallel backend pool to
     # 1 thread. at::set_num_threads(1) only affects libtorch's native
@@ -841,10 +851,18 @@ main() {
     # Preprocessing complete; search_qps.sh will own the main_benchmark phase.
     log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
 
+    # SLA target for search_qps (95p latency in milliseconds). Default 500ms.
+    # Override via FEEDSIM_SLA_P95_MS env var. Prior experiments (t29, t30)
+    # ran at 700ms to give the system more headroom past the prod-aggregator's
+    # own end-to-end budget.
+    sla_p95_ms="${FEEDSIM_SLA_P95_MS:-500}"
+    sla_arg="95p:${sla_p95_ms}"
+
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
+        echo "search_qps SLA: ${sla_arg}"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -w 15 -f 300 -s 95p:500 -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        scripts/search_qps.sh -w 15 -f 300 -s "$sla_arg" -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
@@ -856,8 +874,9 @@ main() {
         benchreps_tell_state "after search_qps"
     elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
         benchreps_tell_state "before search_qps"
+        echo "search_qps SLA: ${sla_arg}"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -a -w 15 -f 300 -s 95p:500 -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        scripts/search_qps.sh -a -w 15 -f 300 -s "$sla_arg" -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             build/workloads/ranking/DriverNodeRank \
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port" \

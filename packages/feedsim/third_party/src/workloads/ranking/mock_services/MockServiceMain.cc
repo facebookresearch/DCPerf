@@ -52,6 +52,12 @@ DECLARE_int32(latency_cap_us);
 DECLARE_int32(latency_offset_us);
 DECLARE_int32(latency_skip_threshold_us);
 
+// NOTE: TLS support intentionally not wired here. The open-source FBThrift
+// v2026.01.05.00 Rocket transport requires a fizz-based AsyncTransport (not
+// plain AsyncSSLSocket) on the client side; without it, TLS-REQUIRED servers
+// reject the first Rocket setup frame before SSL handshake even begins. See
+// the Encryption gap analysis in the t31 memo for the closure plan.
+
 int main(int argc, char** argv) {
   folly::Init init(&argc, &argv);
 

@@ -32,6 +32,28 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
     sysstat jq xxhash libxxhash-dev unzip
 
+# Install liburing >= 2.6 from source. Ubuntu's apt-shipped liburing (0.7 on
+# 20.04, 2.1 on 22.04) is older than folly's minimum, so folly's io_uring
+# integration links `-luring` against a nonexistent library. Build tag
+# liburing-2.12 upstream and install into /usr/local so folly's `find_library`
+# picks it up ahead of the system one.
+if ! ldconfig -p 2>/dev/null | grep -q "liburing.so.2"; then
+    msg "Building liburing 2.12 from source..."
+    LIBURING_BUILD_DIR="${FEEDSIM_THIRD_PARTY_SRC}/liburing_build"
+    mkdir -p "${LIBURING_BUILD_DIR}"
+    if ! [ -d "${LIBURING_BUILD_DIR}/liburing" ]; then
+        git clone --depth 1 --branch liburing-2.12 \
+            https://github.com/axboe/liburing.git \
+            "${LIBURING_BUILD_DIR}/liburing"
+    fi
+    (
+        cd "${LIBURING_BUILD_DIR}/liburing"
+        ./configure --prefix=/usr/local
+        make -j"$(nproc)"
+        make install
+    )
+    ldconfig
+fi
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
