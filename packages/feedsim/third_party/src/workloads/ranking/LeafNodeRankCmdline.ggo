@@ -96,3 +96,13 @@ option "rpc_fanout_scale" - "Scale factor applied to per-session fanout counts. 
 # mock_services attempted). Lets later diffs in the stack run end-to-end
 # integration tests without depending on the mock_services side process.
 option "use_legacy_sleep" - "Force legacy folly::futures::sleep path; skip MockServicesClient construction and outbound RPC fanout." flag off
+
+# Mitigation knob for the t25 cold-channel anti-pattern: when offered load is
+# low, MockServicesClient channels go idle between sparse session bursts.
+# Per-channel keepalive issues a 1-byte getStatus() ping every N ms to keep
+# the Rocket channel + EventBase warm, defeating the cold-wake + deep-C-state
+# penalty observed at low QPS on BGM (p95 cliff: 14x at q=5). 0 = disabled
+# (default = keepalive off so the anti-pattern stays observable for regression
+# tests). Recommended: 150-500ms. See ~/.claude/plans/ancient-launching-pizza.md
+# section "2026-05-27 -- t25" for the root-cause analysis.
+option "mock_keepalive_interval_ms" - "Interval (ms) between per-MockServicesClient keepalive pings. 0 = disabled." int default="0"

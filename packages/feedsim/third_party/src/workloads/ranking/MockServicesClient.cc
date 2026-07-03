@@ -29,8 +29,68 @@
 
 namespace ranking {
 
+// KeepaliveTimer fires a fire-and-forget getStatus() RPC every
+// keepalive_interval_ms to keep the underlying Rocket channel warm.
+//
+// Why this exists: t25 (2026-05-27) measured a 14x latency cliff on BGM at
+// low QPS, traced to cold MockServicesClient channels. After D105903218
+// each leaf thread owns one MockServicesClient per SREventBase (~123 on
+// BGM); at qps=5 most channels see no traffic for 100-300ms between
+// session bursts, then pay re-arm + deep C-state wake costs on the next
+// RPC. Per-channel keepalive defeats this by ensuring every channel sees
+// traffic at least every keepalive_interval_ms.
+//
+// Thread-affinity: scheduled on the same EventBase as the parent
+// MockServicesClient, so the callback runs on the right thread to call
+// dispatchByEnum() (which is thread-affine). Drops the resulting
+// SemiFuture immediately (fire-and-forget); transport errors are
+// swallowed silently — keepalive failures should not propagate to the
+// application path.
+class MockServicesClient::KeepaliveTimer : public folly::AsyncTimeout {
+ public:
+  KeepaliveTimer(
+      folly::EventBase* evb,
+      MockServicesClient* parent,
+      std::chrono::milliseconds interval)
+      : folly::AsyncTimeout(evb), parent_(parent), interval_(interval) {}
+
+  // Caller must invoke from the EventBase thread (or via
+  // runInEventBaseThread). scheduleTimeout itself is thread-affine.
+  void start() { scheduleTimeout(interval_); }
+
+  void timeoutExpired() noexcept override {
+    // Reschedule first so we don't drop the next tick if dispatch throws.
+    scheduleTimeout(interval_);
+
+    // Fire-and-forget getStatus() with latency_us=0 (lightest possible
+    // server-side handler). The 4-byte response header is the wire-
+    // contract minimum. We don't await — the returned SemiFuture goes
+    // out of scope but the underlying RPC remains in flight on the
+    // channel until completion, achieving the warming effect.
+    try {
+      std::string probe(4, '\0');
+      writeBigEndianResponseSize(probe.data(), 4);
+      parent_->client_->semifuture_getStatus(probe, /*latency_us=*/0)
+          .via(parent_->evb_)
+          .thenValue([](std::string&&) {})
+          .thenError(folly::tag_t<std::exception>{}, [](const std::exception&) {
+            // Swallow transport errors silently. The next iter will retry.
+          });
+    } catch (...) {
+      // Defensive — never let the timer callback propagate.
+    }
+  }
+
+ private:
+  MockServicesClient* parent_;
+  std::chrono::milliseconds interval_;
+};
+
 MockServicesClient::MockServicesClient(
-    folly::EventBase* evb, const std::string& host, uint16_t port)
+    folly::EventBase* evb,
+    const std::string& host,
+    uint16_t port,
+    std::chrono::milliseconds keepalive_interval)
     : evb_(evb) {
   if (evb_ == nullptr) {
     throw std::invalid_argument(
@@ -88,15 +148,34 @@ MockServicesClient::MockServicesClient(
     evb_->runInEventBaseThreadAndWait([this]() { client_.reset(); });
     std::rethrow_exception(result.exception().to_exception_ptr());
   }
+
+  // Start keepalive timer if requested. Must be constructed and started
+  // on the EventBase thread because AsyncTimeout is thread-affine.
+  if (keepalive_interval.count() > 0) {
+    evb_->runInEventBaseThreadAndWait([this, keepalive_interval]() {
+      keepalive_ =
+          std::make_unique<KeepaliveTimer>(evb_, this, keepalive_interval);
+      keepalive_->start();
+    });
+  }
 }
 
 MockServicesClient::~MockServicesClient() {
-  // The AsyncClient and its channel must be destroyed on the EventBase
-  // thread. Use runInEventBaseThreadAndWait to guarantee that even when
-  // the destructor runs from a different thread (e.g., during process
-  // shutdown).
-  if (evb_ != nullptr && client_) {
-    evb_->runInEventBaseThreadAndWait([this]() { client_.reset(); });
+  // The AsyncClient, its channel, and the keepalive timer are all
+  // thread-affine to evb_. Destroy them on that thread to guarantee
+  // correct cleanup even when the destructor runs from a different
+  // thread (e.g., during process shutdown). cancelTimeout must precede
+  // destruction or AsyncTimeout will assert.
+  if (evb_ != nullptr) {
+    evb_->runInEventBaseThreadAndWait([this]() {
+      if (keepalive_) {
+        keepalive_->cancelTimeout();
+        keepalive_.reset();
+      }
+      if (client_) {
+        client_.reset();
+      }
+    });
   }
 }
 

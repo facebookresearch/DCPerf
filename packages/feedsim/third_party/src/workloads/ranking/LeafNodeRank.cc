@@ -321,7 +321,9 @@ void ThreadStartup(
             std::make_unique<ranking::MockServicesClient>(
                 evbs[i].get(),
                 args.mock_services_host_arg,
-                static_cast<uint16_t>(args.mock_services_port_arg)));
+                static_cast<uint16_t>(args.mock_services_port_arg),
+                std::chrono::milliseconds(
+                    args.mock_keepalive_interval_ms_arg)));
       } catch (const std::exception& e) {
         std::cerr << "Failed to connect to mock_services on "
                   << args.mock_services_host_arg << ":"
@@ -468,7 +470,9 @@ void ThreadStartup(
             std::make_unique<ranking::MockServicesClient>(
                 evbs[i].get(),
                 args.mock_services_host_arg,
-                static_cast<uint16_t>(args.mock_services_port_arg)));
+                static_cast<uint16_t>(args.mock_services_port_arg),
+                std::chrono::milliseconds(
+                    args.mock_keepalive_interval_ms_arg)));
       } catch (const std::exception& e) {
         std::cerr << "Failed to connect to mock_services on "
                   << args.mock_services_host_arg << ":"
@@ -2357,7 +2361,9 @@ int main(int argc, char** argv) {
     std::cout << "RPC fanout: enabled (target "
               << args.mock_services_host_arg << ":"
               << args.mock_services_port_arg
-              << ", scale=" << args.rpc_fanout_scale_arg << ")"
+              << ", scale=" << args.rpc_fanout_scale_arg
+              << ", keepalive_ms=" << args.mock_keepalive_interval_ms_arg
+              << ")"
               << std::endl;
   } else {
     std::cout << "RPC fanout: disabled (no --rpc_dist_path); using legacy"
