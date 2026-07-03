@@ -142,19 +142,6 @@ else
     msg "[SKIPPED] libevent-2.1.11-stable"
 fi
 
-# Installing openssl
-if ! [ -d "openssl" ]; then
-    mkdir -p build-deps
-    git clone --branch OpenSSL_1_1_1b --depth 1 https://github.com/openssl/openssl.git
-    cd "openssl"
-    ./config --prefix="${FEEDSIM_THIRD_PARTY_SRC}/build-deps"
-    make -j"$(nproc)"
-    make install
-    cd ../
-else
-    msg "[SKIPPED] openssl"
-fi
-
 msg "Installing third-party dependencies ... DONE"
 
 # Installing LibTorch via pip for aarch64
@@ -267,6 +254,16 @@ fi
 # Remove liburing-dev — Ubuntu's version is too old for folly v2026.01.05.00
 # which uses io_uring zero-copy RX APIs requiring liburing >= 2.6
 apt remove -y liburing-dev 2>/dev/null || true
+
+# Generate feature extractor variants (1M+ unique functions for I-cache pressure)
+msg "Generating feature extractor variants..."
+CODEGEN_DIR="${FEEDSIM_ROOT_SRC}/src/workloads/ranking/feature_extractors/generated"
+if [ -f "${CODEGEN_DIR}/generate_extractors.py" ]; then
+    python3 "${CODEGEN_DIR}/generate_extractors.py" --output-dir "${CODEGEN_DIR}"
+    msg "Feature extractor codegen complete"
+else
+    msg "[SKIPPED] No codegen script found at ${CODEGEN_DIR}/generate_extractors.py"
+fi
 
 mkdir -p build && cd build/
 

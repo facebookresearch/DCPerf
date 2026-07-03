@@ -107,6 +107,68 @@ target_link_libraries(rankingDwarfs
 )
 target_compile_options(rankingDwarfs PRIVATE -fvisibility=hidden)
 
+# Feature Extractors library (6 manual + generated variants for I-cache pressure)
+# generated_sources.cmake is produced by generate_extractors.py during install
+set(GENERATED_SOURCES_CMAKE "${CMAKE_CURRENT_SOURCE_DIR}/feature_extractors/generated/generated_sources.cmake")
+if(EXISTS "${GENERATED_SOURCES_CMAKE}")
+    include("${GENERATED_SOURCES_CMAKE}")
+else()
+    message(WARNING "Generated sources not found — run generate_extractors.py first")
+    set(GENERATED_EXTRACTOR_SOURCES "")
+endif()
+
+add_library(featureExtractors STATIC
+    feature_extractors/FeatureExtractorSuite.cpp
+    feature_extractors/FeatureExtractorSuite.h
+    feature_extractors/FeatureExtractorBase.h
+    feature_extractors/FeatureTypes.h
+    feature_extractors/HashLookupExtractor.cpp
+    feature_extractors/HashLookupExtractor.h
+    feature_extractors/FeatureLayoutExtractor.cpp
+    feature_extractors/FeatureLayoutExtractor.h
+    feature_extractors/EmbeddingLookupExtractor.cpp
+    feature_extractors/EmbeddingLookupExtractor.h
+    feature_extractors/ContainerExtractor.cpp
+    feature_extractors/ContainerExtractor.h
+    feature_extractors/TreeTraversalExtractor.cpp
+    feature_extractors/TreeTraversalExtractor.h
+    feature_extractors/BitsetExtractor.cpp
+    feature_extractors/BitsetExtractor.h
+    ${GENERATED_EXTRACTOR_SOURCES}
+)
+add_dependencies(featureExtractors folly)
+target_include_directories(featureExtractors
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/feature_extractors
+        ${CMAKE_CURRENT_SOURCE_DIR}/feature_extractors/generated
+    PRIVATE
+        ${FOLLY_INCLUDE_DIR}
+        ${GLOG_INCLUDE_DIR}
+)
+target_link_libraries(featureExtractors
+    PRIVATE
+        ${FOLLY_LIBRARIES}
+        glog::glog
+)
+target_compile_options(featureExtractors PRIVATE
+    -fno-omit-frame-pointer
+)
+
+# Compile generated copies at -O0 WITHOUT -ffunction-sections to prevent:
+# 1. Linker GC from removing functions only referenced via function pointers
+# 2. Linker ICF from folding "similar" generated functions
+# -O0 also produces larger code = more I-cache pressure (which is the goal)
+file(GLOB GENERATED_COPIES_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/feature_extractors/generated/copies/*.cpp")
+file(GLOB GENERATED_VARIANT_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/feature_extractors/generated/variants/*.cpp")
+set_source_files_properties(
+    ${GENERATED_COPIES_FILES}
+    ${GENERATED_VARIANT_FILES}
+    PROPERTIES COMPILE_FLAGS "-O0"
+)
+
 # DLRM support (optional, requires LibTorch)
 option(FEEDSIM_USE_DLRM "Enable DLRM workload with LibTorch" OFF)
 
@@ -136,7 +198,6 @@ if(FEEDSIM_USE_DLRM)
     )
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 endif()
-
 
 # Generate getopts for LeafNodeRank
 add_custom_command(
@@ -183,6 +244,7 @@ set(LEAF_NODE_RANK_LIBS
     OLDISim::OLDISim
     leafNodeRankcmdline
     rankingDwarfs
+    featureExtractors
     icachebuster
     PointerChaser
     ${FOLLY_LIBRARIES}
@@ -218,7 +280,15 @@ target_link_libraries(LeafNodeRank
         ${LIBLZMA_LIBRARIES}
 )
 target_compile_options(LeafNodeRank PUBLIC -fno-omit-frame-pointer -ffunction-sections -fdata-sections)
-target_link_options(LeafNodeRank PRIVATE -Wl,--gc-sections -Wl,--allow-multiple-definition)
+# --whole-archive for featureExtractors prevents --gc-sections from stripping
+# generated functions that are only referenced via function pointer arrays.
+target_link_options(LeafNodeRank PRIVATE
+    -Wl,--gc-sections
+    -Wl,--allow-multiple-definition
+    -Wl,--whole-archive
+    $<TARGET_FILE:featureExtractors>
+    -Wl,--no-whole-archive
+)
 # Re-link libraries at the end to resolve circular static library dependencies
 # (folly/glog use gflags DEFINE_* macros, fbthrift has internal cross-lib refs)
 target_link_libraries(LeafNodeRank PRIVATE
