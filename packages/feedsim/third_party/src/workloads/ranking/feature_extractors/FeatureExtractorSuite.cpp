@@ -112,6 +112,9 @@ void FeatureExtractorSuite::initializeFlatDispatch(int seed) {
     for (int i = 0; i < 1024; ++i)
       flat_tables_[t][data_rng()] = dist(data_rng);
 
+  for (int t = 0; t < 4; ++t)
+    flat_hash_tables_[t].populate(64, seed + t + 100);
+
   flat_features_.resize(100);
   for (int i = 0; i < 100; ++i) {
     flat_features_[i].raw_feature_index = i % 50;
@@ -140,6 +143,8 @@ void FeatureExtractorSuite::runFlatExtractors(
   ctx.numFeatures = static_cast<int>(flat_features_.size());
   ctx.queryKeys = input_sparse.data();
   ctx.numKeys = static_cast<int>(input_sparse.size());
+  ctx.hashTables = flat_hash_tables_;
+  ctx.numHashTables = 4;
 
   for (int i = 0; i < count; ++i) {
     flat_copies_[flat_pos_](&ctx);
