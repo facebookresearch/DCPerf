@@ -49,3 +49,12 @@ option "stories_per_request" - "Number of story snippets to include per request.
 
 # Phase 4 (Plan): Request size distribution matching production
 option "req_size_dist" - "Path to JSON file with request size percentile distribution. Pads each request to a sampled size matching the distribution." string typestr="json_file" optional
+
+# Phase 6: Session orchestration. When --rpc_dist_json is given, the
+# driver issues per-session pipelines (createAndPrimeSession ->
+# getStoriesUncompressed + streamData * N -> getAllStories) instead of
+# single fire-and-forget requests. The same JSON file LeafNodeRank uses
+# for outbound shaping supplies the inbound percentile distributions.
+option "rpc_dist_json" - "Path to rpc_dist.json. When provided, the driver runs in session mode and shapes inbound payload sizes from the production percentile distribution." string typestr="json_file" optional
+option "streamdata_per_session" - "Number of streamData calls issued in parallel per session (matches prod ~2x ratio). Use 0 to randomize uniformly in [1,3]." int default="2"
+option "stream_ifr_probability" - "Probability of issuing a streamIfrPriorityRanking call per session (production ratio ~0.045)." float default="0.045"

@@ -34,6 +34,10 @@
 #include <thread>
 #include <vector>
 
+#include <folly/container/F14Map.h>
+#include <folly/futures/Future.h>
+#include <folly/futures/Promise.h>
+
 namespace feedsim {
 
 // ─── LatencySampler: log-histogram, identical to oldisim::LogHistogramSampler ─
@@ -112,32 +116,45 @@ struct DriverStats::LatencySampler {
 
 DriverStats::DriverStats(int bins)
     : sampler_(std::make_unique<LatencySampler>(bins)),
+      first_story_sampler_(std::make_unique<LatencySampler>(bins)),
       start_time_(getTimeNano()),
       end_time_(0) {}
 
-void DriverStats::logRequest(uint32_t type, uint32_t packet_size) {
+void DriverStats::logRequest(uint32_t /*type*/, uint32_t packet_size) {
   tx_bytes_ += packet_size;
   query_count_++;
 }
 
-void DriverStats::logResponse(uint32_t type, uint64_t latency_ns,
+void DriverStats::logResponse(uint32_t /*type*/, uint64_t latency_ns,
                               uint32_t packet_size) {
   sampler_->sample(static_cast<double>(latency_ns));
   rx_bytes_ += packet_size;
 }
 
+void DriverStats::logFirstStoryLatency(uint64_t latency_ns) {
+  first_story_sampler_->sample(static_cast<double>(latency_ns));
+}
+
+void DriverStats::logSession() {
+  session_count_++;
+}
+
 void DriverStats::accumulate(const DriverStats& other) {
   sampler_->accumulate(*other.sampler_);
+  first_story_sampler_->accumulate(*other.first_story_sampler_);
   tx_bytes_ += other.tx_bytes_;
   rx_bytes_ += other.rx_bytes_;
   query_count_ += other.query_count_;
+  session_count_ += other.session_count_;
 }
 
 void DriverStats::reset() {
   sampler_->reset();
+  first_story_sampler_->reset();
   tx_bytes_ = 0;
   rx_bytes_ = 0;
   query_count_ = 0;
+  session_count_ = 0;
   start_time_ = getTimeNano();
 }
 
@@ -162,6 +179,35 @@ void DriverStats::printStats(uint32_t type, double elapsed_secs) const {
   printf("  95p: %.3f ms\n", sampler_->get_nth(95) / 1000000);
   printf("  99p: %.3f ms\n", sampler_->get_nth(99) / 1000000);
   printf("  99.9p: %.3f ms\n", sampler_->get_nth(99.9) / 1000000);
+
+  // Phase 6: first-story latency block. Distinct `fs_*` labels keep
+  // search_qps.sh's per-percentile greps unambiguous. Always emit so
+  // downstream parsers see a stable column set; counters of zero make
+  // it obvious when a run produced no first-story samples.
+  uint64_t fs_total = first_story_sampler_->total();
+  printf("Stats for first-story latency\n");
+  printf("  fs_count: %lu first-story samples\n", fs_total);
+  printf("  fs_sessions: %lu sessions completed\n", session_count_);
+  if (fs_total == 0) {
+    // Avoid printing nan -> emit zeros so search_qps.sh / parsers can
+    // still tokenize the line.
+    printf("  fs_min: 0.000 ms\n");
+    printf("  fs_avg: 0.000 ms\n");
+    printf("  fs_50p: 0.000 ms\n");
+    printf("  fs_90p: 0.000 ms\n");
+    printf("  fs_95p: 0.000 ms\n");
+    printf("  fs_99p: 0.000 ms\n");
+    printf("  fs_99.9p: 0.000 ms\n");
+  } else {
+    printf("  fs_min: %.3f ms\n", first_story_sampler_->minimum() / 1000000);
+    printf("  fs_avg: %.3f ms\n", first_story_sampler_->average() / 1000000);
+    printf("  fs_50p: %.3f ms\n", first_story_sampler_->get_nth(50) / 1000000);
+    printf("  fs_90p: %.3f ms\n", first_story_sampler_->get_nth(90) / 1000000);
+    printf("  fs_95p: %.3f ms\n", first_story_sampler_->get_nth(95) / 1000000);
+    printf("  fs_99p: %.3f ms\n", first_story_sampler_->get_nth(99) / 1000000);
+    printf("  fs_99.9p: %.3f ms\n",
+           first_story_sampler_->get_nth(99.9) / 1000000);
+  }
 }
 
 // ─── DriverConnection: one TCP connection to the server ─────────────────────
@@ -222,7 +268,10 @@ class DriverConnection {
 struct TestDriver::Impl {
   int thread_id;
   int max_connection_depth;
-  uint64_t next_request_id = 0;
+  // Phase 6: promoted to atomic so sendRequestAndAwait callers from
+  // arbitrary threads can mint unique IDs without taking the libevent
+  // thread's lock.
+  std::atomic<uint64_t> next_request_id{0};
 
   std::vector<std::pair<int, std::unique_ptr<DriverConnection>>> connections;
   std::vector<int> connection_positions;
@@ -239,6 +288,20 @@ struct TestDriver::Impl {
 
   DriverMakeRequestCallback make_request_cb;
   uint32_t request_type;
+
+  // Phase 6: per-driver-thread promise map keyed by request_id. The
+  // libevent thread fulfills promises from readCb under the mutex; the
+  // sendRequestAndAwait insertion path also takes the mutex (it inserts
+  // from the libevent thread itself via event_base_once, but the lock
+  // is cheap and lets shutdown drain the map cleanly from another
+  // thread without racing readCb).
+  std::mutex pending_mutex;
+  folly::F14FastMap<uint64_t, folly::Promise<std::string>> pending_promises;
+
+  // Phase 6 (Issue 3 fix): atomic running flag so async session
+  // continuations on g_session_pool can bail out of touching the
+  // libevent base once shutdown() has begun tearing it down.
+  std::atomic<bool> running{true};
 
   Impl() : current_stats(1000), last_stats(1000) {}
 
@@ -302,15 +365,39 @@ void TestDriver::Impl::readCb(struct bufferevent* bev, void* arg) {
     // We have a complete response
     evbuffer_drain(input, hdr_size);
 
-    // Read payload (if any)
+    // Phase 6: copy payload bytes out so we can fulfill the matching
+    // promise. If no promise is registered for this request_id (legacy
+    // fire-and-forget sendRequest path), drain and discard like before.
+    std::string payload_bytes;
     if (hdr.payload_length > 0) {
-      evbuffer_drain(input, hdr.payload_length);
+      payload_bytes.resize(hdr.payload_length);
+      evbuffer_remove(
+          input, payload_bytes.data(), hdr.payload_length);
     }
 
     // Log latency
     uint64_t now = getTimeNano();
     uint64_t latency = now - hdr.start_time;
     impl.current_stats.logResponse(hdr.type, latency, total);
+
+    // Phase 6: try to fulfill the matching promise. Move the promise
+    // out of the map under the lock, drop the lock, then setValue —
+    // setValue can run an arbitrary continuation chain and we don't
+    // want to hold the libevent thread's mutex across it.
+    folly::Promise<std::string> promise;
+    bool have_promise = false;
+    {
+      std::lock_guard<std::mutex> lk(impl.pending_mutex);
+      auto it = impl.pending_promises.find(hdr.request_id);
+      if (it != impl.pending_promises.end()) {
+        promise = std::move(it->second);
+        impl.pending_promises.erase(it);
+        have_promise = true;
+      }
+    }
+    if (have_promise) {
+      promise.setValue(std::move(payload_bytes));
+    }
 
     // Connection slot freed
     auto& conn = *impl.connections[impl.connection_positions[conn_id]].second;
@@ -328,13 +415,28 @@ void TestDriver::Impl::readCb(struct bufferevent* bev, void* arg) {
   }
 }
 
-void TestDriver::Impl::eventCb(struct bufferevent* bev, int16_t events,
+void TestDriver::Impl::eventCb(struct bufferevent* /*bev*/, int16_t events,
                                 void* arg) {
   auto* ctx = reinterpret_cast<std::pair<TestDriver*, int>*>(arg);
   if (events & BEV_EVENT_EOF) {
     std::cerr << "Server closed connection" << std::endl;
   } else if (events & BEV_EVENT_ERROR) {
     std::cerr << "Connection error" << std::endl;
+  }
+  // Phase 6: on connection drop, break all pending promises so any
+  // RunSession SemiFuture chains observe a BrokenPromise exception
+  // instead of hanging forever.
+  if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
+    if (ctx == nullptr) return;
+    auto& impl = *ctx->first->impl_;
+    folly::F14FastMap<uint64_t, folly::Promise<std::string>> drained;
+    {
+      std::lock_guard<std::mutex> lk(impl.pending_mutex);
+      drained.swap(impl.pending_promises);
+    }
+    // Promise destructors break the promises automatically; clear is
+    // explicit so the map's storage is released.
+    drained.clear();
   }
 }
 
@@ -365,7 +467,8 @@ void TestDriver::sendRequest(uint32_t type, const void* payload,
   auto& conn = *impl_->connections[index].second;
   int conn_id = impl_->connections[index].first;
 
-  conn.issueRequest(type, impl_->next_request_id++, payload, length);
+  conn.issueRequest(
+      type, impl_->next_request_id.fetch_add(1), payload, length);
   impl_->current_stats.logRequest(
       type, sizeof(QueryPacketHeader) + length);
 
@@ -381,6 +484,164 @@ void TestDriver::sendRequest(uint32_t type, const void* payload,
     tv.tv_usec = next_request_delay_us % 1000000;
     evtimer_add(impl_->next_request_event, &tv);
   }
+}
+
+namespace {
+
+// Heap-allocated context for the event_base_once hop that issues a
+// sendRequestAndAwait write on the libevent thread. Owns a copy of the
+// request payload so the caller's bytes need not outlive the call.
+struct SendCtx {
+  TestDriver* driver;
+  uint32_t type;
+  uint64_t request_id;
+  std::vector<char> payload;
+  folly::Promise<std::string> promise;
+};
+
+} // namespace
+
+// Defined at feedsim namespace scope (not in the anonymous namespace) so
+// the friend declaration in TestDriver matches and grants access to impl_.
+void sendOnLibeventThread(evutil_socket_t, int16_t, void* arg) {
+  std::unique_ptr<SendCtx> ctx(reinterpret_cast<SendCtx*>(arg));
+  auto& impl = *ctx->driver->impl_;
+
+  // Insert the promise into the pending map BEFORE writing on the wire,
+  // so a fast server reply can never observe the response before the
+  // promise is registered.
+  {
+    std::lock_guard<std::mutex> lk(impl.pending_mutex);
+    impl.pending_promises.emplace(
+        ctx->request_id, std::move(ctx->promise));
+  }
+
+  int index = impl.getNextConnectionIndex();
+  if (index < 0) {
+    // No ready connection — pop the promise back out and break it so
+    // the caller observes the failure instead of hanging. This is rare
+    // (the libevent thread is the one that marks connections ready and
+    // not-ready) but worth guarding against.
+    std::lock_guard<std::mutex> lk(impl.pending_mutex);
+    impl.pending_promises.erase(ctx->request_id);
+    return;
+  }
+  auto& conn = *impl.connections[index].second;
+  int conn_id = impl.connections[index].first;
+  conn.issueRequest(
+      ctx->type, ctx->request_id,
+      ctx->payload.empty() ? nullptr : ctx->payload.data(),
+      static_cast<uint32_t>(ctx->payload.size()));
+  impl.current_stats.logRequest(
+      ctx->type,
+      static_cast<uint32_t>(sizeof(QueryPacketHeader) + ctx->payload.size()));
+
+  if (conn.getNumOutstanding() == impl.max_connection_depth) {
+    impl.markConnectionNotReady(conn_id);
+  }
+}
+
+folly::SemiFuture<std::string> TestDriver::sendRequestAndAwait(
+    uint32_t type, const void* payload, uint32_t length) {
+  uint64_t request_id = impl_->next_request_id.fetch_add(1);
+  folly::Promise<std::string> promise;
+  auto sf = promise.getSemiFuture();
+
+  auto ctx = std::make_unique<SendCtx>();
+  ctx->driver = this;
+  ctx->type = type;
+  ctx->request_id = request_id;
+  ctx->payload.assign(
+      reinterpret_cast<const char*>(payload),
+      reinterpret_cast<const char*>(payload) + length);
+  ctx->promise = std::move(promise);
+
+  // Hop to the libevent thread to do the actual write. event_base_once
+  // is libevent's standard mechanism for cross-thread submission; the
+  // event base must already have been initialized with
+  // evthread_use_pthreads (FeedSimDriver::run sets this up).
+  SendCtx* raw = ctx.release();
+  if (event_base_once(impl_->base, -1, EV_TIMEOUT, sendOnLibeventThread, raw,
+                      nullptr) != 0) {
+    // Submission failed — reclaim the context, break the promise.
+    std::unique_ptr<SendCtx> reclaim(raw);
+    // Promise destructor breaks the promise.
+  }
+  return sf;
+}
+
+// Phase 6 (Issue 2 fix): both stats-mutating helpers are called from
+// g_session_pool worker threads. DriverStats / LatencySampler are not
+// thread-safe and the libevent thread also reads/writes current_stats
+// (logResponse on every reply; getSessionCount from
+// RecomputeDelayTimerHandler). Marshal these mutations back onto the
+// libevent thread via event_base_once so all current_stats access is
+// single-threaded.
+namespace {
+
+struct FirstStoryCtx {
+  TestDriver* driver;
+  uint64_t latency_ns;
+};
+
+} // namespace
+
+// Defined at feedsim namespace scope (not in the anonymous namespace) so
+// the friend declarations in TestDriver match and grant access to impl_.
+void firstStoryOnLibeventThread(evutil_socket_t, int16_t, void* arg) {
+  std::unique_ptr<FirstStoryCtx> ctx(reinterpret_cast<FirstStoryCtx*>(arg));
+  ctx->driver->impl_->current_stats.logFirstStoryLatency(ctx->latency_ns);
+}
+
+void sessionCompleteOnLibeventThread(evutil_socket_t, int16_t, void* arg) {
+  auto* driver = reinterpret_cast<TestDriver*>(arg);
+  driver->impl_->current_stats.logSession();
+}
+
+void TestDriver::recordFirstStoryLatencyNs(uint64_t latency_ns) {
+  // Bail out if shutdown has begun — the event_base may already be
+  // freed (Issue 3). The unrecorded sample is acceptable shutdown loss.
+  if (!impl_->running.load(std::memory_order_acquire)) return;
+  auto* ctx = new FirstStoryCtx{this, latency_ns};
+  if (event_base_once(impl_->base, -1, EV_TIMEOUT,
+                      firstStoryOnLibeventThread, ctx, nullptr) != 0) {
+    delete ctx;
+  }
+}
+
+void TestDriver::recordSessionComplete() {
+  if (!impl_->running.load(std::memory_order_acquire)) return;
+  if (event_base_once(impl_->base, -1, EV_TIMEOUT,
+                      sessionCompleteOnLibeventThread, this,
+                      nullptr) != 0) {
+    // Drop the sample on submission failure — better than a crash.
+  }
+}
+
+void TestDriver::scheduleNextSession(uint64_t delay_us) {
+  // Phase 6 (Issue 3 fix): scheduleNextSession runs from a
+  // g_session_pool continuation. If shutdown() has flipped running to
+  // false, the next_request_event / event_base may be torn down
+  // imminently — return early instead of touching them.
+  if (!impl_->running.load(std::memory_order_acquire)) return;
+  impl_->next_request_delay_us = delay_us;
+  if (delay_us != 0 && impl_->next_request_event != nullptr) {
+    struct timeval tv;
+    tv.tv_sec = delay_us / 1000000;
+    tv.tv_usec = delay_us % 1000000;
+    evtimer_add(impl_->next_request_event, &tv);
+  }
+}
+
+void TestDriver::setNextRequestDelayUs(uint64_t delay_us) {
+  // Phase 6 (Issue 1 fix): synchronous setter called from the libevent
+  // thread inside the make_request_cb so makeRequests() exits its spin
+  // loop after dispatching one session onto g_session_pool.
+  impl_->next_request_delay_us = delay_us;
+}
+
+bool TestDriver::isRunning() const {
+  return impl_->running.load(std::memory_order_acquire);
 }
 
 const DriverStats& TestDriver::getConnectionStats() const {
@@ -400,6 +661,7 @@ struct FeedSimDriver::Impl {
 
   DriverThreadStartupCallback on_thread_startup;
   DriverMakeRequestCallback make_request_cb;
+  std::function<void()> pre_teardown_cb;
   std::set<uint32_t> request_types;
   uint16_t monitor_port = 0;
 
@@ -454,9 +716,14 @@ void FeedSimDriver::setMakeRequestCallback(DriverMakeRequestCallback cb) {
   impl_->make_request_cb = std::move(cb);
 }
 
-void FeedSimDriver::registerReplyCallback(uint32_t type,
-                                          DriverResponseCallback cb) {
+void FeedSimDriver::setPreTeardownCallback(std::function<void()> cb) {
+  impl_->pre_teardown_cb = std::move(cb);
+}
+
+void FeedSimDriver::registerReplyCallback(uint32_t /*type*/,
+                                          DriverResponseCallback /*cb*/) {
   // Response callbacks are not used by DriverNodeRank — it ignores responses
+  // (Phase 6 RunSession uses sendRequestAndAwait promises instead).
 }
 
 void FeedSimDriver::registerRequestType(uint32_t type) {
@@ -610,6 +877,43 @@ void FeedSimDriver::run(uint32_t num_threads, bool thread_pinning,
 void FeedSimDriver::shutdown() {
   if (!impl_->running.exchange(false)) return;
 
+  // Phase 6 (Issue 3 fix): the order below matters.
+  //
+  // Step 1: flip every per-driver running flag to false so any new
+  //         continuation that runs scheduleNextSession() /
+  //         recordSessionComplete() / recordFirstStoryLatencyNs() bails
+  //         out instead of touching the libevent base.
+  for (auto& dt : impl_->threads) {
+    dt->driver->impl_->running.store(false, std::memory_order_release);
+  }
+
+  // Step 2: invoke the caller-provided pre-teardown callback (e.g.
+  //         g_session_pool->stop()/join()) so no g_session_pool worker
+  //         can land an evtimer_add on a freed event_base. Even with
+  //         the running check above, in-flight workers that have
+  //         already passed the check could otherwise race the free.
+  if (impl_->pre_teardown_cb) {
+    impl_->pre_teardown_cb();
+  }
+
+  // Step 3: drain any in-flight promises so RunSession chains observe
+  //         a BrokenPromise instead of hanging during shutdown. Done
+  //         AFTER g_session_pool has been joined, so the
+  //         broken-promise continuations no longer have anywhere to
+  //         dispatch onto.
+  for (auto& dt : impl_->threads) {
+    auto& drv_impl = *dt->driver->impl_;
+    folly::F14FastMap<uint64_t, folly::Promise<std::string>> drained;
+    {
+      std::lock_guard<std::mutex> lk(drv_impl.pending_mutex);
+      drained.swap(drv_impl.pending_promises);
+    }
+    // Promise destructors break the promises automatically.
+    drained.clear();
+  }
+
+  // Step 4: now safe to break the libevent loops; threads will exit
+  //         dispatch and run() will free the event_bases.
   for (auto& dt : impl_->threads) {
     event_base_loopbreak(dt->base);
   }
