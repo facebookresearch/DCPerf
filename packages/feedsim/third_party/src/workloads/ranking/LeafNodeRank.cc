@@ -738,10 +738,17 @@ static folly::Future<int> issueOutboundFanout(
 
   for (size_t i = 0; i < ranking::kNumMethods; ++i) {
     auto m = static_cast<ranking::MethodIdx>(i);
-    int n = std::max(
-        1,
-        static_cast<int>(
-            std::round(ranking::perSessionCounts()[i] * scale)));
+    // Round to the nearest integer call count and skip methods that don't
+    // round up to at least 1. The previous std::max(1, ...) floor inflated
+    // the share of low-weighted but slow methods (e.g. tail-latency outliers
+    // that production hits ~once per 200 sessions) to once-per-session at
+    // small --rpc_fanout_scale, which distorted both the per-method ratios
+    // and the aggregate latency distribution toward the slow tail.
+    int n = static_cast<int>(
+        std::round(ranking::perSessionCounts()[i] * scale));
+    if (n == 0) {
+      continue;
+    }
 
     const auto& req_sampler = td.rpc_registry->requestSize(m);
     const auto& resp_sampler = td.rpc_registry->responseSize(m);
