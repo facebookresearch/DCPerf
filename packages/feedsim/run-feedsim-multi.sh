@@ -149,10 +149,24 @@ function start_mock_services() {
     # its default 6-pool sizing and timing out per-client probes.
     local mock_io_threads
     mock_io_threads="$(nproc)"
-    echo "Starting mock_services on port ${MOCK_SERVICES_PORT} (silesia=${SILESIA_DIR_ABS}, io_threads=${mock_io_threads})"
+
+    # Latency-shaping knobs (env-overridable). Defaults match the
+    # mock_services compiled-in defaults: 200ms cap, 0us offset, 100us
+    # skip threshold. Tune via MOCK_LATENCY_CAP_US / MOCK_LATENCY_OFFSET_US
+    # / MOCK_LATENCY_SKIP_THRESHOLD_US to shape the per-RPC simulated
+    # delay -- rpc_dist.json contains very long-tail values (p99 ~8s,
+    # max ~28s) that make each fanout block on the slowest call.
+    local mock_latency_cap_us="${MOCK_LATENCY_CAP_US:-200000}"
+    local mock_latency_offset_us="${MOCK_LATENCY_OFFSET_US:-0}"
+    local mock_latency_skip_threshold_us="${MOCK_LATENCY_SKIP_THRESHOLD_US:-100}"
+
+    echo "Starting mock_services on port ${MOCK_SERVICES_PORT} (silesia=${SILESIA_DIR_ABS}, io_threads=${mock_io_threads}, cap_us=${mock_latency_cap_us}, offset_us=${mock_latency_offset_us}, skip_threshold_us=${mock_latency_skip_threshold_us})"
     "$MOCK_SERVICES_BIN" \
         --port="$MOCK_SERVICES_PORT" \
         --mock_io_threads="$mock_io_threads" \
+        --latency_cap_us="$mock_latency_cap_us" \
+        --latency_offset_us="$mock_latency_offset_us" \
+        --latency_skip_threshold_us="$mock_latency_skip_threshold_us" \
         --silesia_dir="$SILESIA_DIR_ABS" \
         > "$MOCK_SERVICES_LOG" 2>&1 &
     MOCK_SERVICES_PID=$!

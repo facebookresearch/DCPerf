@@ -21,11 +21,42 @@
 #include <thread>
 #include <utility>
 
+#include <gflags/gflags.h>
+
 #include <folly/executors/GlobalExecutor.h>
 #include <folly/futures/Future.h>
 #include <folly/portability/Asm.h>
 
 #include "LatencyHistogram.h"
+
+// rpc_dist.json contains very long-tail latencies (p99 ~8s, max ~28s)
+// because the production aggregator's outbound RPCs occasionally hit
+// retries / queueing / GC pauses; reproducing those raw values inside
+// the mock makes the bench unusable (every fanout blocks on the
+// slowest call). The flags below let us shape the simulated delay so
+// it stays within a useful operating range without losing the
+// per-method latency mix. Defined here (where they're consumed) so the
+// mock_service_handler cpp_library links cleanly on its own; declared
+// in MockServiceMain.cc for the startup LOG line.
+DEFINE_int32(
+    latency_cap_us,
+    200000,
+    "Cap the requested per-call latency at this value (us). Defaults to "
+    "200ms so the slowest per-RPC sleep is bounded; set to 0 to disable.");
+DEFINE_int32(
+    latency_offset_us,
+    0,
+    "Subtract this many us from the requested latency to compensate for "
+    "intrinsic RPC-stack overhead the client already pays for. Defaults "
+    "to 0; tune empirically based on the gap between the leaf-side "
+    "dispatch_per_rpc histogram and the mock-handler actual latency.");
+DEFINE_int32(
+    latency_skip_threshold_us,
+    100,
+    "If the effective latency (after cap + offset) is below this many us, "
+    "skip the spin/sleep entirely and respond immediately. Avoids paying "
+    "for spin-wait jitter on requests whose modeled budget is already "
+    "comparable to the natural RPC round trip.");
 
 namespace mock_services {
 
@@ -34,9 +65,12 @@ namespace mock_services {
 // into them on every call. requested_us = the latency_us argument
 // supplied by the client (sampled from rpc_dist.json). actual_us =
 // elapsed wall time inside runSimulatedRpc, including spin/sleep and
-// response generation.
+// response generation. effective_us = the post-cap/offset/threshold
+// value actually used to drive the sleep -- so we can see how much the
+// shaping flags trim off the long tail.
 feedsim::LatencyHistogram g_handler_requested_us;
 feedsim::LatencyHistogram g_handler_actual_us;
+feedsim::LatencyHistogram g_handler_effective_us;
 
 namespace {
 
@@ -114,13 +148,24 @@ MockServiceHandler::runSimulatedRpc(
   g_handler_requested_us.record(static_cast<uint64_t>(std::max(0, latency_us)));
   uint64_t handler_start_us = feedsim::nowUs();
 
-  if (latency_us <= 0) {
+  // Shape the simulated delay: cap the head, subtract the natural
+  // RPC-stack overhead the client already pays for, and skip the wait
+  // entirely if the residual is below the configured floor (avoids
+  // burning CPU on spin-jitter for sub-100us samples).
+  int32_t effective_us = latency_us;
+  if (FLAGS_latency_cap_us > 0 && effective_us > FLAGS_latency_cap_us) {
+    effective_us = FLAGS_latency_cap_us;
+  }
+  effective_us = std::max(0, effective_us - FLAGS_latency_offset_us);
+  g_handler_effective_us.record(static_cast<uint64_t>(effective_us));
+
+  if (effective_us <= 0 || effective_us < FLAGS_latency_skip_threshold_us) {
     g_handler_actual_us.record(feedsim::nowUs() - handler_start_us);
     return folly::makeSemiFuture(generateResponseBytes(response_size));
   }
-  if (latency_us < kSpinThresholdUs) {
+  if (effective_us < kSpinThresholdUs) {
     auto deadline = std::chrono::steady_clock::now() +
-        std::chrono::microseconds(latency_us);
+        std::chrono::microseconds(effective_us);
     while (std::chrono::steady_clock::now() < deadline) {
       folly::asm_volatile_pause();
     }
@@ -128,7 +173,7 @@ MockServiceHandler::runSimulatedRpc(
     return folly::makeSemiFuture(generateResponseBytes(response_size));
   }
   auto silesia = silesia_;
-  return folly::futures::sleep(std::chrono::microseconds(latency_us))
+  return folly::futures::sleep(std::chrono::microseconds(effective_us))
       .via(folly::getGlobalCPUExecutor().get())
       .thenValue([silesia, response_size, handler_start_us](folly::Unit) {
         auto resp = generateResponseBytesStandalone(silesia, response_size);
