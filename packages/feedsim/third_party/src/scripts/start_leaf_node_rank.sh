@@ -12,7 +12,6 @@
      --timekeeper_threads=2 \
      --io_threads=4 \
      --srv_threads=8 \
-     --srv_io_threads=36 \
      --num_objects=2000 \
      --graph_max_iters=1 \
      --noaffinity \
