@@ -682,6 +682,37 @@ main() {
         server_silesia_opts="--silesia_dir=$silesia_dir"
     fi
 
+    # Resolve rpc_dist.json now (used by both LeafNodeRank's Phase 5-B
+    # mock_services fanout and DriverNodeRank's Phase 6 session-mode
+    # driver). Auto-detect default JSON next to run.sh.
+    local rpc_dist_json=""
+    if [ -f "${FEEDSIM_ROOT}/rpc_dist.json" ]; then
+        rpc_dist_json="${FEEDSIM_ROOT}/rpc_dist.json"
+    elif [ -f "${FEEDSIM_ROOT}/feed_aggregator_req_sizes.json" ]; then
+        rpc_dist_json="${FEEDSIM_ROOT}/feed_aggregator_req_sizes.json"
+    fi
+    if [ -z "$rpc_dist_json" ] || [ ! -f "$rpc_dist_json" ]; then
+        die "rpc_dist.json not found next to run.sh; Phase 5-B fanout requires it"
+    fi
+    echo "rpc_dist.json: ENABLED (file=$rpc_dist_json)"
+
+    # Phase 5-B mock_services fanout. Point LeafNodeRank at the colocated
+    # mock_services Thrift server orchestrated by run-feedsim-multi.sh on
+    # port 21222. Without --rpc_dist_path, LeafNodeRank falls back to
+    # legacy folly::futures::sleep.
+    local mock_services_opts="--rpc_dist_path=$rpc_dist_json --mock_services_host=localhost --mock_services_port=21222"
+    # Diagnostic / isolation knob. When LEAFNODE_USE_LEGACY_SLEEP=1, force
+    # LeafNodeRank to take the legacy folly::futures::sleep path even
+    # though --rpc_dist_path is supplied (rpc_dist.json is still resolved
+    # because DriverNodeRank's session mode needs it). Used by later diffs
+    # in the stack to integration-test without the mock_services side
+    # process. run-feedsim-multi.sh skips starting mock_services under the
+    # same env var.
+    if [ "${LEAFNODE_USE_LEGACY_SLEEP:-0}" = "1" ]; then
+        mock_services_opts="$mock_services_opts --use_legacy_sleep"
+        echo "RPC fanout: forced OFF via LEAFNODE_USE_LEGACY_SLEEP=1 (legacy sleep path)"
+    fi
+
     # shellcheck disable=SC2086
     env $preload_env MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
@@ -706,6 +737,7 @@ main() {
         $instrument_graph \
         $feature_opts \
         $server_silesia_opts \
+        $mock_services_opts \
         $leafnoderank_seed \
         $pagerank_seed \
         $pointerchase_seed >> $BREPS_LFILE 2>&1 &

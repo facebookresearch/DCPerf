@@ -88,6 +88,123 @@ done
 PORT=21212
 PIDS=()
 
+# Phase 5-A orchestration: start mock_services ONCE per host before
+# spawning the LeafNodeRank instances. mock_services is stateless and
+# serves all colocated leaves on a fixed port (21222 = LeafNodeRank's
+# --mock_services_port default). Without this, LeafNodeRank's outbound
+# fanout client cannot connect, the request handler falls back to
+# legacy folly::futures::sleep, and the Phase 6 session-mode driver
+# never produces QPS samples (search_qps.sh fails with "Could not
+# find QPS in loadtest output" -> divide by zero).
+MOCK_SERVICES_PORT=21222
+# Binary lives under src/ — the install script unpacks the source tarball
+# alongside run.sh and ninja builds into src/build/. run.sh's main loop
+# already does `cd "${FEEDSIM_ROOT}/src"` before invoking LeafNodeRank;
+# from this script we use the absolute src/ path directly.
+MOCK_SERVICES_BIN="${FEEDSIM_ROOT}/src/build/workloads/ranking/mock_services/mock_services"
+MOCK_SERVICES_LOG="${FEEDSIM_ROOT}/mock_services.log"
+MOCK_SERVICES_PID=""
+
+# Resolve --silesia-dir from forwarded args ($@); fall back to the default
+# install layout (./silesia next to run.sh). mock_services requires Silesia
+# bytes for its response generators.
+function resolve_silesia_dir() {
+    local args=("$@")
+    local i=0
+    while [ "$i" -lt "${#args[@]}" ]; do
+        case "${args[$i]}" in
+            --silesia-dir)
+                echo "${args[$((i+1))]}"
+                return
+                ;;
+            --silesia-dir=*)
+                echo "${args[$i]#*=}"
+                return
+                ;;
+        esac
+        i=$((i+1))
+    done
+    echo "silesia"
+}
+
+SILESIA_DIR_ARG="$(resolve_silesia_dir "$@")"
+if [[ "$SILESIA_DIR_ARG" != /* ]]; then
+    SILESIA_DIR_ABS="${FEEDSIM_ROOT}/${SILESIA_DIR_ARG}"
+else
+    SILESIA_DIR_ABS="$SILESIA_DIR_ARG"
+fi
+
+function start_mock_services() {
+    if [ ! -x "$MOCK_SERVICES_BIN" ]; then
+        echo "ERROR: mock_services binary not found at $MOCK_SERVICES_BIN" >&2
+        exit 1
+    fi
+    if [ ! -d "$SILESIA_DIR_ABS" ]; then
+        echo "ERROR: Silesia directory not found at $SILESIA_DIR_ABS (mock_services requires it)" >&2
+        exit 1
+    fi
+    # Size the IO worker pool to one thread per logical core so the fbthrift
+    # server can absorb the simultaneous startup-probe burst from every
+    # LeafNodeRank thread (88-176 probes on BGM/Turin) without saturating
+    # its default 6-pool sizing and timing out per-client probes.
+    local mock_io_threads
+    mock_io_threads="$(nproc)"
+    echo "Starting mock_services on port ${MOCK_SERVICES_PORT} (silesia=${SILESIA_DIR_ABS}, io_threads=${mock_io_threads})"
+    "$MOCK_SERVICES_BIN" \
+        --port="$MOCK_SERVICES_PORT" \
+        --mock_io_threads="$mock_io_threads" \
+        --silesia_dir="$SILESIA_DIR_ABS" \
+        > "$MOCK_SERVICES_LOG" 2>&1 &
+    MOCK_SERVICES_PID=$!
+
+    # TCP-poll readiness (mirrors the LeafNodeRank wait loop in run.sh).
+    local max_attempts=30
+    local attempt=0
+    while [ "$attempt" -lt "$max_attempts" ]; do
+        if (echo > /dev/tcp/localhost/"$MOCK_SERVICES_PORT") 2>/dev/null; then
+            echo "mock_services is ready (port $MOCK_SERVICES_PORT accepting connections, pid=$MOCK_SERVICES_PID)"
+            return 0
+        fi
+        # Bail early if the process died.
+        if ! kill -0 "$MOCK_SERVICES_PID" 2>/dev/null; then
+            echo "ERROR: mock_services died during startup. Tail of log:" >&2
+            tail -40 "$MOCK_SERVICES_LOG" >&2
+            exit 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 1
+    done
+    echo "ERROR: mock_services failed to become ready within ${max_attempts}s" >&2
+    tail -40 "$MOCK_SERVICES_LOG" >&2
+    kill -SIGTERM "$MOCK_SERVICES_PID" 2>/dev/null || true
+    exit 1
+}
+
+function stop_mock_services() {
+    if [ -n "$MOCK_SERVICES_PID" ] && kill -0 "$MOCK_SERVICES_PID" 2>/dev/null; then
+        echo "Stopping mock_services (pid=$MOCK_SERVICES_PID)"
+        kill -SIGINT "$MOCK_SERVICES_PID" 2>/dev/null || true
+        # Give it a moment to exit cleanly, then force-kill.
+        for _ in 1 2 3 4 5; do
+            kill -0 "$MOCK_SERVICES_PID" 2>/dev/null || break
+            sleep 1
+        done
+        kill -SIGKILL "$MOCK_SERVICES_PID" 2>/dev/null || true
+    fi
+}
+
+# When LEAFNODE_USE_LEGACY_SLEEP=1, run.sh forwards --use_legacy_sleep to
+# LeafNodeRank and the leaf takes the legacy folly::futures::sleep path
+# instead of fanning RPCs to mock_services. Skip the mock_services side
+# process entirely in that case so later diffs in the stack can run
+# end-to-end integration tests without the mock_services dependency.
+if [ "${LEAFNODE_USE_LEGACY_SLEEP:-0}" = "1" ]; then
+    echo "Skipping mock_services startup (LEAFNODE_USE_LEGACY_SLEEP=1)"
+else
+    trap stop_mock_services EXIT INT TERM
+    start_mock_services
+fi
+
 function get_cpu_range() {
     total_instances="$1"
     inst_id="$2"
