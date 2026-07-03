@@ -40,3 +40,9 @@ option "client_dlrm_inferences" - "Number of DLRM inferences per request" int de
 option "client_feature_seed" - "Seed for client feature generation. Default 42 for deterministic. Use -1 for random." long default="42"
 option "client_num_dense_features" - "Number of dense features per sample" int default="13"
 option "client_num_sparse_features" - "Number of sparse features per sample" int default="26"
+
+# Phase 3 (Plan): Silesia corpus story options
+option "silesia_dir" - "Path to Silesia corpus directory. When specified, stories from the corpus are included in each request." string typestr="directory" optional
+option "story_size_min" - "Minimum story snippet size in bytes." int default="1024"
+option "story_size_max" - "Maximum story snippet size in bytes." int default="4096"
+option "stories_per_request" - "Number of story snippets to include per request." int default="10"

@@ -101,6 +101,14 @@ Usage: ${0##*/} [OPTION]...
     --io-stddev I/O latency standard deviation in ms (for lognormal distribution). Default: 50
     --io-stages Number of I/O stages to simulate (models multi-hop data fetching). Default: 1
     --io-stage-latency Latency per I/O stage in ms (when --io-stages > 1). Default: 50
+    --feature-extractors Enable feature extraction pipeline before ranking inference.
+    --feature-complexity Complexity level for feature extractors (1-10). Default: 5
+    --num-stories Number of stories to process per request. Default: 100
+    --extractors-per-story Number of extractors per story. Default: 50
+    --silesia-dir Path to Silesia corpus directory for story-based requests. Default: auto-detect in benchmarks/feedsim/silesia/
+    --stories-per-request Number of story snippets per request. Default: 10
+    --story-size-min Minimum story snippet size in bytes. Default: 1024
+    --story-size-max Maximum story snippet size in bytes. Default: 4096
     --client-side-features Enable client-side DLRM feature generation (0=disabled, non-zero=enabled). Default: 0
     --client-batch-size Batch size for client-side feature generation. Default: 256
     --client-inferences Number of DLRM inferences per request (client-side). Default: 1
@@ -248,6 +256,19 @@ main() {
 
     local client_num_sparse
     client_num_sparse="26"
+
+    # Silesia corpus options
+    local silesia_dir
+    silesia_dir=""
+
+    local stories_per_request
+    stories_per_request="10"
+
+    local story_size_min
+    story_size_min="1024"
+
+    local story_size_max
+    story_size_max="4096"
 
     # Feature extraction options
     local feature_extractors
@@ -473,6 +494,34 @@ main() {
             --client-num-sparse=*)
                 client_num_sparse="${1#*=}"
                 ;;
+            --silesia-dir)
+                silesia_dir="$2"
+                shift
+                ;;
+            --silesia-dir=*)
+                silesia_dir="${1#*=}"
+                ;;
+            --stories-per-request)
+                stories_per_request="$2"
+                shift
+                ;;
+            --stories-per-request=*)
+                stories_per_request="${1#*=}"
+                ;;
+            --story-size-min)
+                story_size_min="$2"
+                shift
+                ;;
+            --story-size-min=*)
+                story_size_min="${1#*=}"
+                ;;
+            --story-size-max)
+                story_size_max="$2"
+                shift
+                ;;
+            --story-size-max=*)
+                story_size_max="${1#*=}"
+                ;;
             --feature-extractors)
                 feature_extractors="1"
                 ;;
@@ -564,6 +613,12 @@ main() {
         echo "Using PageRank workload"
     fi
 
+    # ICacheBuster only for PAGERANK workload
+    local icache_opts=""
+    if [ "$workload_type" = "pagerank" ]; then
+        icache_opts="--min_icache_iterations=$icache_iterations"
+    fi
+
     # Build async I/O options (Phase 3)
     local async_io_opts=""
     if [ "$async_io" = "1" ]; then
@@ -611,13 +666,14 @@ main() {
         --num_objects=2000 \
         --graph_max_iters=1 \
         --noaffinity \
-        --min_icache_iterations="$icache_iterations" \
+        $icache_opts \
         $dlrm_opts \
         $async_io_opts \
         $feature_opts \
         $store_graph \
         $load_graph \
         $instrument_graph \
+        $feature_opts \
         $leafnoderank_seed \
         $pagerank_seed \
         $pointerchase_seed >> $BREPS_LFILE 2>&1 &
@@ -663,6 +719,20 @@ main() {
         client_feature_opts="--client_side_features --client_dlrm_batch_size=$client_batch_size --client_dlrm_inferences=$client_inferences --client_feature_seed=$client_feature_seed --client_num_dense_features=$client_num_dense --client_num_sparse_features=$client_num_sparse"
     fi
 
+    # Build Silesia story options for DriverNodeRank
+    local silesia_opts=""
+    if [ -n "$silesia_dir" ]; then
+        # Resolve silesia_dir: if relative, prepend FEEDSIM_ROOT
+        if [[ "$silesia_dir" != /* ]]; then
+            silesia_dir="${FEEDSIM_ROOT}/${silesia_dir}"
+        fi
+        if [ ! -d "$silesia_dir" ]; then
+            die "Silesia directory does not exist: $silesia_dir"
+        fi
+        silesia_opts="--silesia_dir=$silesia_dir --stories_per_request=$stories_per_request --story_size_min=$story_size_min --story_size_max=$story_size_max"
+        echo "Silesia story generation: ENABLED (dir=$silesia_dir, stories/req=$stories_per_request, size=$story_size_min-$story_size_max)"
+    fi
+
     # Construct no retry mode parameter if specified
     no_retry_args=""
     if [ -n "$no_retry_mode" ]; then
@@ -678,7 +748,8 @@ main() {
                 --monitor_port "$client_monitor_port" \
                 --threads="${driver_threads}" \
                 --connections=4 \
-                $client_feature_opts
+                $client_feature_opts \
+                $silesia_opts
         benchreps_tell_state "after search_qps"
     elif [ -z "$fixed_qps" ] && [ "$auto_driver_threads" = "1" ]; then
         benchreps_tell_state "before search_qps"
@@ -687,7 +758,8 @@ main() {
             build/workloads/ranking/DriverNodeRank \
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port" \
-                $client_feature_opts
+                $client_feature_opts \
+                $silesia_opts
         benchreps_tell_state "after search_qps"
     else
         # Adjust the number of workers according to QPS
@@ -712,7 +784,9 @@ main() {
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
                 --threads="${num_workers}" \
-                --connections="${num_connections}"
+                --connections="${num_connections}" \
+                $client_feature_opts \
+                $silesia_opts
         benchreps_tell_state "after fixed_qps_exp"
     fi
 

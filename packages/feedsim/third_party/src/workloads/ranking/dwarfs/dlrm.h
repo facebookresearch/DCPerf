@@ -128,6 +128,20 @@ class DLRM {
     return model_loaded_;
   }
 
+  /**
+   * Get the number of dense features expected by the model.
+   */
+  int numDenseFeatures() const {
+    return params_.num_dense_features;
+  }
+
+  /**
+   * Get the number of sparse features expected by the model.
+   */
+  int numSparseFeatures() const {
+    return params_.num_sparse_features;
+  }
+
  private:
   // Use pimpl idiom to hide LibTorch implementation details
   struct Impl;
