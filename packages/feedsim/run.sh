@@ -735,8 +735,8 @@ main() {
     local mock_port="${MOCK_SERVICES_PORT:-21222}"
     local mock_services_opts="--rpc_dist_path=$rpc_dist_json --mock_services_host=localhost --mock_services_port=${mock_port}"
     # Optional fanout-scale override (defaults to LeafNodeRank's
-    # --rpc_fanout_scale=0.025 when the env var is unset). Lets sweep
-    # scripts A/B test heavier outbound load without rebuilding.
+    # --rpc_fanout_scale=0.10 when the env var is unset). Lets sweep
+    # scripts A/B test different outbound load levels without rebuilding.
     if [ -n "${RPC_FANOUT_SCALE:-}" ]; then
         mock_services_opts="$mock_services_opts --rpc_fanout_scale=${RPC_FANOUT_SCALE}"
         echo "RPC fanout scale override: $RPC_FANOUT_SCALE"
@@ -752,23 +752,24 @@ main() {
         mock_services_opts="$mock_services_opts --use_legacy_sleep"
         echo "RPC fanout: forced OFF via LEAFNODE_USE_LEGACY_SLEEP=1 (legacy sleep path)"
     fi
-    # t25 mitigation knob: per-MockServicesClient keepalive ping. When
-    # MOCK_KEEPALIVE_INTERVAL_MS is set and > 0, each channel issues a
-    # 1-byte getStatus() probe every N ms to defeat the cold-channel
-    # anti-pattern observed at low QPS (BGM saw 14x p95 cliff at q=5).
-    # Recommended starting value: 150-500 ms. 0 / unset = disabled
-    # (anti-pattern stays observable).
-    if [ -n "${MOCK_KEEPALIVE_INTERVAL_MS:-}" ] && [ "${MOCK_KEEPALIVE_INTERVAL_MS}" != "0" ]; then
-        mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${MOCK_KEEPALIVE_INTERVAL_MS}"
-        echo "MockServicesClient keepalive: ENABLED (interval=${MOCK_KEEPALIVE_INTERVAL_MS} ms)"
+    # Per-MockServicesClient keepalive ping. Each channel issues a tiny
+    # getStatus() probe every N ms to defeat the cold-channel anti-pattern
+    # observed at low QPS (BGM saw 14x p95 cliff at q=5 without keepalive).
+    # Default 100 ms. Set MOCK_KEEPALIVE_INTERVAL_MS=0 to disable.
+    mock_keepalive_ms="${MOCK_KEEPALIVE_INTERVAL_MS:-100}"
+    if [ "${mock_keepalive_ms}" != "0" ]; then
+        mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${mock_keepalive_ms}"
+        echo "MockServicesClient keepalive: ENABLED (interval=${mock_keepalive_ms} ms)"
     fi
     # TLS + wire compression on the outbound MockServicesClient channel.
     # LeafNodeRank uses gengetopt (rejects unknown CLI flags), so these knobs
     # are plumbed via env vars MOCK_TLS / MOCK_COMPRESS_ZSTD read inside
-    # MockServicesClient.cc. FEEDSIM_TLS=1 must match the server-side
-    # --tls_cert/--tls_key wiring in run-feedsim-multi.sh. FEEDSIM_NO_RPC_ZSTD=1
-    # disables ZSTD (binary default is on); leave unset for prod-parity.
-    if [ "${FEEDSIM_TLS:-0}" = "1" ]; then
+    # MockServicesClient.cc. FEEDSIM_TLS defaults to 1 (matches prod's
+    # Rocket-over-TLS); set FEEDSIM_TLS=0 to disable. Server-side
+    # --tls_cert/--tls_key wiring is in run-feedsim-multi.sh.
+    # FEEDSIM_NO_RPC_ZSTD=1 disables ZSTD (binary default is on); leave
+    # unset for prod-parity.
+    if [ "${FEEDSIM_TLS:-1}" = "1" ]; then
         export MOCK_TLS=1
         echo "MockServicesClient TLS: ENABLED (via MOCK_TLS env)"
     fi
@@ -889,11 +890,10 @@ main() {
     # Preprocessing complete; search_qps.sh will own the main_benchmark phase.
     log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
 
-    # SLA target for search_qps (95p latency in milliseconds). Default 500ms.
-    # Override via FEEDSIM_SLA_P95_MS env var. Prior experiments (t29, t30)
-    # ran at 700ms to give the system more headroom past the prod-aggregator's
-    # own end-to-end budget.
-    sla_p95_ms="${FEEDSIM_SLA_P95_MS:-500}"
+    # SLA target for search_qps (95p latency in milliseconds). Default 700ms
+    # matches the prod multifeed aggregator's own end-to-end budget at p95.
+    # Override via FEEDSIM_SLA_P95_MS env var.
+    sla_p95_ms="${FEEDSIM_SLA_P95_MS:-700}"
     sla_arg="95p:${sla_p95_ms}"
 
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
