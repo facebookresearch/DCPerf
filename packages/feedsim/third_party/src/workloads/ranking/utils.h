@@ -6,16 +6,19 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#include <cstdlib>
+#include <iostream>
 #include <sstream>
 #include <utility>
 
 namespace ranking {
 namespace utils {
-std::pair<std::string, int> parseHostnameAndPort(const std::string &address) {
+inline std::pair<std::string, int> parseHostnameAndPort(const std::string &address) {
   std::stringstream s_stream{address};
   std::string hostname;
   if (!s_stream.good()) {
-    DIE("Failed to parse %s", address.c_str());
+    std::cerr << "Failed to parse " << address << std::endl;
+    exit(1);
   }
   std::getline(s_stream, hostname, ':');
   int port = 11222;
