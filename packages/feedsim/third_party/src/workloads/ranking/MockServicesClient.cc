@@ -24,7 +24,9 @@
 #include <cstring>
 
 #include <folly/SocketAddress.h>
+#include <folly/io/async/AsyncSSLSocket.h>
 #include <folly/io/async/AsyncSocket.h>
+#include <folly/io/async/SSLContext.h>
 
 #include <thrift/lib/cpp2/async/RocketClientChannel.h>
 #include <thrift/lib/thrift/gen-cpp2/RpcMetadata_types.h>
@@ -33,8 +35,10 @@
 
 namespace {
 // LeafNodeRank uses gengetopt (not gflags) for CLI parsing, so we cannot add
-// CLI flags here. Read knobs from env vars instead. Set MOCK_COMPRESS_ZSTD=0
-// to disable per-channel ZSTD negotiation (default on).
+// CLI flags here. Read knobs from env vars instead. Set MOCK_TLS=1 to use
+// AsyncSSLSocket (with ALPN "rs" so the server routes the connection into
+// the Rocket transport). Set MOCK_COMPRESS_ZSTD=0 to disable per-channel
+// ZSTD negotiation (default on).
 bool envBoolTrue(const char* name, bool default_value) {
   const char* v = std::getenv(name);
   if (v == nullptr) {
@@ -118,11 +122,33 @@ MockServicesClient::MockServicesClient(
   // RocketClientChannel must be created on the EventBase thread. Use
   // runInEventBaseThreadAndWait so this constructor remains usable from
   // any thread (typically the main thread during ThreadStartup).
+  const bool use_tls = envBoolTrue("MOCK_TLS", false);
   const bool use_zstd = envBoolTrue("MOCK_COMPRESS_ZSTD", true);
-  evb_->runInEventBaseThreadAndWait([this, &host, port, use_zstd]() {
+  evb_->runInEventBaseThreadAndWait([this, &host, port, use_tls, use_zstd]() {
     folly::SocketAddress addr(host, port, /*allowNameLookup=*/true);
-    folly::AsyncSocket::UniquePtr socket(
-        new folly::AsyncSocket(evb_, addr));
+    folly::AsyncSocket::UniquePtr socket;
+    if (use_tls) {
+      auto ssl_ctx = std::make_shared<folly::SSLContext>();
+      // Benchmark-only: skip peer cert verification so example certs work.
+      ssl_ctx->authenticate(/*checkPeerCert=*/false, /*checkPeerName=*/false);
+      ssl_ctx->setVerificationOption(
+          folly::SSLContext::SSLVerifyPeerEnum::NO_VERIFY);
+      // ALPN "rs" tells the server to route this TLS connection into the
+      // Rocket transport (matches `RocketOverSSLNoALPN` test pattern in
+      // pinned fbthrift v2026.01.05.00). Without ALPN, the server may
+      // reject the connection or fall back to the header-upgrade path.
+      ssl_ctx->setAdvertisedNextProtocols({"rs"});
+      folly::AsyncSSLSocket::UniquePtr ssl_sock(
+          new folly::AsyncSSLSocket(ssl_ctx, evb_));
+      // AsyncSSLSocket buffers writes until the TLS handshake completes,
+      // so RocketClientChannel's setup frame goes out only AFTER TLS is
+      // negotiated. Passing nullptr connect-callback is the canonical
+      // fbthrift pattern (see RocketOverSSLNoALPN in ThriftServerTest.cpp).
+      ssl_sock->connect(/*callback=*/nullptr, addr);
+      socket = std::move(ssl_sock);
+    } else {
+      socket.reset(new folly::AsyncSocket(evb_, addr));
+    }
     auto channel =
         apache::thrift::RocketClientChannel::newChannel(std::move(socket));
     if (use_zstd) {

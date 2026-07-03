@@ -164,7 +164,21 @@ function start_mock_services() {
     local offset_us="${MOCK_LATENCY_OFFSET_US:-0}"
     local skip_us="${MOCK_LATENCY_SKIP_THRESHOLD_US:-100}"
 
-    echo "Starting mock_services on port ${port} (cores=${core_range}, io_threads=${io_threads}, cap_us=${cap_us}, offset_us=${offset_us}, skip_us=${skip_us}, silesia=${SILESIA_DIR_ABS})"
+    # TLS opt-in: FEEDSIM_TLS=1 enables TLS on both server and client.
+    # Server reads --tls_cert / --tls_key; client picks up MOCK_TLS env var
+    # (LeafNodeRank uses gengetopt and rejects unknown CLI flags).
+    local tls_opts=""
+    if [ "${FEEDSIM_TLS:-0}" = "1" ]; then
+        local cert_dir="${FEEDSIM_ROOT}/certs"
+        if [ ! -r "${cert_dir}/example.crt" ] || [ ! -r "${cert_dir}/example.key" ]; then
+            echo "ERROR: FEEDSIM_TLS=1 but ${cert_dir}/example.{crt,key} not found" >&2
+            exit 1
+        fi
+        tls_opts="--tls_cert=${cert_dir}/example.crt --tls_key=${cert_dir}/example.key"
+    fi
+
+    echo "Starting mock_services on port ${port} (cores=${core_range}, io_threads=${io_threads}, cap_us=${cap_us}, offset_us=${offset_us}, skip_us=${skip_us}, tls=${FEEDSIM_TLS:-0}, silesia=${SILESIA_DIR_ABS})"
+    # shellcheck disable=SC2086
     taskset --cpu-list "$core_range" \
         "$MOCK_SERVICES_BIN" \
         --port="$port" \
@@ -173,6 +187,7 @@ function start_mock_services() {
         --latency_offset_us="$offset_us" \
         --latency_skip_threshold_us="$skip_us" \
         --silesia_dir="$SILESIA_DIR_ABS" \
+        $tls_opts \
         > "$log_path" 2>&1 &
     local pid=$!
     MOCK_SERVICES_PIDS+=("$pid")
