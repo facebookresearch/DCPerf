@@ -15,13 +15,26 @@
 #ifndef REQUEST_TYPES_H
 #define REQUEST_TYPES_H
 
+#include <cstdint>
+
 namespace ranking {
 
+// Legacy request types — Phase 6 deletes these.
 // Request type for PageRank/DLRM with server-side feature generation
 static const int kPageRankRequestType = 0;
 
 // Request type for DLRM with client-side feature generation (Phase 7)
 static const int kDLRMRequestType = 1;
+
+// Phase 4: production-shaped multifeed aggregator inbound methods. Type
+// IDs 0x10..0x14 are dispatched by FeedSimServer::registerQueryCallback
+// to the per-method shim handlers in LeafNodeRank.cc. See Phase 4
+// researcher notes section 4 for the dispatch design.
+constexpr uint32_t kCreateAndPrimeSessionRequestType = 0x10;
+constexpr uint32_t kGetStoriesUncompressedRequestType = 0x11;
+constexpr uint32_t kGetAllStoriesRequestType = 0x12;
+constexpr uint32_t kStreamDataRequestType = 0x13;
+constexpr uint32_t kStreamIfrPriorityRankingRequestType = 0x14;
 
 } // namespace ranking
 
