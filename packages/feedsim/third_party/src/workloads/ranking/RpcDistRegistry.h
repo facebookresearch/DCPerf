@@ -123,7 +123,11 @@ inline const std::array<const char*, kNumMethods>& methodNames() {
       "getUserConsents",
       "fciGet",
       "multiget",
-      "FbkeyPointGetRequest",
+      // rpc_dist_v2.json renamed this slot from "FbkeyPointGetRequest"
+      // to "MultiGet". The C++ enum value stays MethodIdx::FbkeyPointGetRequest
+      // and the thrift method semifuture_FbkeyPointGetRequest stays so
+      // existing call sites keep compiling; only the JSON key changes.
+      "MultiGet",
   };
   return kNames;
 }
