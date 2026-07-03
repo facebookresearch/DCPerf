@@ -37,12 +37,23 @@ struct DLRM::Impl {
   // worker thread owns a deep-cloned Module via model_copy, so
   // concurrent forward() calls touch disjoint state. See t16
   // SIGSEGV crash (2026-05-18) for the original failure.
+  //
+  // forward_mutex (t29, 2026-05-28): the LIFO checkout in
+  // get_avail_thread_id() / put_avail_thread_id() is supposed to
+  // prevent two callers from holding the same thread_id at once, but
+  // the leaf still SIGSEGVs inside torch::jit::InterpreterStateImpl::
+  // runTemplate at over-saturation (t27 q=160+/inst on BGM/Grace,
+  // q=50+ on CPL). Likely cause: torch::jit::Module::clone() does NOT
+  // fully isolate all interpreter state. Per-clone mutex is a defensive
+  // safety net — uncontended when the LIFO is doing its job, prevents
+  // the segfault if it's not.
   struct ThreadState {
     std::mt19937 rng;
     std::normal_distribution<float> dense_dist{0.0f, 1.0f};
     std::vector<float> dense_buffer;
     std::vector<int64_t> sparse_buffer;
     std::unique_ptr<torch::jit::script::Module> model_copy;
+    std::mutex forward_mutex;
   };
   std::vector<std::unique_ptr<ThreadState>> thread_states;
 
@@ -248,14 +259,17 @@ int DLRM::infer(int num_inferences, int batch_size) {
         params_.embedding_table_sizes);
 
     // Run inference on the per-thread Module clone (not the shared
-    // pimpl_->model) to avoid concurrent forward() race.
+    // pimpl_->model) to avoid concurrent forward() race. forward_mutex
+    // serializes calls per clone as a safety net on top of the LIFO
+    // checkout — see ThreadState comment.
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(dense_tensor);
     inputs.push_back(sparse_tensor);
 
     torch::NoGradGuard no_grad;
-    auto& thread_model = *pimpl_->thread_states[thread_id]->model_copy;
-    auto output = thread_model.forward(inputs).toTensor();
+    auto& ts = *pimpl_->thread_states[thread_id];
+    std::lock_guard<std::mutex> forward_lock(ts.forward_mutex);
+    auto output = ts.model_copy->forward(inputs).toTensor();
 
     // Count predictions (simulating actual work with the output)
     total_predictions += output.numel();
@@ -299,14 +313,16 @@ int DLRM::inferWithFeatures(
         {static_cast<int64_t>(batch_size), params_.num_sparse_features},
         torch::kInt64);
 
-    // Run inference on this thread's Module clone.
+    // Run inference on this thread's Module clone. forward_mutex
+    // serializes calls per clone — see ThreadState comment.
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(dense_tensor);
     inputs.push_back(sparse_tensor);
 
     torch::NoGradGuard no_grad;
-    auto& thread_model = *pimpl_->thread_states[thread_id]->model_copy;
-    auto output = thread_model.forward(inputs).toTensor();
+    auto& ts = *pimpl_->thread_states[thread_id];
+    std::lock_guard<std::mutex> forward_lock(ts.forward_mutex);
+    auto output = ts.model_copy->forward(inputs).toTensor();
 
     // Count predictions (simulating actual work with the output)
     total_predictions += output.numel();
