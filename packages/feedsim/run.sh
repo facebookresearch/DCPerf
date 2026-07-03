@@ -114,6 +114,12 @@ Usage: ${0##*/} [OPTION]...
     --client-feature-seed Seed for client feature generation. Default: 42. Use -1 for random.
     --client-num-dense Number of dense features per sample (client-side). Default: 13
     --client-num-sparse Number of sparse features per sample (client-side). Default: 26
+    --mock-tls Enable TLS on outbound MockServicesClient channels (0=off, 1=on). Default: 1.
+    --mock-zstd-frac Fraction in [0.0, 1.0] of MockServicesClient channels with ZSTD enabled. Default: 0.75 (t43 c7).
+    --mock-keepalive-interval-ms Per-MockServicesClient keepalive ping interval (ms). 0=disabled. Default: 200.
+    --rpc-fanout-scale Scale factor applied to per-session fanout counts. Default: 0.05 (t43 c7).
+    --server-zstd Enable ZSTD compression on server-side response payloads (0=off, 1=on). Default: 0 (t43 c7).
+    --sla-p95-ms search_qps SLA target (95th percentile latency in ms). Default: 700.
 EOF
 }
 
@@ -288,6 +294,27 @@ main() {
 
     local stories_per_processor_pass
     stories_per_processor_pass="50"
+
+    # t43 c7 calibration knobs — promoted from env vars to CLI flags so they
+    # are visible in --help and surfaced in jobs.yml. Defaults match the
+    # balanced configuration documented in [[t43_c7_recommended]].
+    local mock_tls
+    mock_tls="1"
+
+    local mock_zstd_frac
+    mock_zstd_frac="0.75"
+
+    local mock_keepalive_interval_ms
+    mock_keepalive_interval_ms="200"
+
+    local rpc_fanout_scale
+    rpc_fanout_scale="0.05"
+
+    local server_zstd
+    server_zstd="0"
+
+    local sla_p95_ms
+    sla_p95_ms="700"
 
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
@@ -575,6 +602,48 @@ main() {
             --stories-per-processor-pass=*)
                 stories_per_processor_pass="${1#*=}"
                 ;;
+            --mock-tls)
+                mock_tls="$2"
+                shift
+                ;;
+            --mock-tls=*)
+                mock_tls="${1#*=}"
+                ;;
+            --mock-zstd-frac)
+                mock_zstd_frac="$2"
+                shift
+                ;;
+            --mock-zstd-frac=*)
+                mock_zstd_frac="${1#*=}"
+                ;;
+            --mock-keepalive-interval-ms)
+                mock_keepalive_interval_ms="$2"
+                shift
+                ;;
+            --mock-keepalive-interval-ms=*)
+                mock_keepalive_interval_ms="${1#*=}"
+                ;;
+            --rpc-fanout-scale)
+                rpc_fanout_scale="$2"
+                shift
+                ;;
+            --rpc-fanout-scale=*)
+                rpc_fanout_scale="${1#*=}"
+                ;;
+            --server-zstd)
+                server_zstd="$2"
+                shift
+                ;;
+            --server-zstd=*)
+                server_zstd="${1#*=}"
+                ;;
+            --sla-p95-ms)
+                sla_p95_ms="$2"
+                shift
+                ;;
+            --sla-p95-ms=*)
+                sla_p95_ms="${1#*=}"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -726,95 +795,48 @@ main() {
     fi
     echo "rpc_dist.json: ENABLED (file=$rpc_dist_json)"
 
-    # Phase 5-B mock_services fanout. Point LeafNodeRank at the colocated
+    # Phase 5-B mock_services fanout. Point LeafNodeRank at the co-located
     # mock_services Thrift server orchestrated by run-feedsim-multi.sh.
     # MOCK_SERVICES_PORT is set per-instance (21222 + inst_id) so each
     # feedsim instance talks to its OWN mock_services, eliminating
     # cross-instance queue contention. Defaults to 21222 for back-compat
     # with single-instance manual runs.
-    local mock_port="${MOCK_SERVICES_PORT:-21222}"
-    local mock_services_opts="--rpc_dist_path=$rpc_dist_json --mock_services_host=localhost --mock_services_port=${mock_port}"
-    # Optional fanout-scale override (defaults to LeafNodeRank's
-    # --rpc_fanout_scale=0.10 when the env var is unset). Lets sweep
-    # scripts A/B test different outbound load levels without rebuilding.
-    if [ -n "${RPC_FANOUT_SCALE:-}" ]; then
-        mock_services_opts="$mock_services_opts --rpc_fanout_scale=${RPC_FANOUT_SCALE}"
-        echo "RPC fanout scale override: $RPC_FANOUT_SCALE"
-    fi
-    # Diagnostic / isolation knob. When LEAFNODE_USE_LEGACY_SLEEP=1, force
-    # LeafNodeRank to take the legacy folly::futures::sleep path even
-    # though --rpc_dist_path is supplied (rpc_dist.json is still resolved
-    # because DriverNodeRank's session mode needs it). Used by later diffs
-    # in the stack to integration-test without the mock_services side
-    # process. run-feedsim-multi.sh skips starting mock_services under the
-    # same env var.
-    if [ "${LEAFNODE_USE_LEGACY_SLEEP:-0}" = "1" ]; then
-        mock_services_opts="$mock_services_opts --use_legacy_sleep"
-        echo "RPC fanout: forced OFF via LEAFNODE_USE_LEGACY_SLEEP=1 (legacy sleep path)"
-    fi
-    # Per-MockServicesClient keepalive ping. Each channel issues a tiny
-    # getStatus() probe every N ms to defeat the cold-channel anti-pattern
-    # observed at low QPS (BGM saw 14x p95 cliff at q=5 without keepalive).
-    # Default 200 ms (t29/t30 calibration). Set MOCK_KEEPALIVE_INTERVAL_MS=0
-    # to disable; lower values reduce cold-start latency but add more
-    # background load on mock_services.
-    mock_keepalive_ms="${MOCK_KEEPALIVE_INTERVAL_MS:-200}"
-    if [ "${mock_keepalive_ms}" != "0" ]; then
-        mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${mock_keepalive_ms}"
-        echo "MockServicesClient keepalive: ENABLED (interval=${mock_keepalive_ms} ms)"
-    fi
-    # TLS + wire compression on the outbound MockServicesClient channel.
-    # LeafNodeRank uses gengetopt (rejects unknown CLI flags), so these knobs
-    # are plumbed via env vars MOCK_TLS / MOCK_COMPRESS_ZSTD read inside
-    # MockServicesClient.cc. FEEDSIM_TLS defaults to 1 (matches prod's
-    # Rocket-over-TLS); set FEEDSIM_TLS=0 to disable. Server-side
-    # --tls_cert/--tls_key wiring is in run-feedsim-multi.sh.
-    # FEEDSIM_NO_RPC_ZSTD=1 disables ZSTD (binary default is on); leave
-    # unset for prod-parity.
-    if [ "${FEEDSIM_TLS:-1}" = "1" ]; then
-        export MOCK_TLS=1
-        echo "MockServicesClient TLS: ENABLED (via MOCK_TLS env)"
-    fi
-    if [ "${FEEDSIM_NO_RPC_ZSTD:-0}" = "1" ]; then
-        export MOCK_COMPRESS_ZSTD=0
-        echo "MockServicesClient ZSTD: DISABLED (via MOCK_COMPRESS_ZSTD env)"
-    fi
-
-    # t43 knobs (2026-06-10): three independent knobs for the bench-vs-prod
-    # Compression / Encryption rebalance. See plan doc t41/t43 progress logs.
     #
-    # MOCK_ZSTD_FRAC: float in [0.0, 1.0]. Fraction of MockServicesClient
-    # channels that enable per-channel ZSTD. Replaces all-or-nothing
-    # MOCK_COMPRESS_ZSTD with prod-realistic partial enablement (some
-    # downstream services compress, others don't).
-    if [ -n "${MOCK_ZSTD_FRAC:-}" ]; then
-        export MOCK_ZSTD_FRAC
-        echo "MockServicesClient ZSTD fraction: ${MOCK_ZSTD_FRAC} (overrides MOCK_COMPRESS_ZSTD)"
+    # User-facing knobs (--mock-tls, --mock-zstd-frac, --server-zstd, etc.)
+    # are translated to ENV VARS here. The C++ binaries (MockServicesClient,
+    # LeafNodeRank, FeedSimServer, FeedSimDriver) read these env vars via
+    # std::getenv at thread/server startup. A previous refactor tried to
+    # promote them to gengetopt CLI flags; that caused a silent
+    # MockServicesClient TLS handshake regression (every connection
+    # ECONNRESET, falling back to folly::futures::sleep). Until the C++
+    # side adopts CLI flags safely, env-var plumbing is the proven path.
+    local mock_port="${MOCK_SERVICES_PORT:-21222}"
+    local mock_services_opts="--rpc_dist_path=$rpc_dist_json"
+    mock_services_opts="$mock_services_opts --mock_services_host=localhost"
+    mock_services_opts="$mock_services_opts --mock_services_port=${mock_port}"
+    mock_services_opts="$mock_services_opts --rpc_fanout_scale=${rpc_fanout_scale}"
+    mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${mock_keepalive_interval_ms}"
+    # MOCK_TLS env consumed by MockServicesClient::ctor (envBoolTrue("MOCK_TLS", false)).
+    # When the user-facing --mock-tls flag is set to 1 (default), we export
+    # both MOCK_TLS=1 (client side) and let FEEDSIM_TLS default to 1 so
+    # run-feedsim-multi.sh starts mock_services with --tls_cert/--tls_key.
+    if [ "$mock_tls" = "1" ]; then
+        export MOCK_TLS=1
     fi
-    # FEEDSIM_SERVER_ZSTD: 0 disables server-side response ZSTD
-    # (compressThrift / compressPayload return passthrough). Default 1
-    # preserves current behavior. Use to reduce the bench's Compression
-    # CPU share when over-target.
-    if [ "${FEEDSIM_SERVER_ZSTD:-1}" != "1" ]; then
+    # MOCK_ZSTD_FRAC env consumed by MockServicesClient::resolveZstdFraction.
+    # Always export so the t43 c7 default 0.75 reaches the binary.
+    export MOCK_ZSTD_FRAC="$mock_zstd_frac"
+    echo "MockServicesClient: TLS=${mock_tls} ZSTD_frac=${mock_zstd_frac} keepalive_ms=${mock_keepalive_interval_ms} fanout_scale=${rpc_fanout_scale}"
+
+    # Server-side response compression. FEEDSIM_SERVER_ZSTD=0 disables
+    # compressThrift/compressPayload (server bytes emitted uncompressed).
+    # Default ON in the C++ source; we export "0" when user passes
+    # --server-zstd=0 (the t43 c7 default).
+    if [ "$server_zstd" != "1" ]; then
         export FEEDSIM_SERVER_ZSTD=0
         echo "Server-side response ZSTD: DISABLED (FEEDSIM_SERVER_ZSTD=0)"
-    fi
-    # FEEDSIM_DRIVER_TLS: 1 enables TLS on the driver↔server channel
-    # (DriverNodeRank ↔ LeafNodeRank). Server reads FEEDSIM_TLS_CERT /
-    # FEEDSIM_TLS_KEY env vars (set here to the existing bench cert/key
-    # under ${FEEDSIM_ROOT}/certs/); driver reads FEEDSIM_DRIVER_TLS
-    # directly. Closes the bench's Encryption CPU undershoot (prod
-    # 3.3-3.6% vs bench 0.9-1.5% in t41). Independent of FEEDSIM_TLS,
-    # which only covers the mock_services channel.
-    if [ "${FEEDSIM_DRIVER_TLS:-0}" = "1" ]; then
-        export FEEDSIM_DRIVER_TLS=1
-        export FEEDSIM_TLS_CERT="${FEEDSIM_ROOT}/certs/example.crt"
-        export FEEDSIM_TLS_KEY="${FEEDSIM_ROOT}/certs/example.key"
-        if [ ! -r "${FEEDSIM_TLS_CERT}" ] || [ ! -r "${FEEDSIM_TLS_KEY}" ]; then
-            echo "ERROR: FEEDSIM_DRIVER_TLS=1 but ${FEEDSIM_TLS_CERT} or .key not readable" >&2
-            exit 1
-        fi
-        echo "Driver↔Server TLS: ENABLED (cert=${FEEDSIM_TLS_CERT})"
+    else
+        echo "Server-side response ZSTD: ENABLED"
     fi
 
     # OMP_NUM_THREADS=1: cap PyTorch's OpenMP parallel backend pool to
@@ -931,8 +953,7 @@ main() {
 
     # SLA target for search_qps (95p latency in milliseconds). Default 700ms
     # matches the prod multifeed aggregator's own end-to-end budget at p95.
-    # Override via FEEDSIM_SLA_P95_MS env var.
-    sla_p95_ms="${FEEDSIM_SLA_P95_MS:-700}"
+    # Override via --sla-p95-ms CLI flag (handled in arg parsing above).
     sla_arg="95p:${sla_p95_ms}"
 
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
