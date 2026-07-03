@@ -1097,6 +1097,147 @@ void PageRankRequestHandler(
   context.sendResponse(buf->data(), buf->length());
 }
 
+// ============================================================================
+// Phase 4 shim handlers — exercise the new prod-shaped thrift schema and
+// dispatch path. Heavy methods (getStoriesUncompressed, getAllStories) route
+// to the existing DLRMRequestHandler so QPS/CPU profile is unchanged. Light
+// methods (createAndPrimeSession, streamData, streamIfrPriorityRanking) send
+// a small response without invoking DLRMRequestHandler — production p50
+// latency and response size for these are tiny (4-44 B, 3-13 ms) and we don't
+// want Phase 4 to attribute DLRM CPU to them. Phase 6 replaces these shims
+// with real per-method handlers.
+// ============================================================================
+
+namespace {
+
+// Helper: send a small fixed-size response after validating the inbound
+// schema. Used by the three "light" methods. The payload bytes are filled
+// with zeros — Phase 6 will populate real fields.
+template <typename ResponseT>
+void sendTinyResponse(feedsim::RequestContext& context, ResponseT&& response) {
+  folly::IOBufQueue queue;
+  apache::thrift::CompactSerializer::serialize(response, &queue);
+  auto buf = queue.move();
+  if (buf) {
+    // CompactSerializer may chain IOBufs; coalesce so sendResponse sees the
+    // full payload instead of just the head segment.
+    buf->coalesce();
+    context.sendResponse(buf->data(), buf->length());
+  } else {
+    context.sendResponse(nullptr, 0);
+  }
+}
+
+} // namespace
+
+void CreateAndPrimeSessionRequestHandler(
+    int /*thread_id*/,
+    feedsim::RequestContext& context,
+    std::vector<ThreadData>& /*thread_data*/) {
+  ranking::CreateAndPrimeSessionRequest typed_req;
+  try {
+    folly::IOBuf buf(
+        folly::IOBuf::WRAP_BUFFER, context.payload, context.payload_length);
+    apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
+  } catch (const std::exception& e) {
+    std::cerr << "CreateAndPrimeSession: deserialize failed: " << e.what()
+              << std::endl;
+    context.sendResponse(nullptr, 0);
+    return;
+  }
+  ranking::CreateAndPrimeSessionResponse resp;
+  // 32-char hex placeholder; Phase 6 generates a real session_id.
+  resp.session_id() = "00000000000000000000000000000000";
+  resp.status_code() = 0;
+  sendTinyResponse(context, resp);
+}
+
+void GetStoriesUncompressedRequestHandler(
+    int thread_id,
+    feedsim::RequestContext& context,
+    std::vector<ThreadData>& thread_data) {
+  ranking::GetStoriesRequest typed_req;
+  try {
+    folly::IOBuf buf(
+        folly::IOBuf::WRAP_BUFFER, context.payload, context.payload_length);
+    apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
+  } catch (const std::exception& e) {
+    std::cerr << "GetStoriesUncompressed: deserialize failed: " << e.what()
+              << std::endl;
+    context.sendResponse(nullptr, 0);
+    return;
+  }
+#ifdef FEEDSIM_USE_DLRM
+  DLRMRequestHandler(thread_id, context, thread_data);
+#else
+  (void)thread_id;
+  (void)thread_data;
+  context.sendResponse(nullptr, 0);
+#endif
+}
+
+void GetAllStoriesRequestHandler(
+    int thread_id,
+    feedsim::RequestContext& context,
+    std::vector<ThreadData>& thread_data) {
+  ranking::GetAllStoriesRequest typed_req;
+  try {
+    folly::IOBuf buf(
+        folly::IOBuf::WRAP_BUFFER, context.payload, context.payload_length);
+    apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
+  } catch (const std::exception& e) {
+    std::cerr << "GetAllStories: deserialize failed: " << e.what() << std::endl;
+    context.sendResponse(nullptr, 0);
+    return;
+  }
+#ifdef FEEDSIM_USE_DLRM
+  DLRMRequestHandler(thread_id, context, thread_data);
+#else
+  (void)thread_id;
+  (void)thread_data;
+  context.sendResponse(nullptr, 0);
+#endif
+}
+
+void StreamDataRequestHandler(
+    int /*thread_id*/,
+    feedsim::RequestContext& context,
+    std::vector<ThreadData>& /*thread_data*/) {
+  ranking::StreamDataRequest typed_req;
+  try {
+    folly::IOBuf buf(
+        folly::IOBuf::WRAP_BUFFER, context.payload, context.payload_length);
+    apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
+  } catch (const std::exception& e) {
+    std::cerr << "StreamData: deserialize failed: " << e.what() << std::endl;
+    context.sendResponse(nullptr, 0);
+    return;
+  }
+  ranking::StreamDataResponse resp;
+  resp.ack_code() = 0;
+  sendTinyResponse(context, resp);
+}
+
+void StreamIfrPriorityRankingRequestHandler(
+    int /*thread_id*/,
+    feedsim::RequestContext& context,
+    std::vector<ThreadData>& /*thread_data*/) {
+  ranking::StreamIfrPriorityRankingRequest typed_req;
+  try {
+    folly::IOBuf buf(
+        folly::IOBuf::WRAP_BUFFER, context.payload, context.payload_length);
+    apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
+  } catch (const std::exception& e) {
+    std::cerr << "StreamIfrPriorityRanking: deserialize failed: " << e.what()
+              << std::endl;
+    context.sendResponse(nullptr, 0);
+    return;
+  }
+  ranking::StreamIfrPriorityRankingResponse resp;
+  resp.ack_code() = 0;
+  sendTinyResponse(context, resp);
+}
+
 int main(int argc, char** argv) {
   if (cmdline_parser(argc, argv, &args) != 0) {
     std::cerr << "cmdline_parser failed" << std::endl;
@@ -1427,6 +1568,43 @@ int main(int argc, char** argv) {
         return DLRMRequestHandler(thread_id, context, thread_data);
       });
 #endif
+
+  // Phase 4: register the 5 production-shaped inbound methods. Heavy methods
+  // (getStoriesUncompressed, getAllStories) route to DLRMRequestHandler so
+  // CPU profile is unchanged. Light methods (createAndPrimeSession,
+  // streamData, streamIfrPriorityRanking) send a tiny response to match
+  // prod p50 (4-44 B, 3-13 ms latency).
+  std::cout << "Registering Phase 4 prod-shaped inbound method handlers"
+            << std::endl;
+  server.registerQueryCallback(
+      ranking::kCreateAndPrimeSessionRequestType,
+      [&thread_data](int thread_id, feedsim::RequestContext& context) {
+        return CreateAndPrimeSessionRequestHandler(
+            thread_id, context, thread_data);
+      });
+  server.registerQueryCallback(
+      ranking::kGetStoriesUncompressedRequestType,
+      [&thread_data](int thread_id, feedsim::RequestContext& context) {
+        return GetStoriesUncompressedRequestHandler(
+            thread_id, context, thread_data);
+      });
+  server.registerQueryCallback(
+      ranking::kGetAllStoriesRequestType,
+      [&thread_data](int thread_id, feedsim::RequestContext& context) {
+        return GetAllStoriesRequestHandler(thread_id, context, thread_data);
+      });
+  server.registerQueryCallback(
+      ranking::kStreamDataRequestType,
+      [&thread_data](int thread_id, feedsim::RequestContext& context) {
+        return StreamDataRequestHandler(thread_id, context, thread_data);
+      });
+  server.registerQueryCallback(
+      ranking::kStreamIfrPriorityRankingRequestType,
+      [&thread_data](int thread_id, feedsim::RequestContext& context) {
+        return StreamIfrPriorityRankingRequestHandler(
+            thread_id, context, thread_data);
+      });
+
   server.setNumThreads(args.threads_arg);
   server.setThreadPinning(args.noaffinity_given == 0u);
   server.setThreadLoadBalancing(args.noloadbalance_given == 0u);
