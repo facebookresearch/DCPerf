@@ -755,8 +755,10 @@ main() {
     # Per-MockServicesClient keepalive ping. Each channel issues a tiny
     # getStatus() probe every N ms to defeat the cold-channel anti-pattern
     # observed at low QPS (BGM saw 14x p95 cliff at q=5 without keepalive).
-    # Default 100 ms. Set MOCK_KEEPALIVE_INTERVAL_MS=0 to disable.
-    mock_keepalive_ms="${MOCK_KEEPALIVE_INTERVAL_MS:-100}"
+    # Default 200 ms (t29/t30 calibration). Set MOCK_KEEPALIVE_INTERVAL_MS=0
+    # to disable; lower values reduce cold-start latency but add more
+    # background load on mock_services.
+    mock_keepalive_ms="${MOCK_KEEPALIVE_INTERVAL_MS:-200}"
     if [ "${mock_keepalive_ms}" != "0" ]; then
         mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${mock_keepalive_ms}"
         echo "MockServicesClient keepalive: ENABLED (interval=${mock_keepalive_ms} ms)"
