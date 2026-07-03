@@ -134,6 +134,7 @@ add_library(featureExtractors STATIC
     feature_extractors/TreeTraversalExtractor.h
     feature_extractors/BitsetExtractor.cpp
     feature_extractors/BitsetExtractor.h
+    feature_extractors/generated/extractor_helpers.cpp
     ${GENERATED_EXTRACTOR_SOURCES}
 )
 add_dependencies(featureExtractors folly)
@@ -151,8 +152,17 @@ target_link_libraries(featureExtractors
         ${FOLLY_LIBRARIES}
         glog::glog
 )
+# -mcmodel=large is x86_64-only; on aarch64 use default code model
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set(FEEDSIM_MCMODEL_FLAG "-mcmodel=large")
+else()
+    set(FEEDSIM_MCMODEL_FLAG "")
+endif()
+
 target_compile_options(featureExtractors PRIVATE
     -fno-omit-frame-pointer
+    ${FEEDSIM_MCMODEL_FLAG}
+    -fno-plt
 )
 
 # Compile generated copies at -O0 WITHOUT -ffunction-sections to prevent:
@@ -163,10 +173,15 @@ file(GLOB GENERATED_COPIES_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/feature_extractors/generated/copies/*.cpp")
 file(GLOB GENERATED_VARIANT_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/feature_extractors/generated/variants/*.cpp")
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set(GENERATED_EXTRA_FLAGS "-O0 -mcmodel=large -fno-plt")
+else()
+    set(GENERATED_EXTRA_FLAGS "-O0 -fno-plt")
+endif()
 set_source_files_properties(
     ${GENERATED_COPIES_FILES}
     ${GENERATED_VARIANT_FILES}
-    PROPERTIES COMPILE_FLAGS "-O0"
+    PROPERTIES COMPILE_FLAGS "${GENERATED_EXTRA_FLAGS}"
 )
 
 # DLRM support (optional, requires LibTorch)
@@ -180,6 +195,7 @@ if(FEEDSIM_USE_DLRM)
         dwarfs/dlrm.cpp
         dwarfs/dlrm.h
     )
+    add_dependencies(rankingDLRM folly)
     target_compile_definitions(rankingDLRM PUBLIC FEEDSIM_USE_DLRM)
     target_include_directories(rankingDLRM
         PUBLIC
@@ -279,16 +295,23 @@ target_link_libraries(LeafNodeRank
         ${JEMALLOC_LIB}
         ${LIBLZMA_LIBRARIES}
 )
-target_compile_options(LeafNodeRank PUBLIC -fno-omit-frame-pointer -ffunction-sections -fdata-sections)
+target_compile_options(LeafNodeRank PUBLIC -fno-omit-frame-pointer -ffunction-sections -fdata-sections ${FEEDSIM_MCMODEL_FLAG} -fno-plt)
 # --whole-archive for featureExtractors prevents --gc-sections from stripping
 # generated functions that are only referenced via function pointer arrays.
+# -Wl,--no-relax is x86_64-only (linker relaxation optimization)
 target_link_options(LeafNodeRank PRIVATE
     -Wl,--gc-sections
     -Wl,--allow-multiple-definition
+    -Wl,-z,notext
+    -no-pie
     -Wl,--whole-archive
     $<TARGET_FILE:featureExtractors>
     -Wl,--no-whole-archive
 )
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    target_link_options(LeafNodeRank PRIVATE -Wl,--no-relax)
+endif()
+
 # Re-link libraries at the end to resolve circular static library dependencies
 # (folly/glog use gflags DEFINE_* macros, fbthrift has internal cross-lib refs)
 target_link_libraries(LeafNodeRank PRIVATE

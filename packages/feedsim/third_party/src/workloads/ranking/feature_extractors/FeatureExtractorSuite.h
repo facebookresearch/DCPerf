@@ -15,6 +15,7 @@
 #include "FeatureExtractorBase.h"
 #include "FeatureTypes.h"
 #include "generated/dispatch.h"
+#include "generated/mock_hash_table.h"
 #include "generated/registry.h"
 
 class FeatureExtractorSuite {
@@ -67,6 +68,7 @@ class FeatureExtractorSuite {
   std::unique_ptr<float[]> flat_struct_data_;
   int flat_struct_size_ = 0;
   std::unordered_map<int64_t, float> flat_tables_[4];
+  dcperf::mock_hash::MockHashTable flat_hash_tables_[4];
   MockFeatureExample flat_example_;
   std::vector<MockFeature> flat_features_;
 };
