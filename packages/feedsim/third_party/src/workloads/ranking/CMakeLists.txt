@@ -235,6 +235,29 @@ add_library(leafNodeRankcmdline
     ${CMAKE_CURRENT_BINARY_DIR}/LeafNodeRankCmdline.cc)
 add_dependencies(leafNodeRankcmdline leafNodeRank_gengetopt)
 
+# FeedSim server/driver framework (replaces oldisim for LeafNodeRank/DriverNodeRank)
+add_library(FeedSimFramework STATIC
+    FeedSimServer.cc
+    FeedSimDriver.cc
+    FeedSimProtocol.h
+    FeedSimServer.h
+    FeedSimDriver.h
+)
+add_dependencies(FeedSimFramework folly)
+target_include_directories(FeedSimFramework
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    PRIVATE
+        ${FOLLY_INCLUDE_DIR}
+        ${LIBEVENT_INCLUDE_DIR}
+)
+target_link_libraries(FeedSimFramework
+    PUBLIC
+        ${FOLLY_LIBRARIES}
+        ${LIBEVENT_LIB}
+        Threads::Threads
+)
+
 # Build LeafNodeRank binary
 
 add_executable(LeafNodeRank
@@ -244,6 +267,7 @@ add_executable(LeafNodeRank
 target_include_directories(LeafNodeRank
     PUBLIC
         ${CMAKE_CURRENT_BINARY_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${LIBEVENT_INCLUDE_DIR}
         ${JEMALLOC_INCLUDE_DIR}
         ${BZIP2_INCLUDE_DIR}
@@ -257,7 +281,7 @@ target_include_directories(LeafNodeRank
 
 # Base LeafNodeRank libraries
 set(LEAF_NODE_RANK_LIBS
-    OLDISim::OLDISim
+    FeedSimFramework
     leafNodeRankcmdline
     rankingDwarfs
     featureExtractors
@@ -484,7 +508,7 @@ target_include_directories(
 target_link_libraries(
     DriverNodeRank
     PRIVATE
-        OLDISim::OLDISim
+        FeedSimFramework
         DriverNodeRankcmdline
         FeatureGenerator
         ranking-cpp2

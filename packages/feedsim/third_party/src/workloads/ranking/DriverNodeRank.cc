@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
+#include <iostream>
 #include <memory>
+#include <random>
 #include <string>
+
+#include <event2/event.h>
 
 #include <thrift/lib/cpp2/protocol/CompactProtocol.h>
 #include <thrift/lib/cpp2/protocol/Serializer.h>
 
-#include "oldisim/ChildConnectionStats.h"
-#include "oldisim/DriverNode.h"
-#include "oldisim/Log.h"
-#include "oldisim/NodeThread.h"
-#include "oldisim/ResponseContext.h"
-#include "oldisim/TestDriver.h"
-#include "oldisim/Util.h"
+#include "FeedSimDriver.h"
+#include "FeedSimProtocol.h"
 
 #include "DriverNodeRankCmdline.h"
 #include "FeatureGenerator.h"
@@ -39,14 +39,27 @@ static gengetopt_args_info args;
 const int kMaxRequestSize = 8192;
 const int kRecomputeQPSPeriod = 1;  // Reduced from 5 to 1 second for faster feedback
 
+// Simple random string generator (replaces oldisim/Util.h RandomString)
+static std::string RandomString(size_t length) {
+  static const char charset[] =
+      "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  thread_local std::mt19937 rng(std::random_device{}());
+  std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
+  std::string str(length, 0);
+  for (size_t i = 0; i < length; ++i) {
+    str[i] = charset[dist(rng)];
+  }
+  return str;
+}
+
 struct ThreadData {
   std::string random_string;
   double qps_per_thread;
   uint64_t request_delay; // This is per thread
-  oldisim::TestDriver *test_driver;
+  feedsim::TestDriver *test_driver;
   event *recompute_qps_timer;
 
-  // Phase 7: Client-side feature generation
+  // Client-side feature generation
   std::unique_ptr<ranking::FeatureGenerator> feature_generator;
   std::string serialized_request;  // Pre-allocated buffer for serialized request
 };
@@ -57,10 +70,10 @@ void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
                                 void *arg);
 
 // Declarations of handlers
-void ThreadStartup(oldisim::NodeThread &thread,
-                   oldisim::TestDriver &test_driver,
+void ThreadStartup(int thread_id,
+                   feedsim::TestDriver &test_driver,
                    std::vector<ThreadData> &thread_data);
-void MakeRequest(oldisim::NodeThread &thread, oldisim::TestDriver &test_driver,
+void MakeRequest(int thread_id, feedsim::TestDriver &test_driver,
                  std::vector<ThreadData> &thread_data);
 
 void AddRecomputeDelayTimer(ThreadData &this_thread) {
@@ -71,11 +84,12 @@ void AddRecomputeDelayTimer(ThreadData &this_thread) {
 void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
                                 void *arg) {
   ThreadData *this_thread = reinterpret_cast<ThreadData *>(arg);
-  const oldisim::ChildConnectionStats &stats =
-      this_thread->test_driver->GetConnectionStats();
+  const feedsim::DriverStats &stats =
+      this_thread->test_driver->getConnectionStats();
 
   // Get QPS for last stats period
-  double elapsed_secs = (stats.end_time_ - stats.start_time_) / 1000000000.0;
+  uint64_t now = feedsim::getTimeNano();
+  double elapsed_secs = (now - stats.getStartTimeNano()) / 1000000000.0;
   if (elapsed_secs <= 0) {
     AddRecomputeDelayTimer(*this_thread);
     return;
@@ -86,11 +100,8 @@ void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
       ? ranking::kDLRMRequestType
       : ranking::kPageRankRequestType;
 
-  double measured_qps = 0.0;
-  auto it = stats.query_counts_.find(request_type);
-  if (it != stats.query_counts_.end()) {
-    measured_qps = static_cast<double>(it->second) / elapsed_secs;
-  }
+  double measured_qps = static_cast<double>(stats.getQueryCount(request_type))
+                        / elapsed_secs;
 
   // Compute target delay in microseconds
   double target_delay_us = 1000000.0 / this_thread->qps_per_thread;
@@ -117,10 +128,10 @@ void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
   AddRecomputeDelayTimer(*this_thread);
 }
 
-void ThreadStartup(oldisim::NodeThread &thread,
-                   oldisim::TestDriver &test_driver,
+void ThreadStartup(int thread_id,
+                   feedsim::TestDriver &test_driver,
                    std::vector<ThreadData> &thread_data) {
-  ThreadData &this_thread = thread_data[thread.get_thread_num()];
+  ThreadData &this_thread = thread_data[thread_id];
 
   // Initialize random string with random bits
   this_thread.random_string = RandomString(kMaxRequestSize);
@@ -128,7 +139,7 @@ void ThreadStartup(oldisim::NodeThread &thread,
   // Store pointer to test_driver
   this_thread.test_driver = &test_driver;
 
-  // Phase 7: Initialize client-side feature generator if enabled
+  // Initialize client-side feature generator if enabled
   if (args.client_side_features_given) {
     ranking::FeatureGeneratorConfig config;
     config.batch_size = args.client_dlrm_batch_size_arg;
@@ -137,7 +148,7 @@ void ThreadStartup(oldisim::NodeThread &thread,
     config.seed = static_cast<unsigned>(args.client_feature_seed_arg);
 
     this_thread.feature_generator =
-        std::make_unique<ranking::FeatureGenerator>(config, thread.get_thread_num());
+        std::make_unique<ranking::FeatureGenerator>(config, thread_id);
   }
 
   // If user gave QPS target, initialize QPS modulation
@@ -145,7 +156,7 @@ void ThreadStartup(oldisim::NodeThread &thread,
     this_thread.qps_per_thread =
         (static_cast<double>(args.qps_arg)) / args.threads_arg;
     this_thread.recompute_qps_timer = evtimer_new(
-        thread.get_event_base(), RecomputeDelayTimerHandler, &this_thread);
+        test_driver.getEventBase(), RecomputeDelayTimerHandler, &this_thread);
     AddRecomputeDelayTimer(this_thread);
     this_thread.request_delay = 1000000 / this_thread.qps_per_thread;
   } else {
@@ -153,12 +164,12 @@ void ThreadStartup(oldisim::NodeThread &thread,
   }
 }
 
-void MakeRequest(oldisim::NodeThread &thread, oldisim::TestDriver &test_driver,
+void MakeRequest(int thread_id, feedsim::TestDriver &test_driver,
                  std::vector<ThreadData> &thread_data) {
-  ThreadData &this_thread = thread_data[thread.get_thread_num()];
+  ThreadData &this_thread = thread_data[thread_id];
 
   if (args.client_side_features_given) {
-    // Phase 7: Client-side feature generation mode
+    // Client-side feature generation mode
     // Generate features and serialize into RankingRequest
     int batch_size = args.client_dlrm_batch_size_arg;
     int num_inferences = args.client_dlrm_inferences_arg;
@@ -169,7 +180,7 @@ void MakeRequest(oldisim::NodeThread &thread, oldisim::TestDriver &test_driver,
 
     // Create RankingRequest with DLRMFeatures
     ranking::RankingRequest request;
-    request.request_id() = static_cast<int64_t>(thread.get_thread_num());
+    request.request_id() = static_cast<int64_t>(thread_id);
     request.num_inferences() = num_inferences;
 
     // Populate DLRMFeatures
@@ -199,13 +210,13 @@ void MakeRequest(oldisim::NodeThread &thread, oldisim::TestDriver &test_driver,
     buf->coalesce();
 
     // Send request with serialized RankingRequest
-    test_driver.SendRequest(ranking::kDLRMRequestType,
+    test_driver.sendRequest(ranking::kDLRMRequestType,
                             reinterpret_cast<const char*>(buf->data()),
                             buf->length(),
                             this_thread.request_delay);
   } else {
     // Original mode: send random string payload
-    test_driver.SendRequest(ranking::kPageRankRequestType,
+    test_driver.sendRequest(ranking::kPageRankRequestType,
                             this_thread.random_string.c_str(), 3000,
                             this_thread.request_delay);
   }
@@ -214,20 +225,14 @@ void MakeRequest(oldisim::NodeThread &thread, oldisim::TestDriver &test_driver,
 int main(int argc, char **argv) {
   // Parse arguments
   if (cmdline_parser(argc, argv, &args) != 0) {
-    DIE("cmdline_parser failed");
-  }
-
-  // Set logging level
-  for (unsigned int i = 0; i < args.verbose_given; i++) {
-    log_level = (log_level_t)(static_cast<int>(log_level) - 1);
-  }
-  if (args.quiet_given) {
-    log_level = QUIET;
+    std::cerr << "cmdline_parser failed" << std::endl;
+    return 1;
   }
 
   // Check required arguments
   if (!args.server_given) {
-    DIE("--server must be specified.");
+    std::cerr << "--server must be specified." << std::endl;
+    return 1;
   }
 
   auto host_port = ranking::utils::parseHostnameAndPort(args.server_arg);
@@ -235,25 +240,25 @@ int main(int argc, char **argv) {
   // Make storage for thread variables
   std::vector<ThreadData> thread_data(args.threads_arg);
 
-  oldisim::DriverNode driver_node(host_port.first, host_port.second);
+  feedsim::FeedSimDriver driver_node(host_port.first, host_port.second);
 
-  driver_node.SetThreadStartupCallback(
+  driver_node.setThreadStartupCallback(
       std::bind(ThreadStartup, std::placeholders::_1, std::placeholders::_2,
                 std::ref(thread_data)));
-  driver_node.SetMakeRequestCallback(
+  driver_node.setMakeRequestCallback(
       std::bind(MakeRequest, std::placeholders::_1, std::placeholders::_2,
                 std::ref(thread_data)));
 
   // Register only the request type that will be used
   // This ensures stats are collected for a single type, avoiding output parsing issues
   if (args.client_side_features_given) {
-    driver_node.RegisterRequestType(ranking::kDLRMRequestType);
+    driver_node.registerRequestType(ranking::kDLRMRequestType);
   } else {
-    driver_node.RegisterRequestType(ranking::kPageRankRequestType);
+    driver_node.registerRequestType(ranking::kPageRankRequestType);
   }
 
   // Enable remote monitoring
-  driver_node.EnableMonitoring(args.monitor_port_arg);
+  driver_node.enableMonitoring(args.monitor_port_arg);
 
   // Log client-side feature generation mode
   if (args.client_side_features_given) {
@@ -265,7 +270,7 @@ int main(int argc, char **argv) {
     std::cout << "  Seed: " << args.client_feature_seed_arg << std::endl;
   }
 
-  driver_node.Run(args.threads_arg, args.affinity_given, args.connections_arg,
+  driver_node.run(args.threads_arg, args.affinity_given, args.connections_arg,
                   args.depth_arg);
 
   return 0;
