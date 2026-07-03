@@ -152,4 +152,6 @@ struct RankingRequest {
   3: i32 num_inferences = 1;
   4: map<string, string> metadata;
   5: optional StoryBatch story_batch;
+  // Opaque padding to control serialized request size (matches prod size dist).
+  6: optional binary padding;
 }

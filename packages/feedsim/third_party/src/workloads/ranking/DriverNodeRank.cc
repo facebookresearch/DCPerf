@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <random>
@@ -28,6 +29,7 @@
 
 #include "DriverNodeRankCmdline.h"
 #include "FeatureGenerator.h"
+#include "RequestSizeSampler.h"
 #include "RequestTypes.h"
 #include "SilesiaLoader.h"
 
@@ -39,6 +41,9 @@ static gengetopt_args_info args;
 
 // Global Silesia corpus loader (shared across threads, read-only after init)
 static std::unique_ptr<ranking::SilesiaLoader> g_silesia_loader;
+
+// Global request size sampler (loaded from JSON, read-only after init)
+static std::unique_ptr<ranking::RequestSizeSampler> g_req_size_sampler;
 
 const int kMaxRequestSize = 8192;
 const int kRecomputeQPSPeriod = 1;  // Reduced from 5 to 1 second for faster feedback
@@ -69,6 +74,9 @@ struct ThreadData {
 
   // Silesia story generation
   std::mt19937 silesia_rng;
+
+  // Request size distribution sampling
+  std::mt19937 req_size_rng;
 };
 
 // Specific timer handler to recompute inter-request delays for QPS
@@ -103,7 +111,9 @@ void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
   }
 
   // Use the appropriate request type for QPS calculation
-  uint32_t request_type = args.client_side_features_given
+  uint32_t request_type = (args.client_side_features_given ||
+                           args.silesia_dir_given ||
+                           args.req_size_dist_given)
       ? ranking::kDLRMRequestType
       : ranking::kPageRankRequestType;
 
@@ -164,6 +174,12 @@ void ThreadStartup(int thread_id,
         static_cast<unsigned>(std::random_device{}()) + thread_id);
   }
 
+  // Initialize request size sampler RNG per thread
+  if (g_req_size_sampler && g_req_size_sampler->isLoaded()) {
+    this_thread.req_size_rng.seed(
+        static_cast<unsigned>(std::random_device{}()) + 0xDEADBEEF + thread_id);
+  }
+
   // If user gave QPS target, initialize QPS modulation
   if (args.qps_arg != 0) {
     this_thread.qps_per_thread =
@@ -208,15 +224,71 @@ void PopulateStories(ranking::RankingRequest& request,
   request.story_batch() = std::move(batch);
 }
 
+// Fill `request.padding` with random-looking bytes so the serialized
+// RankingRequest reaches `target_size`. Does nothing if the request already
+// equals or exceeds the target. We use Silesia bytes when available
+// (compression-realistic), otherwise a cheap PRNG over a stable buffer.
+static void PadRequestToSize(ranking::RankingRequest& request,
+                             ThreadData& this_thread,
+                             size_t target_size) {
+  // Serialize once to learn the base size.
+  // Use cacheChainLength() so chainLength() is callable.
+  folly::IOBufQueue probe_q(folly::IOBufQueue::cacheChainLength());
+  apache::thrift::CompactSerializer::serialize(request, &probe_q);
+  size_t base_size = probe_q.chainLength();
+
+  if (base_size >= target_size) {
+    return;
+  }
+
+  // Compact protocol encodes binary length as a varint (1-5 bytes for sizes
+  // <= 4GB). Reserve 5 bytes of slack so we don't undershoot.
+  constexpr size_t kVarintSlack = 5;
+  size_t pad_len = target_size - base_size;
+  if (pad_len > kVarintSlack) {
+    pad_len -= kVarintSlack;
+  } else {
+    pad_len = 1;
+  }
+
+  std::string padding;
+  padding.resize(pad_len);
+
+  if (g_silesia_loader && g_silesia_loader->isLoaded()) {
+    // Fill from Silesia snippets so the bytes are compression-realistic.
+    size_t filled = 0;
+    while (filled < pad_len) {
+      const uint8_t* data = nullptr;
+      size_t snippet_size = 0;
+      std::string filename;
+      g_silesia_loader->getRandomSnippet(
+          this_thread.silesia_rng, 1024, 64 * 1024, data, snippet_size,
+          filename);
+      size_t copy_len = std::min(snippet_size, pad_len - filled);
+      std::memcpy(padding.data() + filled, data, copy_len);
+      filled += copy_len;
+    }
+  } else {
+    // No Silesia - cheap PRNG fill (uniformly random bytes).
+    std::uniform_int_distribution<int> byte_dist(0, 255);
+    for (size_t i = 0; i < pad_len; ++i) {
+      padding[i] = static_cast<char>(byte_dist(this_thread.req_size_rng));
+    }
+  }
+
+  request.padding() = std::move(padding);
+}
+
 void MakeRequest(int thread_id, feedsim::TestDriver &test_driver,
                  std::vector<ThreadData> &thread_data) {
   ThreadData &this_thread = thread_data[thread_id];
 
-  bool use_serialized_request =
-      args.client_side_features_given || args.silesia_dir_given;
+  bool use_serialized_request = args.client_side_features_given ||
+                                args.silesia_dir_given ||
+                                args.req_size_dist_given;
 
   if (use_serialized_request) {
-    // Serialized RankingRequest mode (client features and/or stories)
+    // Serialized RankingRequest mode (client features, stories, or padding)
     ranking::RankingRequest request;
     request.request_id() = static_cast<int64_t>(thread_id);
 
@@ -256,6 +328,15 @@ void MakeRequest(int thread_id, feedsim::TestDriver &test_driver,
     // Add Silesia stories if enabled
     if (args.silesia_dir_given) {
       PopulateStories(request, this_thread);
+    }
+
+    // Pad to target size sampled from the production distribution.
+    if (g_req_size_sampler && g_req_size_sampler->isLoaded()) {
+      size_t target =
+          g_req_size_sampler->sample(this_thread.req_size_rng);
+      if (target > 0) {
+        PadRequestToSize(request, this_thread, target);
+      }
     }
 
     // Serialize the request
@@ -307,6 +388,18 @@ int main(int argc, char **argv) {
               << args.story_size_max_arg << " bytes" << std::endl;
   }
 
+  // Load request size distribution if specified
+  if (args.req_size_dist_given) {
+    g_req_size_sampler = std::make_unique<ranking::RequestSizeSampler>();
+    if (!g_req_size_sampler->load(args.req_size_dist_arg, "req_size")) {
+      std::cerr << "Failed to load request size distribution from: "
+                << args.req_size_dist_arg << std::endl;
+      return 1;
+    }
+    std::cout << "Request size distribution loaded from "
+              << args.req_size_dist_arg << std::endl;
+  }
+
   auto host_port = ranking::utils::parseHostnameAndPort(args.server_arg);
 
   // Make storage for thread variables
@@ -323,7 +416,8 @@ int main(int argc, char **argv) {
 
   // Register only the request type that will be used
   // This ensures stats are collected for a single type, avoiding output parsing issues
-  if (args.client_side_features_given || args.silesia_dir_given) {
+  if (args.client_side_features_given || args.silesia_dir_given ||
+      args.req_size_dist_given) {
     driver_node.registerRequestType(ranking::kDLRMRequestType);
   } else {
     driver_node.registerRequestType(ranking::kPageRankRequestType);
