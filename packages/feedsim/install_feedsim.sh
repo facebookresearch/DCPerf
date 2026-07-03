@@ -45,7 +45,7 @@ dnf install -y bc ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \
     zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq \
-    xxhash xxhash-devel unzip liburing-devel
+    xxhash xxhash-devel unzip rsync liburing-devel
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -65,8 +65,33 @@ cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_resp_sizes.json" "${FEED
 cp "${BENCHPRESS_ROOT}/packages/feedsim/rpc_dist.json" "${FEEDSIM_ROOT_SRC}/rpc_dist.json"
 
 msg "Installing third-party dependencies..."
-cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party" "${FEEDSIM_ROOT_SRC}"
-mv "${FEEDSIM_THIRD_PARTY_SRC}/src" "${FEEDSIM_ROOT_SRC}/src"
+# Sync feedsim source code with --delete so re-install (`./benchpress install -f`)
+# actually picks up source changes. The previous `cp -r ... && mv` pattern silently
+# nested into an existing src/ tree on re-install (mv into a non-empty target moves
+# INTO it instead of overwriting), leaving stale source files. rsync with trailing
+# slashes on both src and dst does file-level overwrite + deletion of removed files.
+#
+# CRITICAL --exclude=third_party: subsequent install steps git-clone submodules
+# (cereal, fbthrift, folly, wangle, fizz, mvfst, ...) INTO ${FEEDSIM_ROOT_SRC}/src/
+# third_party/<submod>/. Without this exclude, rsync --delete wipes those submodule
+# directories on every re-install, forcing a re-clone of ~GB of code. The exclude
+# preserves them. The top-level src/third_party/CMakeLists.txt (the only file
+# packages/feedsim/third_party/src/third_party/ actually owns) is copied separately
+# below.
+mkdir -p "${FEEDSIM_ROOT_SRC}/src" "${FEEDSIM_THIRD_PARTY_SRC}"
+rsync -a --delete --exclude=third_party \
+    "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src/" \
+    "${FEEDSIM_ROOT_SRC}/src/"
+mkdir -p "${FEEDSIM_ROOT_SRC}/src/third_party"
+cp -f "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src/third_party/CMakeLists.txt" \
+    "${FEEDSIM_ROOT_SRC}/src/third_party/CMakeLists.txt"
+# Sync the rest of third_party/ (cmake source dir, fbthrift submodule, etc.) WITHOUT
+# --delete because subsequent steps download cmake / boost / libtorch into this dir
+# and we don't want to wipe them on re-install. The --exclude=src keeps src/ out of
+# this rsync — it's already handled above and lives under ${FEEDSIM_ROOT_SRC}/src.
+rsync -a --exclude=src \
+    "${BENCHPRESS_ROOT}/packages/feedsim/third_party/" \
+    "${FEEDSIM_THIRD_PARTY_SRC}/"
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 # Installing cmake-4.0.3
