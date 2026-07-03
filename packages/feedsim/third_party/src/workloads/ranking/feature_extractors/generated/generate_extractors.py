@@ -1795,6 +1795,9 @@ struct CopyContext {{
   // Mock hash tables for deep-call-chain lookups (mimics F14/QuickHash)
   mock_hash::MockHashTable* hashTables;  // array of 4 mock hash tables
   int numHashTables;
+  // Phase 3 (Plan): Story content from Silesia corpus
+  const uint8_t* storyContent = nullptr;
+  int storyContentLength = 0;
 }};
 
 using CopyFn = void(*)(CopyContext*);

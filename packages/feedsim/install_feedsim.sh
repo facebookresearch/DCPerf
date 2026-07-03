@@ -214,6 +214,32 @@ else
 fi
 
 
+# Download Silesia compression corpus for story-based requests (Phase 3)
+SILESIA_DIR="${FEEDSIM_ROOT_SRC}/silesia"
+SILESIA_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-silesia/silesia.tar.gz"
+if ! [ -d "$SILESIA_DIR" ] || [ -z "$(ls -A "$SILESIA_DIR" 2>/dev/null)" ]; then
+    msg "Downloading Silesia corpus..."
+    mkdir -p "$SILESIA_DIR"
+    cd "$SILESIA_DIR" || { msg "[ERROR] cannot cd to $SILESIA_DIR"; exit 1; }
+    if wget -q "$SILESIA_URL" -O silesia.tar.gz 2>/dev/null; then
+        tar -xzf silesia.tar.gz && rm -f silesia.tar.gz
+        msg "Silesia corpus downloaded: $(ls | wc -l) files, $(du -sh . | cut -f1)"
+    else
+        # Fallback to original Silesia host
+        msg "[INFO] GitHub dataset not available, trying original Silesia host..."
+        SILESIA_FALLBACK_URL="https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip"
+        if wget -q "$SILESIA_FALLBACK_URL" -O silesia.zip 2>/dev/null; then
+            unzip -q silesia.zip && rm -f silesia.zip
+            msg "Silesia corpus downloaded: $(ls | wc -l) files, $(du -sh . | cut -f1)"
+        else
+            msg "[WARNING] Silesia download failed — story-based requests will be unavailable"
+        fi
+    fi
+    cd "${FEEDSIM_THIRD_PARTY_SRC}"
+else
+    msg "[SKIPPED] Silesia corpus already present at $SILESIA_DIR"
+fi
+
 # Installing FeedSim
 cd "${FEEDSIM_ROOT_SRC}"
 

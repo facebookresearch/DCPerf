@@ -129,7 +129,9 @@ void FeatureExtractorSuite::initializeFlatDispatch(int seed) {
 void FeatureExtractorSuite::runFlatExtractors(
     int count,
     const std::vector<float>& input_dense,
-    const std::vector<int64_t>& input_sparse) {
+    const std::vector<int64_t>& input_sparse,
+    const uint8_t* story_content,
+    int story_content_length) {
   using namespace dcperf::feature_extractors::generated;
   if (flat_copies_.empty()) return;
 
@@ -145,6 +147,16 @@ void FeatureExtractorSuite::runFlatExtractors(
   ctx.numKeys = static_cast<int>(input_sparse.size());
   ctx.hashTables = flat_hash_tables_;
   ctx.numHashTables = 4;
+  ctx.storyContent = story_content;
+  ctx.storyContentLength = story_content_length;
+
+  // If story content is available, seed structData from it
+  if (story_content && story_content_length > 0) {
+    int len = std::min(story_content_length, flat_struct_size_);
+    for (int i = 0; i < len; ++i) {
+      flat_struct_data_[i] = static_cast<float>(story_content[i]) / 255.0f;
+    }
+  }
 
   for (int i = 0; i < count; ++i) {
     flat_copies_[flat_pos_](&ctx);

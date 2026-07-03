@@ -48,10 +48,14 @@ class FeatureExtractorSuite {
   void initializeFlatDispatch(int seed);
 
   // Run N sequential copy functions from the shuffled flat vector
+  // Optional story content is passed through to CopyContext for
+  // data-dependent feature extraction using Silesia corpus data.
   void runFlatExtractors(
       int count,
       const std::vector<float>& input_dense,
-      const std::vector<int64_t>& input_sparse);
+      const std::vector<int64_t>& input_sparse,
+      const uint8_t* story_content = nullptr,
+      int story_content_length = 0);
 
  private:
   std::vector<std::unique_ptr<FeatureExtractorBase>> extractors_;

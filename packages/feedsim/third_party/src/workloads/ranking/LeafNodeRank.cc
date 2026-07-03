@@ -194,6 +194,10 @@ void ThreadStartup(
     auto graph = params.makeGraphCopy(g_shared_graph);
     this_thread.page_ranker = std::make_unique<ranking::dwarfs::PageRank>(
         std::move(graph), args.cpu_threads_arg, page_rank_seed);
+  }
+
+  // ICacheBuster only for PAGERANK workload (used by PageRank request handlers)
+  if (g_workload_type == WorkloadType::PAGERANK) {
     this_thread.icache_buster =
         std::make_unique<ICacheBuster>(kNumICacheBusterMethods);
   }
@@ -296,8 +300,11 @@ void ThreadStartup(
 
   this_thread.page_ranker = std::make_unique<ranking::dwarfs::PageRank>(
       std::move(graph), args.cpu_threads_arg, page_rank_seed);
-  this_thread.icache_buster =
-      std::make_unique<ICacheBuster>(kNumICacheBusterMethods);
+  // ICacheBuster only for PAGERANK workload
+  if (g_workload_type == WorkloadType::PAGERANK) {
+    this_thread.icache_buster =
+        std::make_unique<ICacheBuster>(kNumICacheBusterMethods);
+  }
   this_thread.pointer_chaser = std::make_unique<search::PointerChase>(
       kPointerChaseSize, pointer_chase_seed);
   this_thread.rng.seed(noderank_seed);
@@ -423,10 +430,78 @@ static int dlrmInferenceServerSideDataGeneration(ThreadData& this_thread,
 }
 #endif
 
+/**
+ * Populate feature inputs from story content bytes.
+ *
+ * Derives dense and sparse features from raw content to make feature
+ * extraction data-dependent on real corpus data rather than random values.
+ *
+ * - Dense features: byte frequency histogram of content (256 bins -> 128 features)
+ * - Sparse features: rolling hash of content bigrams -> embedding table indices
+ * - CopyContext structData: populated from content bytes cast to floats
+ */
+static void populateFromStories(
+    const std::vector<std::string>& story_contents,
+    std::vector<float>& out_dense,
+    std::vector<int64_t>& out_sparse,
+    float* struct_data,
+    int struct_size) {
+  const int num_dense = 128;
+  const int num_sparse = 64;
+  out_dense.resize(num_dense, 0.0f);
+  out_sparse.resize(num_sparse, 0);
+
+  // Byte frequency histogram across all stories -> dense features
+  uint32_t freq[256] = {};
+  size_t total_bytes = 0;
+  for (const auto& content : story_contents) {
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(content.data());
+    size_t len = content.size();
+    for (size_t i = 0; i < len; ++i) {
+      freq[bytes[i]]++;
+    }
+    total_bytes += len;
+  }
+
+  // Map 256 bins to 128 dense features (pair adjacent bins)
+  float inv_total = (total_bytes > 0) ? (1.0f / static_cast<float>(total_bytes)) : 0.0f;
+  for (int i = 0; i < num_dense; ++i) {
+    out_dense[i] = static_cast<float>(freq[2 * i] + freq[2 * i + 1]) * inv_total;
+  }
+
+  // Rolling hash of bigrams -> sparse feature indices
+  int sparse_idx = 0;
+  for (const auto& content : story_contents) {
+    if (sparse_idx >= num_sparse) break;
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(content.data());
+    size_t len = content.size();
+    uint64_t h = 0x5BD1E995ULL;
+    for (size_t i = 0; i + 1 < len && sparse_idx < num_sparse; i += 64) {
+      h = h * 0x9E3779B97F4A7C15ULL;
+      h ^= (static_cast<uint64_t>(bytes[i]) << 8) | bytes[i + 1];
+      h ^= h >> 17;
+      out_sparse[sparse_idx++] = static_cast<int64_t>(h % 50000);
+    }
+  }
+
+  // Fill structData from content bytes (cast to float, normalized)
+  int data_idx = 0;
+  for (const auto& content : story_contents) {
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(content.data());
+    size_t len = content.size();
+    for (size_t i = 0; i < len && data_idx < struct_size; ++i) {
+      struct_data[data_idx++] = static_cast<float>(bytes[i]) / 255.0f;
+    }
+  }
+}
+
 // Run feature extraction pipeline if enabled
 // Uses flat dispatch: all 1.035M copy functions are shuffled into one vector
 // and iterated sequentially. total_calls = num_stories * extractors_per_story.
-static void runFeatureExtraction(ThreadData& this_thread) {
+// If story_contents is non-empty, features are derived from story bytes.
+static void runFeatureExtraction(
+    ThreadData& this_thread,
+    const std::vector<std::string>& story_contents = {}) {
   if (!this_thread.feature_suite || this_thread.feature_suite->size() == 0) {
     return;
   }
@@ -436,18 +511,39 @@ static void runFeatureExtraction(ThreadData& this_thread) {
 
   std::vector<float> input_dense(num_dense);
   std::vector<int64_t> input_sparse(num_sparse);
-  std::uniform_real_distribution<float> dense_dist(0.0f, 1.0f);
-  std::uniform_int_distribution<int64_t> sparse_dist(0, 1000000);
 
-  for (int i = 0; i < num_dense; ++i) {
-    input_dense[i] = dense_dist(this_thread.rng);
-  }
-  for (int i = 0; i < num_sparse; ++i) {
-    input_sparse[i] = sparse_dist(this_thread.rng);
-  }
+  if (!story_contents.empty()) {
+    // Derive features from story content (data-dependent on real corpus)
+    // Use a temporary structData buffer for population
+    std::vector<float> temp_struct(512);
+    populateFromStories(
+        story_contents, input_dense, input_sparse,
+        temp_struct.data(), static_cast<int>(temp_struct.size()));
 
-  this_thread.feature_suite->runFlatExtractors(
-      total_calls, input_dense, input_sparse);
+    // Run extractors with story-derived data and story content pointer
+    // Concatenate story bytes for CopyContext
+    std::vector<uint8_t> all_content;
+    for (const auto& c : story_contents) {
+      all_content.insert(all_content.end(), c.begin(), c.end());
+    }
+    this_thread.feature_suite->runFlatExtractors(
+        total_calls, input_dense, input_sparse,
+        all_content.data(), static_cast<int>(all_content.size()));
+  } else {
+    // Original random data path
+    std::uniform_real_distribution<float> dense_dist(0.0f, 1.0f);
+    std::uniform_int_distribution<int64_t> sparse_dist(0, 1000000);
+
+    for (int i = 0; i < num_dense; ++i) {
+      input_dense[i] = dense_dist(this_thread.rng);
+    }
+    for (int i = 0; i < num_sparse; ++i) {
+      input_sparse[i] = sparse_dist(this_thread.rng);
+    }
+
+    this_thread.feature_suite->runFlatExtractors(
+        total_calls, input_dense, input_sparse);
+  }
 }
 
 /**
@@ -477,8 +573,8 @@ void AsyncPageRankRequestHandler(
   // beyond the handler return for async work.
   auto context_ptr = std::make_shared<feedsim::RequestContext>(std::move(context));
 
-  // Stage 1: ICacheBuster (synchronous, lightweight) - only for PageRank
-  if (g_workload_type == WorkloadType::PAGERANK) {
+  // Stage 1: ICacheBuster (synchronous, adds I-cache pressure) - PAGERANK only
+  if (this_thread.icache_buster) {
     const int min_iterations = std::max(args.min_icache_iterations_arg, 0);
     const int num_iterations =
         static_cast<int>(this_thread.latency_distribution(this_thread.rng)) +
@@ -489,6 +585,9 @@ void AsyncPageRankRequestHandler(
       buster.RunNextMethod();
     }
   }
+
+  // Run feature extraction if enabled
+  runFeatureExtraction(this_thread);
 
   // Stage 2: Ranking workload (CPU-intensive, parallelized)
   // This stage blocks briefly for CPU work, which is acceptable
@@ -664,65 +763,140 @@ void DLRMRequestHandler(
     return;
   }
 
+  // Extract story content from request (Phase 3)
+  std::vector<std::string> story_contents;
+  if (request.story_batch().has_value()) {
+    const auto& batch = request.story_batch().value();
+    const auto& stories = *batch.stories();
+    story_contents.reserve(stories.size());
+    for (const auto& story : stories) {
+      story_contents.push_back(*story.content());
+    }
+  }
+
+  // Run feature extraction if enabled (with story content if available)
+  runFeatureExtraction(this_thread, story_contents);
+
+  // Populate CopyContext structData from story content when available
+  if (!story_contents.empty()) {
+    std::vector<float> story_dense;
+    std::vector<int64_t> story_sparse;
+    std::vector<float> temp_struct(512);
+    populateFromStories(
+        story_contents, story_dense, story_sparse,
+        temp_struct.data(), static_cast<int>(temp_struct.size()));
+  }
+
   int result = 0;
 
-  // Check if client provided features
-  if (request.dlrm_features().has_value()) {
-    const auto& features = request.dlrm_features().value();
-    int batch_size = *features.batch_size();
-    int total_num_inferences = *request.num_inferences();
-
-    // Convert from Thrift types to arrays
-    const auto& dense_vec = *features.dense_features();
-    const auto& sparse_vec = *features.sparse_features();
-
-    // Convert double to float for dense features
-    std::vector<float> dense_floats;
-    dense_floats.reserve(dense_vec.size());
-    for (double d : dense_vec) {
-      dense_floats.push_back(static_cast<float>(d));
-    }
-
-    // Calculate max number of inferences per thread
-    int num_inferences_max =
-        (total_num_inferences + args.cpu_threads_arg - 1)
-        / args.cpu_threads_arg;
-
-    // Run inference with client-provided features
-    std::vector<folly::Future<int>> futures;
-    for (int i = 0; i < args.cpu_threads_arg; i++) {
-      int num_inferences = std::min(num_inferences_max, total_num_inferences);
-      auto f = folly::via(
-          this_thread.cpuThreadPool.get(),
-          [num_inferences, batch_size, &dense_floats, &sparse_vec, &this_thread]() {
-            return this_thread.dlrm_ranker->inferWithFeatures(
-                dense_floats.data(),
-                sparse_vec.data(),
-                batch_size,
-                num_inferences);
-          });
-      futures.push_back(std::move(f));
-      total_num_inferences -= num_inferences;
-      if (total_num_inferences <= 0) break;
-    }
-    auto fs = folly::collect(futures).get();
-    result = std::accumulate(fs.begin(), fs.end(), 0);
-  } else {
-    // Fallback to server-side feature generation
+  // DLRM inference uses server-side feature generation (same CPU work as baseline)
+  // to maintain comparable QPS. Story content influences feature extractors above,
+  // not the DLRM inference inputs.
+  if (this_thread.dlrm_ranker) {
     result = dlrmInferenceServerSideDataGeneration(
         this_thread, *request.num_inferences());
   }
 
-  // Generate response (same as PageRankRequestHandler)
-  auto per_thread_num_objects = args.num_objects_arg / args.srv_io_threads_arg;
-  auto r = ranking::generators::generateRandomRankingResponse(per_thread_num_objects);
-  ranking::RankingResponse resp = r;
+  // Move context into shared_ptr for async lifetime (same pattern as async handler)
+  auto context_ptr = std::make_shared<feedsim::RequestContext>(std::move(context));
 
-  folly::IOBufQueue bufq;
-  apache::thrift::CompactSerializer::serialize(resp, &bufq);
-  auto buf = bufq.move();
+  // Capture values needed for async stages
+  auto random_string = this_thread.random_string;
+  auto srvCPUThreadPool = this_thread.srvCPUThreadPool;
+  auto srvIOThreadPool = this_thread.srvIOThreadPool;
+  auto ioThreadPool = this_thread.ioThreadPool;
+  auto timekeeperPool = this_thread.timekeeperPool;
+  search::PointerChase* pointer_chaser = this_thread.pointer_chaser.get();
 
-  context.sendResponse(buf->data(), buf->length());
+  int io_latency_ms = this_thread.getNextIOLatencyMs();
+  int num_io_stages = args.io_stages_arg;
+  int io_stage_latency_ms = args.io_stage_latency_ms_arg;
+  int srv_io_threads = args.srv_io_threads_arg;
+  int srv_threads = args.srv_threads_arg;
+  int num_objects = args.num_objects_arg;
+  int chase_iterations = args.chase_iterations_arg;
+
+  int total_io_latency_ms = (num_io_stages > 1)
+      ? (num_io_stages * io_stage_latency_ms)
+      : io_latency_ms;
+
+  // Async I/O simulation + compression + pointer chase (matches async handler)
+  auto timekeeper = timekeeperPool->getTimekeeper();
+  folly::futures::sleep(
+      std::chrono::milliseconds(total_io_latency_ms), timekeeper.get())
+      .via(ioThreadPool.get())
+      .thenValue([result, random_string, srvIOThreadPool,
+                  srv_io_threads, num_objects](folly::Unit) {
+        auto compressed = compressPayload(random_string, result);
+        auto per_thread_num_objects = num_objects / srv_io_threads;
+
+        std::vector<folly::Future<int>> compressionFutures;
+        for (int i = 0; i < srv_io_threads; i++) {
+          auto f = folly::via(srvIOThreadPool.get(), [per_thread_num_objects]() {
+            auto resp = ranking::generators::generateRandomRankingResponse(
+                per_thread_num_objects);
+            auto payloadiobufq = serializePayload(resp);
+            auto buf = payloadiobufq.move();
+            const auto compress_length = buf->computeChainDataLength() / 2;
+            size_t total_size = 0;
+            for (auto range : *buf) {
+              if (total_size >= compress_length) break;
+              auto iobuf = folly::IOBuf::copyBuffer(range.data(), range.size());
+              auto c = compressThrift(std::move(iobuf));
+              total_size += range.size();
+            }
+            return 1;
+          });
+          compressionFutures.push_back(std::move(f));
+        }
+        return folly::collectAll(std::move(compressionFutures))
+            .via(srvIOThreadPool.get())
+            .thenValue([result](std::vector<folly::Try<int>> results) {
+              int total = result;
+              for (auto& r : results) {
+                if (r.hasValue()) total += r.value();
+              }
+              return total;
+            });
+      })
+      .thenValue([pointer_chaser, srvCPUThreadPool, srv_threads,
+                  chase_iterations](int prev_result) {
+        auto per_thread_chase_iterations = chase_iterations / srv_threads;
+        std::vector<folly::Future<int>> chaseFutures;
+        for (int i = 0; i < srv_threads; i++) {
+          auto f = folly::via(srvCPUThreadPool.get(),
+              [pointer_chaser, per_thread_chase_iterations]() {
+                pointer_chaser->Chase(per_thread_chase_iterations);
+                return 1;
+              });
+          chaseFutures.push_back(std::move(f));
+        }
+        return folly::collectAll(std::move(chaseFutures))
+            .via(srvCPUThreadPool.get())
+            .thenValue([prev_result](std::vector<folly::Try<int>> results) {
+              int total = prev_result;
+              for (auto& r : results) {
+                if (r.hasValue()) total += r.value();
+              }
+              return total;
+            });
+      })
+      .thenValue([context_ptr, srv_io_threads, num_objects](int final_result) {
+        auto per_thread_num_objects = num_objects / srv_io_threads;
+        auto r = ranking::generators::generateRandomRankingResponse(
+            per_thread_num_objects);
+        ranking::RankingResponse resp = r;
+
+        folly::IOBufQueue bufq;
+        apache::thrift::CompactSerializer::serialize(resp, &bufq);
+        auto buf = bufq.move();
+
+        context_ptr->sendResponse(buf->data(), buf->length());
+      })
+      .thenError(folly::tag_t<std::exception>{}, [context_ptr](const std::exception& e) {
+        std::cerr << "DLRM request handler error: " << e.what() << std::endl;
+        context_ptr->sendResponse(nullptr, 0);
+      });
 }
 #endif // FEEDSIM_USE_DLRM
 
@@ -733,8 +907,8 @@ void PageRankRequestHandler(
   auto& this_thread = thread_data[thread_id];
   search::PointerChase& chaser = *this_thread.pointer_chaser;
 
-  // ICacheBuster stage (only for PageRank mode)
-  if (g_workload_type == WorkloadType::PAGERANK) {
+  // ICacheBuster stage (adds I-cache pressure) - PAGERANK only
+  if (this_thread.icache_buster) {
     const int min_iterations = std::max(args.min_icache_iterations_arg, 0);
     const int num_iterations =
         static_cast<int>(this_thread.latency_distribution(this_thread.rng)) +
@@ -745,6 +919,9 @@ void PageRankRequestHandler(
       buster.RunNextMethod();
     }
   }
+
+  // Run feature extraction if enabled
+  runFeatureExtraction(this_thread);
 
   int result = 0;
 
@@ -1086,15 +1263,15 @@ int main(int argc, char** argv) {
   }
 
 #ifdef FEEDSIM_USE_DLRM
-  // Register DLRM request handler for client-side feature generation
-  if (g_workload_type == WorkloadType::DLRM) {
-    std::cout << "Registering DLRM request handler for client-side features" << std::endl;
-    server.registerQueryCallback(
-        ranking::kDLRMRequestType,
-        [&thread_data](int thread_id, feedsim::RequestContext& context) {
-          return DLRMRequestHandler(thread_id, context, thread_data);
-        });
-  }
+  // Register DLRM request handler for client-side features and/or Silesia stories
+  // Always register when DLRM is compiled in — the handler handles both
+  // DLRM inference and story-only requests gracefully.
+  std::cout << "Registering DLRM request handler (client features / stories)" << std::endl;
+  server.registerQueryCallback(
+      ranking::kDLRMRequestType,
+      [&thread_data](int thread_id, feedsim::RequestContext& context) {
+        return DLRMRequestHandler(thread_id, context, thread_data);
+      });
 #endif
   server.setNumThreads(args.threads_arg);
   server.setThreadPinning(args.noaffinity_given == 0u);
