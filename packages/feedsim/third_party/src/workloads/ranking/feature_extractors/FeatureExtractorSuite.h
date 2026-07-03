@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <random>
@@ -66,13 +67,27 @@ class FeatureExtractorSuite {
   std::vector<int64_t> sparse_buf_a_;
   std::vector<int64_t> sparse_buf_b_;
 
-  // Flat dispatch state
+  // Flat dispatch state. Concurrency contract: a single
+  // FeatureExtractorSuite instance can have runFlatExtractors() called
+  // from multiple threads at once (LeafNodeRank dispatches feature
+  // extraction onto the multi-threaded GlobalCPUThread pool, and
+  // multiple in-flight requests on the same ThreadData share its
+  // suite). The fields below are read-only after initializeFlatDispatch
+  // — the generated extractor code only does `.find()` on tables and
+  // never mutates flat_features_ / flat_copies_ / flat_hash_tables_,
+  // so sharing is safe.
+  //
+  // The previously-member `flat_example_` and shared writes to
+  // `flat_struct_data_` were removed: extractor code calls
+  // `c->example->idScoreLists[i].emplace_back(...)` and `c->structData[i]
+  // += ...`, both racy when shared. runFlatExtractors now uses
+  // thread_local buffers for those, with the per-call copy from
+  // flat_struct_data_ as the read-only template.
   std::vector<dcperf::feature_extractors::generated::CopyFn> flat_copies_;
-  size_t flat_pos_ = 0;
+  std::atomic<size_t> flat_pos_{0};
   std::unique_ptr<float[]> flat_struct_data_;
   int flat_struct_size_ = 0;
   std::unordered_map<int64_t, float> flat_tables_[4];
   dcperf::mock_hash::MockHashTable flat_hash_tables_[4];
-  MockFeatureExample flat_example_;
   std::vector<MockFeature> flat_features_;
 };
