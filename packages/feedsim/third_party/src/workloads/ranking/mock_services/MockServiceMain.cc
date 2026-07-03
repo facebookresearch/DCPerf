@@ -32,6 +32,7 @@
 namespace mock_services {
 extern feedsim::LatencyHistogram g_handler_requested_us;
 extern feedsim::LatencyHistogram g_handler_actual_us;
+extern feedsim::LatencyHistogram g_handler_effective_us;
 } // namespace mock_services
 
 DEFINE_int32(port, 21222, "Port for the mock_services Thrift server.");
@@ -43,6 +44,13 @@ DEFINE_string(
     silesia_dir,
     "",
     "Required. Path to the Silesia corpus directory used for response bytes.");
+
+// Latency-shaping flags are DEFINE'd in MockServiceHandler.cc (where they're
+// consumed) so the mock_service_handler cpp_library links cleanly on its
+// own; declared here so the main-side LOG line can read them.
+DECLARE_int32(latency_cap_us);
+DECLARE_int32(latency_offset_us);
+DECLARE_int32(latency_skip_threshold_us);
 
 int main(int argc, char** argv) {
   folly::Init init(&argc, &argv);
@@ -74,14 +82,19 @@ int main(int argc, char** argv) {
             << " (" << silesia->numFiles() << " files, "
             << (silesia->totalSize() / (1024 * 1024)) << " MB)";
 
-  // Background dump of the per-request requested-vs-actual latency
-  // histograms so we can compare what rpc_dist.json asks for against
-  // what the handler actually delivers (spin/sleep accuracy + response
-  // generation overhead).
+  LOG(INFO) << "latency shaping: cap_us=" << FLAGS_latency_cap_us
+            << " offset_us=" << FLAGS_latency_offset_us
+            << " skip_threshold_us=" << FLAGS_latency_skip_threshold_us;
+
+  // Background dump of the per-request requested-vs-effective-vs-actual
+  // latency histograms so we can compare what rpc_dist.json asks for,
+  // what the cap/offset shaping decides to actually wait for, and what
+  // the handler ends up spending wall-time on.
   std::thread debug_dump_thread([]() {
     while (true) {
       std::this_thread::sleep_for(std::chrono::seconds(10));
       mock_services::g_handler_requested_us.dump("mock_handler_requested");
+      mock_services::g_handler_effective_us.dump("mock_handler_effective");
       mock_services::g_handler_actual_us.dump("mock_handler_actual");
     }
   });
