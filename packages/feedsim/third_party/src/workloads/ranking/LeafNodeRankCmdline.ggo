@@ -91,7 +91,7 @@ option "silesia_dir" - "Path to Silesia corpus directory. When set, server-side 
 option "rpc_dist_path" - "Path to rpc_dist.json. When set, request handlers fan out real RPCs to mock_services." string typestr="filename" default=""
 option "mock_services_host" - "Hostname for mock_services Thrift server." string default="127.0.0.1"
 option "mock_services_port" - "Port for mock_services Thrift server (matches mock_services --port)." int default="21222"
-option "rpc_fanout_scale" - "Scale factor applied to per-session fanout counts. Default 0.025 yields ~94 RPCs/session (vs ~3742 at scale=1.0)." double default="0.025"
+option "rpc_fanout_scale" - "Scale factor applied to per-session fanout counts. Default 0.10 yields ~376 RPCs/session (vs ~3742 at scale=1.0); calibrated to raise outbound RPC volume so Encryption/RPC-Compression/RPC-AsyncIO shares match prod's multifeed_aggregator profile." double default="0.10"
 # Diagnostic / isolation knob. When set, request handlers take the legacy
 # folly::futures::sleep path even if --rpc_dist_path is supplied, and the
 # per-thread MockServicesClient is not constructed (no connection to
