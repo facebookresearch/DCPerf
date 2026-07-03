@@ -258,6 +258,9 @@ target_link_libraries(FeedSimFramework
         Threads::Threads
 )
 
+# Build mock_services standalone Thrift server (Phase 5)
+add_subdirectory(mock_services)
+
 # Build LeafNodeRank binary
 
 add_executable(LeafNodeRank
