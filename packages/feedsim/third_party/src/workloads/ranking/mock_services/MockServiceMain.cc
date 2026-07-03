@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <thread>
@@ -23,9 +24,15 @@
 
 #include "thrift/lib/cpp2/server/ThriftServer.h"
 
+#include "LatencyHistogram.h"
 #include "MockServiceHandler.h"
 
 #include "SilesiaLoader.h"
+
+namespace mock_services {
+extern feedsim::LatencyHistogram g_handler_requested_us;
+extern feedsim::LatencyHistogram g_handler_actual_us;
+} // namespace mock_services
 
 DEFINE_int32(port, 21222, "Port for the mock_services Thrift server.");
 DEFINE_int32(
@@ -66,6 +73,19 @@ int main(int argc, char** argv) {
             << "; Silesia corpus from " << FLAGS_silesia_dir
             << " (" << silesia->numFiles() << " files, "
             << (silesia->totalSize() / (1024 * 1024)) << " MB)";
+
+  // Background dump of the per-request requested-vs-actual latency
+  // histograms so we can compare what rpc_dist.json asks for against
+  // what the handler actually delivers (spin/sleep accuracy + response
+  // generation overhead).
+  std::thread debug_dump_thread([]() {
+    while (true) {
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+      mock_services::g_handler_requested_us.dump("mock_handler_requested");
+      mock_services::g_handler_actual_us.dump("mock_handler_actual");
+    }
+  });
+  debug_dump_thread.detach();
 
   server->serve();
   return 0;
