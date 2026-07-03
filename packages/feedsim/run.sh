@@ -780,6 +780,43 @@ main() {
         echo "MockServicesClient ZSTD: DISABLED (via MOCK_COMPRESS_ZSTD env)"
     fi
 
+    # t43 knobs (2026-06-10): three independent knobs for the bench-vs-prod
+    # Compression / Encryption rebalance. See plan doc t41/t43 progress logs.
+    #
+    # MOCK_ZSTD_FRAC: float in [0.0, 1.0]. Fraction of MockServicesClient
+    # channels that enable per-channel ZSTD. Replaces all-or-nothing
+    # MOCK_COMPRESS_ZSTD with prod-realistic partial enablement (some
+    # downstream services compress, others don't).
+    if [ -n "${MOCK_ZSTD_FRAC:-}" ]; then
+        export MOCK_ZSTD_FRAC
+        echo "MockServicesClient ZSTD fraction: ${MOCK_ZSTD_FRAC} (overrides MOCK_COMPRESS_ZSTD)"
+    fi
+    # FEEDSIM_SERVER_ZSTD: 0 disables server-side response ZSTD
+    # (compressThrift / compressPayload return passthrough). Default 1
+    # preserves current behavior. Use to reduce the bench's Compression
+    # CPU share when over-target.
+    if [ "${FEEDSIM_SERVER_ZSTD:-1}" != "1" ]; then
+        export FEEDSIM_SERVER_ZSTD=0
+        echo "Server-side response ZSTD: DISABLED (FEEDSIM_SERVER_ZSTD=0)"
+    fi
+    # FEEDSIM_DRIVER_TLS: 1 enables TLS on the driver↔server channel
+    # (DriverNodeRank ↔ LeafNodeRank). Server reads FEEDSIM_TLS_CERT /
+    # FEEDSIM_TLS_KEY env vars (set here to the existing bench cert/key
+    # under ${FEEDSIM_ROOT}/certs/); driver reads FEEDSIM_DRIVER_TLS
+    # directly. Closes the bench's Encryption CPU undershoot (prod
+    # 3.3-3.6% vs bench 0.9-1.5% in t41). Independent of FEEDSIM_TLS,
+    # which only covers the mock_services channel.
+    if [ "${FEEDSIM_DRIVER_TLS:-0}" = "1" ]; then
+        export FEEDSIM_DRIVER_TLS=1
+        export FEEDSIM_TLS_CERT="${FEEDSIM_ROOT}/certs/example.crt"
+        export FEEDSIM_TLS_KEY="${FEEDSIM_ROOT}/certs/example.key"
+        if [ ! -r "${FEEDSIM_TLS_CERT}" ] || [ ! -r "${FEEDSIM_TLS_KEY}" ]; then
+            echo "ERROR: FEEDSIM_DRIVER_TLS=1 but ${FEEDSIM_TLS_CERT} or .key not readable" >&2
+            exit 1
+        fi
+        echo "Driver↔Server TLS: ENABLED (cert=${FEEDSIM_TLS_CERT})"
+    fi
+
     # OMP_NUM_THREADS=1: cap PyTorch's OpenMP parallel backend pool to
     # 1 thread. at::set_num_threads(1) only affects libtorch's native
     # parallel backend; OpenMP-backed builds (which Meta's internal

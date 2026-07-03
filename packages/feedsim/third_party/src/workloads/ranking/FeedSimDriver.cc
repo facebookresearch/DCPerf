@@ -11,9 +11,12 @@
 #include <event2/event.h>
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
+#include <event2/bufferevent_ssl.h>
 #include <event2/thread.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <string.h>
@@ -218,6 +221,39 @@ void DriverStats::printStats(uint32_t type, double elapsed_secs) const {
   }
 }
 
+// FEEDSIM_DRIVER_TLS env gate: when "1", every DriverConnection wraps its
+// libevent bufferevent in a TLS bufferevent via OpenSSL. Bench-only — peer
+// cert verification is disabled (SSL_VERIFY_NONE). The SSL_CTX is process-
+// global (one per process), constructed lazily on first use to avoid paying
+// the OpenSSL init cost when TLS is off. Closes the bench's Encryption CPU
+// undershoot on the driver↔server channel (paired with FeedSimServer's
+// FEEDSIM_TLS_CERT / FEEDSIM_TLS_KEY env vars). See t41 progress log.
+namespace {
+SSL_CTX* getDriverSslCtxOrNull() {
+  static SSL_CTX* s_ctx = []() -> SSL_CTX* {
+    const char* env = std::getenv("FEEDSIM_DRIVER_TLS");
+    if (env == nullptr || std::strcmp(env, "1") != 0) {
+      return nullptr;
+    }
+    // OpenSSL >= 1.1 self-initializes; keep these calls as no-ops on
+    // older libs for forward compat.
+    SSL_library_init();
+    SSL_load_error_strings();
+    OpenSSL_add_all_algorithms();
+    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
+    if (ctx == nullptr) {
+      std::cerr << "FeedSimDriver: SSL_CTX_new failed" << std::endl;
+      return nullptr;
+    }
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);
+    std::cout << "FeedSimDriver: TLS enabled via FEEDSIM_DRIVER_TLS=1"
+              << std::endl;
+    return ctx;
+  }();
+  return s_ctx;
+}
+} // namespace
+
 // ─── DriverConnection: one TCP connection to the server ─────────────────────
 
 class DriverConnection {
@@ -238,7 +274,33 @@ class DriverConnection {
       setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
     }
     evutil_make_socket_nonblocking(sockfd);
-    bev_ = bufferevent_socket_new(base, sockfd, BEV_OPT_CLOSE_ON_FREE);
+    SSL_CTX* ssl_ctx = getDriverSslCtxOrNull();
+    if (ssl_ctx != nullptr) {
+      // Per-connection SSL object owned by the bufferevent
+      // (BEV_OPT_CLOSE_ON_FREE will SSL_free it). State is CONNECTING
+      // because we already have an open TCP socket and need libevent to
+      // drive the TLS handshake from the client side.
+      SSL* ssl = SSL_new(ssl_ctx);
+      if (ssl == nullptr) {
+        std::cerr << "Error: SSL_new failed" << std::endl;
+        abort();
+      }
+      bev_ = bufferevent_openssl_socket_new(
+          base,
+          sockfd,
+          ssl,
+          BUFFEREVENT_SSL_CONNECTING,
+          BEV_OPT_CLOSE_ON_FREE);
+      if (bev_ == nullptr) {
+        std::cerr << "Error: bufferevent_openssl_socket_new failed"
+                  << std::endl;
+        SSL_free(ssl);
+        ::close(sockfd);
+        abort();
+      }
+    } else {
+      bev_ = bufferevent_socket_new(base, sockfd, BEV_OPT_CLOSE_ON_FREE);
+    }
   }
 
   ~DriverConnection() {
