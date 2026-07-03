@@ -691,6 +691,13 @@ main() {
     # port 21222. Without --rpc_dist_path, LeafNodeRank falls back to
     # legacy folly::futures::sleep.
     local mock_services_opts="--rpc_dist_path=$rpc_dist_json --mock_services_host=localhost --mock_services_port=21222"
+    # Optional fanout-scale override (defaults to LeafNodeRank's
+    # --rpc_fanout_scale=0.025 when the env var is unset). Lets sweep
+    # scripts A/B test heavier outbound load without rebuilding.
+    if [ -n "${RPC_FANOUT_SCALE:-}" ]; then
+        mock_services_opts="$mock_services_opts --rpc_fanout_scale=${RPC_FANOUT_SCALE}"
+        echo "RPC fanout scale override: $RPC_FANOUT_SCALE"
+    fi
     # Diagnostic / isolation knob. When LEAFNODE_USE_LEGACY_SLEEP=1, force
     # LeafNodeRank to take the legacy folly::futures::sleep path even
     # though --rpc_dist_path is supplied (rpc_dist.json is still resolved
