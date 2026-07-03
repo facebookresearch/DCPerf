@@ -34,7 +34,7 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    sysstat jq unzip xxhash libxxhash-dev libboost-all-dev
+    sysstat jq unzip xxhash libxxhash-dev libboost-all-dev rsync
 
 # Install liburing >= 2.6 from source. Ubuntu's apt-shipped liburing is
 # older than folly's minimum, so folly's io_uring integration links
@@ -70,12 +70,23 @@ chmod u+x "${FEEDSIM_ROOT_SRC}/run.sh"
 chmod u+x "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 
 msg "Installing third-party dependencies..."
-mkdir -p "${FEEDSIM_THIRD_PARTY_SRC}"
-if ! [ -d "${FEEDSIM_ROOT_SRC}/src" ]; then
-    cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src" "${FEEDSIM_ROOT_SRC}/"
-else
-    msg "[SKIPPED] copying feedsim src"
-fi
+# Sync feedsim source with --delete so `./benchpress install -f` actually picks up
+# source changes. The previous "skip if dir exists" guard meant -f never refreshed
+# source files. rsync with trailing slashes does file-level overwrite + deletion of
+# removed files.
+#
+# CRITICAL --exclude=third_party: subsequent install steps git-clone submodules
+# (cereal, fbthrift, folly, wangle, fizz, mvfst, ...) INTO ${FEEDSIM_ROOT_SRC}/src/
+# third_party/<submod>/. Without this exclude, rsync --delete wipes those submodule
+# directories on every re-install, forcing a re-clone. The top-level
+# src/third_party/CMakeLists.txt is copied separately below.
+mkdir -p "${FEEDSIM_ROOT_SRC}/src" "${FEEDSIM_THIRD_PARTY_SRC}"
+rsync -a --delete --exclude=third_party \
+    "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src/" \
+    "${FEEDSIM_ROOT_SRC}/src/"
+mkdir -p "${FEEDSIM_ROOT_SRC}/src/third_party"
+cp -f "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src/third_party/CMakeLists.txt" \
+    "${FEEDSIM_ROOT_SRC}/src/third_party/CMakeLists.txt"
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 # Installing fast_float
