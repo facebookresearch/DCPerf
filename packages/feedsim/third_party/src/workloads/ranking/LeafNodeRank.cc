@@ -294,26 +294,158 @@ static ranking::RankingResponse generateResponse(int num_objects) {
 // destructor chain (was RPC-DataGen=6.3% in the t31v5 profile; this drops
 // it to <0.5%).
 //
-// The 64-slot rotation prevents a single template from getting cache-hot
-// enough to skew the Serialization/Compression bucket measurements. The
-// queryID mutation is racy across threads but acceptable: we only need
+// To match prod's getStoriesUncompressed response_sizes distribution
+// (rpc_dist_v2.json: p50=173 KB, p99=2.7 MB, p99.9=6.5 MB), the pool
+// holds N templates at quantized percentiles. At request time we sample
+// a target_bytes from the inbound.getStoriesUncompressed.response_sizes
+// PercentileSampler and return the template whose pre-measured serialized
+// size is closest to target_bytes. When --rpc_dist_path is unset the pool
+// degrades to a single-size pool keyed off --num_objects (legacy behavior).
+//
+// The queryID mutation is racy across threads but acceptable: we only need
 // wire-shape stability, not value correctness for the benchmark.
 static constexpr size_t kResponseTemplatePoolSize = 64;
 static std::vector<ranking::RankingResponse> g_response_templates;
+// Pre-measured serialized size of each template, in bytes. Used to map a
+// target_bytes (sampled from rpc_dist_v2.json) to the nearest template.
+static std::vector<size_t> g_response_template_sizes;
 static std::atomic<size_t> g_response_template_idx{0};
 
-static void initResponseTemplatePool(int num_objects) {
-  g_response_templates.reserve(kResponseTemplatePoolSize);
-  for (size_t i = 0; i < kResponseTemplatePoolSize; ++i) {
-    g_response_templates.push_back(generateResponse(num_objects));
-  }
+// Pool of per-thread RNGs for response-size sampling (per-thread to avoid
+// shared-state contention; std::mt19937 is not thread-safe).
+static thread_local std::mt19937 g_response_size_rng{
+    std::random_device{}()};
+
+// Helper: measure the serialized size of a RankingResponse via CompactProto.
+// Used at pool init to build the (size → template) lookup table.
+static size_t measureSerializedSize(const ranking::RankingResponse& resp) {
+  folly::IOBufQueue queue;
+  apache::thrift::CompactSerializer::serialize(resp, &queue);
+  auto buf = queue.move();
+  return buf ? buf->computeChainDataLength() : 0;
 }
 
+// Map an integer obj count to an approximate serialized response size.
+// Empirically each RankingObject from the Silesia generator serializes
+// to ~300-500 bytes (4 i64 + 3 F14FastMap + list<Action> + double, with
+// payloadStrMap drawing strings from Silesia). The mapping is rebuilt
+// per-host at pool init by serializing a probe at num_objects=64 and
+// dividing by 64, so platform-specific layout doesn't drift the estimate.
+static size_t g_bytes_per_object_estimate = 400;
+
+static void initResponseTemplatePool(int default_num_objects) {
+  // Probe: build one template at a known num_objects, measure its
+  // serialized size, derive bytes/object. We use 64 objects to amortize
+  // the per-response fixed overhead (queryID, list header, etc).
+  constexpr int kProbeObjects = 64;
+  auto probe = generateResponse(kProbeObjects);
+  size_t probe_bytes = measureSerializedSize(probe);
+  if (probe_bytes > 0) {
+    g_bytes_per_object_estimate =
+        std::max<size_t>(1, probe_bytes / kProbeObjects);
+  }
+  std::cerr << "Response template probe: " << kProbeObjects << " objects → "
+            << probe_bytes << " bytes (" << g_bytes_per_object_estimate
+            << " B/obj)" << std::endl;
+
+  // Choose target sizes for the pool. If the rpc_dist_v2 inbound
+  // getStoriesUncompressed response_sizes sampler is loaded, draw
+  // kResponseTemplatePoolSize percentile samples from it so the pool
+  // covers the full prod distribution shape. Otherwise build a flat
+  // pool at the legacy --num_objects size.
+  std::vector<size_t> target_sizes;
+  target_sizes.reserve(kResponseTemplatePoolSize);
+  bool use_dist = false;
+  if (g_rpc_registry != nullptr) {
+    const auto& sampler = g_rpc_registry->inboundResponseSize(
+        ranking::InboundIdx::kGetStoriesUncompressed);
+    if (sampler.isLoaded()) {
+      use_dist = true;
+      // Deterministic-but-spread sampling: walk equally-spaced percentiles
+      // across [0, 1). Avoids RNG dependency at init time.
+      std::mt19937 init_rng(/*seed=*/0xfeed51);
+      for (size_t i = 0; i < kResponseTemplatePoolSize; ++i) {
+        target_sizes.push_back(
+            std::max<size_t>(1, static_cast<size_t>(sampler.sample(init_rng))));
+      }
+    }
+  }
+  if (!use_dist) {
+    size_t default_size = static_cast<size_t>(default_num_objects) *
+        g_bytes_per_object_estimate;
+    for (size_t i = 0; i < kResponseTemplatePoolSize; ++i) {
+      target_sizes.push_back(default_size);
+    }
+  }
+  // Sort target_sizes so g_response_template_sizes is ascending; lets
+  // pickResponseTemplate binary-search for the nearest match.
+  std::sort(target_sizes.begin(), target_sizes.end());
+
+  g_response_templates.reserve(kResponseTemplatePoolSize);
+  g_response_template_sizes.reserve(kResponseTemplatePoolSize);
+  size_t min_built = SIZE_MAX, max_built = 0, sum_built = 0;
+  for (size_t target : target_sizes) {
+    int n_obj = std::max<int>(
+        1, static_cast<int>(target / g_bytes_per_object_estimate));
+    auto resp = generateResponse(n_obj);
+    size_t actual = measureSerializedSize(resp);
+    g_response_templates.push_back(std::move(resp));
+    g_response_template_sizes.push_back(actual);
+    min_built = std::min(min_built, actual);
+    max_built = std::max(max_built, actual);
+    sum_built += actual;
+  }
+  std::cerr << "Response template pool: " << kResponseTemplatePoolSize
+            << " templates built from "
+            << (use_dist
+                    ? "rpc_dist_v2.inbound.getStoriesUncompressed.response_sizes"
+                    : "fixed --num_objects")
+            << "; serialized bytes min=" << min_built << " mean="
+            << (sum_built / kResponseTemplatePoolSize) << " max=" << max_built
+            << std::endl;
+}
+
+// Picks a response template whose serialized size is closest to a sample
+// drawn from the rpc_dist_v2 response_sizes distribution. Falls back to
+// round-robin when the registry is unset (legacy behavior).
 static ranking::RankingResponse& pickResponseTemplate() {
-  size_t idx = g_response_template_idx.fetch_add(
-      1, std::memory_order_relaxed) % kResponseTemplatePoolSize;
-  ranking::RankingResponse& resp = g_response_templates[idx];
-  resp.queryID() = static_cast<int64_t>(idx);
+  size_t pool_idx;
+  if (g_rpc_registry != nullptr) {
+    const auto& sampler = g_rpc_registry->inboundResponseSize(
+        ranking::InboundIdx::kGetStoriesUncompressed);
+    if (sampler.isLoaded()) {
+      size_t target =
+          static_cast<size_t>(sampler.sample(g_response_size_rng));
+      // Binary search for the template with serialized size closest to
+      // target. g_response_template_sizes is sorted ascending.
+      auto it = std::lower_bound(
+          g_response_template_sizes.begin(),
+          g_response_template_sizes.end(),
+          target);
+      if (it == g_response_template_sizes.end()) {
+        pool_idx = g_response_template_sizes.size() - 1;
+      } else if (it == g_response_template_sizes.begin()) {
+        pool_idx = 0;
+      } else {
+        // Pick the closer of (*it) or (*(it - 1))
+        size_t hi_diff = *it - target;
+        size_t lo_diff = target - *(it - 1);
+        pool_idx = (lo_diff < hi_diff)
+            ? static_cast<size_t>((it - 1) - g_response_template_sizes.begin())
+            : static_cast<size_t>(it - g_response_template_sizes.begin());
+      }
+    } else {
+      pool_idx = g_response_template_idx.fetch_add(
+                     1, std::memory_order_relaxed) %
+          kResponseTemplatePoolSize;
+    }
+  } else {
+    pool_idx = g_response_template_idx.fetch_add(
+                   1, std::memory_order_relaxed) %
+        kResponseTemplatePoolSize;
+  }
+  ranking::RankingResponse& resp = g_response_templates[pool_idx];
+  resp.queryID() = static_cast<int64_t>(pool_idx);
   return resp;
 }
 
@@ -2411,15 +2543,6 @@ int main(int argc, char** argv) {
               << std::endl;
   }
 
-  // Pre-build the response template pool now that generateResponse is wired
-  // (either Silesia or xor128). Each handler grabs a template by index +
-  // mutates queryID, eliminating the per-request construct+destruct chain
-  // that was 6.3% of total CPU (RPC-DataGen) in the t31v5 profile.
-  initResponseTemplatePool(args.num_objects_arg);
-  std::cout << "Response template pool: " << kResponseTemplatePoolSize
-            << " pre-built " << args.num_objects_arg
-            << "-object RankingResponse instances" << std::endl;
-
   // Phase 5: load rpc_dist.json and instantiate the RpcDistRegistry. When
   // --rpc_dist_path is empty (default) OR --use_legacy_sleep is set, the
   // legacy folly::futures::sleep I/O simulation is used everywhere --
@@ -2434,6 +2557,9 @@ int main(int argc, char** argv) {
   // every ThreadStartup skip MockServicesClient construction (gate at
   // `rpc_registry != nullptr`) and simulateIoOrFanout fall through to
   // folly::futures::sleep (gate at `mock_client != nullptr`).
+  //
+  // NOTE: registry is loaded BEFORE initResponseTemplatePool so the
+  // response-size distribution sampler can shape the template pool.
   if (args.use_legacy_sleep_flag) {
     std::cout << "RPC fanout: disabled (--use_legacy_sleep override);"
               << " using legacy folly::futures::sleep" << std::endl;
@@ -2458,6 +2584,14 @@ int main(int argc, char** argv) {
     std::cout << "RPC fanout: disabled (no --rpc_dist_path); using legacy"
               << " folly::futures::sleep" << std::endl;
   }
+
+  // Pre-build the response template pool now that generateResponse is wired
+  // (either Silesia or xor128) AND g_rpc_registry is loaded (so the pool
+  // can shape itself to the response_sizes distribution). Each handler
+  // grabs a template by index + mutates queryID, eliminating the
+  // per-request construct+destruct chain that was 6.3% of total CPU
+  // (RPC-DataGen) in the t31v5 profile.
+  initResponseTemplatePool(args.num_objects_arg);
 
   int fake_argc = 1;
   char* fake_argv[2] = {const_cast<char*>("./LeafNodeRank"), nullptr};
