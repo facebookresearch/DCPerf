@@ -37,8 +37,13 @@ namespace {
 // LeafNodeRank uses gengetopt (not gflags) for CLI parsing, so we cannot add
 // CLI flags here. Read knobs from env vars instead. Set MOCK_TLS=1 to use
 // AsyncSSLSocket (with ALPN "rs" so the server routes the connection into
-// the Rocket transport). Set MOCK_COMPRESS_ZSTD=0 to disable per-channel
-// ZSTD negotiation (default on).
+// the Rocket transport). MOCK_ZSTD_FRAC controls per-channel ZSTD compression:
+// set to a float in [0.0, 1.0] to enable ZSTD on that fraction of the
+// MockServicesClient instances (each leaf builds one client per SREventBase,
+// ~88-176 per process). Fractional enablement lets us match prod's partial
+// downstream-service compression footprint instead of all-or-nothing.
+// MOCK_COMPRESS_ZSTD remains supported for backwards compat: =1 maps to
+// frac=1.0, =0 maps to frac=0.0. Default if both unset: frac=1.0.
 bool envBoolTrue(const char* name, bool default_value) {
   const char* v = std::getenv(name);
   if (v == nullptr) {
@@ -47,6 +52,41 @@ bool envBoolTrue(const char* name, bool default_value) {
   return std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 ||
       std::strcmp(v, "TRUE") == 0;
 }
+double envFloat(const char* name, double default_value) {
+  const char* v = std::getenv(name);
+  if (v == nullptr) {
+    return default_value;
+  }
+  try {
+    double parsed = std::stod(v);
+    if (parsed < 0.0) {
+      return 0.0;
+    }
+    if (parsed > 1.0) {
+      return 1.0;
+    }
+    return parsed;
+  } catch (const std::exception&) {
+    return default_value;
+  }
+}
+// Resolve the effective ZSTD fraction once per process. MOCK_ZSTD_FRAC wins
+// when set; otherwise fall back to legacy MOCK_COMPRESS_ZSTD; otherwise 1.0.
+double resolveZstdFraction() {
+  const char* frac_env = std::getenv("MOCK_ZSTD_FRAC");
+  if (frac_env != nullptr) {
+    return envFloat("MOCK_ZSTD_FRAC", 1.0);
+  }
+  const char* legacy = std::getenv("MOCK_COMPRESS_ZSTD");
+  if (legacy != nullptr) {
+    return envBoolTrue("MOCK_COMPRESS_ZSTD", true) ? 1.0 : 0.0;
+  }
+  return 1.0;
+}
+// Process-global construction counter assigns each new MockServicesClient a
+// monotonic index. The index modulo 100 vs (frac * 100) gives a deterministic
+// per-instance decision: e.g. frac=0.5 -> every other client gets ZSTD.
+std::atomic<std::size_t> g_mock_client_idx{0};
 } // namespace
 
 namespace ranking {
@@ -123,7 +163,20 @@ MockServicesClient::MockServicesClient(
   // runInEventBaseThreadAndWait so this constructor remains usable from
   // any thread (typically the main thread during ThreadStartup).
   const bool use_tls = envBoolTrue("MOCK_TLS", false);
-  const bool use_zstd = envBoolTrue("MOCK_COMPRESS_ZSTD", true);
+  // Per-channel ZSTD fraction: read MOCK_ZSTD_FRAC once per process; each
+  // new MockServicesClient gets a monotonic index and decides ZSTD on/off
+  // deterministically. This lets us match prod's partial downstream-service
+  // compression footprint (some services compress, others don't) instead of
+  // the previous all-or-nothing knob. See t41 progress log + plan doc for
+  // bench-vs-prod hot-func gap analysis that motivated this knob.
+  static const double kZstdFrac = resolveZstdFraction();
+  const std::size_t my_idx =
+      g_mock_client_idx.fetch_add(1, std::memory_order_relaxed);
+  const int frac_bucket = static_cast<int>(kZstdFrac * 100);
+  const bool use_zstd = (my_idx % 100) < static_cast<std::size_t>(frac_bucket);
+  LOG_FIRST_N(INFO, 1) << "MockServicesClient: ZSTD fraction = " << kZstdFrac
+                       << " (per-channel deterministic enable, "
+                       << frac_bucket << " of every 100 channels)";
   evb_->runInEventBaseThreadAndWait([this, &host, port, use_tls, use_zstd]() {
     folly::SocketAddress addr(host, port, /*allowNameLookup=*/true);
     folly::AsyncSocket::UniquePtr socket;
