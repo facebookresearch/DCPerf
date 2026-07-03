@@ -25,6 +25,16 @@ create_breakdown_csv() {
 
     local csv_file="${folder_path}/${breakdown_file_name}"
 
+    # Idempotent: if the file already exists, leave it alone. Multi-instance
+    # workloads (e.g. feedsim run-feedsim-multi.sh) have several processes
+    # racing to call create_breakdown_csv concurrently — truncating after the
+    # first writer would silently drop entries already logged by the earlier
+    # instance. benchpress's copymove hook (is_move: true) clears the file
+    # between iterations, so stale data is not a risk.
+    if [ -f "$csv_file" ]; then
+        return 0
+    fi
+
     # Create CSV file with headers
     if echo "operation_name,PID,timestamp_type,timestamp,sub_operation_name" > "$csv_file"; then
         echo "Created breakdown CSV file: $csv_file"

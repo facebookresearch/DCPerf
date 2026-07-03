@@ -574,6 +574,12 @@ main() {
     fi
 
     create_breakdown_csv "$BREAKDOWN_FOLDER"
+    # Phase timeline (per-instance, shared CSV in $BREAKDOWN_FOLDER):
+    #   preprocessing   = run.sh start → driver launch (server bring-up, graph/model load, warmup)
+    #   main_benchmark  = the experiment_time window (logged by search_qps.sh around `sleep $experiment_time`)
+    #   postprocessing  = driver exit → run.sh exit (queue drain, leaf shutdown)
+    # perfpub reads only main_benchmark entries by default; pre/post are informational.
+    log_preprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
     set -u  # Enable unbound variables check from here onwards
 
@@ -822,6 +828,9 @@ main() {
         no_retry_args="-N"
     fi
 
+    # Preprocessing complete; search_qps.sh will own the main_benchmark phase.
+    log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
+
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
         # shellcheck disable=SC2086
@@ -876,8 +885,10 @@ main() {
         benchreps_tell_state "after fixed_qps_exp"
     fi
 
+    log_postprocessing_start "$BREAKDOWN_FOLDER" "$$"
     sleep "$queue_drain_time" # wait for queue to drain
     kill -SIGINT $LEAF_PID || true > /dev/null # SIGINT so exits cleanly
+    log_postprocessing_end "$BREAKDOWN_FOLDER" "$$"
 }
 
 main "$@"
