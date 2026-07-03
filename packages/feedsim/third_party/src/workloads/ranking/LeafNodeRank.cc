@@ -722,6 +722,27 @@ static feedsim::LatencyHistogram g_fanout_total_us;
 static feedsim::LatencyHistogram g_dispatch_us;
 static feedsim::LatencyHistogram g_sampled_lat_us;
 
+// Per-request bound on how many outbound RPCs are queued onto the
+// MockServicesClient EventBase at once. The pre-window code dumped all
+// ~376 RPCs (at scale=0.10) onto one EB simultaneously; that produced
+// dispatch_per_rpc averages ~500ms even though mock_handler_actual was
+// ~4ms — pure EB queue depth. window(K) issues K up-front and then
+// refills as each completes, capping per-request EB pressure.
+//
+// 32 was picked to be small enough to keep the EB queue shallow (each
+// in-flight RPC ~5-200ms means the queue completes in 50-300ms) while
+// still amortizing the per-RPC overhead of the window machinery.
+static constexpr size_t kOutboundFanoutWindow = 32;
+
+namespace {
+struct FanoutSpec {
+  ranking::MethodIdx method;
+  int32_t lat_us;
+  std::string req_payload;  // pre-built so the windowed lambda
+                            // doesn't need td.rpc_rng/silesia
+};
+} // namespace
+
 static folly::Future<int> issueOutboundFanout(
     ThreadData& td, double scale) {
   if (td.mock_client == nullptr || td.rpc_registry == nullptr) {
@@ -729,11 +750,12 @@ static folly::Future<int> issueOutboundFanout(
     return folly::makeFuture<int>(0);
   }
 
-  uint64_t fanout_start_us = feedsim::nowUs();
-
-  std::vector<folly::Future<int>> futs;
-  futs.reserve(128);
-
+  // Build the spec list up-front on the dispatcher thread. Sampling
+  // td.rpc_rng / building Silesia-padded request bodies happens here
+  // (single-threaded), so the windowed lambda can be invoked from any
+  // SREventBase worker without racing on the per-thread RNG.
+  std::vector<FanoutSpec> specs;
+  specs.reserve(128);
   for (size_t i = 0; i < ranking::kNumMethods; ++i) {
     auto m = static_cast<ranking::MethodIdx>(i);
     // Round to the nearest integer call count and skip methods that don't
@@ -762,34 +784,49 @@ static folly::Future<int> issueOutboundFanout(
       {
         std::lock_guard<std::mutex> lock(td.rpc_rng_mutex);
         req_size = req_sampler.sample(td.rpc_rng);
-        resp_size = static_cast<uint32_t>(resp_sampler.sample(td.rpc_rng));
-        lat_us = static_cast<int32_t>(lat_sampler.sampleI64(td.rpc_rng));
+        resp_size =
+          static_cast<uint32_t>(resp_sampler.sample(td.rpc_rng));
+        lat_us =
+          static_cast<int32_t>(lat_sampler.sampleI64(td.rpc_rng));
         req = buildFanoutRequest(
             req_size, resp_size, td.rpc_silesia, td.rpc_rng);
       }
       g_sampled_lat_us.record(static_cast<uint64_t>(std::max(0, lat_us)));
-
-      uint64_t dispatch_start_us = feedsim::nowUs();
-      futs.push_back(td.mock_client
-                         ->dispatchByEnum(m, req, lat_us)
-                         .via(td.srEventBasePool.get())
-                         .thenValue([dispatch_start_us](std::string&&) {
-                           g_dispatch_us.record(
-                               feedsim::nowUs() - dispatch_start_us);
-                           return 1;
-                         })
-                         .thenError(
-                             folly::tag_t<std::exception>{},
-                             [dispatch_start_us](const std::exception&) {
-                               g_dispatch_us.record(
-                                   feedsim::nowUs() - dispatch_start_us);
-                               return 0;
-                             }));
+      specs.push_back(FanoutSpec{m, lat_us, std::move(req)});
     }
   }
 
+  uint64_t fanout_start_us = feedsim::nowUs();
+  auto* mock_client = td.mock_client.get();
+  auto* srEvbPool = td.srEventBasePool.get();
+
+  // folly::window(executor, items, fn, K): issues fn(item) for the
+  // first K items; as each returned Future completes, issues the next
+  // item's fn(). Bounded concurrency K avoids burst-queueing the
+  // entire fanout onto one EB at once.
+  auto futs = folly::window(
+      srEvbPool,
+      std::move(specs),
+      [mock_client, srEvbPool](FanoutSpec spec) {
+        uint64_t dispatch_start_us = feedsim::nowUs();
+        return mock_client
+            ->dispatchByEnum(spec.method, spec.req_payload, spec.lat_us)
+            .via(srEvbPool)
+            .thenValue([dispatch_start_us](std::string&&) {
+              g_dispatch_us.record(feedsim::nowUs() - dispatch_start_us);
+              return 1;
+            })
+            .thenError(
+                folly::tag_t<std::exception>{},
+                [dispatch_start_us](const std::exception&) {
+                  g_dispatch_us.record(feedsim::nowUs() - dispatch_start_us);
+                  return 0;
+                });
+      },
+      kOutboundFanoutWindow);
+
   return folly::collectAll(std::move(futs))
-      .via(td.srEventBasePool.get())
+      .via(srEvbPool)
       .thenValue([fanout_start_us](std::vector<folly::Try<int>> results) {
         g_fanout_total_us.record(feedsim::nowUs() - fanout_start_us);
         int total = 0;
