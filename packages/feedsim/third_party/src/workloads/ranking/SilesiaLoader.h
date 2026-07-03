@@ -177,6 +177,8 @@ class SilesiaLoader {
   size_t numFiles() const { return files_.size(); }
   size_t totalSize() const { return total_size_; }
   bool isLoaded() const { return !files_.empty(); }
+  // Read-only accessor used by Silesia-backed response generators.
+  const MappedFile& fileAt(size_t idx) const { return files_[idx]; }
 
  private:
   std::vector<MappedFile> files_;

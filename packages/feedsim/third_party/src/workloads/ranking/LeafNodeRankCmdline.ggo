@@ -73,3 +73,8 @@ option "feature_extractors" - "Enable feature extraction pipeline before ranking
 option "feature_complexity" - "Complexity level for feature extractors (1-10). Higher values increase data intensity." int default="5"
 option "num_stories" - "Number of stories to process per request. Each story runs a random subset of extractors." int default="100"
 option "extractors_per_story" - "Number of extractors to randomly select per story." int default="50"
+
+# Server-side response data source. When set, the response generator slices
+# bytes from Silesia files instead of running xor128 RNG. Removes the
+# ~15% of CPU that response generation otherwise burns on RNG.
+option "silesia_dir" - "Path to Silesia corpus directory. When set, server-side response generation uses Silesia bytes instead of RNG." string typestr="directory" optional
