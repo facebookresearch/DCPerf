@@ -185,7 +185,16 @@ class IntelPerfSpect(Monitor):
             self.collect_output_path,
         ]
         self.proc = subprocess.Popen(
-            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8"
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            # Run in its own process group so Monitor.terminate() can killpg()
+            # both the bash wrapper and its perf-stat child cleanly. Without
+            # this, SIGINT to the bash PID alone leaves perf-stat orphaned
+            # and parent .wait() hangs (root cause of the t29/t32 teardown
+            # hang on fb_chef_off_turbo_on + perf hook combo).
+            start_new_session=True,
         )
         super(IntelPerfSpect, self).run()
 
@@ -266,7 +275,12 @@ class IntelPerfSpect3(Monitor):
             self.collect_output_path,
         ]
         self.proc = subprocess.Popen(
-            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8"
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            # Process-group isolation for clean teardown (see IntelPerfSpect).
+            start_new_session=True,
         )
         super(IntelPerfSpect3, self).run()
 
@@ -329,7 +343,14 @@ class BasePerfUtil(Monitor):
         cmd = [perf_collect_script]
         if self.interval is not None:
             cmd.append(str(self.interval))
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, encoding="utf-8")
+        self.proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            encoding="utf-8",
+            # Process-group isolation for clean teardown — Monitor.terminate
+            # killpg()'s this so perf stat + bash wrapper both die together.
+            start_new_session=True,
+        )
         super(BasePerfUtil, self).run()
 
     def gen_csv(self):
@@ -494,6 +515,8 @@ class ARMPerfUtil(Monitor):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             encoding="utf-8",
+            # Process-group isolation for clean teardown.
+            start_new_session=True,
         )
         super(ARMPerfUtil, self).run()
 

@@ -93,5 +93,11 @@ class PerfStat(Monitor):
             "--log-fd",
             "1",
         ]
-        self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, encoding="utf-8")
+        self.proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            encoding="utf-8",
+            # Process-group isolation for clean teardown.
+            start_new_session=True,
+        )
         super(PerfStat, self).run()
