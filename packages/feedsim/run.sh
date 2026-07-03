@@ -719,6 +719,16 @@ main() {
         mock_services_opts="$mock_services_opts --use_legacy_sleep"
         echo "RPC fanout: forced OFF via LEAFNODE_USE_LEGACY_SLEEP=1 (legacy sleep path)"
     fi
+    # t25 mitigation knob: per-MockServicesClient keepalive ping. When
+    # MOCK_KEEPALIVE_INTERVAL_MS is set and > 0, each channel issues a
+    # 1-byte getStatus() probe every N ms to defeat the cold-channel
+    # anti-pattern observed at low QPS (BGM saw 14x p95 cliff at q=5).
+    # Recommended starting value: 150-500 ms. 0 / unset = disabled
+    # (anti-pattern stays observable).
+    if [ -n "${MOCK_KEEPALIVE_INTERVAL_MS:-}" ] && [ "${MOCK_KEEPALIVE_INTERVAL_MS}" != "0" ]; then
+        mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${MOCK_KEEPALIVE_INTERVAL_MS}"
+        echo "MockServicesClient keepalive: ENABLED (interval=${MOCK_KEEPALIVE_INTERVAL_MS} ms)"
+    fi
 
     # OMP_NUM_THREADS=1: cap PyTorch's OpenMP parallel backend pool to
     # 1 thread. at::set_num_threads(1) only affects libtorch's native
