@@ -688,10 +688,13 @@ main() {
     echo "rpc_dist.json: ENABLED (file=$rpc_dist_json)"
 
     # Phase 5-B mock_services fanout. Point LeafNodeRank at the colocated
-    # mock_services Thrift server orchestrated by run-feedsim-multi.sh on
-    # port 21222. Without --rpc_dist_path, LeafNodeRank falls back to
-    # legacy folly::futures::sleep.
-    local mock_services_opts="--rpc_dist_path=$rpc_dist_json --mock_services_host=localhost --mock_services_port=21222"
+    # mock_services Thrift server orchestrated by run-feedsim-multi.sh.
+    # MOCK_SERVICES_PORT is set per-instance (21222 + inst_id) so each
+    # feedsim instance talks to its OWN mock_services, eliminating
+    # cross-instance queue contention. Defaults to 21222 for back-compat
+    # with single-instance manual runs.
+    local mock_port="${MOCK_SERVICES_PORT:-21222}"
+    local mock_services_opts="--rpc_dist_path=$rpc_dist_json --mock_services_host=localhost --mock_services_port=${mock_port}"
     # Optional fanout-scale override (defaults to LeafNodeRank's
     # --rpc_fanout_scale=0.025 when the env var is unset). Lets sweep
     # scripts A/B test heavier outbound load without rebuilding.
