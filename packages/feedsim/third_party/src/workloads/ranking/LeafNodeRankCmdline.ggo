@@ -74,6 +74,8 @@ option "feature_extractors" - "Enable feature extraction pipeline before ranking
 option "feature_complexity" - "Complexity level for feature extractors (1-10). Higher values increase data intensity." int default="5"
 option "num_stories" - "Number of stories to process per request. Each story runs a random subset of extractors." int default="100"
 option "extractors_per_story" - "Number of extractors to randomly select per story." int default="50"
+option "story_processors_per_story" - "Number of story-processor pipeline passes per story (0 = disable story-processor module). Mirrors prod multifeed's scoring + filter + blend + serdes + topK pass density." int default="0"
+option "stories_per_processor_pass" - "Number of MockStories per story-processor pipeline pass." int default="50"
 
 # Server-side response data source. When set, the response generator slices
 # bytes from Silesia files instead of running xor128 RNG. Removes the

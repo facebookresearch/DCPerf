@@ -743,6 +743,8 @@
     - '--feature-complexity={feature_complexity}'
     - '--num-stories={num_stories}'
     - '--extractors-per-story={extractors_per_story}'
+    - '--story-processors-per-story={story_processors_per_story}'
+    - '--stories-per-processor-pass={stories_per_processor_pass}'
     - '--silesia-dir={silesia_dir}'
     - '--stories-per-request={stories_per_request}'
     - '{extra_args}'
@@ -752,10 +754,10 @@
     - 'io_mean=200'
     - 'workload=dlrm'
     - 'dlrm_model=models/dlrm_small.pt'
-    # 64 matches t29 baseline (was 256, which is 4x oversized vs t29). Combined
-    # with dlrm_inferences=1 the per-request DLRM CPU drops further toward
-    # prod multifeed's Ranking-Prediction share (~6%).
-    - 'dlrm_batch_size=64'
+    # 32: half of t29 baseline 64. t32 BGM still showed Ranking-Prediction
+    # at 17.8% vs prod 5.9% with batch=64 — halving the batch ≈ halves the
+    # per-inference DLRM compute and brings it closer to prod's share.
+    - 'dlrm_batch_size=32'
     - 'dlrm_threads=1'
     - 'dlrm_inferences=1'
     - 'client_side_features=0'
@@ -765,13 +767,17 @@
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
     - 'feature_complexity=5'
-    # 400 x 400 = 160K extractor calls/req. Matches the t29 BGM/CPL/GRC
-    # search_qps validation that converged cleanly at 700ms p95 SLA. The
-    # earlier 1800x50 tuning came from feedsim_autoscale_dlrm_mini (fixed
-    # QPS, no search) and produces queueing collapse under search_qps.
-    # 5K calls/req (100x50) is too few to surface FeatureExtraction CPU.
+    # 400 x 280 = 112K extractor calls/req. Combined with the scaled-up
+    # story-processor pipeline (below) this matches prod's FE:story CPU
+    # ratio of ~1.3:1 (multifeed: FE 29%, story 22% on BGM Strobelight).
     - 'num_stories=400'
-    - 'extractors_per_story=400'
+    - 'extractors_per_story=280'
+    # Story-processor pipeline scaled 8x from t32 first attempt (was
+    # 1 pass/story * 25 stories/pass = 25 cmpns/story → 1.1% Ranking-Story
+    # on BGM, vs prod 9.3%). Bumped to 2 passes * 100 stories = 200
+    # comparisons/story, target ~9% Ranking-Story share.
+    - 'story_processors_per_story=2'
+    - 'stories_per_processor_pass=100'
     - 'silesia_dir=silesia'
     - 'stories_per_request=10'
     - 'extra_args='

@@ -184,6 +184,46 @@ set_source_files_properties(
     PROPERTIES COMPILE_FLAGS "${GENERATED_EXTRA_FLAGS}"
 )
 
+# Story Processors library — pipeline mock for prod multifeed's
+# scoring + filter + blend + thrift-serdes + topK passes (separate
+# from feature extractors; their workloads are substantially distinct
+# per the t31 prod-vs-mock analysis).
+add_library(storyProcessors STATIC
+    story_processors/StoryProcessorBase.h
+    story_processors/StoryPrimitives.h
+    story_processors/ScoringPassProcessor.cpp
+    story_processors/ScoringPassProcessor.h
+    story_processors/FilteringPassProcessor.cpp
+    story_processors/FilteringPassProcessor.h
+    story_processors/BlendingPassProcessor.cpp
+    story_processors/BlendingPassProcessor.h
+    story_processors/ThriftSerdesProcessor.cpp
+    story_processors/ThriftSerdesProcessor.h
+    story_processors/TopKProcessor.cpp
+    story_processors/TopKProcessor.h
+    story_processors/StoryProcessorSuite.cpp
+    story_processors/StoryProcessorSuite.h
+)
+add_dependencies(storyProcessors folly)
+target_include_directories(storyProcessors
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/story_processors
+    PRIVATE
+        ${FOLLY_INCLUDE_DIR}
+        ${GLOG_INCLUDE_DIR}
+)
+target_link_libraries(storyProcessors
+    PRIVATE
+        ${FOLLY_LIBRARIES}
+        glog::glog
+)
+target_compile_options(storyProcessors PRIVATE
+    -fno-omit-frame-pointer
+    ${FEEDSIM_MCMODEL_FLAG}
+    -fno-plt
+)
+
 # DLRM support (optional, requires LibTorch)
 option(FEEDSIM_USE_DLRM "Enable DLRM workload with LibTorch" OFF)
 
@@ -294,6 +334,7 @@ set(LEAF_NODE_RANK_LIBS
     leafNodeRankcmdline
     rankingDwarfs
     featureExtractors
+    storyProcessors
     icachebuster
     PointerChaser
     ${FOLLY_LIBRARIES}
