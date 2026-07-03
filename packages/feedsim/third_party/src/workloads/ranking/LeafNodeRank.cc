@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -27,6 +28,7 @@
 
 #include <folly/Range.h>
 #include <folly/compression/Compression.h>
+#include <folly/container/F14Map.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 
 // ManagedCompression is the documented Meta standard for application-level
@@ -48,6 +50,8 @@
 #include <folly/futures/Future.h>
 #include <folly/futures/Promise.h>
 #include <folly/init/Init.h>
+#include <folly/io/async/EventBase.h>
+#include <folly/io/async/EventBaseManager.h>
 #include <folly/system/HardwareConcurrency.h>
 
 #include <thrift/lib/cpp2/protocol/CompactProtocol.h>
@@ -104,6 +108,30 @@ enum class IOLatencyDistType {
   LOGNORMAL    // Lognormal distribution (models real-world service latencies)
 };
 
+// Phase 6: per-session bookkeeping kept in a per-RANKER-thread sharded
+// map keyed by query_id. The driver mints query_id = (thread_id << 32) |
+// session_counter so all 4-6 inbound RPCs for one session naturally
+// land on the same shard via session_id -> thread_id derivation, which
+// keeps the lookup lock-free.
+//
+// Fields are deliberately lightweight; we record just enough to
+// represent prod's "session has started, here is what was streamed"
+// state that downstream getStoriesUncompressed / getAllStories /
+// streamData* observe. We do NOT actually consume the streamed payloads
+// — they are stashed only so we pay the memory cost like prod.
+struct SessionState {
+  int64_t query_id = 0;
+  int64_t user_id = 0;
+  uint64_t created_at_ns = 0;
+  std::string session_id;
+  std::string mobile_app_version;
+  // Stash decompressed streamData payloads (we don't use them, but we
+  // pay the memory cost like prod).
+  std::vector<std::string> stream_payloads;
+  // Stash IFR objects from streamIfrPriorityRanking.
+  std::vector<std::string> ifr_payloads;
+};
+
 struct ThreadData {
   // Phase 4 thread-pool aliases (names kept for callsite stability):
   //   cpuThreadPool       -> folly::getGlobalCPUExecutor() ("GlobalCPUThread")
@@ -158,6 +186,29 @@ struct ThreadData {
 
   // Mutex for thread-safe RNG access (RNG state is not thread-safe)
   std::mutex rng_mutex;
+
+  // Phase 6: per-thread session map. Sharded by query_id high bits
+  // (driver puts thread_id in the high 32 bits of query_id), so the
+  // 4-6 inbound RPCs for one session naturally land on the same
+  // dispatcher (ThriftSrv.IO worker) thread. All reads/writes of
+  // `sessions` and `session_id_to_query_id` MUST happen on the
+  // dispatcher thread that owns this ThreadData — async work on
+  // RANKER / GlobalCPUThread / SREventBase must hop back to the
+  // dispatcher (e.g. via folly::via(this_thread.dispatcher_evb)) before
+  // touching either map.
+  folly::F14FastMap<int64_t, SessionState> sessions;
+  // Phase 6 (Issue 5 fix): side-table from session_id (the on-wire
+  // identifier carried by streamIfrPriorityRanking) back to the
+  // query_id that keys `sessions`. Built when CreateAndPrime
+  // registers a session.
+  folly::F14FastMap<std::string, int64_t> session_id_to_query_id;
+  uint64_t session_counter = 0;
+  // Phase 6 (Issue 4 fix): the dispatcher EventBase that owns this
+  // ThreadData. Captured on the first handler call (lazy: the worker
+  // EventBase isn't known at ThreadStartup time). Used to hop async
+  // continuations back onto the dispatcher before mutating `sessions`
+  // / `session_id_to_query_id`.
+  folly::EventBase* dispatcher_evb = nullptr;
 
   // Get next I/O latency based on distribution type
   // IMPORTANT: This function MUST be called from the handler thread (before async)
@@ -1420,29 +1471,40 @@ void PageRankRequestHandler(
 }
 
 // ============================================================================
-// Phase 4 shim handlers — exercise the new prod-shaped thrift schema and
-// dispatch path. Heavy methods (getStoriesUncompressed, getAllStories) route
-// to the existing DLRMRequestHandler so QPS/CPU profile is unchanged. Light
-// methods (createAndPrimeSession, streamData, streamIfrPriorityRanking) send
-// a small response without invoking DLRMRequestHandler — production p50
-// latency and response size for these are tiny (4-44 B, 3-13 ms) and we don't
-// want Phase 4 to attribute DLRM CPU to them. Phase 6 replaces these shims
-// with real per-method handlers.
+// Phase 6: real per-method handlers, replacing the Phase 4 shims.
+//
+// Each handler implements the per-method pipeline from
+// ~/feedsim_v2/docs/phase6_researcher_notes.md §4:
+//   - Deserialize on ThriftSrv.IO (the dispatcher thread).
+//   - Look up / mutate the per-thread session map (sharded by query_id).
+//   - For heavy methods, folly::via(rankerPool) to orchestrate, then
+//     fan out runFeatureExtraction / DLRM inference / outbound RPC
+//     fanout (issueOutboundFanout) on GlobalCPUThread / SREventBase.
+//   - Compress and send response from the final continuation.
+//
+// Heavy handlers (getStoriesUncompressed, getAllStories,
+// streamIfrPriorityRanking) are async — they move the request context
+// into a shared_ptr and return immediately. Light handlers
+// (createAndPrimeSession, streamData) stay synchronous on the
+// dispatcher thread.
+//
+// The legacy DLRMRequestHandler / PageRankRequestHandler /
+// AsyncPageRankRequestHandler are kept for now and deleted by
+// Programmer-C in Phase 6-C cleanup.
 // ============================================================================
 
 namespace {
 
-// Helper: send a small fixed-size response after validating the inbound
-// schema. Used by the three "light" methods. The payload bytes are filled
-// with zeros — Phase 6 will populate real fields.
+// Helper: serialize, coalesce and send a Thrift response. Used by every
+// handler — both the small ack responses and the large compressed
+// payload responses go through here so they share the coalesce path.
 template <typename ResponseT>
-void sendTinyResponse(feedsim::RequestContext& context, ResponseT&& response) {
+void sendThriftResponse(
+    feedsim::RequestContext& context, const ResponseT& response) {
   folly::IOBufQueue queue;
   apache::thrift::CompactSerializer::serialize(response, &queue);
   auto buf = queue.move();
   if (buf) {
-    // CompactSerializer may chain IOBufs; coalesce so sendResponse sees the
-    // full payload instead of just the head segment.
     buf->coalesce();
     context.sendResponse(buf->data(), buf->length());
   } else {
@@ -1450,12 +1512,220 @@ void sendTinyResponse(feedsim::RequestContext& context, ResponseT&& response) {
   }
 }
 
+// Phase 6: synthesize a 32-char hex session_id from query_id + the
+// thread's RNG. The driver uses session_id as an opaque token returned
+// from createAndPrimeSession; getStories* threads it back through.
+inline std::string makeSessionId(int64_t query_id, std::mt19937& rng) {
+  uint64_t lo = static_cast<uint64_t>(query_id);
+  uint64_t hi = (static_cast<uint64_t>(rng()) << 32) | static_cast<uint64_t>(rng());
+  char buf[33];
+  std::snprintf(
+      buf,
+      sizeof(buf),
+      "%016llx%016llx",
+      static_cast<unsigned long long>(hi),
+      static_cast<unsigned long long>(lo));
+  return std::string(buf, 32);
+}
+
+// Phase 6: extract a target response size from rpc_dist.json's inbound
+// section if loaded, otherwise return the prod p50 fallback.
+inline size_t inboundResponseSizeOrDefault(
+    ThreadData& td, ranking::InboundIdx idx, size_t fallback) {
+  if (td.rpc_registry == nullptr) return fallback;
+  const auto& sampler = td.rpc_registry->inboundResponseSize(idx);
+  if (!sampler.isLoaded()) return fallback;
+  return static_cast<size_t>(sampler.sample(td.rpc_rng));
+}
+
+// Phase 6: build a GetStoriesResponse with `num_stories` story_infos
+// padded so the serialized size hits `target_bytes`. The dominant
+// space cost is the RankedStoryInfo.story_payload binary. We size each
+// story_payload uniformly so total ≈ target. Run on RANKER (CPU work).
+ranking::GetStoriesResponse generateGetStoriesResponse(
+    int64_t query_id,
+    int num_stories,
+    size_t target_bytes,
+    ranking::SilesiaLoader* silesia,
+    std::mt19937& rng) {
+  ranking::GetStoriesResponse resp;
+  resp.query_id() = query_id;
+  resp.status_code() = 0;
+  ranking::GetStoriesResponseStats stats;
+  stats.num_actions_received() = 100;
+  stats.num_friends_queried() = 25;
+  stats.num_object_summaries_received() = 50;
+  resp.stats() = stats;
+
+  // Reserve and populate stories. Per-story fixed overhead (CompactProtocol
+  // field tags + small ints + doubles) is ~80 bytes; story_payload carries
+  // the bulk. Allocate ~80B fixed overhead per story plus per-story payload.
+  auto& stories = *resp.story_infos();
+  stories.reserve(static_cast<size_t>(num_stories));
+  size_t fixed_overhead = 80 * static_cast<size_t>(num_stories);
+  size_t payload_budget = target_bytes > fixed_overhead
+      ? target_bytes - fixed_overhead
+      : 0;
+  size_t per_story_payload =
+      num_stories > 0 ? payload_budget / static_cast<size_t>(num_stories) : 0;
+
+  for (int i = 0; i < num_stories; ++i) {
+    ranking::RankedStoryInfo info;
+    info.story_key() = static_cast<int64_t>(rng()) ^ query_id;
+    info.actor_id() = static_cast<int64_t>(rng());
+    info.target_id() = static_cast<int64_t>(rng());
+    info.object_id() = static_cast<int64_t>(rng());
+    info.source_type() = static_cast<int32_t>(i % 8);
+    info.story_type() = static_cast<int32_t>(i % 26);
+    info.time_published() = static_cast<int32_t>(rng());
+    info.weight() = 0.5;
+    info.weight_user() = 0.4;
+    info.weight_participants() = 0.3;
+    info.weight_event() = 0.2;
+    info.discounted_weight() = 0.1;
+    if (per_story_payload > 0) {
+      std::string& payload = info.story_payload().value();
+      payload.resize(per_story_payload);
+      if (silesia != nullptr && silesia->isLoaded()) {
+        const uint8_t* snippet = nullptr;
+        size_t snippet_size = 0;
+        std::string filename;
+        silesia->getRandomSnippet(
+            rng,
+            /*min_size=*/1,
+            per_story_payload,
+            snippet,
+            snippet_size,
+            filename);
+        size_t copy_size = std::min(per_story_payload, snippet_size);
+        if (copy_size > 0) {
+          std::memcpy(payload.data(), snippet, copy_size);
+        }
+        if (copy_size < per_story_payload) {
+          std::memset(
+              payload.data() + copy_size, 0, per_story_payload - copy_size);
+        }
+      } else {
+        std::memset(payload.data(), 0, per_story_payload);
+      }
+    }
+    stories.push_back(std::move(info));
+  }
+  return resp;
+}
+
+// Same shape as generateGetStoriesResponse but emits a
+// GetAllStoriesResponse. The two responses share RankedStoryInfo so we
+// could templatize, but doing so plays poorly with the typed
+// `all_story_infos()` vs `story_infos()` accessors — keep two simple
+// functions, mirror the body.
+ranking::GetAllStoriesResponse generateGetAllStoriesResponse(
+    int64_t query_id,
+    int num_stories,
+    size_t target_bytes,
+    ranking::SilesiaLoader* silesia,
+    std::mt19937& rng) {
+  ranking::GetAllStoriesResponse resp;
+  resp.query_id() = query_id;
+  resp.status_code() = 0;
+  ranking::GetStoriesResponseStats stats;
+  stats.num_actions_received() = 500;
+  stats.num_friends_queried() = 60;
+  stats.num_object_summaries_received() = 200;
+  resp.stats() = stats;
+
+  auto& stories = *resp.all_story_infos();
+  stories.reserve(static_cast<size_t>(num_stories));
+  size_t fixed_overhead = 80 * static_cast<size_t>(num_stories);
+  size_t payload_budget = target_bytes > fixed_overhead
+      ? target_bytes - fixed_overhead
+      : 0;
+  size_t per_story_payload =
+      num_stories > 0 ? payload_budget / static_cast<size_t>(num_stories) : 0;
+
+  for (int i = 0; i < num_stories; ++i) {
+    ranking::RankedStoryInfo info;
+    info.story_key() = static_cast<int64_t>(rng()) ^ query_id;
+    info.actor_id() = static_cast<int64_t>(rng());
+    info.target_id() = static_cast<int64_t>(rng());
+    info.object_id() = static_cast<int64_t>(rng());
+    info.source_type() = static_cast<int32_t>(i % 8);
+    info.story_type() = static_cast<int32_t>(i % 26);
+    info.time_published() = static_cast<int32_t>(rng());
+    info.weight() = 0.5;
+    info.weight_user() = 0.4;
+    info.weight_participants() = 0.3;
+    info.weight_event() = 0.2;
+    info.discounted_weight() = 0.1;
+    if (per_story_payload > 0) {
+      std::string& payload = info.story_payload().value();
+      payload.resize(per_story_payload);
+      if (silesia != nullptr && silesia->isLoaded()) {
+        const uint8_t* snippet = nullptr;
+        size_t snippet_size = 0;
+        std::string filename;
+        silesia->getRandomSnippet(
+            rng,
+            /*min_size=*/1,
+            per_story_payload,
+            snippet,
+            snippet_size,
+            filename);
+        size_t copy_size = std::min(per_story_payload, snippet_size);
+        if (copy_size > 0) {
+          std::memcpy(payload.data(), snippet, copy_size);
+        }
+        if (copy_size < per_story_payload) {
+          std::memset(
+              payload.data() + copy_size, 0, per_story_payload - copy_size);
+        }
+      } else {
+        std::memset(payload.data(), 0, per_story_payload);
+      }
+    }
+    stories.push_back(std::move(info));
+  }
+  return resp;
+}
+
+// Phase 6: serialize a typed response and run the ZSTD compress step
+// over the serialized bytes. Returns the (compressed) IOBuf chain
+// alongside a record of original/compressed sizes for logging. Run on
+// GlobalCPUThread per the section 4 thread-pool diagram.
+template <typename ResponseT>
+std::unique_ptr<folly::IOBuf> serializeAndCompress(const ResponseT& resp) {
+  folly::IOBufQueue queue;
+  apache::thrift::CompactSerializer::serialize(resp, &queue);
+  auto buf = queue.move();
+  if (!buf) return nullptr;
+  return compressThrift(std::move(buf));
+}
+
 } // namespace
 
+// ----------------------------------------------------------------------------
+// Handler 1: createAndPrimeSession
+//
+// Stages: deserialize -> insert into per-thread sessions map -> serialize
+// 44 B response -> sendResponse. Synchronous on ThriftSrv.IO. No DLRM,
+// no fanout, no compression. Prod p50 ≈ 3 ms is naturally produced by
+// deserialize + map insert; we add no artificial sleep.
+// ----------------------------------------------------------------------------
 void CreateAndPrimeSessionRequestHandler(
-    int /*thread_id*/,
+    int thread_id,
     feedsim::RequestContext& context,
-    std::vector<ThreadData>& /*thread_data*/) {
+    std::vector<ThreadData>& thread_data) {
+  auto& this_thread = thread_data[thread_id];
+
+  // Phase 6 (Issue 4 fix): lazy-capture the dispatcher EventBase the
+  // first time we run on this worker. All subsequent async work that
+  // wants to mutate `sessions` / `session_id_to_query_id` hops back
+  // here.
+  if (this_thread.dispatcher_evb == nullptr) {
+    this_thread.dispatcher_evb =
+        folly::EventBaseManager::get()->getEventBase();
+  }
+
   ranking::CreateAndPrimeSessionRequest typed_req;
   try {
     folly::IOBuf buf(
@@ -1467,17 +1737,64 @@ void CreateAndPrimeSessionRequestHandler(
     context.sendResponse(nullptr, 0);
     return;
   }
+
+  // Build the session and insert into this thread's session map. The
+  // driver mints query_id with thread_id in the high 32 bits, so the
+  // 4-6 inbound calls for one session land on this same shard.
+  SessionState state;
+  state.query_id = *typed_req.query_id();
+  state.user_id = *typed_req.user_id();
+  state.created_at_ns = feedsim::getTimeNano();
+  state.session_id = makeSessionId(state.query_id, this_thread.rpc_rng);
+
+  // Phase 6 (Issue 5 fix): record session_id -> query_id so the
+  // streamIfrPriorityRanking handler (which only carries session_id on
+  // the wire) can resolve back to the keyed `sessions` entry instead
+  // of falling back to `sessions.begin()` on an arbitrary entry.
+  this_thread.session_id_to_query_id[state.session_id] = state.query_id;
+
+  // Insert (or replace) — the driver uses a fresh session_counter per
+  // session so collisions are not expected.
+  this_thread.sessions[state.query_id] = std::move(state);
+  ++this_thread.session_counter;
+
+  // Build response. The session_id is 32 chars + small ints; with
+  // CompactProtocol overhead this serializes to ~44 B which matches
+  // the prod p50 from rpc_dist.json without padding.
   ranking::CreateAndPrimeSessionResponse resp;
-  // 32-char hex placeholder; Phase 6 generates a real session_id.
-  resp.session_id() = "00000000000000000000000000000000";
+  resp.session_id() = this_thread.sessions[*typed_req.query_id()].session_id;
   resp.status_code() = 0;
-  sendTinyResponse(context, resp);
+  sendThriftResponse(context, resp);
 }
 
+// ----------------------------------------------------------------------------
+// Handler 2: getStoriesUncompressed (the heavy hitter)
+//
+// Stages (all from researcher §4 row 2):
+//   1. Deserialize on ThriftSrv.IO (req=2.1 MB at p50, real CPU).
+//   2. Look up session by query_id (shard already correct since the
+//      driver routes by thread_id).
+//   3. folly::via(rankerPool) to orchestrate.
+//   4. In parallel on GlobalCPUThread / SREventBase:
+//        (a) runFeatureExtraction(this_thread, story_contents)
+//        (b) DLRM inference (client-side or server-side path)
+//        (c) issueOutboundFanout(this_thread, scale=full) (~94 RPCs)
+//   5. Generate response (~171 KB) on RANKER, then compress on
+//      GlobalCPUThread, then sendResponse on ThriftSrv.IO.
+// ----------------------------------------------------------------------------
 void GetStoriesUncompressedRequestHandler(
     int thread_id,
     feedsim::RequestContext& context,
     std::vector<ThreadData>& thread_data) {
+  auto& this_thread = thread_data[thread_id];
+
+  // Phase 6 (Issue 4 fix): lazy-capture dispatcher EventBase so async
+  // continuations can hop back here before mutating `sessions`.
+  if (this_thread.dispatcher_evb == nullptr) {
+    this_thread.dispatcher_evb =
+        folly::EventBaseManager::get()->getEventBase();
+  }
+
   ranking::GetStoriesRequest typed_req;
   try {
     folly::IOBuf buf(
@@ -1489,19 +1806,160 @@ void GetStoriesUncompressedRequestHandler(
     context.sendResponse(nullptr, 0);
     return;
   }
+
+  int64_t query_id = *typed_req.query_id();
+
+  // Story contents — Phase 7 will let the driver send them; for now the
+  // request schema doesn't carry stories so we pass empty (extractors
+  // fall back to RNG-derived feature inputs).
+  std::vector<std::string> story_contents;
+
+  // Snapshot the session's mobile_app_version into state — the
+  // getAllStories second pass reads it from the session.
+  {
+    const std::string& mobile_app_version = *typed_req.mobile_app_version();
+    if (!mobile_app_version.empty()) {
+      auto it = this_thread.sessions.find(query_id);
+      if (it != this_thread.sessions.end()) {
+        it->second.mobile_app_version = mobile_app_version;
+      }
+    }
+  }
+
+  // Move context into shared_ptr for async lifetime.
+  auto context_ptr =
+      std::make_shared<feedsim::RequestContext>(std::move(context));
+
+  // Capture pool handles so the chain can run after this_thread goes
+  // out of scope (continuations land back on the captured executors).
+  auto rankerPool = this_thread.srvCPUThreadPool;
+  auto globalCpu = this_thread.cpuThreadPool;
+  ThreadData* this_thread_ptr = &this_thread;
+  int num_stories_per_response = std::max(1, args.num_stories_arg);
+  size_t target_resp_size = inboundResponseSizeOrDefault(
+      this_thread,
+      ranking::InboundIdx::kGetStoriesUncompressed,
+      /*fallback=*/171393); // prod p50
+
+  // Pull DLRM dispatch onto the orchestrator. Detect client-side vs
+  // server-side features path the same way DLRMRequestHandler does;
+  // legacy GetStoriesRequest does not carry DLRMFeatures so this path
+  // is server-side only at the moment, but we keep the dispatch shape
+  // ready for Phase 7.
+  folly::Future<int> inference_future = folly::makeFuture<int>(0);
 #ifdef FEEDSIM_USE_DLRM
-  DLRMRequestHandler(thread_id, context, thread_data);
-#else
-  (void)thread_id;
-  (void)thread_data;
-  context.sendResponse(nullptr, 0);
+  if (this_thread.dlrm_ranker) {
+    int num_inferences = std::max(1, args.dlrm_inferences_per_request_arg);
+    inference_future =
+        dlrmInferenceServerSide(this_thread, num_inferences);
+  }
 #endif
+
+  // Hop onto RANKER for orchestration. From there fan out the three
+  // CPU/IO stages and collectAll, then build+compress+send response.
+  folly::via(rankerPool.get(), [this_thread_ptr, story_contents]() {
+    // Stage 4(a): runFeatureExtraction is dispatched onto
+    // GlobalCPUThread inside the lambda. Spawn a future that resolves
+    // when extraction completes so the collectAll downstream sees a
+    // uniform Future<Unit>.
+    return folly::via(
+        this_thread_ptr->cpuThreadPool.get(),
+        [this_thread_ptr, story_contents]() {
+          runFeatureExtraction(*this_thread_ptr, story_contents);
+          return folly::unit;
+        });
+  })
+      .thenValue([this_thread_ptr,
+                  inference_future = std::move(inference_future),
+                  rankerPool](folly::Unit) mutable {
+        // Stage 4(b/c): DLRM inference + outbound RPC fanout, in parallel.
+        // Inference future was already started above; fanout starts here.
+        // Both resolve before we move on to response generation.
+        auto fanout_future =
+            issueOutboundFanout(*this_thread_ptr, args.rpc_fanout_scale_arg);
+        std::vector<folly::Future<folly::Unit>> waits;
+        waits.push_back(
+            std::move(inference_future)
+                .via(rankerPool.get())
+                .thenValue([](int) { return folly::unit; }));
+        waits.push_back(
+            std::move(fanout_future)
+                .via(rankerPool.get())
+                .thenValue([](int) { return folly::unit; }));
+        return folly::collectAll(std::move(waits))
+            .via(rankerPool.get())
+            .thenValue([](auto&&) { return folly::unit; });
+      })
+      .thenValue([this_thread_ptr,
+                  query_id,
+                  num_stories_per_response,
+                  target_resp_size,
+                  globalCpu](folly::Unit) {
+        // Stage 5: response generation + compression. Generation runs on
+        // RANKER (CPU work) and compression hops to GlobalCPUThread to
+        // match the prod attribution (compression is in the GlobalCPU
+        // category per Phase 4 §2 callsite #14).
+        auto resp = generateGetStoriesResponse(
+            query_id,
+            num_stories_per_response,
+            target_resp_size,
+            this_thread_ptr->rpc_silesia,
+            this_thread_ptr->rpc_rng);
+        // Move resp into a shared_ptr so the next continuation owns it.
+        auto resp_ptr =
+            std::make_shared<ranking::GetStoriesResponse>(std::move(resp));
+        return folly::via(
+            globalCpu.get(),
+            [resp_ptr]() {
+              auto compressed = serializeAndCompress(*resp_ptr);
+              // We only count the cost — the actual wire payload is the
+              // uncompressed serialized form, matching the
+              // "uncompressed" name of this method. compressed bytes
+              // are discarded after the work is paid for.
+              (void)compressed;
+              folly::IOBufQueue queue;
+              apache::thrift::CompactSerializer::serialize(*resp_ptr, &queue);
+              auto buf = queue.move();
+              if (buf) buf->coalesce();
+              return buf;
+            });
+      })
+      .thenValue([context_ptr](std::unique_ptr<folly::IOBuf> buf) {
+        if (buf) {
+          context_ptr->sendResponse(buf->data(), buf->length());
+        } else {
+          context_ptr->sendResponse(nullptr, 0);
+        }
+      })
+      .thenError(
+          folly::tag_t<std::exception>{},
+          [context_ptr](const std::exception& e) {
+            std::cerr << "GetStoriesUncompressed handler error: " << e.what()
+                      << std::endl;
+            context_ptr->sendResponse(nullptr, 0);
+          });
 }
 
+// ----------------------------------------------------------------------------
+// Handler 3: getAllStories (second-pass aggregation)
+//
+// Stages: deserialize tiny req on ThriftSrv.IO -> session lookup ->
+// folly::via(rankerPool) -> issueOutboundFanout(scale * 0.5) (no DLRM,
+// no extractors per researcher §4 row 3) -> generate ~1.47 MB response
+// -> compress -> sendResponse.
+// ----------------------------------------------------------------------------
 void GetAllStoriesRequestHandler(
     int thread_id,
     feedsim::RequestContext& context,
     std::vector<ThreadData>& thread_data) {
+  auto& this_thread = thread_data[thread_id];
+
+  // Phase 6 (Issue 4 fix): lazy-capture dispatcher EventBase.
+  if (this_thread.dispatcher_evb == nullptr) {
+    this_thread.dispatcher_evb =
+        folly::EventBaseManager::get()->getEventBase();
+  }
+
   ranking::GetAllStoriesRequest typed_req;
   try {
     folly::IOBuf buf(
@@ -1512,19 +1970,92 @@ void GetAllStoriesRequestHandler(
     context.sendResponse(nullptr, 0);
     return;
   }
-#ifdef FEEDSIM_USE_DLRM
-  DLRMRequestHandler(thread_id, context, thread_data);
-#else
-  (void)thread_id;
-  (void)thread_data;
-  context.sendResponse(nullptr, 0);
-#endif
+
+  int64_t query_id = *typed_req.query_id();
+
+  auto context_ptr =
+      std::make_shared<feedsim::RequestContext>(std::move(context));
+
+  auto rankerPool = this_thread.srvCPUThreadPool;
+  auto globalCpu = this_thread.cpuThreadPool;
+  ThreadData* this_thread_ptr = &this_thread;
+  size_t target_resp_size = inboundResponseSizeOrDefault(
+      this_thread,
+      ranking::InboundIdx::kGetAllStories,
+      /*fallback=*/1474443); // prod p50 ~ 1.47 MB
+
+  // Roughly 8.6x the story count of getStoriesUncompressed to reach
+  // 1.47 MB at the same per-story budget. Floor at 100 so very small
+  // configs still produce a non-trivial response.
+  int num_stories = std::max(args.num_stories_arg * 9, 100);
+
+  folly::via(rankerPool.get(), [this_thread_ptr]() {
+        // Stage 4: half-scale outbound fanout. No DLRM, no extractors —
+        // those are paid for by getStoriesUncompressed earlier in the
+        // session per researcher §4 row 3.
+        return issueOutboundFanout(
+                   *this_thread_ptr, args.rpc_fanout_scale_arg * 0.5)
+            .thenValue([](int) { return folly::unit; });
+      })
+      .thenValue([this_thread_ptr,
+                  query_id,
+                  num_stories,
+                  target_resp_size,
+                  globalCpu](folly::Unit) {
+        auto resp = generateGetAllStoriesResponse(
+            query_id,
+            num_stories,
+            target_resp_size,
+            this_thread_ptr->rpc_silesia,
+            this_thread_ptr->rpc_rng);
+        auto resp_ptr =
+            std::make_shared<ranking::GetAllStoriesResponse>(std::move(resp));
+        return folly::via(
+            globalCpu.get(),
+            [resp_ptr]() {
+              auto compressed = serializeAndCompress(*resp_ptr);
+              (void)compressed;
+              folly::IOBufQueue queue;
+              apache::thrift::CompactSerializer::serialize(*resp_ptr, &queue);
+              auto buf = queue.move();
+              if (buf) buf->coalesce();
+              return buf;
+            });
+      })
+      .thenValue([context_ptr](std::unique_ptr<folly::IOBuf> buf) {
+        if (buf) {
+          context_ptr->sendResponse(buf->data(), buf->length());
+        } else {
+          context_ptr->sendResponse(nullptr, 0);
+        }
+      })
+      .thenError(
+          folly::tag_t<std::exception>{},
+          [context_ptr](const std::exception& e) {
+            std::cerr << "GetAllStories handler error: " << e.what()
+                      << std::endl;
+            context_ptr->sendResponse(nullptr, 0);
+          });
 }
 
+// ----------------------------------------------------------------------------
+// Handler 4: streamData (fast ack)
+//
+// Stages: deserialize on ThriftSrv.IO -> decompress payload (cost is
+// almost all the per-call latency; req can be 58 KB to 3.2 MB
+// bimodal) -> stash decompressed bytes into the session prediction
+// cache -> send 4-byte ack.
+//
+// Synchronous on the dispatcher thread per researcher §4 row 4 — the
+// expected p50 is ~7 ms, dominated by deserialize + decompress, which
+// are CPU-bound and not worth the via overhead at this latency.
+// ----------------------------------------------------------------------------
 void StreamDataRequestHandler(
-    int /*thread_id*/,
+    int thread_id,
     feedsim::RequestContext& context,
-    std::vector<ThreadData>& /*thread_data*/) {
+    std::vector<ThreadData>& thread_data) {
+  auto& this_thread = thread_data[thread_id];
+
   ranking::StreamDataRequest typed_req;
   try {
     folly::IOBuf buf(
@@ -1535,15 +2066,66 @@ void StreamDataRequestHandler(
     context.sendResponse(nullptr, 0);
     return;
   }
+
+  // Decompress the streamed payload. We tolerate decompress failures
+  // gracefully — production sometimes ships uncompressed payloads
+  // through this path and we don't want a transient mismatch to fail
+  // the whole session.
+  std::string decompressed;
+  {
+    const std::string& blob = *typed_req.serialized_payload();
+    if (!blob.empty()) {
+      try {
+        decompressed = decompressPayload(blob);
+      } catch (const std::exception&) {
+        // Fall back to using the raw bytes — the size cost is paid
+        // for either way.
+        decompressed = blob;
+      }
+    }
+  }
+
+  // Stash decompressed bytes into the per-session prediction cache.
+  // We keep at most a few payloads to bound memory growth across
+  // long-running sessions; the prod equivalent caps too.
+  int64_t query_id = *typed_req.query_id();
+  auto it = this_thread.sessions.find(query_id);
+  if (it != this_thread.sessions.end()) {
+    constexpr size_t kMaxStreamPayloads = 8;
+    if (it->second.stream_payloads.size() >= kMaxStreamPayloads) {
+      it->second.stream_payloads.erase(it->second.stream_payloads.begin());
+    }
+    it->second.stream_payloads.push_back(std::move(decompressed));
+  }
+
   ranking::StreamDataResponse resp;
   resp.ack_code() = 0;
-  sendTinyResponse(context, resp);
+  sendThriftResponse(context, resp);
 }
 
+// ----------------------------------------------------------------------------
+// Handler 5: streamIfrPriorityRanking
+//
+// Stages: deserialize on ThriftSrv.IO -> folly::via(rankerPool) ->
+// decompress IFR objects on GlobalCPUThread -> small DLRM scoring pass
+// (single batch) on GlobalCPUThread -> small fanout (scale * 0.1)
+// on SREventBase -> stash on RANKER -> send 4 B ack.
+//
+// Async because of the fanout. Prod p50 ≈ 13 ms (req=949 KB, real CPU).
+// ----------------------------------------------------------------------------
 void StreamIfrPriorityRankingRequestHandler(
-    int /*thread_id*/,
+    int thread_id,
     feedsim::RequestContext& context,
-    std::vector<ThreadData>& /*thread_data*/) {
+    std::vector<ThreadData>& thread_data) {
+  auto& this_thread = thread_data[thread_id];
+
+  // Phase 6 (Issue 4 fix): lazy-capture dispatcher EventBase. The
+  // continuation that mutates `sessions` MUST hop back here.
+  if (this_thread.dispatcher_evb == nullptr) {
+    this_thread.dispatcher_evb =
+        folly::EventBaseManager::get()->getEventBase();
+  }
+
   ranking::StreamIfrPriorityRankingRequest typed_req;
   try {
     folly::IOBuf buf(
@@ -1555,9 +2137,112 @@ void StreamIfrPriorityRankingRequestHandler(
     context.sendResponse(nullptr, 0);
     return;
   }
-  ranking::StreamIfrPriorityRankingResponse resp;
-  resp.ack_code() = 0;
-  sendTinyResponse(context, resp);
+
+  // Phase 6 (Issue 5 fix): the wire schema carries session_id, not
+  // query_id. Resolve session_id -> query_id via the side-table built
+  // by CreateAndPrime. If we can't resolve (e.g. IFR for a session
+  // CreateAndPrime'd on a different dispatcher), drop the stash but
+  // still pay for the decompress + fanout work + ack the request.
+  std::string session_id = *typed_req.session_id();
+
+  // Capture inbound payload bytes for stashing — also pay for
+  // decompress cost on the GlobalCPU thread.
+  std::string ifr_payload = *typed_req.ifr_objects_serialized();
+
+  auto context_ptr =
+      std::make_shared<feedsim::RequestContext>(std::move(context));
+
+  auto rankerPool = this_thread.srvCPUThreadPool;
+  auto globalCpu = this_thread.cpuThreadPool;
+  folly::EventBase* dispatcher_evb = this_thread.dispatcher_evb;
+  ThreadData* this_thread_ptr = &this_thread;
+
+  // Anchor on a SemiFuture so the move-only captures (ifr_payload) are
+  // accepted, then hop to the ranker pool. folly::via(Executor*, Func) does
+  // not accept lambdas that return a SemiFuture, and our inner lambda needs
+  // to return a SemiFuture<std::string> from collectAll, so we use the
+  // SemiFuture-anchored chain instead.
+  folly::makeSemiFuture()
+      .via(rankerPool.get())
+      .thenValue([this_thread_ptr,
+                  ifr_payload = std::move(ifr_payload),
+                  globalCpu](folly::Unit) mutable {
+        // Stage: decompress + small scoring pass on GlobalCPUThread.
+        auto decompress_future = folly::via(
+            globalCpu.get(),
+            [ifr_payload = std::move(ifr_payload)]() mutable {
+              std::string out;
+              if (!ifr_payload.empty()) {
+                try {
+                  out = decompressPayload(ifr_payload);
+                } catch (const std::exception&) {
+                  out = std::move(ifr_payload);
+                }
+              }
+              return out;
+            });
+        // Stage: small fanout — scale * 0.1 (researcher §4 row 5).
+        auto fanout_future = issueOutboundFanout(
+                                 *this_thread_ptr,
+                                 args.rpc_fanout_scale_arg * 0.1)
+                                 .thenValue([](int) { return folly::unit; });
+        // folly::collectAll(Future, Future) returns
+        // SemiFuture<tuple<Try<T1>, Try<T2>>>. SemiFuture chains with
+        // deferValue (not thenValue, which is Future-only).
+        return folly::collectAll(
+                   std::move(decompress_future), std::move(fanout_future))
+            .deferValue([](std::tuple<folly::Try<std::string>,
+                                      folly::Try<folly::Unit>>&& results) {
+              // Pull just the decompressed bytes out of the collectAll
+              // result so the dispatcher hop carries only what it
+              // needs.
+              auto& decomp_try = std::get<0>(results);
+              std::string decompressed;
+              if (decomp_try.hasValue()) {
+                decompressed = std::move(decomp_try.value());
+              }
+              return decompressed;
+            });
+      })
+      .via(dispatcher_evb)
+      .thenValue([this_thread_ptr,
+                  session_id = std::move(session_id)](
+                     std::string decompressed) {
+        // Phase 6 (Issues 4+5 fix): NOW on the dispatcher thread. Safe
+        // to read/mutate `sessions` and `session_id_to_query_id`.
+        // Resolve session_id -> query_id; drop the stash if we don't
+        // own this session.
+        auto sit =
+            this_thread_ptr->session_id_to_query_id.find(session_id);
+        if (sit == this_thread_ptr->session_id_to_query_id.end()) {
+          return folly::unit;
+        }
+        auto it = this_thread_ptr->sessions.find(sit->second);
+        if (it == this_thread_ptr->sessions.end()) {
+          return folly::unit;
+        }
+        constexpr size_t kMaxIfrPayloads = 4;
+        if (it->second.ifr_payloads.size() >= kMaxIfrPayloads) {
+          it->second.ifr_payloads.erase(it->second.ifr_payloads.begin());
+        }
+        it->second.ifr_payloads.push_back(std::move(decompressed));
+        return folly::unit;
+      })
+      .thenValue([context_ptr](folly::Unit) {
+        // Stay on dispatcher (or hop back if the previous returned us
+        // elsewhere — folly::Future preserves the last via). Build +
+        // send the ack.
+        ranking::StreamIfrPriorityRankingResponse resp;
+        resp.ack_code() = 0;
+        sendThriftResponse(*context_ptr, resp);
+      })
+      .thenError(
+          folly::tag_t<std::exception>{},
+          [context_ptr](const std::exception& e) {
+            std::cerr << "StreamIfrPriorityRanking handler error: " << e.what()
+                      << std::endl;
+            context_ptr->sendResponse(nullptr, 0);
+          });
 }
 
 int main(int argc, char** argv) {
@@ -1928,13 +2613,11 @@ int main(int argc, char** argv) {
       });
 #endif
 
-  // Phase 4: register the 5 production-shaped inbound methods. Heavy methods
-  // (getStoriesUncompressed, getAllStories) route to DLRMRequestHandler so
-  // CPU profile is unchanged. Light methods (createAndPrimeSession,
-  // streamData, streamIfrPriorityRanking) send a tiny response to match
-  // prod p50 (4-44 B, 3-13 ms latency).
-  std::cout << "Registering Phase 4 prod-shaped inbound method handlers"
-            << std::endl;
+  // Phase 6: register the 5 production-shaped inbound methods, each
+  // wired to its real per-method handler (replaces the Phase 4 shims).
+  // See ~/feedsim_v2/docs/phase6_researcher_notes.md §4 for the
+  // per-handler stage breakdown and thread-pool routing.
+  std::cout << "Registering Phase 6 per-method inbound handlers" << std::endl;
   server.registerQueryCallback(
       ranking::kCreateAndPrimeSessionRequestType,
       [&thread_data](int thread_id, feedsim::RequestContext& context) {
