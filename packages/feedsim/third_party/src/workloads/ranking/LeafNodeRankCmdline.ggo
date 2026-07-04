@@ -80,3 +80,20 @@ option "extractors_per_story" - "Number of extractors to randomly select per sto
 # bytes from Silesia files instead of running xor128 RNG. Removes the
 # ~15% of CPU that response generation otherwise burns on RNG.
 option "silesia_dir" - "Path to Silesia corpus directory. When set, server-side response generation uses Silesia bytes instead of RNG." string typestr="directory" optional
+
+# Phase 5: outbound RPC fanout to mock_services. When --rpc_dist_path is set,
+# request handlers issue real Thrift RPCs to a co-located mock_services
+# instance instead of folly::futures::sleep. Fanout is calibrated from
+# rpc_dist.json (see ~/feedsim_v2/docs/phase5_researcher_notes.md §4) and
+# scaled by --rpc_fanout_scale. When --rpc_dist_path is empty, the legacy
+# folly::futures::sleep path is used (regression safety net).
+option "rpc_dist_path" - "Path to rpc_dist.json. When set, request handlers fan out real RPCs to mock_services." string typestr="filename" default=""
+option "mock_services_host" - "Hostname for mock_services Thrift server." string default="127.0.0.1"
+option "mock_services_port" - "Port for mock_services Thrift server (matches mock_services --port)." int default="21222"
+option "rpc_fanout_scale" - "Scale factor applied to per-session fanout counts. Default 0.025 yields ~94 RPCs/session (vs ~3742 at scale=1.0)." double default="0.025"
+# Diagnostic / isolation knob. When set, request handlers take the legacy
+# folly::futures::sleep path even if --rpc_dist_path is supplied, and the
+# per-thread MockServicesClient is not constructed (no connection to
+# mock_services attempted). Lets later diffs in the stack run end-to-end
+# integration tests without depending on the mock_services side process.
+option "use_legacy_sleep" - "Force legacy folly::futures::sleep path; skip MockServicesClient construction and outbound RPC fanout." flag off
