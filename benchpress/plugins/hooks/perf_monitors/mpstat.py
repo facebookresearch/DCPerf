@@ -18,7 +18,17 @@ class MPStat(Monitor):
 
     def run(self):
         args = ["mpstat", "-u", f"{self.interval}"]
-        self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, encoding="utf-8")
+        self.proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            encoding="utf-8",
+            # CRITICAL: Run in its own process group so Monitor.terminate()
+            # can killpg() the bash wrapper + mpstat cleanly without
+            # signalling benchpress itself (which would raise
+            # KeyboardInterrupt and abort cleanup of all subsequent
+            # monitors).
+            start_new_session=True,
+        )
         super(MPStat, self).run()
 
     def process_output(self, line):
