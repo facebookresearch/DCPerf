@@ -1192,10 +1192,10 @@ void DLRMRequestHandler(
     }
   }
 
-  // Run feature extraction if enabled (with story content if available)
-  runFeatureExtraction(this_thread, story_contents);
-
-  // Populate CopyContext structData from story content when available
+  // Populate CopyContext structData from story content when available.
+  // This is small (KB-scale memcpy + hashing) so it stays on the
+  // dispatcher; the heavy ranking-side feature extraction runs async
+  // below.
   if (!story_contents.empty()) {
     std::vector<float> story_dense;
     std::vector<int64_t> story_sparse;
@@ -1254,10 +1254,17 @@ void DLRMRequestHandler(
       ? (num_io_stages * io_stage_latency_ms)
       : io_latency_ms;
 
-  // Pipeline: DLRM inference -> I/O sleep (or RPC fanout) -> pointer
-  // chase -> generate+send response. Everything chains via futures so
-  // the handler thread returns immediately and the request is processed
-  // entirely off the dispatcher thread.
+  // Pipeline:
+  //   - DLRM inference (already started above, runs on cpuThreadPool)
+  //   - Feature extraction in parallel: orchestrated by RANKER, the
+  //     actual extractor work delegated to GlobalCPUThread (matches the
+  //     prod thread-pool layout: ranking orchestration on RANKER, heavy
+  //     CPU extraction on GlobalCPUThread). Production multifeed
+  //     aggregator spends ~30-35% of CPU here, so we keep it in the
+  //     hot path.
+  //   - collectAll the two, then proceed to I/O fanout, pointer chase,
+  //     response generation. Everything chains via futures so the
+  //     dispatcher thread returns immediately.
   //
   // Phase 5: when --rpc_dist_path is set, the I/O sleep is replaced by
   // an outbound RPC fanout to mock_services on srEventBasePool (see
@@ -1268,7 +1275,33 @@ void DLRMRequestHandler(
   // now redundant.
   auto timekeeper = timekeeperPool->getTimekeeper();
   ThreadData* this_thread_ptr = &this_thread;
-  std::move(inference_future)
+  auto cpuPool = this_thread.cpuThreadPool;
+
+  // Stage A: hop to RANKER, then delegate feature extraction to
+  // GlobalCPUThread. Production multifeed_aggregator spends ~30-35% of
+  // CPU here, so we keep it on the hot path. Runs in parallel with
+  // the DLRM inference that was already kicked off above (inference
+  // executes on cpuThreadPool too, but folly's CPUThreadPoolExecutor
+  // is multi-threaded so the two stages overlap).
+  // story_contents is captured by value (copy) so its lifetime
+  // survives into the deferred GlobalCPUThread task.
+  folly::via(srvCPUThreadPool.get(),
+             [this_thread_ptr, story_contents, cpuPool]() {
+    return folly::via(cpuPool.get(),
+                      [this_thread_ptr, story_contents]() {
+      runFeatureExtraction(*this_thread_ptr, story_contents);
+      return folly::unit;
+    });
+  })
+      // Stage B: wait for DLRM inference to complete. inference_future
+      // was started before this chain so the wait is usually trivial
+      // (extraction is heavier). Hop onto ioThreadPool so the
+      // continuation that runs simulateIoOrFanout is on the IO loop.
+      .via(ioThreadPool.get())
+      .thenValue([inference_future = std::move(inference_future)](
+                     folly::Unit) mutable {
+        return std::move(inference_future);
+      })
       .via(ioThreadPool.get())
       .thenValue([this_thread_ptr, total_io_latency_ms, timekeeper, ioThreadPool](
                      int prediction_result) {
