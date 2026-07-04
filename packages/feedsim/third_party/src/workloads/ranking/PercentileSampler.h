@@ -53,9 +53,12 @@ namespace ranking {
  *      Loaded via loadFromDynamic(obj).
  *
  * Recognized percentile keys: min, p05, p10, p15, p20, p25, p30, p35,
- * p40, p45, p50, p55, p60, p65, p70, p75, p80, p85, p90, p95, p99, max.
- * Missing keys are silently skipped (rpc_dist.json has no p99, so this
- * is normal).
+ * p40, p45, p50, p55, p60, p65, p70, p75, p80, p85, p90, p95, p99,
+ * p99_9, p99_99, max. Missing keys are silently skipped. The p99_9 /
+ * p99_99 entries (added in rpc_dist_v2) provide finer-grained tail
+ * resolution; without them the linear interpolation between p99 and
+ * max overstates the latency in the 99th-99.99th percentile band by
+ * orders of magnitude.
  *
  * Thread-safety: load*() must complete before any sample*() call. After
  * load, sample*() is read-only on the percentile vectors but requires a
@@ -153,13 +156,20 @@ class PercentileSampler {
 
  private:
   static const std::vector<std::pair<std::string, double>>& kPercentiles() {
+    // Order matters: kept ascending in probability so loadInternal()
+    // produces a monotonic probs_ vector that std::lower_bound can
+    // traverse without re-sorting. p99_9 / p99_99 sit between p99 and
+    // max so the inverse-CDF interpolation buckets the long tail at
+    // ~10x finer resolution than the original [p99 .. max] segment.
     static const std::vector<std::pair<std::string, double>> kP = {
-        {"min", 0.00}, {"p05", 0.05}, {"p10", 0.10}, {"p15", 0.15},
-        {"p20", 0.20}, {"p25", 0.25}, {"p30", 0.30}, {"p35", 0.35},
-        {"p40", 0.40}, {"p45", 0.45}, {"p50", 0.50}, {"p55", 0.55},
-        {"p60", 0.60}, {"p65", 0.65}, {"p70", 0.70}, {"p75", 0.75},
-        {"p80", 0.80}, {"p85", 0.85}, {"p90", 0.90}, {"p95", 0.95},
-        {"p99", 0.99}, {"max", 1.00},
+        {"min", 0.0000}, {"p05", 0.0500}, {"p10", 0.1000},
+        {"p15", 0.1500}, {"p20", 0.2000}, {"p25", 0.2500},
+        {"p30", 0.3000}, {"p35", 0.3500}, {"p40", 0.4000},
+        {"p45", 0.4500}, {"p50", 0.5000}, {"p55", 0.5500},
+        {"p60", 0.6000}, {"p65", 0.6500}, {"p70", 0.7000},
+        {"p75", 0.7500}, {"p80", 0.8000}, {"p85", 0.8500},
+        {"p90", 0.9000}, {"p95", 0.9500}, {"p99", 0.9900},
+        {"p99_9", 0.9990}, {"p99_99", 0.9999}, {"max", 1.0000},
     };
     return kP;
   }
