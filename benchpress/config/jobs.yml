@@ -719,10 +719,12 @@
   benchmark: feedsim_autoscale
   description: >
     Multi-instance aggregator workload with DLRM (Deep Learning Recommendation Model)
-    inference. Uses async I/O for improved throughput on high-core CPUs.
-    Finds maximum QPS that system can sustain while keeping
-    95th percentile latency <= 500 msecs. Automatically spawns multiple
-    workload instances at 100 cores per instance (rounded up).
+    inference. Defaults bake in the t43 c7 calibration — the balanced
+    configuration that minimizes both gen-over-gen correlation gap AND
+    bench-vs-prod hot-function gap on CPL/BGM. Finds maximum QPS that the
+    system can sustain while keeping 95th percentile latency <= 700ms
+    (matches prod multifeed_aggregator's own end-to-end p95 budget).
+    Automatically spawns one workload instance per ~100 cores.
   args:
     - '-n {num_instances}'
     - '--async-io'
@@ -747,6 +749,13 @@
     - '--stories-per-processor-pass={stories_per_processor_pass}'
     - '--silesia-dir={silesia_dir}'
     - '--stories-per-request={stories_per_request}'
+    # t43 c7 calibration knobs (t31 tracking: T269255604)
+    - '--mock-tls={mock_tls}'
+    - '--mock-zstd-frac={mock_zstd_frac}'
+    - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
+    - '--rpc-fanout-scale={rpc_fanout_scale}'
+    - '--server-zstd={server_zstd}'
+    - '--sla-p95-ms={sla_p95_ms}'
     - '{extra_args}'
   vars:
     - 'num_instances=-1'
@@ -754,10 +763,11 @@
     - 'io_mean=200'
     - 'workload=dlrm'
     - 'dlrm_model=models/dlrm_small.pt'
-    # 32: half of t29 baseline 64. t32 BGM still showed Ranking-Prediction
-    # at 17.8% vs prod 5.9% with batch=64 — halving the batch ≈ halves the
-    # per-inference DLRM compute and brings it closer to prod's share.
-    - 'dlrm_batch_size=32'
+    # t43 c7: bs=64 is the balanced choice across both gen-over-gen
+    # correlation (BGM/CPL = 4.25× → 2nd best of 12 cells) and prod
+    # hot-function gap (CPL 4th, BGM 5th). bs=32 wins peak QPS alone but
+    # breaks correlation (BGM stretches to 4.75× CPL).
+    - 'dlrm_batch_size=64'
     - 'dlrm_threads=1'
     - 'dlrm_inferences=1'
     - 'client_side_features=0'
@@ -780,6 +790,15 @@
     - 'stories_per_processor_pass=100'
     - 'silesia_dir=silesia'
     - 'stories_per_request=10'
+    # t43 c7: TLS+keepalive on mock_services, 75% of channels compress,
+    # rpc_fanout_scale=0.05 (~188 RPCs/session). Server-side ZSTD off
+    # (mock-side ZSTD provides the prod-realistic Compression share).
+    - 'mock_tls=1'
+    - 'mock_zstd_frac=0.75'
+    - 'mock_keepalive_interval_ms=200'
+    - 'rpc_fanout_scale=0.05'
+    - 'server_zstd=0'
+    - 'sla_p95_ms=700'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
@@ -833,6 +852,13 @@
     - '-P {page_rank_seed}'
     - '-C {pointer_chase_seed}'
     - '-N'
+    # t43 c7 calibration knobs (t31 tracking: T269255604)
+    - '--mock-tls={mock_tls}'
+    - '--mock-zstd-frac={mock_zstd_frac}'
+    - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
+    - '--rpc-fanout-scale={rpc_fanout_scale}'
+    - '--server-zstd={server_zstd}'
+    - '--sla-p95-ms={sla_p95_ms}'
     - '{extra_args}'
   vars:
     - 'num_instances=-1'
@@ -840,7 +866,7 @@
     - 'io_mean=200'
     - 'workload=dlrm'
     - 'dlrm_model=models/dlrm_small.pt'
-    - 'dlrm_batch_size=256'
+    - 'dlrm_batch_size=64'
     - 'dlrm_threads=1'
     # 8 inferences/req brings DLRM-Inference CPU share from 55-62% down
     # toward prod multifeed_aggregator's Ranking-Prediction share of 7-13%.
@@ -866,6 +892,13 @@
     - 'node_rank_seed=54321'
     - 'page_rank_seed=12345'
     - 'pointer_chase_seed=98765'
+    # t43 c7 mock_services + TLS knobs (same baseline as feedsim_autoscale_dlrm)
+    - 'mock_tls=1'
+    - 'mock_zstd_frac=0.75'
+    - 'mock_keepalive_interval_ms=200'
+    - 'rpc_fanout_scale=0.05'
+    - 'server_zstd=0'
+    - 'sla_p95_ms=700'
     - 'extra_args='
   hooks:
     - hook: copymove
