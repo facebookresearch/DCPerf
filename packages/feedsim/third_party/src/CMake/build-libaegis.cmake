@@ -62,6 +62,10 @@ else()
         INSTALL_COMMAND
             ${CMAKE_COMMAND} -E copy_directory <SOURCE_DIR>/zig-out/include <INSTALL_DIR>/include
             COMMAND ${CMAKE_COMMAND} -E copy_directory <SOURCE_DIR>/zig-out/lib <INSTALL_DIR>/lib
+        # Required so ninja knows libaegis.a is produced by this ExternalProject;
+        # without this, downstream targets (mock_services) that depend on the .a
+        # path fail with "missing and no known rule to make it".
+        BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libaegis.a
     )
 
     ExternalProject_Add_StepDependencies(libaegis build zig)

@@ -52,13 +52,15 @@ ExternalProject_Add(fbthrift
         <INSTALL_DIR>/lib/libconcurrency.a
         <INSTALL_DIR>/lib/librpcmetadata.a
         <INSTALL_DIR>/lib/libthriftmetadata.a
+        <INSTALL_DIR>/lib/libthriftannotation.a
         <INSTALL_DIR>/lib/libthrifttype.a
         <INSTALL_DIR>/lib/libthrifttyperep.a
         <INSTALL_DIR>/lib/libthriftanyrep.a
-        <INSTALL_DIR>/lib/libthriftannotation.a
-        <INSTALL_DIR>/lib/libcommon.a
         <INSTALL_DIR>/lib/libruntime.a
+        <INSTALL_DIR>/lib/libcommon.a
         <INSTALL_DIR>/lib/libserverdbginfo.a
+        <INSTALL_DIR>/lib/libcompiler.a
+        <INSTALL_DIR>/lib/libwhisker.a
     BUILD_COMMAND
         cmake --build . --parallel ${BUILD_PARALLEL_JOBS}
     )
@@ -73,9 +75,40 @@ ExternalProject_Get_Property(fbthrift INSTALL_DIR)
 set(THRIFT1 ${INSTALL_DIR}/bin/thrift1)
 set(THRIFTCPP2 ${INSTALL_DIR}/lib/libthriftcpp2.a)
 
+# Use --start-group/--end-group to make link order between fbthrift sub-libs
+# irrelevant. The fbthrift static libs have many cyclic dependencies between
+# themselves (e.g. libthriftcpp2 <-> librpcmetadata <-> libserverdbginfo) that
+# would otherwise require careful manual ordering. With the group, the linker
+# will iterate until all cross-references resolve.
+#
+# Sub-lib map (why each is needed):
+#   librpcmetadata: CompressionConfig / CodecConfig / ClientMetadata /
+#       LoggingContext / QuotaReportConfig
+#   libruntime: apache::thrift::runtime::wasInitialized() /
+#       getGlobalLegacyClientEventHandlers()
+#   libcommon: apache::thrift::validate_universal_name()
+#   libserverdbginfo: apache::thrift::serverdbginfo::ResourcePoolsDbgInfo
+#       (referenced by ThriftServer's resource pool reporting)
+#   libcompiler / libwhisker: pulled in transitively by compiler_ast /
+#       compiler_lib / compiler_base when linking fbthrift's reflection /
+#       metadata bits.
+#
+# Note: libquic_thriftcpp2.a and libcompiler_generators.a are produced by the
+# fbthrift build but NOT installed by `cmake --install`, so they are not
+# referenced here.
 set(FBTHRIFT_LIBRARIES
+    -Wl,--start-group
     ${INSTALL_DIR}/lib/libthriftcpp2.a
     ${INSTALL_DIR}/lib/libthriftprotocol.a
+    ${INSTALL_DIR}/lib/librpcmetadata.a
+    ${INSTALL_DIR}/lib/libthriftmetadata.a
+    ${INSTALL_DIR}/lib/libthriftannotation.a
+    ${INSTALL_DIR}/lib/libthrifttype.a
+    ${INSTALL_DIR}/lib/libthrifttyperep.a
+    ${INSTALL_DIR}/lib/libthriftanyrep.a
+    ${INSTALL_DIR}/lib/libruntime.a
+    ${INSTALL_DIR}/lib/libcommon.a
+    ${INSTALL_DIR}/lib/libserverdbginfo.a
     ${INSTALL_DIR}/lib/libthrift-core.a
     ${INSTALL_DIR}/lib/libtransport.a
     ${INSTALL_DIR}/lib/libasync.a
@@ -90,6 +123,9 @@ set(FBTHRIFT_LIBRARIES
     ${INSTALL_DIR}/lib/libcommon.a
     ${INSTALL_DIR}/lib/libruntime.a
     ${INSTALL_DIR}/lib/libserverdbginfo.a
+    ${INSTALL_DIR}/lib/libcompiler.a
+    ${INSTALL_DIR}/lib/libwhisker.a
+    -Wl,--end-group
 )
 
 set(FBTHRIFT_INCLUDE_DIR
