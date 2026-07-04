@@ -137,12 +137,14 @@ struct ThreadData {
   // Phase 4 thread-pool aliases (names kept for callsite stability):
   //   cpuThreadPool       -> folly::getGlobalCPUExecutor() ("GlobalCPUThread")
   //   srvCPUThreadPool    -> RANKER pool (NamedThreadFactory("RANKER"))
-  //   srvIOThreadPool     -> legacy compression pool (kept until Phase 6)
   //   ioThreadPool        -> ThriftSrv.IO pool (NamedThreadFactory("ThriftSrv.IO"))
-  //   srEventBasePool     -> NEW outbound-RPC EventBase pool (idle in Phase 4)
+  //   srEventBasePool     -> outbound-RPC EventBase pool (carries fanout
+  //                          to mock_services). Replaces the legacy
+  //                          "srvIOThread" pool which used to host
+  //                          throw-away datagen + compression as a
+  //                          placeholder for real outbound work.
   std::shared_ptr<folly::Executor> cpuThreadPool;
   std::shared_ptr<folly::CPUThreadPoolExecutor> srvCPUThreadPool;
-  std::shared_ptr<folly::CPUThreadPoolExecutor> srvIOThreadPool;
   std::shared_ptr<folly::IOThreadPoolExecutor> ioThreadPool;
   std::shared_ptr<folly::IOThreadPoolExecutor> srEventBasePool;
   std::shared_ptr<ranking::TimekeeperPool> timekeeperPool;
@@ -278,7 +280,6 @@ void ThreadStartup(
     ranking::dwarfs::PageRankParams& params,
     const std::shared_ptr<folly::Executor>& cpuThreadPool,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvCPUThreadPool,
-    const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvIOThreadPool,
     const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
     const std::shared_ptr<folly::IOThreadPoolExecutor>& srEventBasePool,
     const std::shared_ptr<ranking::TimekeeperPool>& timekeeperPool,
@@ -286,7 +287,6 @@ void ThreadStartup(
   auto& this_thread = thread_data[thread_id];
   this_thread.cpuThreadPool = cpuThreadPool;
   this_thread.srvCPUThreadPool = srvCPUThreadPool;
-  this_thread.srvIOThreadPool = srvIOThreadPool;
   this_thread.ioThreadPool = ioThreadPool;
   this_thread.srEventBasePool = srEventBasePool;
   this_thread.timekeeperPool = timekeeperPool;
@@ -422,7 +422,6 @@ void ThreadStartup(
     ranking::dwarfs::PageRankParams& params,
     const std::shared_ptr<folly::Executor>& cpuThreadPool,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvCPUThreadPool,
-    const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvIOThreadPool,
     const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
     const std::shared_ptr<folly::IOThreadPoolExecutor>& srEventBasePool,
     const std::shared_ptr<ranking::TimekeeperPool>& timekeeperPool) {
@@ -430,7 +429,6 @@ void ThreadStartup(
   auto graph = params.makeGraphCopy(g_shared_graph);
   this_thread.cpuThreadPool = cpuThreadPool;
   this_thread.srvCPUThreadPool = srvCPUThreadPool;
-  this_thread.srvIOThreadPool = srvIOThreadPool;
   this_thread.ioThreadPool = ioThreadPool;
   this_thread.srEventBasePool = srEventBasePool;
   this_thread.timekeeperPool = timekeeperPool;
@@ -1076,9 +1074,7 @@ void AsyncPageRankRequestHandler(
   }
 
   // Capture data needed for async stages by value
-  auto random_string = this_thread.random_string;
   auto srvCPUThreadPool = this_thread.srvCPUThreadPool;
-  auto srvIOThreadPool = this_thread.srvIOThreadPool;
   auto ioThreadPool = this_thread.ioThreadPool;
   auto timekeeperPool = this_thread.timekeeperPool;
   search::PointerChase* pointer_chaser = this_thread.pointer_chaser.get();
@@ -1091,7 +1087,6 @@ void AsyncPageRankRequestHandler(
   int io_stage_latency_ms = args.io_stage_latency_ms_arg;
 
   // Capture values for lambda captures
-  int srv_io_threads = args.srv_io_threads_arg;
   int srv_threads = args.srv_threads_arg;
   int num_objects = args.num_objects_arg;
   int chase_iterations = args.chase_iterations_arg;
@@ -1111,43 +1106,14 @@ void AsyncPageRankRequestHandler(
   // legacy behavior is preserved verbatim.
   simulateIoOrFanout(
       this_thread, total_io_latency_ms, timekeeper.get(), ioThreadPool.get())
-      .thenValue([ranking_result, random_string, srvIOThreadPool,
-                  srv_io_threads, num_objects](folly::Unit) {
-        // Stage 4: Compression and serialization
-        auto compressed = compressPayload(random_string, ranking_result);
-        auto per_thread_num_objects = num_objects / srv_io_threads;
-
-        std::vector<folly::Future<int>> compressionFutures;
-        for (int i = 0; i < srv_io_threads; i++) {
-          auto f = folly::via(srvIOThreadPool.get(), [per_thread_num_objects]() {
-            auto resp = generateResponse(per_thread_num_objects);
-            auto payloadiobufq = serializePayload(resp);
-            auto buf = payloadiobufq.move();
-            const auto compress_length = buf->computeChainDataLength() / 2;
-            size_t total_size = 0;
-            for (auto range : *buf) {
-              if (total_size >= compress_length) break;
-              auto iobuf = folly::IOBuf::copyBuffer(range.data(), range.size());
-              auto c = compressThrift(std::move(iobuf));
-              total_size += range.size();
-            }
-            return 1;
-          });
-          compressionFutures.push_back(std::move(f));
-        }
-        return folly::collectAll(std::move(compressionFutures))
-            .via(srvIOThreadPool.get())
-            .thenValue([ranking_result](std::vector<folly::Try<int>> results) {
-              int total = ranking_result;
-              for (auto& r : results) {
-                if (r.hasValue()) total += r.value();
-              }
-              return total;
-            });
-      })
       .thenValue([pointer_chaser, srvCPUThreadPool, srv_threads,
-                  chase_iterations](int prev_result) {
-        // Stage 5: Pointer chase
+                  chase_iterations, ranking_result](folly::Unit) {
+        // Stage 4: Pointer chase. The legacy throw-away
+        // generateResponse + serializePayload + compressThrift fanout
+        // on srvIOThreadPool that used to sit between Stage 3 and this
+        // stage was a placeholder for outbound RPC work; that work is
+        // now paid for by issueOutboundFanout (see Stage 3 /
+        // simulateIoOrFanout) on srEventBasePool.
         auto per_thread_chase_iterations = chase_iterations / srv_threads;
 
         std::vector<folly::Future<int>> chaseFutures;
@@ -1161,18 +1127,17 @@ void AsyncPageRankRequestHandler(
         }
         return folly::collectAll(std::move(chaseFutures))
             .via(srvCPUThreadPool.get())
-            .thenValue([prev_result](std::vector<folly::Try<int>> results) {
-              int total = prev_result;
+            .thenValue([ranking_result](std::vector<folly::Try<int>> results) {
+              int total = ranking_result;
               for (auto& r : results) {
                 if (r.hasValue()) total += r.value();
               }
               return total;
             });
       })
-      .thenValue([context_ptr, srv_io_threads, num_objects](int final_result) {
-        // Stage 6: Generate and send response
-        auto per_thread_num_objects = num_objects / srv_io_threads;
-        ranking::RankingResponse resp = generateResponse(per_thread_num_objects);
+      .thenValue([context_ptr, num_objects](int /*final_result*/) {
+        // Stage 5: Generate and send response.
+        ranking::RankingResponse resp = generateResponse(num_objects);
 
         auto payloadiobufq = serializePayload(resp);
         auto buf = payloadiobufq.move();
@@ -1274,7 +1239,6 @@ void DLRMRequestHandler(
 
   // Capture values needed for async stages
   auto srvCPUThreadPool = this_thread.srvCPUThreadPool;
-  auto srvIOThreadPool = this_thread.srvIOThreadPool;
   auto ioThreadPool = this_thread.ioThreadPool;
   auto timekeeperPool = this_thread.timekeeperPool;
   search::PointerChase* pointer_chaser = this_thread.pointer_chaser.get();
@@ -1282,7 +1246,6 @@ void DLRMRequestHandler(
   int io_latency_ms = this_thread.getNextIOLatencyMs();
   int num_io_stages = args.io_stages_arg;
   int io_stage_latency_ms = args.io_stage_latency_ms_arg;
-  int srv_io_threads = args.srv_io_threads_arg;
   int srv_threads = args.srv_threads_arg;
   int num_objects = args.num_objects_arg;
   int chase_iterations = args.chase_iterations_arg;
@@ -1291,13 +1254,18 @@ void DLRMRequestHandler(
       ? (num_io_stages * io_stage_latency_ms)
       : io_latency_ms;
 
-  // Pipeline: DLRM inference -> I/O sleep (or RPC fanout) -> compression
-  // -> pointer chase -> generate+send response. Everything chains via
-  // futures so the handler thread returns immediately and the request
-  // is processed entirely off the dispatcher thread.
+  // Pipeline: DLRM inference -> I/O sleep (or RPC fanout) -> pointer
+  // chase -> generate+send response. Everything chains via futures so
+  // the handler thread returns immediately and the request is processed
+  // entirely off the dispatcher thread.
   //
   // Phase 5: when --rpc_dist_path is set, the I/O sleep is replaced by
-  // an outbound RPC fanout to mock_services (see simulateIoOrFanout).
+  // an outbound RPC fanout to mock_services on srEventBasePool (see
+  // simulateIoOrFanout). The legacy throw-away
+  // generateResponse + serializePayload + compressThrift fanout on
+  // srvIOThreadPool that used to sit between simulateIoOrFanout and the
+  // pointer chase was a placeholder for that real outbound work and is
+  // now redundant.
   auto timekeeper = timekeeperPool->getTimekeeper();
   ThreadData* this_thread_ptr = &this_thread;
   std::move(inference_future)
@@ -1311,41 +1279,6 @@ void DLRMRequestHandler(
                    ioThreadPool.get())
             .thenValue([prediction_result](folly::Unit) {
               return prediction_result;
-            });
-      })
-      .thenValue([srvIOThreadPool, srv_io_threads, num_objects](
-                     int prediction_result) {
-        auto per_thread_num_objects = num_objects / srv_io_threads;
-        std::vector<folly::Future<int>> compressionFutures;
-        for (int i = 0; i < srv_io_threads; i++) {
-          auto f = folly::via(
-              srvIOThreadPool.get(), [per_thread_num_objects]() {
-                auto resp = generateResponse(per_thread_num_objects);
-                auto payloadiobufq = serializePayload(resp);
-                auto buf = payloadiobufq.move();
-                const auto compress_length =
-                    buf->computeChainDataLength() / 2;
-                size_t total_size = 0;
-                for (auto range : *buf) {
-                  if (total_size >= compress_length) break;
-                  auto iobuf = folly::IOBuf::copyBuffer(
-                      range.data(), range.size());
-                  auto c = compressThrift(std::move(iobuf));
-                  total_size += range.size();
-                }
-                return 1;
-              });
-          compressionFutures.push_back(std::move(f));
-        }
-        return folly::collectAll(std::move(compressionFutures))
-            .via(srvIOThreadPool.get())
-            .thenValue([prediction_result](
-                           std::vector<folly::Try<int>> results) {
-              int total = prediction_result;
-              for (auto& r : results) {
-                if (r.hasValue()) total += r.value();
-              }
-              return total;
             });
       })
       .thenValue([pointer_chaser, srvCPUThreadPool, srv_threads,
@@ -1371,10 +1304,8 @@ void DLRMRequestHandler(
               return total;
             });
       })
-      .thenValue([context_ptr, srv_io_threads, num_objects](
-                     int /*final_result*/) {
-        auto per_thread_num_objects = num_objects / srv_io_threads;
-        auto resp = generateResponse(per_thread_num_objects);
+      .thenValue([context_ptr, num_objects](int /*final_result*/) {
+        auto resp = generateResponse(num_objects);
         folly::IOBufQueue bufq;
         apache::thrift::CompactSerializer::serialize(resp, &bufq);
         auto buf = bufq.move();
@@ -1445,32 +1376,11 @@ void PageRankRequestHandler(
                .thenValue([&](folly::Unit) { return result + 1; });
   result = std::move(s).get();
 
-  auto compressed = compressPayload(this_thread.random_string, result);
-
-  auto per_thread_num_objects = args.num_objects_arg / args.srv_io_threads_arg;
-
-  std::vector<folly::Future<int>> compressionFutures;
-  for (int i = 0; i < args.srv_io_threads_arg; i++) {
-    auto f = folly::via(this_thread.srvIOThreadPool.get(), [&]() {
-      auto resp = generateResponse(per_thread_num_objects);
-      auto payloadiobufq = serializePayload(resp);
-      auto buf = payloadiobufq.move();
-      const auto compress_length = buf->computeChainDataLength() / 2;
-      auto total_size = 0;
-      folly::IOBuf::Iterator it = buf->begin();
-      while (it != buf->end() && total_size < compress_length) {
-        const auto& b = *it;
-        auto iobuf = folly::IOBuf::copyBuffer(b.data(), b.size());
-        auto c = compressThrift(std::move(iobuf));
-        total_size += b.size();
-        ++it;
-      }
-      return 1;
-    });
-    compressionFutures.push_back(std::move(f));
-  }
-  auto cfs = folly::collect(compressionFutures).get();
-  int cResult = std::accumulate(cfs.begin(), cfs.end(), 0);
+  // The legacy throw-away generateResponse + serializePayload +
+  // compressThrift fanout on srvIOThreadPool that used to sit here was a
+  // placeholder for outbound RPC work; that work is now paid for by
+  // simulateIoOrFanout above (issueOutboundFanout on srEventBasePool
+  // when --rpc_dist_path is set).
 
   auto per_thread_chase_iterations =
       args.chase_iterations_arg / args.srv_threads_arg;
@@ -1486,14 +1396,13 @@ void PageRankRequestHandler(
   int chaseResult = std::accumulate(chaseFs.begin(), chaseFs.end(), 0);
 
   // Generate a response
-  auto r = generateResponse(per_thread_num_objects);
+  auto r = generateResponse(args.num_objects_arg);
   ranking::RankingResponse resp = r;
 
   // Serialize into FBThrift
   auto payloadiobufq = serializePayload(resp);
   auto buf = payloadiobufq.move();
 
-  auto uncompressed = decompressPayload(compressed);
   auto resp1 = deserializePayload(buf.get());
 
   context.sendResponse(buf->data(), buf->length());
@@ -2391,19 +2300,16 @@ int main(int argc, char** argv) {
       rankerThreads,
       std::make_shared<folly::NamedThreadFactory>("RANKER"));
 
-  // Legacy pool kept only for compression callsites until Phase 6.
-  auto srvIOThreadPool = std::make_shared<folly::CPUThreadPoolExecutor>(
-      args.srv_io_threads_arg,
-      std::make_shared<folly::NamedThreadFactory>("srvIOThread"));
-
   // ThriftSrv.IO: inbound RPC IO loop. Renamed (was anonymous folly default).
   auto ioThreadPool = std::make_shared<folly::IOThreadPoolExecutor>(
       args.io_threads_arg,
       std::make_shared<folly::NamedThreadFactory>("ThriftSrv.IO"));
 
-  // SREventBase: outbound-RPC EventBase pool. Idle in Phase 4 (Phase 5
-  // wires mock_services fanout to it). Sized 0.7 * nproc by default
-  // (matches CPL prod: 39 SREventBase threads on a 52-logical-core host).
+  // SREventBase: outbound-RPC EventBase pool. Carries the
+  // issueOutboundFanout work to mock_services (Phase 5), replacing the
+  // legacy srvIOThread pool's throw-away datagen + compression. Sized
+  // 0.7 * nproc by default (matches CPL prod: 39 SREventBase threads on
+  // a 52-logical-core host).
   const int srEventBaseThreads = (args.sr_event_base_threads_arg > 0)
       ? args.sr_event_base_threads_arg
       : std::max(1, (static_cast<int>(nproc) * 7) / 10);
@@ -2414,10 +2320,8 @@ int main(int argc, char** argv) {
   std::cout << "Thread pools (nproc=" << nproc << "): "
             << "GlobalCPUThread (folly singleton), "
             << "RANKER=" << rankerThreads << ", "
-            << "SREventBase=" << srEventBaseThreads << " (idle in Phase 4), "
-            << "ThriftSrv.IO=" << args.io_threads_arg << ", "
-            << "srvIOThread (legacy compression)=" << args.srv_io_threads_arg
-            << std::endl;
+            << "SREventBase=" << srEventBaseThreads << ", "
+            << "ThriftSrv.IO=" << args.io_threads_arg << std::endl;
 
   auto timekeeperPool =
       std::make_shared<ranking::TimekeeperPool>(args.timekeeper_threads_arg);
@@ -2459,17 +2363,6 @@ int main(int argc, char** argv) {
       }));
     }
     folly::collectAll(std::move(srvCPUFutures)).get();
-
-    // Warm up srvIO thread pool
-    std::vector<folly::Future<int>> srvIOFutures;
-    for (int i = 0; i < warmup_tasks; i++) {
-      srvIOFutures.push_back(folly::via(srvIOThreadPool.get(), []() {
-        volatile int sum = 0;
-        for (int j = 0; j < 1000; j++) sum += j;
-        return static_cast<int>(sum);
-      }));
-    }
-    folly::collectAll(std::move(srvIOFutures)).get();
 
     // Warm up IO thread pool (uses different API)
     std::vector<folly::Future<int>> ioFutures;
@@ -2585,7 +2478,6 @@ int main(int argc, char** argv) {
         params,
         cpuThreadPool,
         srvCPUThreadPool,
-        srvIOThreadPool,
         ioThreadPool,
         srEventBasePool,
         timekeeperPool,
@@ -2597,7 +2489,6 @@ int main(int argc, char** argv) {
         params,
         cpuThreadPool,
         srvCPUThreadPool,
-        srvIOThreadPool,
         ioThreadPool,
         srEventBasePool,
         timekeeperPool);
