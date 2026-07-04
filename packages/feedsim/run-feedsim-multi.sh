@@ -88,22 +88,23 @@ done
 PORT=21212
 PIDS=()
 
-# Phase 5-A orchestration: start mock_services ONCE per host before
-# spawning the LeafNodeRank instances. mock_services is stateless and
-# serves all colocated leaves on a fixed port (21222 = LeafNodeRank's
-# --mock_services_port default). Without this, LeafNodeRank's outbound
-# fanout client cannot connect, the request handler falls back to
-# legacy folly::futures::sleep, and the Phase 6 session-mode driver
-# never produces QPS samples (search_qps.sh fails with "Could not
-# find QPS in loadtest output" -> divide by zero).
-MOCK_SERVICES_PORT=21222
-# Binary lives under src/ — the install script unpacks the source tarball
-# alongside run.sh and ninja builds into src/build/. run.sh's main loop
-# already does `cd "${FEEDSIM_ROOT}/src"` before invoking LeafNodeRank;
-# from this script we use the absolute src/ path directly.
+# Phase 5-A orchestration: start ONE mock_services per feedsim instance
+# (was: ONE per host shared by all instances). Each mock_services is
+# tasksetted to the same CPU range as its feedsim instance, so the two
+# processes share L1/L2/L3 + memory bandwidth but DON'T share queue
+# depth with the other instance's mock_services. This eliminates a
+# previously-confirmed cross-instance contention point that produced
+# wide per-iter QPS variance under heavy outbound fanout (see Progress
+# Log 2026-05-13).
+#
+# Port allocation:
+#   feedsim instance i (1..N): listens on   21212 + (i-1)
+#   mock_services for inst i : listens on   21222 + (i-1)
+# (21222 stays the i=1 default for backwards compat with single-instance
+# manual runs and with --mock_services_port=21222 in run.sh defaults.)
+MOCK_SERVICES_PORT_BASE=21222
 MOCK_SERVICES_BIN="${FEEDSIM_ROOT}/src/build/workloads/ranking/mock_services/mock_services"
-MOCK_SERVICES_LOG="${FEEDSIM_ROOT}/mock_services.log"
-MOCK_SERVICES_PID=""
+MOCK_SERVICES_PIDS=()
 
 # Resolve --silesia-dir from forwarded args ($@); fall back to the default
 # install layout (./silesia next to run.sh). mock_services requires Silesia
@@ -134,7 +135,16 @@ else
     SILESIA_DIR_ABS="$SILESIA_DIR_ARG"
 fi
 
+# start_mock_services <port> <core_range> <log_path> <io_threads>
+# Starts ONE mock_services pinned via taskset to the given core range.
+# Returns PID on stdout; appends to MOCK_SERVICES_PIDS so stop_mock_services
+# can reap them all on EXIT.
 function start_mock_services() {
+    local port="$1"
+    local core_range="$2"
+    local log_path="$3"
+    local io_threads="$4"
+
     if [ ! -x "$MOCK_SERVICES_BIN" ]; then
         echo "ERROR: mock_services binary not found at $MOCK_SERVICES_BIN" >&2
         exit 1
@@ -143,12 +153,6 @@ function start_mock_services() {
         echo "ERROR: Silesia directory not found at $SILESIA_DIR_ABS (mock_services requires it)" >&2
         exit 1
     fi
-    # Size the IO worker pool to one thread per logical core so the fbthrift
-    # server can absorb the simultaneous startup-probe burst from every
-    # LeafNodeRank thread (88-176 probes on BGM/Turin) without saturating
-    # its default 6-pool sizing and timing out per-client probes.
-    local mock_io_threads
-    mock_io_threads="$(nproc)"
 
     # Latency-shaping knobs (env-overridable). Defaults match the
     # mock_services compiled-in defaults: 200ms cap, 0us offset, 100us
@@ -156,55 +160,68 @@ function start_mock_services() {
     # / MOCK_LATENCY_SKIP_THRESHOLD_US to shape the per-RPC simulated
     # delay -- rpc_dist.json contains very long-tail values (p99 ~8s,
     # max ~28s) that make each fanout block on the slowest call.
-    local mock_latency_cap_us="${MOCK_LATENCY_CAP_US:-200000}"
-    local mock_latency_offset_us="${MOCK_LATENCY_OFFSET_US:-0}"
-    local mock_latency_skip_threshold_us="${MOCK_LATENCY_SKIP_THRESHOLD_US:-100}"
+    local cap_us="${MOCK_LATENCY_CAP_US:-200000}"
+    local offset_us="${MOCK_LATENCY_OFFSET_US:-0}"
+    local skip_us="${MOCK_LATENCY_SKIP_THRESHOLD_US:-100}"
 
-    echo "Starting mock_services on port ${MOCK_SERVICES_PORT} (silesia=${SILESIA_DIR_ABS}, io_threads=${mock_io_threads}, cap_us=${mock_latency_cap_us}, offset_us=${mock_latency_offset_us}, skip_threshold_us=${mock_latency_skip_threshold_us})"
-    "$MOCK_SERVICES_BIN" \
-        --port="$MOCK_SERVICES_PORT" \
-        --mock_io_threads="$mock_io_threads" \
-        --latency_cap_us="$mock_latency_cap_us" \
-        --latency_offset_us="$mock_latency_offset_us" \
-        --latency_skip_threshold_us="$mock_latency_skip_threshold_us" \
+    echo "Starting mock_services on port ${port} (cores=${core_range}, io_threads=${io_threads}, cap_us=${cap_us}, offset_us=${offset_us}, skip_us=${skip_us}, silesia=${SILESIA_DIR_ABS})"
+    taskset --cpu-list "$core_range" \
+        "$MOCK_SERVICES_BIN" \
+        --port="$port" \
+        --mock_io_threads="$io_threads" \
+        --latency_cap_us="$cap_us" \
+        --latency_offset_us="$offset_us" \
+        --latency_skip_threshold_us="$skip_us" \
         --silesia_dir="$SILESIA_DIR_ABS" \
-        > "$MOCK_SERVICES_LOG" 2>&1 &
-    MOCK_SERVICES_PID=$!
+        > "$log_path" 2>&1 &
+    local pid=$!
+    MOCK_SERVICES_PIDS+=("$pid")
 
     # TCP-poll readiness (mirrors the LeafNodeRank wait loop in run.sh).
     local max_attempts=30
     local attempt=0
     while [ "$attempt" -lt "$max_attempts" ]; do
-        if (echo > /dev/tcp/localhost/"$MOCK_SERVICES_PORT") 2>/dev/null; then
-            echo "mock_services is ready (port $MOCK_SERVICES_PORT accepting connections, pid=$MOCK_SERVICES_PID)"
+        if (echo > /dev/tcp/localhost/"$port") 2>/dev/null; then
+            echo "mock_services is ready on port $port (pid=$pid)"
             return 0
         fi
-        # Bail early if the process died.
-        if ! kill -0 "$MOCK_SERVICES_PID" 2>/dev/null; then
-            echo "ERROR: mock_services died during startup. Tail of log:" >&2
-            tail -40 "$MOCK_SERVICES_LOG" >&2
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo "ERROR: mock_services died during startup. Tail of $log_path:" >&2
+            tail -40 "$log_path" >&2
             exit 1
         fi
         attempt=$((attempt + 1))
         sleep 1
     done
-    echo "ERROR: mock_services failed to become ready within ${max_attempts}s" >&2
-    tail -40 "$MOCK_SERVICES_LOG" >&2
-    kill -SIGTERM "$MOCK_SERVICES_PID" 2>/dev/null || true
+    echo "ERROR: mock_services failed to become ready within ${max_attempts}s on port $port" >&2
+    tail -40 "$log_path" >&2
+    kill -SIGTERM "$pid" 2>/dev/null || true
     exit 1
 }
 
 function stop_mock_services() {
-    if [ -n "$MOCK_SERVICES_PID" ] && kill -0 "$MOCK_SERVICES_PID" 2>/dev/null; then
-        echo "Stopping mock_services (pid=$MOCK_SERVICES_PID)"
-        kill -SIGINT "$MOCK_SERVICES_PID" 2>/dev/null || true
-        # Give it a moment to exit cleanly, then force-kill.
-        for _ in 1 2 3 4 5; do
-            kill -0 "$MOCK_SERVICES_PID" 2>/dev/null || break
-            sleep 1
+    local pid
+    for pid in "${MOCK_SERVICES_PIDS[@]}"; do
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping mock_services (pid=$pid)"
+            kill -SIGINT "$pid" 2>/dev/null || true
+        fi
+    done
+    # Brief grace period, then force-kill any survivors.
+    for _ in 1 2 3 4 5; do
+        local any_alive=0
+        for pid in "${MOCK_SERVICES_PIDS[@]}"; do
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                any_alive=1
+                break
+            fi
         done
-        kill -SIGKILL "$MOCK_SERVICES_PID" 2>/dev/null || true
-    fi
+        [ "$any_alive" -eq 0 ] && break
+        sleep 1
+    done
+    for pid in "${MOCK_SERVICES_PIDS[@]}"; do
+        kill -SIGKILL "$pid" 2>/dev/null || true
+    done
 }
 
 # When LEAFNODE_USE_LEGACY_SLEEP=1, run.sh forwards --use_legacy_sleep to
@@ -212,11 +229,12 @@ function stop_mock_services() {
 # instead of fanning RPCs to mock_services. Skip the mock_services side
 # process entirely in that case so later diffs in the stack can run
 # end-to-end integration tests without the mock_services dependency.
+SKIP_MOCK_SERVICES=0
 if [ "${LEAFNODE_USE_LEGACY_SLEEP:-0}" = "1" ]; then
     echo "Skipping mock_services startup (LEAFNODE_USE_LEGACY_SLEEP=1)"
+    SKIP_MOCK_SERVICES=1
 else
     trap stop_mock_services EXIT INT TERM
-    start_mock_services
 fi
 
 function get_cpu_range() {
@@ -259,10 +277,29 @@ echo > $BREPS_LFILE
 # shellcheck disable=SC2086
 for i in $(seq 1 ${NUM_INSTANCES}); do
     CORE_RANGE="$(get_cpu_range "${NUM_INSTANCES}" "$((i - 1))")"
-    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -i ${NUM_ICACHE_ITERATIONS} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
+    MOCK_PORT=$((MOCK_SERVICES_PORT_BASE + i - 1))
+    MOCK_LOG="${FEEDSIM_ROOT}/mock_services_${i}.log"
+
+    if [ "$SKIP_MOCK_SERVICES" -eq 0 ]; then
+        # Size mock_services io threads to roughly match this instance's
+        # CPU share (one mock thread per core in the instance's range).
+        # awk parses the comma-and-dash core list "0-43,88-131" into a
+        # total core count so SMT-on hosts get the SMT-doubled count.
+        MOCK_IO_THREADS="$(echo "$CORE_RANGE" | awk -F',' '{
+            t = 0;
+            for (i = 1; i <= NF; i++) {
+                n = split($i, r, "-");
+                if (n == 2) t += (r[2] - r[1] + 1); else t += 1;
+            }
+            print t;
+        }')"
+        start_mock_services "$MOCK_PORT" "$CORE_RANGE" "$MOCK_LOG" "$MOCK_IO_THREADS"
+    fi
+
+    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -i ${NUM_ICACHE_ITERATIONS} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
     echo "$CMD" > "${FEEDSIM_LOG_PREFIX}${i}.log"
     # shellcheck disable=SC2068,SC2069
-    IS_AUTOSCALE_RUN=${NUM_INSTANCES} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -i "${NUM_ICACHE_ITERATIONS}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
+    IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -i "${NUM_ICACHE_ITERATIONS}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
     PIDS+=("$!")
     PHY_CORE_ID=$((PHY_CORE_ID + CORES_PER_INST))
     SMT_ID=$((SMT_ID + CORES_PER_INST))
