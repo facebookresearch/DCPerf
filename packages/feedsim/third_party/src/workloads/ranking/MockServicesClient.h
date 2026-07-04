@@ -14,12 +14,14 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
 
 #include <folly/SocketAddress.h>
 #include <folly/futures/Future.h>
+#include <folly/io/async/AsyncTimeout.h>
 #include <folly/io/async/EventBase.h>
 
 #include "RpcDistRegistry.h"
@@ -66,7 +68,9 @@ class MockServicesClient {
   MockServicesClient(
       folly::EventBase* evb,
       const std::string& host,
-      uint16_t port);
+      uint16_t port,
+      std::chrono::milliseconds keepalive_interval =
+          std::chrono::milliseconds(0));
 
   ~MockServicesClient();
 
@@ -97,8 +101,15 @@ class MockServicesClient {
   folly::EventBase* getEventBase() const { return evb_; }
 
  private:
+  // KeepaliveTimer (defined in .cc) fires a fire-and-forget getStatus()
+  // probe RPC every keepalive_interval_ms to keep the underlying Rocket
+  // channel + SREventBase warm. Forward declared here so the unique_ptr
+  // member doesn't pull AsyncTimeout into the header's public surface.
+  class KeepaliveTimer;
+
   folly::EventBase* evb_;
   std::unique_ptr<mock_services::MockServiceAsyncClient> client_;
+  std::unique_ptr<KeepaliveTimer> keepalive_;
 };
 
 /**
