@@ -28,6 +28,21 @@
 #include <folly/Range.h>
 #include <folly/compression/Compression.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
+
+// ManagedCompression is the documented Meta standard for application-level
+// compression (per fbcode/.llms/rules/managed_compression.md), but it is
+// internal-only. The benchpress repo is open-sourced, so the include and
+// usages below are gated behind BENCHPRESS_INTERNAL. When the gate is not
+// defined (the current OSS / CMake build path) we fall back to raw folly
+// ZSTD, which is the historical behavior. The gate is wired up by the
+// fbcode-internal Buck build (see packages/feedsim/.../mock_services/BUCK
+// for the analogous internal-only wiring); the open-source CMake build
+// leaves it undefined.
+#ifdef BENCHPRESS_INTERNAL
+#include <folly/Singleton.h>
+#include "common/managed_compression/ManagedCompression.h"
+#endif
+
 #include <folly/executors/GlobalExecutor.h>
 #include <folly/executors/IOThreadPoolExecutor.h>
 #include <folly/futures/Future.h>
@@ -396,29 +411,84 @@ void ThreadStartup(
   }
 }
 
-std::string compressPayload(const std::string& data, int result) {
+#ifdef BENCHPRESS_INTERNAL
+namespace {
+using facebook::managed_compression::ManagedCompressionFactory;
+
+// One ManagedCompressionFactory per (oncall, project) pair, lifetime =
+// process. Per the ManagedCompression skill / wiki, constructing a new
+// factory per call is expensive and explicitly discouraged.
+//
+// Two categories are used in this file:
+//   "leaf_random_string"   — the pseudo-random payload bytes shared by
+//                            compressPayload / decompressPayload. Both
+//                            sides MUST use the same category so
+//                            ManagedCompression can serve the right
+//                            dictionary on decompress.
+//   "leaf_thrift_payload"  — serialized RankingResponse (CompactProtocol)
+//                            consumed by compressThrift.
+class FeedSimCompressionTag {};
+folly::Singleton<ManagedCompressionFactory, FeedSimCompressionTag> gFactory(
+    [] {
+      return new ManagedCompressionFactory(
+          /*oncall_team=*/"chips_dcperf",
+          /*project=*/"feedsim");
+    });
+
+std::shared_ptr<folly::compression::Codec> getRandomStringCodec() {
+  // getCachedCodec() reuses the codec instance per category; preferred
+  // over getCodec() for hot paths per references/cpp.md. try_get() can
+  // return null before SingletonVault::registrationComplete() or after
+  // destroyInstances() during shutdown — fail loudly rather than crash
+  // with a null-deref.
+  auto factory = gFactory.try_get();
+  CHECK(factory) << "ManagedCompressionFactory singleton unavailable";
+  return factory->getCachedCodec("leaf_random_string");
+}
+
+std::shared_ptr<folly::compression::Codec> getThriftPayloadCodec() {
+  auto factory = gFactory.try_get();
+  CHECK(factory) << "ManagedCompressionFactory singleton unavailable";
+  return factory->getCachedCodec("leaf_thrift_payload");
+}
+} // namespace
+#endif // BENCHPRESS_INTERNAL
+
+std::string compressPayload(const std::string& data, int /*result*/) {
   folly::StringPiece output(
       data.data(),
       std::min(args.compression_data_size_arg, args.random_data_size_arg));
+#ifdef BENCHPRESS_INTERNAL
+  return getRandomStringCodec()->compress(output);
+#else
   auto codec =
       folly::compression::getCodec(folly::compression::CodecType::ZSTD);
   std::string compressed = codec->compress(output);
   return std::move(compressed);
+#endif
 }
 
 std::string decompressPayload(const std::string& data) {
+#ifdef BENCHPRESS_INTERNAL
+  return getRandomStringCodec()->uncompress(data);
+#else
   auto codec =
       folly::compression::getCodec(folly::compression::CodecType::ZSTD);
   std::string decompressed = codec->uncompress(data);
   return decompressed;
+#endif
 }
 
 std::unique_ptr<folly::IOBuf> compressThrift(
     std::unique_ptr<folly::IOBuf> buf) {
+#ifdef BENCHPRESS_INTERNAL
+  return getThriftPayloadCodec()->compress(buf.get());
+#else
   auto codec =
       folly::compression::getCodec(folly::compression::CodecType::ZSTD);
   auto compressed_buf = codec->compress(buf.get());
   return compressed_buf;
+#endif
 }
 
 folly::IOBufQueue serializePayload(const ranking::RankingResponse& resp) {
