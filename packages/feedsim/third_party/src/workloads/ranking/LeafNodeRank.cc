@@ -91,6 +91,7 @@
 #include "feature_extractors/TreeTraversalExtractor.h"
 #include "feature_extractors/BitsetExtractor.h"
 #include "feature_extractors/generated/registry.h"
+#include "story_processors/StoryProcessorSuite.h"
 
 // Shared configuration flags
 static gengetopt_args_info args;
@@ -188,6 +189,8 @@ struct ThreadData {
 
   // Feature extraction suite (Phase 2)
   std::unique_ptr<FeatureExtractorSuite> feature_suite;
+  std::unique_ptr<dcperf::story_processors::StoryProcessorSuite>
+      story_suite;
 
   // Phase 3: I/O latency distribution support
   IOLatencyDistType io_latency_dist_type = IOLatencyDistType::FIXED;
@@ -443,6 +446,18 @@ void ThreadStartup(
     this_thread.feature_suite->initializeFlatDispatch(noderank_seed);
   }
 
+  // Initialize story-processor suite if enabled. Per-thread instance
+  // keeps weight tables + aux lists thread-local (no cross-thread
+  // sharing in the hot path).
+  if (args.story_processors_per_story_arg > 0) {
+    this_thread.story_suite =
+        std::make_unique<dcperf::story_processors::StoryProcessorSuite>();
+    this_thread.story_suite->initialize(
+        args.feature_complexity_arg,
+        noderank_seed ^ 0xbeefbeefbeefbeefull,
+        static_cast<size_t>(args.stories_per_processor_pass_arg));
+  }
+
   // Phase 3: Initialize I/O latency distributions
   this_thread.io_latency_mean_ms = args.io_latency_mean_ms_arg;
   std::string io_dist_str = args.io_latency_distribution_arg;
@@ -581,6 +596,16 @@ void ThreadStartup(
     this_thread.feature_suite->initializeAll(
         args.feature_complexity_arg, noderank_seed);
     this_thread.feature_suite->initializeFlatDispatch(noderank_seed);
+  }
+
+  // Initialize story-processor suite if enabled.
+  if (args.story_processors_per_story_arg > 0) {
+    this_thread.story_suite =
+        std::make_unique<dcperf::story_processors::StoryProcessorSuite>();
+    this_thread.story_suite->initialize(
+        args.feature_complexity_arg,
+        noderank_seed ^ 0xbeefbeefbeefbeefull,
+        static_cast<size_t>(args.stories_per_processor_pass_arg));
   }
 
   // Phase 3: Initialize I/O latency distributions
@@ -1104,6 +1129,24 @@ static void runFeatureExtraction(
   }
 }
 
+// runStoryProcessing — companion to runFeatureExtraction. Issues
+// `num_stories * story_processors_per_story` pipeline passes per
+// request. The story-processor module is a mock for prod multifeed's
+// scoring + filter + blend + serdes + topK stages, which are
+// substantially distinct from feature extraction per the t31 prod-vs-
+// mock profile analysis.
+static void runStoryProcessing(ThreadData& this_thread) {
+  if (!this_thread.story_suite) {
+    return;
+  }
+  const int passes =
+      args.num_stories_arg * args.story_processors_per_story_arg;
+  if (passes <= 0) {
+    return;
+  }
+  this_thread.story_suite->runPipelinePasses(passes);
+}
+
 /**
  * Phase 3: Async (non-blocking) request handler using continuation-passing style.
  *
@@ -1146,6 +1189,9 @@ void AsyncPageRankRequestHandler(
 
   // Run feature extraction if enabled
   runFeatureExtraction(this_thread);
+  // Run story processors (mirrors prod multifeed scoring+filter+blend+
+  // serdes+topK passes; runs only when --story_processors_per_story > 0).
+  runStoryProcessing(this_thread);
 
   // Stage 2: PageRank ranking workload (CPU-intensive, parallelized).
   // This handler is for kPageRankRequestType only — DLRM workload is
@@ -1389,6 +1435,7 @@ void DLRMRequestHandler(
     return folly::via(cpuPool.get(),
                       [this_thread_ptr, story_contents]() {
       runFeatureExtraction(*this_thread_ptr, story_contents);
+      runStoryProcessing(*this_thread_ptr);
       return folly::unit;
     });
   })

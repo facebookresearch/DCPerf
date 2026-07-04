@@ -283,6 +283,12 @@ main() {
     local extractors_per_story
     extractors_per_story="50"
 
+    local story_processors_per_story
+    story_processors_per_story="0"
+
+    local stories_per_processor_pass
+    stories_per_processor_pass="50"
+
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
     fi
@@ -555,6 +561,20 @@ main() {
             --extractors-per-story=*)
                 extractors_per_story="${1#*=}"
                 ;;
+            --story-processors-per-story)
+                story_processors_per_story="$2"
+                shift
+                ;;
+            --story-processors-per-story=*)
+                story_processors_per_story="${1#*=}"
+                ;;
+            --stories-per-processor-pass)
+                stories_per_processor_pass="$2"
+                shift
+                ;;
+            --stories-per-processor-pass=*)
+                stories_per_processor_pass="${1#*=}"
+                ;;
             -h|--help)
                 show_help >&2
                 exit 1
@@ -648,6 +668,19 @@ main() {
     if [ "$feature_extractors" = "1" ]; then
         feature_opts="--feature_extractors --feature_complexity=$feature_complexity --num_stories=$num_stories --extractors_per_story=$extractors_per_story"
         echo "Feature extraction pipeline: ENABLED (complexity=$feature_complexity, stories=$num_stories, extractors/story=$extractors_per_story)"
+    fi
+
+    # Build story-processor options. The story-processor mock module mirrors
+    # prod multifeed's scoring + filter + blend + serdes + topK passes (see
+    # ScoringPassProcessor, FilteringPassProcessor, ...). When
+    # story_processors_per_story > 0, LeafNodeRank's ThreadStartup
+    # constructs a per-thread StoryProcessorSuite and runStoryProcessing
+    # issues `num_stories * story_processors_per_story` pipeline passes
+    # per request.
+    local story_opts=""
+    if [ "$story_processors_per_story" != "0" ]; then
+        story_opts="--story_processors_per_story=$story_processors_per_story --stories_per_processor_pass=$stories_per_processor_pass"
+        echo "Story-processor pipeline: ENABLED (passes/story=$story_processors_per_story, stories/pass=$stories_per_processor_pass)"
     fi
 
     # Resolve silesia_dir up-front so both LeafNodeRank and DriverNodeRank
@@ -773,6 +806,7 @@ main() {
         $load_graph \
         $instrument_graph \
         $feature_opts \
+        $story_opts \
         $server_silesia_opts \
         $mock_services_opts \
         $leafnoderank_seed \
