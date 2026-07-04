@@ -809,6 +809,17 @@ std::string compressPayload(const std::string& data, int /*result*/) {
   folly::StringPiece output(
       data.data(),
       std::min(args.compression_data_size_arg, args.random_data_size_arg));
+  // Honor FEEDSIM_SERVER_ZSTD passthrough (see comment above
+  // compressThrift). For symmetry; this path is hit on the random-payload
+  // workload variant. kServerZstdLocal mirrors the global once-per-process
+  // read in compressThrift's kServerZstd.
+  static const bool kServerZstdLocal = []() {
+    const char* v = std::getenv("FEEDSIM_SERVER_ZSTD");
+    return v == nullptr || std::strcmp(v, "0") != 0;
+  }();
+  if (!kServerZstdLocal) {
+    return std::string(output.data(), output.size());
+  }
 #ifdef BENCHPRESS_INTERNAL
   return getRandomStringCodec()->compress(output);
 #else
@@ -830,8 +841,27 @@ std::string decompressPayload(const std::string& data) {
 #endif
 }
 
+// FEEDSIM_SERVER_ZSTD env gate: when "0", server-side response compression
+// is bypassed (passthrough). Default behavior (ZSTD on) preserved. Lets the
+// bench match prod's lighter Compression CPU share (prod 3.9-5.2% vs bench
+// 6-10% in t41) without ripping out the entire ZSTD path. Decision is read
+// once per process to avoid getenv() on every request — kServerZstd is
+// shared with compressPayload below.
+namespace {
+bool readServerZstdEnv() {
+  const char* v = std::getenv("FEEDSIM_SERVER_ZSTD");
+  return v == nullptr || std::strcmp(v, "0") != 0;
+}
+} // namespace
+
 std::unique_ptr<folly::IOBuf> compressThrift(
     std::unique_ptr<folly::IOBuf> buf) {
+  static const bool kServerZstd = readServerZstdEnv();
+  LOG_FIRST_N(INFO, 1) << "Server-side response ZSTD: "
+                       << (kServerZstd ? "ON" : "OFF (passthrough)");
+  if (!kServerZstd) {
+    return buf;
+  }
 #ifdef BENCHPRESS_INTERNAL
   return getThriftPayloadCodec()->compress(buf.get());
 #else

@@ -27,11 +27,13 @@
 
 #include <folly/MPMCQueue.h>
 #include <folly/container/F14Map.h>
+#include <folly/io/async/AsyncSSLSocket.h>
 #include <folly/io/async/AsyncServerSocket.h>
 #include <folly/io/async/AsyncSocket.h>
 #include <folly/io/async/AsyncTransport.h>
 #include <folly/io/async/EventBase.h>
 #include <folly/io/async/EventBaseManager.h>
+#include <folly/io/async/SSLContext.h>
 
 namespace feedsim {
 
@@ -241,9 +243,11 @@ class AcceptCallback : public folly::AsyncServerSocket::AcceptCallback {
  public:
   AcceptCallback(
       std::vector<std::unique_ptr<WorkerThread>>& workers,
-      const folly::F14FastMap<uint32_t, QueryCallback>& callbacks)
+      const folly::F14FastMap<uint32_t, QueryCallback>& callbacks,
+      std::shared_ptr<folly::SSLContext> ssl_ctx)
       : workers_(workers),
         callbacks_(callbacks),
+        ssl_ctx_(std::move(ssl_ctx)),
         next_worker_(0) {}
 
   void connectionAccepted(
@@ -260,12 +264,29 @@ class AcceptCallback : public folly::AsyncServerSocket::AcceptCallback {
     auto& worker = workers_[next_worker_];
     next_worker_ = (next_worker_ + 1) % workers_.size();
 
-    // Create connection on the worker's EventBase
+    // Create connection on the worker's EventBase. When TLS is enabled
+    // (FEEDSIM_TLS_CERT/FEEDSIM_TLS_KEY env vars set at server startup),
+    // wrap the accepted fd in folly::AsyncSSLSocket so the TLS handshake
+    // is performed on the worker's EventBase before any wire reads. This
+    // closes the bench's Encryption CPU undershoot (prod ~3.3-3.6% vs
+    // bench ~0.9-1.5% in t41). Plain AsyncSocket preserves the original
+    // no-TLS behavior when the env vars are unset.
+    auto ssl_ctx = ssl_ctx_;
     worker->evb->runInEventBaseThread(
         [fd, thread_id = worker->thread_id, &callbacks = callbacks_,
-         evb = worker->evb.get()]() {
-          auto socket = folly::AsyncSocket::newSocket(
-              evb, folly::NetworkSocket::fromFd(fd));
+         evb = worker->evb.get(), ssl_ctx]() {
+          folly::AsyncSocket::UniquePtr socket;
+          if (ssl_ctx) {
+            // AsyncSSLSocket server-side: pass true for the server flag.
+            // The handshake is initiated lazily on first read/write,
+            // matching the existing client's connect-then-write pattern.
+            folly::AsyncSSLSocket::UniquePtr ssl_sock(new folly::AsyncSSLSocket(
+                ssl_ctx, evb, folly::NetworkSocket::fromFd(fd), true));
+            socket.reset(ssl_sock.release());
+          } else {
+            socket = folly::AsyncSocket::newSocket(
+                evb, folly::NetworkSocket::fromFd(fd));
+          }
           // ServerConnection self-manages its lifetime
           new ServerConnection(std::move(socket), thread_id, callbacks);
         });
@@ -278,6 +299,7 @@ class AcceptCallback : public folly::AsyncServerSocket::AcceptCallback {
  private:
   std::vector<std::unique_ptr<WorkerThread>>& workers_;
   const folly::F14FastMap<uint32_t, QueryCallback>& callbacks_;
+  std::shared_ptr<folly::SSLContext> ssl_ctx_;
   size_t next_worker_;
 };
 
@@ -297,6 +319,11 @@ struct FeedSimServer::Impl {
   std::shared_ptr<folly::AsyncServerSocket> server_socket;
   std::unique_ptr<AcceptCallback> accept_cb;
   std::vector<std::unique_ptr<WorkerThread>> workers;
+
+  // Optional SSL context — populated at startup from FEEDSIM_TLS_CERT /
+  // FEEDSIM_TLS_KEY env vars. When set, accepted connections are wrapped
+  // in AsyncSSLSocket. Driver-side env: FEEDSIM_DRIVER_TLS=1.
+  std::shared_ptr<folly::SSLContext> ssl_ctx;
 
   std::atomic<bool> running{false};
 };
@@ -390,8 +417,38 @@ void FeedSimServer::run() {
   impl_->main_evb = std::make_unique<folly::EventBase>();
   impl_->server_socket = folly::AsyncServerSocket::newSocket(impl_->main_evb.get());
 
+  // Optional TLS: when FEEDSIM_TLS_CERT and FEEDSIM_TLS_KEY are both set,
+  // create an SSL context and pass it through to AcceptCallback, which
+  // wraps each accepted fd in AsyncSSLSocket. Reuses the same cert/key
+  // pair as mock_services (FEEDSIM_TLS_CERT defaults to
+  // ${FEEDSIM_ROOT}/certs/example.crt via run.sh wiring). Bench-only:
+  // peer cert verification is not configured here; the client side
+  // (FeedSimDriver) skips verify via SSL_VERIFY_NONE.
+  {
+    const char* cert_env = std::getenv("FEEDSIM_TLS_CERT");
+    const char* key_env = std::getenv("FEEDSIM_TLS_KEY");
+    if (cert_env != nullptr && key_env != nullptr && cert_env[0] != '\0' &&
+        key_env[0] != '\0') {
+      try {
+        auto ctx = std::make_shared<folly::SSLContext>();
+        ctx->loadCertificate(cert_env);
+        ctx->loadPrivateKey(key_env);
+        // No ALPN — FeedSim uses its own custom binary protocol over the
+        // TLS-wrapped socket, not Rocket. The client similarly does not
+        // advertise ALPN.
+        impl_->ssl_ctx = std::move(ctx);
+        std::cout << "FeedSimServer: TLS enabled (cert=" << cert_env
+                  << " key=" << key_env << ")" << std::endl;
+      } catch (const std::exception& e) {
+        std::cerr << "FeedSimServer: failed to init SSL context: " << e.what()
+                  << " — falling back to plaintext" << std::endl;
+        impl_->ssl_ctx.reset();
+      }
+    }
+  }
+
   impl_->accept_cb = std::make_unique<AcceptCallback>(
-      impl_->workers, impl_->query_callbacks);
+      impl_->workers, impl_->query_callbacks, impl_->ssl_ctx);
 
   impl_->server_socket->addAcceptCallback(
       impl_->accept_cb.get(), nullptr);

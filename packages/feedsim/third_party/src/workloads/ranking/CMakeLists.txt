@@ -38,6 +38,18 @@ find_package(Snappy REQUIRED)
 find_package(LibLZMA REQUIRED)
 find_program(GENGETOPT_EXECUTABLE gengetopt REQUIRED)
 
+# libevent_openssl: required by FeedSimDriver.cc's bufferevent_openssl_socket_new
+# (used when FEEDSIM_DRIVER_TLS=1). libevent ships this as a separate library
+# alongside the core libevent. The .pc is libevent_openssl.pc and the lib file
+# is libevent_openssl.{so,a}.
+find_library(LIBEVENT_OPENSSL_LIB
+    NAMES event_openssl
+    PATHS ${CMAKE_INSTALL_PREFIX}/lib /usr/local/lib /usr/lib /usr/lib64
+)
+if(NOT LIBEVENT_OPENSSL_LIB)
+    message(WARNING "libevent_openssl not found; FEEDSIM_DRIVER_TLS will fail at runtime")
+endif()
+
 include(if/CMakeLists.txt)
 add_dependencies(ranking-cpp2-target fbthrift)
 set_target_properties(
@@ -64,6 +76,7 @@ target_link_libraries(ranking-cpp2
     ${SNAPPY_LIBRARY}
     ${FOLLY_LIBRARIES}
     ${LIBEVENT_LIB}
+    ${LIBEVENT_OPENSSL_LIB}
     ${JEMALLOC_LIB}
     ${LIBLZMA_LIBRARIES}
     ${LIBSODIUM_LIBRARIES}
