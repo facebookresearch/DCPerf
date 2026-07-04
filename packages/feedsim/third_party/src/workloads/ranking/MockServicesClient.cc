@@ -20,12 +20,30 @@
 #include <string>
 #include <utility>
 
+#include <cstdlib>
+#include <cstring>
+
 #include <folly/SocketAddress.h>
 #include <folly/io/async/AsyncSocket.h>
 
 #include <thrift/lib/cpp2/async/RocketClientChannel.h>
+#include <thrift/lib/thrift/gen-cpp2/RpcMetadata_types.h>
 
 #include "mock_services/gen-cpp2/MockServiceAsyncClient.h"
+
+namespace {
+// LeafNodeRank uses gengetopt (not gflags) for CLI parsing, so we cannot add
+// CLI flags here. Read knobs from env vars instead. Set MOCK_COMPRESS_ZSTD=0
+// to disable per-channel ZSTD negotiation (default on).
+bool envBoolTrue(const char* name, bool default_value) {
+  const char* v = std::getenv(name);
+  if (v == nullptr) {
+    return default_value;
+  }
+  return std::strcmp(v, "1") == 0 || std::strcmp(v, "true") == 0 ||
+      std::strcmp(v, "TRUE") == 0;
+}
+} // namespace
 
 namespace ranking {
 
@@ -100,12 +118,18 @@ MockServicesClient::MockServicesClient(
   // RocketClientChannel must be created on the EventBase thread. Use
   // runInEventBaseThreadAndWait so this constructor remains usable from
   // any thread (typically the main thread during ThreadStartup).
-  evb_->runInEventBaseThreadAndWait([this, &host, port]() {
+  const bool use_zstd = envBoolTrue("MOCK_COMPRESS_ZSTD", true);
+  evb_->runInEventBaseThreadAndWait([this, &host, port, use_zstd]() {
     folly::SocketAddress addr(host, port, /*allowNameLookup=*/true);
     folly::AsyncSocket::UniquePtr socket(
         new folly::AsyncSocket(evb_, addr));
     auto channel =
         apache::thrift::RocketClientChannel::newChannel(std::move(socket));
+    if (use_zstd) {
+      apache::thrift::CompressionConfig compressionConfig;
+      compressionConfig.codecConfig().ensure().set_zstdConfig();
+      channel->setDesiredCompressionConfig(compressionConfig);
+    }
     client_ =
         std::make_unique<mock_services::MockServiceAsyncClient>(
             std::move(channel));

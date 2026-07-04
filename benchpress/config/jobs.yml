@@ -659,7 +659,7 @@
     - 'dlrm_model=models/dlrm_small.pt'
     - 'dlrm_batch_size=256'
     - 'dlrm_threads=1'
-    - 'dlrm_inferences=64'
+    - 'dlrm_inferences=1'
     - 'client_side_features=0'
     - 'client_batch_size=256'
     - 'client_inferences=64'
@@ -739,7 +739,7 @@
     - '--client-feature-seed={client_feature_seed}'
     - '--client-num-dense={client_num_dense}'
     - '--client-num-sparse={client_num_sparse}'
-    - '--feature-extractors={feature_extractors}'
+    - '--feature-extractors'
     - '--feature-complexity={feature_complexity}'
     - '--num-stories={num_stories}'
     - '--extractors-per-story={extractors_per_story}'
@@ -752,19 +752,26 @@
     - 'io_mean=200'
     - 'workload=dlrm'
     - 'dlrm_model=models/dlrm_small.pt'
-    - 'dlrm_batch_size=256'
+    # 64 matches t29 baseline (was 256, which is 4x oversized vs t29). Combined
+    # with dlrm_inferences=1 the per-request DLRM CPU drops further toward
+    # prod multifeed's Ranking-Prediction share (~6%).
+    - 'dlrm_batch_size=64'
     - 'dlrm_threads=1'
-    - 'dlrm_inferences=64'
+    - 'dlrm_inferences=1'
     - 'client_side_features=0'
     - 'client_batch_size=256'
     - 'client_inferences=64'
     - 'client_feature_seed=42'
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
-    - 'feature_extractors=0'
     - 'feature_complexity=5'
-    - 'num_stories=100'
-    - 'extractors_per_story=50'
+    # 400 x 400 = 160K extractor calls/req. Matches the t29 BGM/CPL/GRC
+    # search_qps validation that converged cleanly at 700ms p95 SLA. The
+    # earlier 1800x50 tuning came from feedsim_autoscale_dlrm_mini (fixed
+    # QPS, no search) and produces queueing collapse under search_qps.
+    # 5K calls/req (100x50) is too few to surface FeatureExtraction CPU.
+    - 'num_stories=400'
+    - 'extractors_per_story=400'
     - 'silesia_dir=silesia'
     - 'stories_per_request=10'
     - 'extra_args='
