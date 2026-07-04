@@ -47,6 +47,12 @@ class DriverStats {
 
   uint64_t getQueryCount(uint32_t type) const;
   uint64_t getSessionCount() const { return session_count_; }
+  // DCPERF_DRIVER_QPS_TRACE accessors — read by the trace thread once per
+  // second to compute per-second sent/completed rates and the per-thread
+  // in-flight (sent - completed). Aligned uint64 reads are atomic on
+  // x86-64 and aarch64, so no atomic counters are needed for 1-Hz polling.
+  uint64_t getSentCount() const { return query_count_; }
+  uint64_t getCompletedCount() const { return completed_count_; }
   uint64_t getStartTimeNano() const { return start_time_; }
   uint64_t getEndTimeNano() const { return end_time_; }
   void setEndTimeNano(uint64_t t) { end_time_ = t; }
@@ -68,6 +74,7 @@ class DriverStats {
   uint64_t tx_bytes_ = 0;
   uint64_t rx_bytes_ = 0;
   uint64_t query_count_ = 0;
+  uint64_t completed_count_ = 0;
   uint64_t session_count_ = 0;
 };
 

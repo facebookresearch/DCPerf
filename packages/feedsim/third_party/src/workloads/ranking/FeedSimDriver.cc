@@ -23,10 +23,15 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <deque>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -129,6 +134,7 @@ void DriverStats::logResponse(uint32_t /*type*/, uint64_t latency_ns,
                               uint32_t packet_size) {
   sampler_->sample(static_cast<double>(latency_ns));
   rx_bytes_ += packet_size;
+  completed_count_++;
 }
 
 void DriverStats::logFirstStoryLatency(uint64_t latency_ns) {
@@ -145,6 +151,7 @@ void DriverStats::accumulate(const DriverStats& other) {
   tx_bytes_ += other.tx_bytes_;
   rx_bytes_ += other.rx_bytes_;
   query_count_ += other.query_count_;
+  completed_count_ += other.completed_count_;
   session_count_ += other.session_count_;
 }
 
@@ -154,6 +161,7 @@ void DriverStats::reset() {
   tx_bytes_ = 0;
   rx_bytes_ = 0;
   query_count_ = 0;
+  completed_count_ = 0;
   session_count_ = 0;
   start_time_ = getTimeNano();
 }
@@ -440,8 +448,42 @@ void TestDriver::Impl::eventCb(struct bufferevent* /*bev*/, int16_t events,
   }
 }
 
+// DCPERF_DRIVER_INFLIGHT_CAP: per-thread soft cap on (sent - completed).
+// 0 means disabled (back-compat). When set, nextRequestCb skips firing
+// until in-flight drops back below the cap — couples driver firing rate
+// to actual server completion rate so requested_qps > server_qps cannot
+// pin in-flight at the connection-layer hard cap and drive latency up
+// indefinitely. Read once at startup (cached in g_driver_inflight_cap)
+// so per-tick checks don't pay env-lookup cost.
+static uint64_t g_driver_inflight_cap = []() {
+  const char* env = std::getenv("DCPERF_DRIVER_INFLIGHT_CAP");
+  if (env == nullptr || env[0] == '\0') return uint64_t{0};
+  char* end = nullptr;
+  unsigned long v = std::strtoul(env, &end, 10);
+  return static_cast<uint64_t>(v);
+}();
+
 void TestDriver::Impl::nextRequestCb(evutil_socket_t, int16_t, void* arg) {
   auto* driver = reinterpret_cast<TestDriver*>(arg);
+  auto& impl = *driver->impl_;
+  if (g_driver_inflight_cap > 0) {
+    uint64_t sent = impl.current_stats.getSentCount();
+    uint64_t done = impl.current_stats.getCompletedCount();
+    uint64_t in_flight = sent > done ? (sent - done) : 0;
+    if (in_flight >= g_driver_inflight_cap) {
+      // Server isn't keeping up. Skip this firing and re-arm the timer
+      // for the same delay so the next pacing tick is still on schedule
+      // (we're not trying to "make up" the missed call — that's the
+      // whole point of the back-off).
+      if (impl.next_request_delay_us != 0 && impl.next_request_event != nullptr) {
+        struct timeval tv;
+        tv.tv_sec = impl.next_request_delay_us / 1000000;
+        tv.tv_usec = impl.next_request_delay_us % 1000000;
+        evtimer_add(impl.next_request_event, &tv);
+      }
+      return;
+    }
+  }
   makeRequests(*driver);
 }
 
@@ -451,6 +493,15 @@ void TestDriver::Impl::makeRequests(TestDriver& driver) {
     if (impl.num_ready_connections == 0) {
       impl.num_backlogged_requests++;
       return;
+    }
+    if (g_driver_inflight_cap > 0) {
+      uint64_t sent = impl.current_stats.getSentCount();
+      uint64_t done = impl.current_stats.getCompletedCount();
+      if (sent > done && (sent - done) >= g_driver_inflight_cap) {
+        // Same back-off rule applies inside the spin loop (which only
+        // spins when next_request_delay_us == 0, i.e. unpaced runs).
+        return;
+      }
     }
     impl.make_request_cb(impl.thread_id, driver);
   } while (impl.next_request_delay_us == 0);
@@ -679,6 +730,11 @@ struct FeedSimDriver::Impl {
 
   event_base* main_base = nullptr;
   std::atomic<bool> running{false};
+
+  // DCPERF_DRIVER_QPS_TRACE: per-second telemetry thread. Idle unless
+  // the env var is set to a non-empty, non-"0" value at run() time.
+  std::thread trace_thread;
+  std::atomic<bool> trace_running{false};
 };
 
 // ─── FeedSimDriver public methods ───────────────────────────────────────────
@@ -834,6 +890,91 @@ void FeedSimDriver::run(uint32_t num_threads, bool thread_pinning,
   pthread_barrier_wait(&init_barrier);
   pthread_barrier_destroy(&init_barrier);
 
+  // DCPERF_DRIVER_QPS_TRACE: spawn a 1Hz trace thread when the env var
+  // is set (any non-empty, non-"0" value enables it). Logs to the path
+  // in DCPERF_DRIVER_QPS_TRACE_FILE, defaulting to
+  // /tmp/driver_qps_trace_<pid>.log. The default uses pid so that
+  // multi-instance feedsim runs (each DriverNodeRank is a separate
+  // process) produce per-instance trace files instead of stomping on
+  // one shared file. Each line:
+  //   t=<elapsed_s> total{sent_qps=X done_qps=Y inflight=Z} |
+  //     t0{sent=W done=V inflight=U} t1{...} ...
+  // Aligned uint64 reads of query_count_/completed_count_ are atomic on
+  // x86-64 and aarch64; no extra synchronization needed for a 1Hz poll.
+  //
+  // CRITICAL: do NOT print a startup banner to stderr — search_qps.sh
+  // reads DriverNodeRank's stdout AND stderr (combined via 2>&1), and a
+  // stderr write here interleaves with the (fully-buffered) stdout
+  // "final requested_qps = ..., measured_qps = ..., latency = ..."
+  // line on the pipe, fragmenting it so the parser captures wrong
+  // values (regression observed in the t7 sweep). The trace file's
+  // existence is sufficient evidence the trace was enabled.
+  {
+    const char* env = std::getenv("DCPERF_DRIVER_QPS_TRACE");
+    if (env != nullptr && env[0] != '\0' && std::string(env) != "0") {
+      const char* path_env = std::getenv("DCPERF_DRIVER_QPS_TRACE_FILE");
+      std::string trace_path;
+      if (path_env != nullptr && path_env[0] != '\0') {
+        trace_path = std::string(path_env);
+      } else {
+        std::ostringstream p;
+        p << "/tmp/driver_qps_trace_" << ::getpid() << ".log";
+        trace_path = p.str();
+      }
+      impl_->trace_running = true;
+      impl_->trace_thread = std::thread(
+          [impl_ptr = impl_.get(), trace_path]() {
+            std::ofstream out(trace_path, std::ios::out | std::ios::app);
+            if (!out) return;  // silent: any cerr write would corrupt search_qps
+            const auto t0 = std::chrono::steady_clock::now();
+            std::vector<uint64_t> last_sent(impl_ptr->threads.size(), 0);
+            std::vector<uint64_t> last_done(impl_ptr->threads.size(), 0);
+            for (size_t i = 0; i < impl_ptr->threads.size(); i++) {
+              const auto& s = impl_ptr->threads[i]->driver->impl_->current_stats;
+              last_sent[i] = s.getSentCount();
+              last_done[i] = s.getCompletedCount();
+            }
+            out << "# DCPERF_DRIVER_QPS_TRACE start, threads="
+                << impl_ptr->threads.size() << std::endl;
+            while (impl_ptr->trace_running.load(std::memory_order_acquire)) {
+              std::this_thread::sleep_for(std::chrono::seconds(1));
+              if (!impl_ptr->trace_running.load(std::memory_order_acquire)) {
+                break;
+              }
+              auto now = std::chrono::steady_clock::now();
+              double elapsed_s = std::chrono::duration<double>(now - t0).count();
+              uint64_t total_sent_qps = 0;
+              uint64_t total_done_qps = 0;
+              uint64_t total_in_flight = 0;
+              std::ostringstream per_thread;
+              for (size_t i = 0; i < impl_ptr->threads.size(); i++) {
+                const auto& s =
+                    impl_ptr->threads[i]->driver->impl_->current_stats;
+                uint64_t sent = s.getSentCount();
+                uint64_t done = s.getCompletedCount();
+                uint64_t dsent = sent - last_sent[i];
+                uint64_t ddone = done - last_done[i];
+                uint64_t in_flight = sent > done ? (sent - done) : 0;
+                last_sent[i] = sent;
+                last_done[i] = done;
+                total_sent_qps += dsent;
+                total_done_qps += ddone;
+                total_in_flight += in_flight;
+                per_thread << " t" << i << "{sent=" << dsent
+                           << " done=" << ddone
+                           << " inflight=" << in_flight << "}";
+              }
+              out << "t=" << std::fixed << std::setprecision(1) << elapsed_s
+                  << " total{sent_qps=" << total_sent_qps
+                  << " done_qps=" << total_done_qps
+                  << " inflight=" << total_in_flight << "} |"
+                  << per_thread.str() << std::endl;
+            }
+            out << "# DCPERF_DRIVER_QPS_TRACE stop" << std::endl;
+          });
+    }
+  }
+
   double start_time = getTimeSec();
 
   // Main event loop (for SIGINT handling)
@@ -919,6 +1060,16 @@ void FeedSimDriver::shutdown() {
   }
   if (impl_->main_base) {
     event_base_loopbreak(impl_->main_base);
+  }
+
+  // Step 5: stop the DCPERF_DRIVER_QPS_TRACE thread (if it was started).
+  // Do this after the main loop has been broken so the trace thread
+  // doesn't keep firing through the join(); the trace lambda checks
+  // trace_running every iteration and exits cleanly.
+  if (impl_->trace_running.exchange(false)) {
+    if (impl_->trace_thread.joinable()) {
+      impl_->trace_thread.join();
+    }
   }
 }
 
