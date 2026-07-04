@@ -21,6 +21,8 @@
 #include <glog/logging.h>
 
 #include <folly/init/Init.h>
+#include <folly/io/async/SSLContext.h>
+#include <wangle/ssl/SSLContextConfig.h>
 
 #include "thrift/lib/cpp2/server/ThriftServer.h"
 
@@ -52,11 +54,17 @@ DECLARE_int32(latency_cap_us);
 DECLARE_int32(latency_offset_us);
 DECLARE_int32(latency_skip_threshold_us);
 
-// NOTE: TLS support intentionally not wired here. The open-source FBThrift
-// v2026.01.05.00 Rocket transport requires a fizz-based AsyncTransport (not
-// plain AsyncSSLSocket) on the client side; without it, TLS-REQUIRED servers
-// reject the first Rocket setup frame before SSL handshake even begins. See
-// the Encryption gap analysis in the t31 memo for the closure plan.
+// TLS knob. When --tls_cert and --tls_key are both set, the server requires
+// TLS on every inbound connection and advertises ALPN "rs" so RocketClient
+// transports can negotiate Rocket-over-TLS at handshake time (matches the
+// canonical pattern at thrift/lib/cpp2/test/server/ThriftServerTest.cpp
+// `RocketOverSSLNoALPN` in fbthrift v2026.01.05.00). Closes prod
+// multifeed/aggregator_main's Encryption CPU footprint (~3% on BGM).
+DEFINE_string(
+    tls_cert,
+    "",
+    "Path to TLS cert PEM. Empty disables TLS (plaintext sockets).");
+DEFINE_string(tls_key, "", "Path to TLS key PEM. Required when --tls_cert set.");
 
 int main(int argc, char** argv) {
   folly::Init init(&argc, &argv);
@@ -82,11 +90,31 @@ int main(int argc, char** argv) {
   server->setPort(FLAGS_port);
   server->setNumIOWorkerThreads(io_threads);
 
+  bool tls_enabled = false;
+  if (!FLAGS_tls_cert.empty() && !FLAGS_tls_key.empty()) {
+    auto sslCfg = std::make_shared<wangle::SSLContextConfig>();
+    sslCfg->setCertificate(FLAGS_tls_cert, FLAGS_tls_key, "");
+    sslCfg->clientVerification =
+        folly::SSLContext::VerifyClientCertificate::DO_NOT_REQUEST;
+    // Advertise ALPN "rs" so RocketClient transports negotiate
+    // Rocket-over-TLS in the handshake. Without this, REQUIRED servers
+    // can reject the connection or fall back to the header-upgrade path
+    // which never speaks Rocket on TLS.
+    sslCfg->setNextProtocols({"rs"});
+    server->setSSLConfig(sslCfg);
+    server->setSSLPolicy(apache::thrift::SSLPolicy::REQUIRED);
+    tls_enabled = true;
+  } else if (!FLAGS_tls_cert.empty() || !FLAGS_tls_key.empty()) {
+    LOG(ERROR) << "Both --tls_cert and --tls_key must be set together";
+    return EXIT_FAILURE;
+  }
+
   LOG(INFO) << "mock_services listening on port " << FLAGS_port
             << " with " << io_threads << " IO worker threads"
             << "; Silesia corpus from " << FLAGS_silesia_dir
             << " (" << silesia->numFiles() << " files, "
-            << (silesia->totalSize() / (1024 * 1024)) << " MB)";
+            << (silesia->totalSize() / (1024 * 1024)) << " MB)"
+            << "; tls=" << (tls_enabled ? "on" : "off");
 
   LOG(INFO) << "latency shaping: cap_us=" << FLAGS_latency_cap_us
             << " offset_us=" << FLAGS_latency_offset_us

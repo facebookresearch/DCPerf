@@ -729,12 +729,16 @@ main() {
         mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${MOCK_KEEPALIVE_INTERVAL_MS}"
         echo "MockServicesClient keepalive: ENABLED (interval=${MOCK_KEEPALIVE_INTERVAL_MS} ms)"
     fi
-    # Wire compression on the outbound MockServicesClient channel.
-    # LeafNodeRank uses gengetopt (rejects unknown flags), so the knob is
-    # plumbed via the MOCK_COMPRESS_ZSTD env var read inside
-    # MockServicesClient.cc — not as a CLI flag. FEEDSIM_NO_RPC_ZSTD=1 turns
-    # ZSTD off (binary default is on); leave unset for default-on parity with
-    # prod's wire-compressed channels.
+    # TLS + wire compression on the outbound MockServicesClient channel.
+    # LeafNodeRank uses gengetopt (rejects unknown CLI flags), so these knobs
+    # are plumbed via env vars MOCK_TLS / MOCK_COMPRESS_ZSTD read inside
+    # MockServicesClient.cc. FEEDSIM_TLS=1 must match the server-side
+    # --tls_cert/--tls_key wiring in run-feedsim-multi.sh. FEEDSIM_NO_RPC_ZSTD=1
+    # disables ZSTD (binary default is on); leave unset for prod-parity.
+    if [ "${FEEDSIM_TLS:-0}" = "1" ]; then
+        export MOCK_TLS=1
+        echo "MockServicesClient TLS: ENABLED (via MOCK_TLS env)"
+    fi
     if [ "${FEEDSIM_NO_RPC_ZSTD:-0}" = "1" ]; then
         export MOCK_COMPRESS_ZSTD=0
         echo "MockServicesClient ZSTD: DISABLED (via MOCK_COMPRESS_ZSTD env)"
