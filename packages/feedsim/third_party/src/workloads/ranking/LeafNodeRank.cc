@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -150,16 +151,25 @@ struct ThreadData {
   std::shared_ptr<ranking::TimekeeperPool> timekeeperPool;
 
   // Phase 5: outbound RPC fanout to mock_services. Populated only when
-  // --rpc_dist_path is set; nullptr otherwise (in which case the legacy
+  // --rpc_dist_path is set; empty otherwise (in which case the legacy
   // folly::futures::sleep path is used).
   //
-  // mock_client is per-thread because each MockServiceAsyncClient is
-  // pinned to one folly::EventBase (see MockServicesClient.h). registry
-  // and silesia are shared (read-only after load) — held here as raw
-  // pointers to globals to avoid shared_ptr churn on the request path.
+  // mock_clients holds one MockServicesClient per SREventBase in the
+  // pool; each MockServiceAsyncClient is pinned to one folly::EventBase
+  // (see MockServicesClient.h), so to fan an outbound RPC across all
+  // EBs we need one client per EB. issueOutboundFanout round-robins
+  // across these via next_mock_client_idx. This addresses the
+  // single-channel serialization where the prior single-client-per-
+  // dispatcher design funneled all outbound RPCs through one Rocket
+  // channel on one EB, producing dispatch_per_rpc ≫ mock_handler_actual
+  // even with folly::window(K=16) bounding per-fanout concurrency.
+  // registry and silesia are shared (read-only after load) — held here
+  // as raw pointers to globals to avoid shared_ptr churn on the
+  // request path.
   ranking::RpcDistRegistry* rpc_registry = nullptr;
   ranking::SilesiaLoader* rpc_silesia = nullptr;
-  std::unique_ptr<ranking::MockServicesClient> mock_client;
+  std::vector<std::unique_ptr<ranking::MockServicesClient>> mock_clients;
+  std::atomic<uint64_t> next_mock_client_idx{0};
   std::mt19937 rpc_rng;
   // rpc_rng is sampled from issueOutboundFanout which runs inside .thenValue
   // continuations on the multi-threaded ioThreadPool — multiple concurrent
@@ -293,8 +303,8 @@ void ThreadStartup(
 
   // Phase 5: populate per-thread RPC fanout state. registry / silesia
   // pointers are global (initialized in main() if --rpc_dist_path was
-  // set); mock_client is constructed lazily here so it lives on a
-  // thread from the SREventBase pool. Seed the fanout RNG with
+  // set); mock_clients are constructed lazily here so they live on
+  // threads from the SREventBase pool. Seed the fanout RNG with
   // hardware_destructive seed mixing so each thread gets independent
   // sample sequences without sharing the std::default_random_engine
   // used elsewhere in this struct.
@@ -303,21 +313,26 @@ void ThreadStartup(
   this_thread.rpc_rng.seed(
       std::random_device{}() ^ static_cast<unsigned>(thread_id + 1));
   if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
-    auto* evb = srEventBasePool->getEventBase();
-    try {
-      this_thread.mock_client =
-          std::make_unique<ranking::MockServicesClient>(
-              evb,
-              args.mock_services_host_arg,
-              static_cast<uint16_t>(args.mock_services_port_arg));
-    } catch (const std::exception& e) {
-      std::cerr << "Failed to connect to mock_services on "
-                << args.mock_services_host_arg << ":"
-                << args.mock_services_port_arg
-                << " (thread " << thread_id << "): " << e.what()
-                << ". Falling back to legacy folly::futures::sleep path."
-                << std::endl;
-      this_thread.mock_client.reset();
+    auto evbs = srEventBasePool->getAllEventBases();
+    this_thread.mock_clients.reserve(evbs.size());
+    for (size_t i = 0; i < evbs.size(); ++i) {
+      try {
+        this_thread.mock_clients.push_back(
+            std::make_unique<ranking::MockServicesClient>(
+                evbs[i].get(),
+                args.mock_services_host_arg,
+                static_cast<uint16_t>(args.mock_services_port_arg)));
+      } catch (const std::exception& e) {
+        std::cerr << "Failed to connect to mock_services on "
+                  << args.mock_services_host_arg << ":"
+                  << args.mock_services_port_arg
+                  << " (thread " << thread_id << ", evb " << i << "): "
+                  << e.what()
+                  << ". Falling back to legacy folly::futures::sleep path."
+                  << std::endl;
+        this_thread.mock_clients.clear();
+        break;
+      }
     }
   }
 
@@ -435,8 +450,8 @@ void ThreadStartup(
 
   // Phase 5: populate per-thread RPC fanout state. registry / silesia
   // pointers are global (initialized in main() if --rpc_dist_path was
-  // set); mock_client is constructed lazily here so it lives on a
-  // thread from the SREventBase pool. Seed the fanout RNG with
+  // set); mock_clients are constructed lazily here so they live on
+  // threads from the SREventBase pool. Seed the fanout RNG with
   // hardware_destructive seed mixing so each thread gets independent
   // sample sequences without sharing the std::default_random_engine
   // used elsewhere in this struct.
@@ -445,21 +460,26 @@ void ThreadStartup(
   this_thread.rpc_rng.seed(
       std::random_device{}() ^ static_cast<unsigned>(thread_id + 1));
   if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
-    auto* evb = srEventBasePool->getEventBase();
-    try {
-      this_thread.mock_client =
-          std::make_unique<ranking::MockServicesClient>(
-              evb,
-              args.mock_services_host_arg,
-              static_cast<uint16_t>(args.mock_services_port_arg));
-    } catch (const std::exception& e) {
-      std::cerr << "Failed to connect to mock_services on "
-                << args.mock_services_host_arg << ":"
-                << args.mock_services_port_arg
-                << " (thread " << thread_id << "): " << e.what()
-                << ". Falling back to legacy folly::futures::sleep path."
-                << std::endl;
-      this_thread.mock_client.reset();
+    auto evbs = srEventBasePool->getAllEventBases();
+    this_thread.mock_clients.reserve(evbs.size());
+    for (size_t i = 0; i < evbs.size(); ++i) {
+      try {
+        this_thread.mock_clients.push_back(
+            std::make_unique<ranking::MockServicesClient>(
+                evbs[i].get(),
+                args.mock_services_host_arg,
+                static_cast<uint16_t>(args.mock_services_port_arg)));
+      } catch (const std::exception& e) {
+        std::cerr << "Failed to connect to mock_services on "
+                  << args.mock_services_host_arg << ":"
+                  << args.mock_services_port_arg
+                  << " (thread " << thread_id << ", evb " << i << "): "
+                  << e.what()
+                  << ". Falling back to legacy folly::futures::sleep path."
+                  << std::endl;
+        this_thread.mock_clients.clear();
+        break;
+      }
     }
   }
   unsigned noderank_seed;
@@ -741,7 +761,7 @@ struct FanoutSpec {
 
 static folly::Future<int> issueOutboundFanout(
     ThreadData& td, double scale) {
-  if (td.mock_client == nullptr || td.rpc_registry == nullptr) {
+  if (td.mock_clients.empty() || td.rpc_registry == nullptr) {
     // Defensive: caller should have checked --rpc_dist_path.
     return folly::makeFuture<int>(0);
   }
@@ -793,18 +813,28 @@ static folly::Future<int> issueOutboundFanout(
   }
 
   uint64_t fanout_start_us = feedsim::nowUs();
-  auto* mock_client = td.mock_client.get();
+  auto* mock_clients_ptr = &td.mock_clients;
+  auto* rr_idx_ptr = &td.next_mock_client_idx;
   auto* srEvbPool = td.srEventBasePool.get();
 
   // folly::window(executor, items, fn, K): issues fn(item) for the
   // first K items; as each returned Future completes, issues the next
   // item's fn(). Bounded concurrency K avoids burst-queueing the
   // entire fanout onto one EB at once.
+  //
+  // Per RPC, round-robin across mock_clients (one per SREventBase) so
+  // outbound RPCs spread across every EB in the pool instead of
+  // funneling through a single per-dispatcher Rocket channel. Relaxed
+  // memory order is fine — we only need monotonic forward progress for
+  // uniform distribution, no happens-before with other state.
   auto futs = folly::window(
       srEvbPool,
       std::move(specs),
-      [mock_client, srEvbPool](FanoutSpec spec) {
+      [mock_clients_ptr, rr_idx_ptr, srEvbPool](FanoutSpec spec) {
         uint64_t dispatch_start_us = feedsim::nowUs();
+        size_t idx = rr_idx_ptr->fetch_add(1, std::memory_order_relaxed) %
+            mock_clients_ptr->size();
+        auto* mock_client = (*mock_clients_ptr)[idx].get();
         return mock_client
             ->dispatchByEnum(spec.method, spec.req_payload, spec.lat_us)
             .via(srEvbPool)
@@ -847,7 +877,7 @@ static folly::Future<folly::Unit> simulateIoOrFanout(
     int io_latency_ms,
     folly::Timekeeper* tk,
     folly::Executor* via_executor) {
-  if (td.mock_client != nullptr && td.rpc_registry != nullptr) {
+  if (!td.mock_clients.empty() && td.rpc_registry != nullptr) {
     return issueOutboundFanout(td, args.rpc_fanout_scale_arg)
         .via(via_executor)
         .thenValue([](int /*completed*/) { return folly::unit; });
