@@ -728,11 +728,7 @@ static feedsim::LatencyHistogram g_sampled_lat_us;
 // dispatch_per_rpc averages ~500ms even though mock_handler_actual was
 // ~4ms — pure EB queue depth. window(K) issues K up-front and then
 // refills as each completes, capping per-request EB pressure.
-//
-// 32 was picked to be small enough to keep the EB queue shallow (each
-// in-flight RPC ~5-200ms means the queue completes in 50-300ms) while
-// still amortizing the per-RPC overhead of the window machinery.
-static constexpr size_t kOutboundFanoutWindow = 32;
+static constexpr size_t kOutboundFanoutWindow = 16;
 
 namespace {
 struct FanoutSpec {

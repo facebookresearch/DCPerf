@@ -50,15 +50,16 @@ EVENTBASE_THREADS_DEFAULT="$(nproc)"  # nproc threads so the ThriftSrv.IO pool i
 SRV_THREADS_DEFAULT=8        # 8 should also suffice for most purposes
 if [[ "$IS_SMT_ON" = 1 ]]; then
   RANKING_THREADS_DEFAULT="$(( $(nproc) * 7/20))"  # 7/20 is 0.35 cpu factor
-  DRIVER_THREADS="$(echo "scale=2; $(nproc) / 5.0 + 0.5 " | bc )"  # Driver threads, rounds nearest.
-  DRIVER_THREADS="${DRIVER_THREADS%.*}"  # Truncate decimal fraction.
-  DRIVER_THREADS="$(echo "${BC_MAX_FN}; max(${DRIVER_THREADS:-0}, 4)" | bc )" # At least 4 threads.
 else
   RANKING_THREADS_DEFAULT="$(( $(nproc) * 15/20))"  # 15/20 is 0.75 cpu factor
-  DRIVER_THREADS="$(echo "scale=2; $(nproc) / 4.0 + 0.5 " | bc )"  # Driver threads, rounds nearest.
-  DRIVER_THREADS="${DRIVER_THREADS%.*}"  # Truncate decimal fraction.
-  DRIVER_THREADS="$(echo "${BC_MAX_FN}; max(${DRIVER_THREADS:-0}, 4)" | bc )" # At least 4 threads.
 fi
+# Driver threads = nproc/4 across SMT-on / SMT-off. Previously the SMT-on
+# branch used nproc/5, which under-pinned driver work on big SMT boxes
+# (e.g. BGM 176 logical → 35 vs 44 threads). Standardizing both branches
+# at nproc/4 removes one source of cross-platform variance.
+DRIVER_THREADS="$(echo "scale=2; $(nproc) / 4.0 + 0.5 " | bc )"  # rounds nearest
+DRIVER_THREADS="${DRIVER_THREADS%.*}"  # Truncate decimal fraction.
+DRIVER_THREADS="$(echo "${BC_MAX_FN}; max(${DRIVER_THREADS:-0}, 4)" | bc )" # At least 4 threads.
 
 show_help() {
 cat <<EOF
