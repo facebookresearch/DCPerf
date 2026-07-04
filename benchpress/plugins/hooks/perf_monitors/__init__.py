@@ -98,17 +98,45 @@ class Monitor:
 
     def terminate(self):
         """
-        Kill the monitoring process using SIGINT signal and join the stdout
-        and stderr catcher threads.
+        Kill the monitoring process and join its stdout/stderr catcher threads.
+
+        The monitor's `proc` is typically a bash wrapper script (e.g.
+        `perfutils/collect_amd_perf_counters.sh`) that itself spawns `perf
+        stat`. Signaling only the bash PID is unreliable because bash does
+        not synchronously forward signals to its `wait`-blocked foreground
+        child — leaving `perf stat` running and `proc.wait()` hanging
+        forever. We send SIGINT to the entire process group (which requires
+        the Popen to have used `start_new_session=True`) and bound the wait
+        with a timeout, escalating to SIGKILL if SIGINT isn't honored.
         """
         exitcode = -1
         if hasattr(self, "proc") and isinstance(self.proc, subprocess.Popen):
-            os.kill(self.proc.pid, signal.SIGINT)
-            exitcode = self.proc.wait()
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGINT)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                exitcode = self.proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    f"{getattr(self, 'name', 'Monitor')}: SIGINT did not "
+                    "terminate within 15s, escalating to SIGKILL"
+                )
+                try:
+                    os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                try:
+                    exitcode = self.proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.error(
+                        f"{getattr(self, 'name', 'Monitor')}: SIGKILL did "
+                        "not reap process within 5s; leaving as orphan"
+                    )
         if hasattr(self, "oc") and isinstance(self.oc, threading.Thread):
-            self.oc.join()
+            self.oc.join(timeout=5)
         if hasattr(self, "ec") and isinstance(self.ec, threading.Thread):
-            self.ec.join()
+            self.ec.join(timeout=5)
         return exitcode
 
     def get_result(self):
