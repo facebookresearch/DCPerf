@@ -51,7 +51,7 @@ dnf install -y bc ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \
     zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq \
-    xxhash xxhash-devel unzip liburing-devel
+    xxhash xxhash-devel unzip rsync liburing-devel
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -71,12 +71,23 @@ cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_resp_sizes.json" "${FEED
 cp "${BENCHPRESS_ROOT}/packages/feedsim/rpc_dist.json" "${FEEDSIM_ROOT_SRC}/rpc_dist.json"
 
 msg "Installing third-party dependencies..."
-mkdir -p "${FEEDSIM_THIRD_PARTY_SRC}"
-if ! [ -d "${FEEDSIM_ROOT_SRC}/src" ]; then
-    cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src" "${FEEDSIM_ROOT_SRC}/"
-else
-    msg "[SKIPPED] copying feedsim src"
-fi
+# Sync feedsim source with --delete so `./benchpress install -f` actually picks up
+# source changes. The previous "skip if dir exists" guard meant -f never refreshed
+# source files. rsync with trailing slashes does file-level overwrite + deletion of
+# removed files.
+#
+# CRITICAL --exclude=third_party: subsequent install steps git-clone submodules
+# (cereal, fbthrift, folly, wangle, fizz, mvfst, ...) INTO ${FEEDSIM_ROOT_SRC}/src/
+# third_party/<submod>/. Without this exclude, rsync --delete wipes those submodule
+# directories on every re-install, forcing a re-clone. The top-level
+# src/third_party/CMakeLists.txt is copied separately below.
+mkdir -p "${FEEDSIM_ROOT_SRC}/src" "${FEEDSIM_THIRD_PARTY_SRC}"
+rsync -a --delete --exclude=third_party \
+    "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src/" \
+    "${FEEDSIM_ROOT_SRC}/src/"
+mkdir -p "${FEEDSIM_ROOT_SRC}/src/third_party"
+cp -f "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src/third_party/CMakeLists.txt" \
+    "${FEEDSIM_ROOT_SRC}/src/third_party/CMakeLists.txt"
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 DEP_CMAKE_VERSION="4.0.3"
@@ -85,10 +96,14 @@ if ! [ -d "cmake-${DEP_CMAKE_VERSION}-linux-aarch64" ]; then
     wget "https://github.com/Kitware/CMake/releases/download/v${DEP_CMAKE_VERSION}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz" -O "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz"
     verify_checksum "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz" "391da1544ef50ac31300841caaf11db4de3976cdc4468643272e44b3f4644713"
     tar xfz "cmake-${DEP_CMAKE_VERSION}-linux-aarch64.tar.gz"
-    export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64/bin:${PATH}"
 else
     msg "[SKIPPED] cmake-${DEP_CMAKE_VERSION}"
 fi
+# Always export PATH so the cmake invocation later in this script finds the
+# binary on both fresh and re-installs. (Previously this export was inside the
+# download branch only, so install -f after the first install failed with
+# `cmake: command not found` at line 401.)
+export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64/bin:${PATH}"
 
 # Installing fast_float
 if ! [ -d "fast_float" ]; then
