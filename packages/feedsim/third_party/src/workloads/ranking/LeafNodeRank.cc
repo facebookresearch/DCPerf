@@ -59,6 +59,7 @@
 
 #include "FeedSimServer.h"
 #include "FeedSimProtocol.h"
+#include "LatencyHistogram.h"
 
 #include "LeafNodeRankCmdline.h"
 #include "RequestTypes.h"
@@ -715,12 +716,22 @@ std::string buildFanoutRequest(
 // Returns a Future<int> that resolves to the total number of completed
 // RPCs once all are done (regardless of success — we count attempts so
 // caller code can keep the same shape as before).
+// Debug histograms for ad-hoc instrumentation of mock_services fanout
+// (issueOutboundFanout total + per-dispatch round trip + sampled
+// latency_us). Periodically dumped to stderr from a background thread
+// in main().
+static feedsim::LatencyHistogram g_fanout_total_us;
+static feedsim::LatencyHistogram g_dispatch_us;
+static feedsim::LatencyHistogram g_sampled_lat_us;
+
 static folly::Future<int> issueOutboundFanout(
     ThreadData& td, double scale) {
   if (td.mock_client == nullptr || td.rpc_registry == nullptr) {
     // Defensive: caller should have checked --rpc_dist_path.
     return folly::makeFuture<int>(0);
   }
+
+  uint64_t fanout_start_us = feedsim::nowUs();
 
   std::vector<folly::Future<int>> futs;
   futs.reserve(128);
@@ -751,20 +762,31 @@ static folly::Future<int> issueOutboundFanout(
         req = buildFanoutRequest(
             req_size, resp_size, td.rpc_silesia, td.rpc_rng);
       }
+      g_sampled_lat_us.record(static_cast<uint64_t>(std::max(0, lat_us)));
 
+      uint64_t dispatch_start_us = feedsim::nowUs();
       futs.push_back(td.mock_client
                          ->dispatchByEnum(m, req, lat_us)
                          .via(td.srEventBasePool.get())
-                         .thenValue([](std::string&&) { return 1; })
+                         .thenValue([dispatch_start_us](std::string&&) {
+                           g_dispatch_us.record(
+                               feedsim::nowUs() - dispatch_start_us);
+                           return 1;
+                         })
                          .thenError(
                              folly::tag_t<std::exception>{},
-                             [](const std::exception&) { return 0; }));
+                             [dispatch_start_us](const std::exception&) {
+                               g_dispatch_us.record(
+                                   feedsim::nowUs() - dispatch_start_us);
+                               return 0;
+                             }));
     }
   }
 
   return folly::collectAll(std::move(futs))
       .via(td.srEventBasePool.get())
-      .thenValue([](std::vector<folly::Try<int>> results) {
+      .thenValue([fanout_start_us](std::vector<folly::Try<int>> results) {
+        g_fanout_total_us.record(feedsim::nowUs() - fanout_start_us);
         int total = 0;
         for (auto& r : results) {
           if (r.hasValue()) total += r.value();
@@ -2653,7 +2675,28 @@ int main(int argc, char** argv) {
 
   server.enableMonitoring(args.monitor_port_arg);
 
+  // Background thread that periodically dumps the mock_services fanout
+  // debug histograms to stderr so we can see how the per-RPC dispatch
+  // and total fanout latencies evolve over the run. Detached so the
+  // process exit will tear it down. 10s cadence keeps the log compact
+  // but still picks up the warmup→steady-state transition.
+  std::thread debug_dump_thread([]() {
+    while (true) {
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+      g_fanout_total_us.dump("fanout_total");
+      g_dispatch_us.dump("dispatch_per_rpc");
+      g_sampled_lat_us.dump("sampled_latency_us");
+    }
+  });
+  debug_dump_thread.detach();
+
   server.run();
+
+  // One last dump after the server returns so the final state hits the
+  // log even if the periodic timer was mid-sleep at shutdown.
+  g_fanout_total_us.dump("fanout_total_final");
+  g_dispatch_us.dump("dispatch_per_rpc_final");
+  g_sampled_lat_us.dump("sampled_latency_us_final");
 
   return 0;
 }
