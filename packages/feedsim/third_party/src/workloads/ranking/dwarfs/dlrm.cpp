@@ -28,12 +28,21 @@ namespace dwarfs {
 struct DLRM::Impl {
   torch::jit::script::Module model;
 
-  // Per-thread state for synthetic feature generation
+  // Per-thread state for synthetic feature generation + an isolated
+  // JIT Module clone. torch::jit::Module::forward() is NOT thread-safe
+  // when called concurrently on the same Module instance — the JIT
+  // interpreter mutates internal state (e.g. interpreter stack,
+  // intermediate tensors) and concurrent invocations race on the
+  // backing allocator, producing SIGSEGV in je_large_dalloc. Each
+  // worker thread owns a deep-cloned Module via model_copy, so
+  // concurrent forward() calls touch disjoint state. See t16
+  // SIGSEGV crash (2026-05-18) for the original failure.
   struct ThreadState {
     std::mt19937 rng;
     std::normal_distribution<float> dense_dist{0.0f, 1.0f};
     std::vector<float> dense_buffer;
     std::vector<int64_t> sparse_buffer;
+    std::unique_ptr<torch::jit::script::Module> model_copy;
   };
   std::vector<std::unique_ptr<ThreadState>> thread_states;
 
@@ -51,7 +60,8 @@ struct DLRM::Impl {
       unsigned seed,
       int batch_size,
       int num_dense_features,
-      int num_sparse_features) {
+      int num_sparse_features,
+      bool clone_model) {
     thread_states.resize(num_threads);
 
     std::lock_guard<std::mutex> lock(thread_id_lifo_mutex);
@@ -75,6 +85,15 @@ struct DLRM::Impl {
       // Pre-allocate buffers
       state->dense_buffer.resize(batch_size * num_dense_features);
       state->sparse_buffer.resize(batch_size * num_sparse_features);
+
+      // Deep-clone the JIT Module so this thread's forward() touches
+      // disjoint interpreter state. clone() copies submodules + tensors;
+      // copy() would share them and re-introduce the race.
+      // Skipped when the parent DLRM has no model loaded (test paths).
+      if (clone_model) {
+        state->model_copy = std::make_unique<torch::jit::script::Module>(
+            model.clone());
+      }
 
       thread_states[i] = std::move(state);
       thread_id_lifo.push_back(i);
@@ -152,6 +171,20 @@ DLRM::DLRM(const DLRMParams& params, int num_thread_instances, unsigned seed)
   // Set number of inference threads
   at::set_num_threads(params_.num_threads);
 
+  // Cap inter-op thread pool to 1. Without this, PyTorch's inter-op pool
+  // defaults to available_concurrency() (= nproc on a leaf process). At
+  // model warmup + on first forward() from each ThriftSrv.IO worker,
+  // libtorch lazily spawns nproc inter-op threads — which adds up to
+  // nproc^2 GlobalCPUThread-named threads (= 30,976 on BGM with 176
+  // logical cores), all stuck in __futex_wait, eventually deadlocking
+  // the kernel scheduler. See progress log 2026-05-15 (t12/t13).
+  //
+  // libtorch treats set_num_interop_threads as call-once-per-process:
+  // subsequent invocations throw. Guard so a second DLRM construction
+  // (unit tests, re-init) doesn't crash.
+  static std::once_flag interop_threads_once;
+  std::call_once(interop_threads_once, [] { at::set_num_interop_threads(1); });
+
   // Enable JIT optimizations
   torch::jit::setGraphExecutorOptimize(true);
 
@@ -169,13 +202,16 @@ DLRM::DLRM(const DLRMParams& params, int num_thread_instances, unsigned seed)
     }
   }
 
-  // Initialize per-thread state
+  // Initialize per-thread state. Deep-clones the JIT Module per thread
+  // when model is loaded, to avoid concurrent forward() race on shared
+  // interpreter state (see ThreadState comment + t16 SIGSEGV).
   pimpl_->initializeThreadState(
       num_thread_instances,
       seed,
       params_.batch_size,
       params_.num_dense_features,
-      params_.num_sparse_features);
+      params_.num_sparse_features,
+      model_loaded_);
 
   // Warmup
   if (model_loaded_) {
@@ -191,12 +227,13 @@ int DLRM::infer(int num_inferences, int batch_size) {
   }
 
   int thread_id = pimpl_->get_avail_thread_id();
-  SCOPE_EXIT { pimpl_->put_avail_thread_id(thread_id); };
-
+  // Validate before arming SCOPE_EXIT so a bogus id doesn't get pushed back
+  // into thread_id_lifo (would silently corrupt the free-list).
   if (thread_id < 0 ||
       thread_id >= static_cast<int>(pimpl_->thread_states.size())) {
     throw std::out_of_range("Invalid thread_id: " + std::to_string(thread_id));
   }
+  SCOPE_EXIT { pimpl_->put_avail_thread_id(thread_id); };
 
   int total_predictions = 0;
 
@@ -210,13 +247,15 @@ int DLRM::infer(int num_inferences, int batch_size) {
         params_.num_sparse_features,
         params_.embedding_table_sizes);
 
-    // Run inference
+    // Run inference on the per-thread Module clone (not the shared
+    // pimpl_->model) to avoid concurrent forward() race.
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(dense_tensor);
     inputs.push_back(sparse_tensor);
 
     torch::NoGradGuard no_grad;
-    auto output = pimpl_->model.forward(inputs).toTensor();
+    auto& thread_model = *pimpl_->thread_states[thread_id]->model_copy;
+    auto output = thread_model.forward(inputs).toTensor();
 
     // Count predictions (simulating actual work with the output)
     total_predictions += output.numel();
@@ -234,6 +273,17 @@ int DLRM::inferWithFeatures(
     throw std::runtime_error("Model not loaded");
   }
 
+  // Acquire a thread_id so we can use this thread's Module clone. Same
+  // race avoidance as DLRM::infer.
+  int thread_id = pimpl_->get_avail_thread_id();
+  // Validate before arming SCOPE_EXIT so a bogus id doesn't get pushed back
+  // into thread_id_lifo (would silently corrupt the free-list).
+  if (thread_id < 0 ||
+      thread_id >= static_cast<int>(pimpl_->thread_states.size())) {
+    throw std::out_of_range("Invalid thread_id: " + std::to_string(thread_id));
+  }
+  SCOPE_EXIT { pimpl_->put_avail_thread_id(thread_id); };
+
   int total_predictions = 0;
 
   for (int i = 0; i < num_inferences; ++i) {
@@ -249,13 +299,14 @@ int DLRM::inferWithFeatures(
         {static_cast<int64_t>(batch_size), params_.num_sparse_features},
         torch::kInt64);
 
-    // Run inference
+    // Run inference on this thread's Module clone.
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(dense_tensor);
     inputs.push_back(sparse_tensor);
 
     torch::NoGradGuard no_grad;
-    auto output = pimpl_->model.forward(inputs).toTensor();
+    auto& thread_model = *pimpl_->thread_states[thread_id]->model_copy;
+    auto output = thread_model.forward(inputs).toTensor();
 
     // Count predictions (simulating actual work with the output)
     total_predictions += output.numel();

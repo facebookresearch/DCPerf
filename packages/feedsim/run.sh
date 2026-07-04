@@ -711,8 +711,15 @@ main() {
         echo "RPC fanout: forced OFF via LEAFNODE_USE_LEGACY_SLEEP=1 (legacy sleep path)"
     fi
 
+    # OMP_NUM_THREADS=1: cap PyTorch's OpenMP parallel backend pool to
+    # 1 thread. at::set_num_threads(1) only affects libtorch's native
+    # parallel backend; OpenMP-backed builds (which Meta's internal
+    # libtorch may use) read OMP_NUM_THREADS directly. Without this,
+    # each ThriftSrv.IO worker calling forward() spawns nproc OMP
+    # threads, accumulating to nproc^2 GlobalCPUThread-named threads
+    # (= 7,744 on BGM per-instance after taskset). See t14 progress log.
     # shellcheck disable=SC2086
-    env $preload_env MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
+    env $preload_env OMP_NUM_THREADS=1 MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
         --monitor_port="$monitor_port" \
         --graph_scale=21 \
