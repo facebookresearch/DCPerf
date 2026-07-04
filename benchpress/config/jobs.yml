@@ -622,16 +622,20 @@
           - 'benchmarks/feedsim/src/perf.data'
 
 - name: feedsim_dlrm
-  benchmark: feedsim
+  benchmark: feedsim_autoscale
   description: >
-    Aggregator like workload with DLRM (Deep Learning Recommendation Model)
-    inference. Uses async I/O for improved throughput on high-core CPUs.
-    Finds maximum QPS that system can sustain while keeping
-    95th percentile latency <= 500 msecs. Supports both server-side (default)
-    and client-side feature generation via FBThrift protocol.
+    Single-instance aggregator workload with DLRM (Deep Learning Recommendation
+    Model) inference. Same t43 c7 calibration as feedsim_autoscale_dlrm but pinned
+    to ONE feedsim instance per host (overrides the autoscale "100 cores per
+    instance" rule). Single-instance runs give better gen-over-gen correlation
+    than multi-instance — there's no cross-instance mock_services queue contention
+    and no per-instance core-range fragmentation. Use this for cross-LSST CPU
+    comparisons; use feedsim_autoscale_dlrm for max-throughput experiments on big
+    multi-instance boxes. Finds maximum QPS that the system can sustain while
+    keeping 95th percentile latency <= 700ms (matches prod multifeed_aggregator's
+    own end-to-end p95 budget).
   args:
-    - '-p {port}'
-    - '-o {output}'
+    - '-n {num_instances}'
     - '--async-io'
     - '--io-dist={io_dist}'
     - '--io-mean={io_mean}'
@@ -646,18 +650,32 @@
     - '--client-feature-seed={client_feature_seed}'
     - '--client-num-dense={client_num_dense}'
     - '--client-num-sparse={client_num_sparse}'
-    - '--feature-extractors={feature_extractors}'
+    - '--feature-extractors'
     - '--feature-complexity={feature_complexity}'
     - '--num-stories={num_stories}'
     - '--extractors-per-story={extractors_per_story}'
+    - '--story-processors-per-story={story_processors_per_story}'
+    - '--stories-per-processor-pass={stories_per_processor_pass}'
+    - '--silesia-dir={silesia_dir}'
+    - '--stories-per-request={stories_per_request}'
+    # t43 c7 calibration (see ~/.claude/projects/.../memory/t43_c7_recommended.md)
+    - '--mock-tls={mock_tls}'
+    - '--mock-zstd-frac={mock_zstd_frac}'
+    - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
+    - '--rpc-fanout-scale={rpc_fanout_scale}'
+    - '--server-zstd={server_zstd}'
+    - '--sla-p95-ms={sla_p95_ms}'
+    - '{extra_args}'
   vars:
-    - 'port=11222'
-    - 'output=feedsim_results.txt'
+    # Hardcode num_instances=1: this job exists specifically for single-instance
+    # cross-LSST comparisons. If you want autoscale-by-cores, use
+    # feedsim_autoscale_dlrm instead.
+    - 'num_instances=1'
     - 'io_dist=fixed'
     - 'io_mean=200'
     - 'workload=dlrm'
     - 'dlrm_model=models/dlrm_small.pt'
-    - 'dlrm_batch_size=256'
+    - 'dlrm_batch_size=64'
     - 'dlrm_threads=1'
     - 'dlrm_inferences=1'
     - 'client_side_features=0'
@@ -666,10 +684,20 @@
     - 'client_feature_seed=42'
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
-    - 'feature_extractors=0'
     - 'feature_complexity=5'
-    - 'num_stories=100'
-    - 'extractors_per_story=50'
+    - 'num_stories=400'
+    - 'extractors_per_story=280'
+    - 'story_processors_per_story=2'
+    - 'stories_per_processor_pass=100'
+    - 'silesia_dir=silesia'
+    - 'stories_per_request=10'
+    - 'mock_tls=1'
+    - 'mock_zstd_frac=0.75'
+    - 'mock_keepalive_interval_ms=200'
+    - 'rpc_fanout_scale=0.05'
+    - 'server_zstd=0'
+    - 'sla_p95_ms=700'
+    - 'extra_args='
   hooks:
     - hook: cpu-mpstat
       options:
@@ -680,9 +708,10 @@
       options:
         is_move: true
         after:
-          - '/tmp/feedsim_log.txt'
-          - 'benchmarks/feedsim/feedsim_results.txt'
+          - 'benchmarks/feedsim/feedsim_results*.txt'
+          - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
           - 'benchmarks/feedsim/src/perf.data'
+          - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
 
 - name: feedsim_autoscale
