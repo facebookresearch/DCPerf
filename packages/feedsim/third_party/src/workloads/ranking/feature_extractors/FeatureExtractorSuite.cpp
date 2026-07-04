@@ -135,12 +135,44 @@ void FeatureExtractorSuite::runFlatExtractors(
   using namespace dcperf::feature_extractors::generated;
   if (flat_copies_.empty()) return;
 
-  flat_example_.resize(100, 50, 0);
+  // Per-call mutable state. CopyContext fields the generated extractors
+  // mutate (example via emplace_back, structData via in-place
+  // arithmetic) MUST NOT alias across concurrent invocations on the
+  // same suite — t27 forensic analysis showed SIGSEGV in
+  // vc_NNNN_NNNN -> std::vector<IdScorePair>::_M_realloc_insert ->
+  // je_large_dalloc, caused by concurrent emplace_back on the shared
+  // flat_example_.idScoreLists[i]. thread_local keeps allocator
+  // pressure low: each worker thread reuses its own buffers across
+  // calls; only initialized on first call.
+  thread_local MockFeatureExample local_example;
+  local_example.resize(100, 50, 0);
+
+  // structData is mutated by the generated code even without
+  // story_content seeding (e.g. `c->structData[off] += 1e-15f` in
+  // archetype templates), so it also needs to be per-call. We snapshot
+  // from flat_struct_data_ (the read-only template populated in
+  // initializeFlatDispatch) into a thread_local buffer once per call.
+  thread_local std::vector<float> local_struct;
+  if (local_struct.size() != static_cast<size_t>(flat_struct_size_)) {
+    local_struct.assign(flat_struct_data_.get(),
+                        flat_struct_data_.get() + flat_struct_size_);
+  } else {
+    std::copy(flat_struct_data_.get(),
+              flat_struct_data_.get() + flat_struct_size_,
+              local_struct.begin());
+  }
+  if (story_content && story_content_length > 0) {
+    int len = std::min(story_content_length, flat_struct_size_);
+    for (int i = 0; i < len; ++i) {
+      local_struct[i] = static_cast<float>(story_content[i]) / 255.0f;
+    }
+  }
+
   CopyContext ctx;
   ctx.tables = flat_tables_;
-  ctx.structData = flat_struct_data_.get();
-  ctx.structSize = flat_struct_size_;
-  ctx.example = &flat_example_;
+  ctx.structData = local_struct.data();
+  ctx.structSize = static_cast<int>(local_struct.size());
+  ctx.example = &local_example;
   ctx.features = flat_features_.data();
   ctx.numFeatures = static_cast<int>(flat_features_.size());
   ctx.queryKeys = input_sparse.data();
@@ -150,16 +182,16 @@ void FeatureExtractorSuite::runFlatExtractors(
   ctx.storyContent = story_content;
   ctx.storyContentLength = story_content_length;
 
-  // If story content is available, seed structData from it
-  if (story_content && story_content_length > 0) {
-    int len = std::min(story_content_length, flat_struct_size_);
-    for (int i = 0; i < len; ++i) {
-      flat_struct_data_[i] = static_cast<float>(story_content[i]) / 255.0f;
-    }
-  }
-
+  // Atomic cursor advance so concurrent calls don't race on
+  // flat_pos_. Reserves `count` slots in one fetch_add; each call
+  // therefore runs N consecutive copy functions from the shuffled
+  // vector, just starting at a different offset depending on
+  // interleaving. Distribution remains uniform.
+  const size_t total = flat_copies_.size();
+  size_t start = flat_pos_.fetch_add(static_cast<size_t>(count),
+                                     std::memory_order_relaxed) %
+      total;
   for (int i = 0; i < count; ++i) {
-    flat_copies_[flat_pos_](&ctx);
-    flat_pos_ = (flat_pos_ + 1) % flat_copies_.size();
+    flat_copies_[(start + static_cast<size_t>(i)) % total](&ctx);
   }
 }
