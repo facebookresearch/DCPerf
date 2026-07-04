@@ -28,10 +28,12 @@
 #include <folly/Range.h>
 #include <folly/compression/Compression.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/GlobalExecutor.h>
 #include <folly/executors/IOThreadPoolExecutor.h>
 #include <folly/futures/Future.h>
 #include <folly/futures/Promise.h>
 #include <folly/init/Init.h>
+#include <folly/system/HardwareConcurrency.h>
 
 #include <thrift/lib/cpp2/protocol/CompactProtocol.h>
 #include <thrift/lib/cpp2/protocol/Serializer.h>
@@ -86,10 +88,17 @@ enum class IOLatencyDistType {
 };
 
 struct ThreadData {
-  std::shared_ptr<folly::CPUThreadPoolExecutor> cpuThreadPool;
+  // Phase 4 thread-pool aliases (names kept for callsite stability):
+  //   cpuThreadPool       -> folly::getGlobalCPUExecutor() ("GlobalCPUThread")
+  //   srvCPUThreadPool    -> RANKER pool (NamedThreadFactory("RANKER"))
+  //   srvIOThreadPool     -> legacy compression pool (kept until Phase 6)
+  //   ioThreadPool        -> ThriftSrv.IO pool (NamedThreadFactory("ThriftSrv.IO"))
+  //   srEventBasePool     -> NEW outbound-RPC EventBase pool (idle in Phase 4)
+  std::shared_ptr<folly::Executor> cpuThreadPool;
   std::shared_ptr<folly::CPUThreadPoolExecutor> srvCPUThreadPool;
   std::shared_ptr<folly::CPUThreadPoolExecutor> srvIOThreadPool;
   std::shared_ptr<folly::IOThreadPoolExecutor> ioThreadPool;
+  std::shared_ptr<folly::IOThreadPoolExecutor> srEventBasePool;
   std::shared_ptr<ranking::TimekeeperPool> timekeeperPool;
   std::unique_ptr<ranking::dwarfs::PageRank> page_ranker;
 #ifdef FEEDSIM_USE_DLRM
@@ -171,10 +180,11 @@ void ThreadStartup(
     int thread_id,
     std::vector<ThreadData>& thread_data,
     ranking::dwarfs::PageRankParams& params,
-    const std::shared_ptr<folly::CPUThreadPoolExecutor>& cpuThreadPool,
+    const std::shared_ptr<folly::Executor>& cpuThreadPool,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvCPUThreadPool,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvIOThreadPool,
     const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
+    const std::shared_ptr<folly::IOThreadPoolExecutor>& srEventBasePool,
     const std::shared_ptr<ranking::TimekeeperPool>& timekeeperPool,
     const std::shared_ptr<ranking::dwarfs::DLRM>& shared_dlrm_ranker) {
   auto& this_thread = thread_data[thread_id];
@@ -182,6 +192,7 @@ void ThreadStartup(
   this_thread.srvCPUThreadPool = srvCPUThreadPool;
   this_thread.srvIOThreadPool = srvIOThreadPool;
   this_thread.ioThreadPool = ioThreadPool;
+  this_thread.srEventBasePool = srEventBasePool;
   this_thread.timekeeperPool = timekeeperPool;
 
   // Store shared DLRM ranker
@@ -283,10 +294,11 @@ void ThreadStartup(
     int thread_id,
     std::vector<ThreadData>& thread_data,
     ranking::dwarfs::PageRankParams& params,
-    const std::shared_ptr<folly::CPUThreadPoolExecutor>& cpuThreadPool,
+    const std::shared_ptr<folly::Executor>& cpuThreadPool,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvCPUThreadPool,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvIOThreadPool,
     const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
+    const std::shared_ptr<folly::IOThreadPoolExecutor>& srEventBasePool,
     const std::shared_ptr<ranking::TimekeeperPool>& timekeeperPool) {
   auto& this_thread = thread_data[thread_id];
   auto graph = params.makeGraphCopy(g_shared_graph);
@@ -294,6 +306,7 @@ void ThreadStartup(
   this_thread.srvCPUThreadPool = srvCPUThreadPool;
   this_thread.srvIOThreadPool = srvIOThreadPool;
   this_thread.ioThreadPool = ioThreadPool;
+  this_thread.srEventBasePool = srEventBasePool;
   this_thread.timekeeperPool = timekeeperPool;
   unsigned noderank_seed;
   if (args.node_rank_seed_given) {
@@ -1136,19 +1149,61 @@ int main(int argc, char** argv) {
   char* fake_argv[2] = {const_cast<char*>("./LeafNodeRank"), nullptr};
   char** sargv = static_cast<char**>(fake_argv);
   folly::init(&fake_argc, &sargv);
-  auto cpuThreadPool =
-      std::make_shared<folly::CPUThreadPoolExecutor>(args.cpu_threads_arg);
 
+  // Phase 4: production-shaped thread pools. Names (visible in
+  // /proc/$pid/task/*/comm and Strobelight) match the multifeed_aggregator
+  // prod profile: ThriftSrv.IO, RANKER, SREventBase, GlobalCPUThread.
+  const unsigned int nproc = folly::available_concurrency();
+
+  // GlobalCPUThread: shared folly singleton. DLRM inference, feature
+  // extraction, and compression all dispatch here. DO NOT construct a
+  // second CPUThreadPoolExecutor named "GlobalCPUThreadPool" — folly's
+  // global executor (folly/executors/GlobalExecutor.cpp) already has that
+  // name and is sized to nproc by default.
+  auto globalCpuKa = folly::getGlobalCPUExecutor();
+  folly::Executor* globalCpuRaw = globalCpuKa.get();
+  auto globalCpuKaPtr =
+      std::make_shared<folly::Executor::KeepAlive<>>(std::move(globalCpuKa));
+  // Aliasing shared_ptr: holds the KeepAlive alive, exposes raw Executor*.
+  std::shared_ptr<folly::Executor> cpuThreadPool(globalCpuKaPtr, globalCpuRaw);
+
+  // RANKER: ranking-orchestration / response-generation pool. Sized to
+  // nproc/2 by default (matches CPL prod: 26 RANKER threads on a
+  // 52-logical-core host). Replaces the legacy "srvCPUThread" pool.
+  const int rankerThreads = (args.ranker_threads_arg > 0)
+      ? args.ranker_threads_arg
+      : std::max(1, static_cast<int>(nproc) / 2);
   auto srvCPUThreadPool = std::make_shared<folly::CPUThreadPoolExecutor>(
-      args.srv_threads_arg,
-      std::make_shared<folly::NamedThreadFactory>("srvCPUThread"));
+      rankerThreads,
+      std::make_shared<folly::NamedThreadFactory>("RANKER"));
 
+  // Legacy pool kept only for compression callsites until Phase 6.
   auto srvIOThreadPool = std::make_shared<folly::CPUThreadPoolExecutor>(
       args.srv_io_threads_arg,
       std::make_shared<folly::NamedThreadFactory>("srvIOThread"));
 
-  auto ioThreadPool =
-      std::make_shared<folly::IOThreadPoolExecutor>(args.io_threads_arg);
+  // ThriftSrv.IO: inbound RPC IO loop. Renamed (was anonymous folly default).
+  auto ioThreadPool = std::make_shared<folly::IOThreadPoolExecutor>(
+      args.io_threads_arg,
+      std::make_shared<folly::NamedThreadFactory>("ThriftSrv.IO"));
+
+  // SREventBase: outbound-RPC EventBase pool. Idle in Phase 4 (Phase 5
+  // wires mock_services fanout to it). Sized 0.7 * nproc by default
+  // (matches CPL prod: 39 SREventBase threads on a 52-logical-core host).
+  const int srEventBaseThreads = (args.sr_event_base_threads_arg > 0)
+      ? args.sr_event_base_threads_arg
+      : std::max(1, (static_cast<int>(nproc) * 7) / 10);
+  auto srEventBasePool = std::make_shared<folly::IOThreadPoolExecutor>(
+      srEventBaseThreads,
+      std::make_shared<folly::NamedThreadFactory>("SREventBase"));
+
+  std::cout << "Thread pools (nproc=" << nproc << "): "
+            << "GlobalCPUThread (folly singleton), "
+            << "RANKER=" << rankerThreads << ", "
+            << "SREventBase=" << srEventBaseThreads << " (idle in Phase 4), "
+            << "ThriftSrv.IO=" << args.io_threads_arg << ", "
+            << "srvIOThread (legacy compression)=" << args.srv_io_threads_arg
+            << std::endl;
 
   auto timekeeperPool =
       std::make_shared<ranking::TimekeeperPool>(args.timekeeper_threads_arg);
@@ -1159,7 +1214,7 @@ int main(int argc, char** argv) {
   {
     const int warmup_tasks = 100;  // Run multiple tasks to ensure all threads are active
 
-    // Warm up CPU thread pool
+    // Warm up CPU thread pool (= folly global CPU executor).
     std::vector<folly::Future<int>> cpuFutures;
     for (int i = 0; i < warmup_tasks; i++) {
       cpuFutures.push_back(folly::via(cpuThreadPool.get(), []() {
@@ -1169,6 +1224,16 @@ int main(int argc, char** argv) {
       }));
     }
     folly::collectAll(std::move(cpuFutures)).get();
+
+    // Warm up SREventBase pool so threads spawn and Strobelight sees them
+    // even when nothing is dispatched there in Phase 4.
+    std::vector<folly::Future<int>> srEbFutures;
+    for (int i = 0; i < warmup_tasks; i++) {
+      srEbFutures.push_back(folly::via(srEventBasePool.get(), []() {
+        return 1;
+      }));
+    }
+    folly::collectAll(std::move(srEbFutures)).get();
 
     // Warm up srvCPU thread pool
     std::vector<folly::Future<int>> srvCPUFutures;
@@ -1308,6 +1373,7 @@ int main(int argc, char** argv) {
         srvCPUThreadPool,
         srvIOThreadPool,
         ioThreadPool,
+        srEventBasePool,
         timekeeperPool,
         shared_dlrm_ranker);
 #else
@@ -1319,6 +1385,7 @@ int main(int argc, char** argv) {
         srvCPUThreadPool,
         srvIOThreadPool,
         ioThreadPool,
+        srEventBasePool,
         timekeeperPool);
 #endif
   });
