@@ -46,7 +46,7 @@ source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 # will risk running out of memory and getting killed
 IS_SMT_ON="$(cat /sys/devices/system/cpu/smt/active)"
 THRIFT_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc), 216)" | bc)"
-EVENTBASE_THREADS_DEFAULT=4  # 4 should suffice. Tune up if threads are saturated.
+EVENTBASE_THREADS_DEFAULT="$(nproc)"  # nproc threads so the ThriftSrv.IO pool isn't a 4-EB bottleneck. Each EB owns its own MockServicesClient so outbound RPC fanout (issueOutboundFanout) actually spreads across the SREventBase pool instead of serializing through 4 EBs.
 SRV_THREADS_DEFAULT=8        # 8 should also suffice for most purposes
 if [[ "$IS_SMT_ON" = 1 ]]; then
   RANKING_THREADS_DEFAULT="$(( $(nproc) * 7/20))"  # 7/20 is 0.35 cpu factor
