@@ -828,7 +828,9 @@
     - 'dlrm_model=models/dlrm_small.pt'
     - 'dlrm_batch_size=256'
     - 'dlrm_threads=1'
-    - 'dlrm_inferences=64'
+    # 8 inferences/req brings DLRM-Inference CPU share from 55-62% down
+    # toward prod multifeed_aggregator's Ranking-Prediction share of 7-13%.
+    - 'dlrm_inferences=8'
     - 'client_side_features=0'
     - 'client_batch_size=256'
     - 'client_inferences=64'
@@ -836,7 +838,10 @@
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
     - 'feature_complexity=5'
-    - 'num_stories=100'
+    # 1800 stories x 50 extractors = 90K extractor calls/req. Tuned to
+    # push FeatureExtraction CPU share into prod's 30-35% band; 5K
+    # calls/req previously gave only 1.7-1.9%.
+    - 'num_stories=1800'
     - 'extractors_per_story=50'
     - 'fixed_qps=100000'
     - 'fixed_qps_duration=10'
