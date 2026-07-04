@@ -67,3 +67,9 @@ option "io_latency_mean_ms" - "Mean I/O latency in milliseconds. For fixed: exac
 option "io_latency_stddev_ms" - "I/O latency standard deviation in ms (only used for lognormal distribution)." int default="50"
 option "io_stages" - "Number of I/O stages to simulate (models multi-hop data fetching like Feature Store -> Memcache -> TAO)." int default="1"
 option "io_stage_latency_ms" - "Latency per I/O stage in ms (when io_stages > 1). Total latency = io_stages * io_stage_latency_ms." int default="50"
+
+# Feature extraction options
+option "feature_extractors" - "Enable feature extraction pipeline before ranking inference."
+option "feature_complexity" - "Complexity level for feature extractors (1-10). Higher values increase data intensity." int default="5"
+option "num_stories" - "Number of stories to process per request. Each story runs a random subset of extractors." int default="100"
+option "extractors_per_story" - "Number of extractors to randomly select per story." int default="50"

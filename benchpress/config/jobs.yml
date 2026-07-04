@@ -646,6 +646,10 @@
     - '--client-feature-seed={client_feature_seed}'
     - '--client-num-dense={client_num_dense}'
     - '--client-num-sparse={client_num_sparse}'
+    - '--feature-extractors={feature_extractors}'
+    - '--feature-complexity={feature_complexity}'
+    - '--num-stories={num_stories}'
+    - '--extractors-per-story={extractors_per_story}'
   vars:
     - 'port=11222'
     - 'output=feedsim_results.txt'
@@ -662,6 +666,10 @@
     - 'client_feature_seed=42'
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
+    - 'feature_extractors=0'
+    - 'feature_complexity=5'
+    - 'num_stories=100'
+    - 'extractors_per_story=50'
   hooks:
     - hook: cpu-mpstat
       options:
@@ -731,6 +739,10 @@
     - '--client-feature-seed={client_feature_seed}'
     - '--client-num-dense={client_num_dense}'
     - '--client-num-sparse={client_num_sparse}'
+    - '--feature-extractors={feature_extractors}'
+    - '--feature-complexity={feature_complexity}'
+    - '--num-stories={num_stories}'
+    - '--extractors-per-story={extractors_per_story}'
     - '{extra_args}'
   vars:
     - 'num_instances=-1'
@@ -747,6 +759,10 @@
     - 'client_feature_seed=42'
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
+    - 'feature_extractors=0'
+    - 'feature_complexity=5'
+    - 'num_stories=100'
+    - 'extractors_per_story=50'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat

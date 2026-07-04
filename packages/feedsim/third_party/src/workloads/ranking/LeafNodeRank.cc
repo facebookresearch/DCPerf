@@ -59,6 +59,15 @@
 
 #include "generators/RankingGenerators.h"
 
+#include "feature_extractors/FeatureExtractorSuite.h"
+#include "feature_extractors/HashLookupExtractor.h"
+#include "feature_extractors/FeatureLayoutExtractor.h"
+#include "feature_extractors/EmbeddingLookupExtractor.h"
+#include "feature_extractors/ContainerExtractor.h"
+#include "feature_extractors/TreeTraversalExtractor.h"
+#include "feature_extractors/BitsetExtractor.h"
+#include "feature_extractors/generated/registry.h"
+
 // Shared configuration flags
 static gengetopt_args_info args;
 
@@ -92,6 +101,9 @@ struct ThreadData {
   std::default_random_engine rng;
   std::gamma_distribution<double> latency_distribution;
   std::string random_string;
+
+  // Feature extraction suite (Phase 2)
+  std::unique_ptr<FeatureExtractorSuite> feature_suite;
 
   // Phase 3: I/O latency distribution support
   IOLatencyDistType io_latency_dist_type = IOLatencyDistType::FIXED;
@@ -200,6 +212,32 @@ void ThreadStartup(
 
   this_thread.random_string = RandomString(args.random_data_size_arg);
 
+  // Initialize feature extraction suite if enabled
+  if (args.feature_extractors_given) {
+    this_thread.feature_suite = std::make_unique<FeatureExtractorSuite>();
+    // Add 6 hand-written extractors
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<HashLookupExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<FeatureLayoutExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<EmbeddingLookupExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<ContainerExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<TreeTraversalExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<BitsetExtractor>());
+    // Add generated extractors (1035 variants, each dispatches to 1 of 1000 copies)
+    auto generated = dcperf::feature_extractors::generated::createGeneratedExtractors();
+    for (auto& ext : generated) {
+      this_thread.feature_suite->addExtractor(std::move(ext));
+    }
+    this_thread.feature_suite->initializeAll(
+        args.feature_complexity_arg, noderank_seed);
+    this_thread.feature_suite->initializeFlatDispatch(noderank_seed);
+  }
+
   // Phase 3: Initialize I/O latency distributions
   this_thread.io_latency_mean_ms = args.io_latency_mean_ms_arg;
   std::string io_dist_str = args.io_latency_distribution_arg;
@@ -273,6 +311,32 @@ void ThreadStartup(
       std::gamma_distribution<double>(alpha, beta);
 
   this_thread.random_string = RandomString(args.random_data_size_arg);
+
+  // Initialize feature extraction suite if enabled
+  if (args.feature_extractors_given) {
+    this_thread.feature_suite = std::make_unique<FeatureExtractorSuite>();
+    // Add 6 hand-written extractors
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<HashLookupExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<FeatureLayoutExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<EmbeddingLookupExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<ContainerExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<TreeTraversalExtractor>());
+    this_thread.feature_suite->addExtractor(
+        std::make_unique<BitsetExtractor>());
+    // Add generated extractors (1035 variants, each dispatches to 1 of 1000 copies)
+    auto generated = dcperf::feature_extractors::generated::createGeneratedExtractors();
+    for (auto& ext : generated) {
+      this_thread.feature_suite->addExtractor(std::move(ext));
+    }
+    this_thread.feature_suite->initializeAll(
+        args.feature_complexity_arg, noderank_seed);
+    this_thread.feature_suite->initializeFlatDispatch(noderank_seed);
+  }
 
   // Phase 3: Initialize I/O latency distributions
   this_thread.io_latency_mean_ms = args.io_latency_mean_ms_arg;
@@ -361,6 +425,33 @@ static int dlrmInferenceServerSideDataGeneration(ThreadData& this_thread,
   return result;
 }
 #endif
+
+// Run feature extraction pipeline if enabled
+// Uses flat dispatch: all 1.035M copy functions are shuffled into one vector
+// and iterated sequentially. total_calls = num_stories * extractors_per_story.
+static void runFeatureExtraction(ThreadData& this_thread) {
+  if (!this_thread.feature_suite || this_thread.feature_suite->size() == 0) {
+    return;
+  }
+  const int num_dense = 128;
+  const int num_sparse = 64;
+  const int total_calls = args.num_stories_arg * args.extractors_per_story_arg;
+
+  std::vector<float> input_dense(num_dense);
+  std::vector<int64_t> input_sparse(num_sparse);
+  std::uniform_real_distribution<float> dense_dist(0.0f, 1.0f);
+  std::uniform_int_distribution<int64_t> sparse_dist(0, 1000000);
+
+  for (int i = 0; i < num_dense; ++i) {
+    input_dense[i] = dense_dist(this_thread.rng);
+  }
+  for (int i = 0; i < num_sparse; ++i) {
+    input_sparse[i] = sparse_dist(this_thread.rng);
+  }
+
+  this_thread.feature_suite->runFlatExtractors(
+      total_calls, input_dense, input_sparse);
+}
 
 /**
  * Phase 3: Async (non-blocking) request handler using continuation-passing style.
