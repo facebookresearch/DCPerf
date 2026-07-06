@@ -4,6 +4,7 @@
 
 #include <fmt/format.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/io/async/EventBase.h>
 #include <folly/portability/GFlags.h>
 #include <mcrouter/lib/carbon/Result.h>
 #include "UcacheBenchIOThreadContext.h"
@@ -30,7 +31,16 @@ inline folly::CPUThreadPoolExecutor* getCpuPool() {
 }
 
 /**
- * Common entry point to run request with fiber management
+ * Common entry point to run a request.
+ *
+ * `handler` COMPUTES and returns the reply (it must not complete the callback
+ * itself). This function owns delivering the reply via `callback->result(...)`.
+ * That split matters for the IO→CPU→IO path: these are async_eb handlers, so
+ * the callback MUST be completed on its own EventBase. When work is offloaded
+ * to the CPU pool we compute the reply there, then bounce the completion back
+ * to the callback's EventBase via runInEventBaseThread(). Completing an
+ * async_eb callback directly from a CPU-pool thread never delivers the reply —
+ * in-flight requests never drain and the server goes idle.
  */
 template <class Callback, class Request, class Handler>
 void ucacheBenchOnRequestCommon(
@@ -41,27 +51,33 @@ void ucacheBenchOnRequestCommon(
 {
   auto* cpuPool = getCpuPool();
   if (cpuPool) {
+    auto* evb = callback->getEventBase();
     cpuPool->add([handler,
                   cb = std::forward<Callback>(callback),
-                  req = std::forward<Request>(request)]() mutable {
-      handler(std::move(cb), std::move(req));
+                  req = std::forward<Request>(request),
+                  evb]() mutable {
+      auto reply = handler(req);
+      evb->runInEventBaseThread(
+          [cb = std::move(cb), reply = std::move(reply)]() mutable {
+            cb->result(std::move(reply));
+          });
     });
     return;
   }
 
-  // If fibers are disabled, execute directly
+  // If fibers are disabled, execute directly on the IO thread.
   if (!FLAGS_enable_fibers ||
       !UcacheBenchIOThreadContext::isInitializedForCurrentThread()) {
-    handler(std::forward<Callback>(callback), std::forward<Request>(request));
+    callback->result(handler(request));
     return;
   }
 
-  // Execute the handler in a fiber
+  // Execute the handler in a fiber (so simulateIOLatency can yield).
   UcacheBenchIOThreadContext::tlInstance().fm().addTaskEager(
       [handler,
-       callbackFiber = std::forward<Callback>(callback),
-       requestFiber = std::forward<Request>(request)]() mutable {
-        handler(std::move(callbackFiber), std::move(requestFiber));
+       cb = std::forward<Callback>(callback),
+       req = std::forward<Request>(request)]() mutable {
+        cb->result(handler(req));
       });
 }
 
