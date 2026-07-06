@@ -24,6 +24,9 @@
 #include <folly/coro/BlockingWait.h>
 #include <folly/coro/Promise.h>
 #include <folly/coro/Timeout.h>
+#include <folly/fibers/FiberManagerMap.h>
+#include <folly/futures/Future.h>
+#include <folly/futures/Promise.h>
 #include <folly/io/async/ScopedEventBaseThread.h>
 #include <folly/portability/GFlags.h>
 #include <mcrouter/McrouterFiberContext.h>
@@ -987,8 +990,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
         request.value_ref() = *folly::IOBuf::copyBuffer(value);
         request.exptime_ref() = 3600;
 
-        auto [promise, future] =
-            folly::coro::makePromiseContract<UcbSetReply>();
+        auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
 
         clientPtr->send(
             request,
@@ -998,8 +1000,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
             });
 
         try {
-          co_await folly::coro::timeout(
-              std::move(future), std::chrono::seconds(10));
+          co_await std::move(future).within(std::chrono::seconds(10));
           scanOps++;
         } catch (const std::exception&) {
           // Request timed out or failed (e.g. send() returned false and the
@@ -1103,7 +1104,9 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   auto warmupWorker =
       [&](memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>*
               clientPtr) -> folly::coro::Task<void> {
-    folly::coro::AsyncScope scope;
+    // CancellableAsyncScope so stragglers at warmup-end are cancelled, not
+    // waited on forever (same hang as the measurement worker — see below).
+    folly::coro::CancellableAsyncScope scope;
     auto exe = co_await folly::coro::co_current_executor;
 
     std::atomic<uint64_t> inflight{0};
@@ -1137,7 +1140,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       }
 
       // Same pattern as production McrouterAdapter::coro()
-      auto [promise, future] = folly::coro::makePromiseContract<UcbSetReply>();
+      auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
 
       clientPtr->send(
           request,
@@ -1148,8 +1151,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
 
       UcbSetReply result;
       try {
-        result = co_await folly::coro::timeout(
-            std::move(future), std::chrono::seconds(10));
+        result = co_await std::move(future).within(std::chrono::seconds(10));
       } catch (const std::exception&) {
         // Request never completed (send() rejected without callback, or stuck
         // pre-send during the connection storm). Count as error and return so
@@ -1165,11 +1167,15 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
         localSuccesses++;
       } else {
         localErrors++;
-        // Rate-limit verbose error output to avoid flooding stdout pipe
-        // which can deadlock when run through benchpress/automark
-        if (FLAGS_verbose && (localErrors.load() % 1000 == 1)) {
+        // Print only the FIRST error per worker. Any periodic sampling (even
+        // 1/1000) floods stdout under a TKO storm at multi-M QPS; the
+        // synchronous write() blocks on the backpressured benchpress/automark
+        // pipe while holding the stdio FILE lock and glog's log_mutex, wedging
+        // every worker thread -> joinAsync never returns -> BENCHMARK_DONE is
+        // never sent.
+        if (FLAGS_verbose && localErrors.load() == 1) {
           printf(
-              "Warmup SET error (sample 1/1000): %s\n",
+              "Warmup SET error (first sample): %s\n",
               carbon::resultToString(*result.result_ref()));
         }
       }
@@ -1220,7 +1226,8 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       co_await folly::futures::sleep(std::chrono::milliseconds(1));
     }
 
-    co_await scope.joinAsync();
+    // Warmup window over: cancel stragglers and join (deterministic drain).
+    co_await scope.cancelAndJoinAsync();
 
     // Final update - add any remaining counts not yet synced
     uint64_t finalSuccesses = localSuccesses.load();
@@ -1624,7 +1631,14 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       [&](size_t workerId,
           memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>*
               clientPtr) -> folly::coro::Task<void> {
-    folly::coro::AsyncScope scope;
+    // CancellableAsyncScope (not AsyncScope) so that when the measurement
+    // window ends we CANCEL any still-outstanding requests instead of waiting
+    // for them indefinitely. A small number of in-flight requests at endTime
+    // can have responses that never arrive (and the per-request timeout's timer
+    // may sit on a momentarily-saturated proxy event base), which otherwise
+    // hangs joinAsync forever -> the client never sends BENCHMARK_DONE -> the
+    // whole run stalls. Cancelling at window-end is the correct semantics.
+    folly::coro::CancellableAsyncScope scope;
     auto exe = co_await folly::coro::co_current_executor;
 
     // Send one GET request - matches production McrouterAdapter::coro() pattern
@@ -1647,7 +1661,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
 
       // Same pattern as production McrouterAdapter::coro()
-      auto [promise, future] = folly::coro::makePromiseContract<UcbGetReply>();
+      auto [promise, future] = folly::makePromiseContract<UcbGetReply>();
 
       clientPtr->send(
           request,
@@ -1658,8 +1672,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
       UcbGetReply result;
       try {
-        result = co_await folly::coro::timeout(
-            std::move(future), std::chrono::seconds(10));
+        result = co_await std::move(future).within(std::chrono::seconds(10));
       } catch (const std::exception&) {
         // Request never completed; count as a GET error and return so the
         // measurement worker's scope.joinAsync() can't hang.
@@ -1708,7 +1721,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         }
 
         auto [setPromise, setFuture] =
-            folly::coro::makePromiseContract<UcbSetReply>();
+            folly::makePromiseContract<UcbSetReply>();
 
         clientPtr->send(
             setRequest,
@@ -1719,8 +1732,8 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
         UcbSetReply setResult;
         try {
-          setResult = co_await folly::coro::timeout(
-              std::move(setFuture), std::chrono::seconds(10));
+          setResult =
+              co_await std::move(setFuture).within(std::chrono::seconds(10));
         } catch (const std::exception&) {
           workerSetOps[workerId]->fetch_add(1);
           workerSetErrors[workerId]->fetch_add(1);
@@ -1732,18 +1745,17 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           workerSetSuccesses[workerId]->fetch_add(1);
         } else {
           workerSetErrors[workerId]->fetch_add(1);
-          if (FLAGS_verbose &&
-              (workerSetErrors[workerId]->load() % 1000 == 1)) {
+          if (FLAGS_verbose && workerSetErrors[workerId]->load() == 1) {
             printf(
-                "Benchmark SET error (on GET miss, sample 1/1000): %s\n",
+                "Benchmark SET error (on GET miss, first sample): %s\n",
                 carbon::resultToString(*setResult.result_ref()));
           }
         }
       } else {
         workerGetErrors[workerId]->fetch_add(1);
-        if (FLAGS_verbose && (workerGetErrors[workerId]->load() % 1000 == 1)) {
+        if (FLAGS_verbose && workerGetErrors[workerId]->load() == 1) {
           printf(
-              "Benchmark GET error (sample 1/1000): %s\n",
+              "Benchmark GET error (first sample): %s\n",
               carbon::resultToString(*result.result_ref()));
         }
       }
@@ -1774,7 +1786,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
 
       // Same pattern as production McrouterAdapter::coro()
-      auto [promise, future] = folly::coro::makePromiseContract<UcbSetReply>();
+      auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
 
       clientPtr->send(
           request,
@@ -1785,8 +1797,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
       UcbSetReply result;
       try {
-        result = co_await folly::coro::timeout(
-            std::move(future), std::chrono::seconds(10));
+        result = co_await std::move(future).within(std::chrono::seconds(10));
       } catch (const std::exception&) {
         workerTotalOps[workerId]->fetch_add(1);
         workerSetOps[workerId]->fetch_add(1);
@@ -1811,9 +1822,9 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         workerSetSuccesses[workerId]->fetch_add(1);
       } else {
         workerSetErrors[workerId]->fetch_add(1);
-        if (FLAGS_verbose && (workerSetErrors[workerId]->load() % 1000 == 1)) {
+        if (FLAGS_verbose && workerSetErrors[workerId]->load() == 1) {
           printf(
-              "Benchmark SET error (sample 1/1000): %s\n",
+              "Benchmark SET error (first sample): %s\n",
               carbon::resultToString(*result.result_ref()));
         }
       }
@@ -1864,7 +1875,9 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       co_await folly::futures::sleep(std::chrono::milliseconds(1));
     }
 
-    co_await scope.joinAsync();
+    // Measurement window is over: cancel any still-outstanding requests and
+    // join. This drains deterministically instead of hanging on stragglers.
+    co_await scope.cancelAndJoinAsync();
 
     // No need to sync to global counters - they'll be summed at the end
     co_return;
