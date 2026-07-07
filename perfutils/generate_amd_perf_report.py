@@ -2303,6 +2303,24 @@ def zen5es_total_cxl_write_bw_mbs(grouped_df):
     }
 
 
+def drop_first_interval(metrics, num_samples):
+    """Drop the first perf-stat interval from every metric's time series.
+
+    The uncore/DF memory-controller counters report a cumulative startup value
+    on their first ``perf stat -I`` read, and the first interval's duration is
+    often irregular, so the first sample's derived rates (e.g. DRAM bandwidth)
+    can exceed the hardware's physical limits. Excluding it keeps both the
+    aggregated summary and the emitted time series physically meaningful. One
+    interval spans ``num_samples`` rows (one per socket). Series shorter than
+    that are left untouched so short runs don't collapse to empty.
+    """
+    if any(m["series"].size <= num_samples for m in metrics):
+        return metrics
+    for m in metrics:
+        m["series"] = m["series"].iloc[num_samples:]
+    return metrics
+
+
 def aggregate_stats(derived_metric):
     derived_series = derived_metric["series"]
     prefix = derived_metric.get("prefix", 1.0)
@@ -2598,6 +2616,8 @@ def main(
             "No metrics could be calculated. All required counters are missing from the input data."
         )
         return
+
+    filtered_metrics = drop_first_interval(filtered_metrics, get_num_sockets(df))
 
     shortest_series = max(filtered_metrics, key=lambda m: m["series"].size)
     df_metrics = concat_series(filtered_metrics, shortest_series)
