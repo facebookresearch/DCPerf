@@ -4,313 +4,282 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 -->
-# Feedsim
+# FeedSim
 
-FeedSim is a benchmark that represents the aggregation and ranking workloads in
-recommendation systems. It searches for the maximum QPS that the system can
-achieve while keeping p95 latency to be no greater than 500ms.
+FeedSim is a benchmark that represents the aggregation and ranking workloads
+in production recommendation systems. It searches for the maximum QPS the
+system can sustain while keeping p95 latency ≤ **700 ms**. Though it's possible
+that on some platforms the CPU gets saturated before latency hitting the SLA.
 
-## Install feedsim
+The current recommended job is **`feedsim_dlrm`** (v2). It runs a
+single-instance aggregator with real DLRM inference, out-of-process
+`mock_services` RPC fanout over TLS + ZSTD, feature extraction and story
+processors modules. Data used in the request flow is backed by the Silesia corpus
+to ensure representative in compressibility. Because we replaced the fixed 200ms
+sleep with hundreds of concurrent real RPC communication to the `mock_services`
+module, the tail latency SLA is increased from 500ms to 700ms accordingly.
 
-```
-./benchpress_cli.py install feedsim_autoscale
-```
+For the legacy PageRank-based v1 job (`feedsim_autoscale`, 500 ms SLA), see
+[README_v1.md](README_v1.md).
 
-## Run feedsim
+For the software architecture and request control/data flow of v2, see
+[ARCHITECTURE_v2.md](ARCHITECTURE_v2.md).
 
-### Recommended job - `feedsim_autoscale`
+## Recommended job — `feedsim_dlrm`
 
-`feedsim_autoscale` is the version of Feedsim benchmark that can scale up on
-systems with CPUs of very large core counts. It will spawn multiple Feedsim
-workload instances at 100 cores per instance (rounded up), let them run in
-parallel and aggregate final results when they finish. For example, if your
-system has 256 cores, this job will spawn three Feedsim instances.
-
-To run Feedsim benchmark, simply execute the following command
-
-```
-./benchpress_cli.py run feedsim_autoscale
-```
-
-This job also has the following optional parameters:
-  - `num_instances`: manually specify the number of feedsim workload instances
-  to run in parallel instead of automatically scaling with the CPU core count
-  - `extra_args`: extra arguments you would like to pass to Feedsim's runner
-  script. Available arguments can be viewed by running
-  `./benchmarks/feedsim/run.sh -h`.
-
-For example, if you would like to run two instances regardless the CPU core
-count, you can run the following:
+### Install
 
 ```
-./benchpress_cli.py run feedsim_autoscale -i '{"num_instances": 2}'
+./benchpress_cli.py install feedsim_dlrm
 ```
 
-If you want to run an experiment with fixed 100 QPS, you can run:
+The installer downloads and builds folly, fbthrift, wangle, fizz, mvfst,
+LibTorch, the Silesia compression corpus, the DLRM TorchScript model, and
+the FeedSim binaries. It runs ~30 minutes on a fresh host.
+
+On memory-constrained hosts (e.g. machines with less than 1GB per core), we
+recommend that you cap the build parallelism to avoid OOM, for example:
 
 ```
-./benchpress_cli.py run feedsim_autoscale -i '{"extra_args": "-q 100"}'
+taskset -c 0-15 ./benchpress_cli.py install feedsim_dlrm
 ```
 
-This benchmark normally takes around 30 minutes to finish. It is recommended to
-turn on CPU boost before running this benchmark, otherwise feedsim might not
-converge and yield very low result.
-
-When feedsim finds the optimal QPS that meets the SLA of <=500ms p95 latency, it
-will execute a final run of 5 minutes using the optimal QPS. Therefore, if you
-would like to collect system and microarch metrics for performance analysis,
-collect those during the last 5 minutes of the benchmark. We expect the CPU
-utilization during this period to be in the range of 60%~75%.
-
-### Running on ARM Platforms
-If running on ARM platforms, please use the job `feedsim_autoscale_arm` (other usages will be the same):
-```
-./benchpress_cli.py run feedsim_autoscale_arm
-```
-
-### Running Feedsim Mini
-
-Feedsim Mini is a shrunken version of Feedsim
-that aims to reduce execution time to a few seconds.
-It includes runtime breakdown tracking capabilities that record
-benchmark timestamps to enable metric filtering for the actual benchmark time,
-which is essential for mini jobs where execution time is only a few seconds.
-
-To run Feedsim Mini, please follow these steps:
-
-1. Make sure that you get the latest version of DCPerf and check out the latest commit in the `v2-beta` branch.
-If you've installed Feedsim with an older version of DCPerf,
-we recommend you clean and re-install Feedsim.
-
-2. Run the `feedsim_autoscale_mini` job:
-
-```bash
-./benchpress_cli.py run feedsim_autoscale_mini
-```
-
-This mini job runs the same workload as the full Feedsim Autoscale but with
-minimal settings to enable quick testing and validation.
-A `breakdown.csv` file will be generated in the results to track runtime breakdowns,
-which can be used to filter metrics for the actual benchmark execution time.
-
-## Reporting and Measurement
-
-After the feedsim benchmark finishing, benchpress will report the results in
-JSON format like the following:
+### Run
 
 ```
+./benchpress_cli.py run feedsim_dlrm
+```
+
+Unlike FeedSim v1 which spawns a new FeedSim instance per 100 CPU cores,
+`feedsim_dlrm` is pinned to **one FeedSim instance per host** because the
+redesigned threading model in FeedSim v2 has overcome the scalability issue
+on ultra-high-core-count CPUs and ARM CPUs. 
+
+The runner searches for the QPS that keeps 95th-percentile end-to-end
+latency at or below **700 ms**. When it converges it runs a final 5-minute
+steady-state pass at that QPS; collect telemetry (perf, mpstat, µarch
+counters) during that final window. We expect the total wall-clock runtime
+to be around 30 minutes.
+
+Please make sure to turn CPU turbo-boost on before starting, or FeedSim may
+fail to converge and report a low QPS. 
+
+### Result report
+
+After the run finishes, benchpress prints a JSON result. Example from a
+AMD Zen4 host (176 logical cores, 256 GB RAM):
+
+```json
 {
-  "benchmark_args": [],
-  "benchmark_desc": "Aggregator like workload. Latency sensitive. Finds maximum QPS that system can sustain while keeping 95th percentile latency <= 500 msecs.\n",
-  "benchmark_hooks": [
-    "cpu-mpstat: {'args': ['-u', '1']}",
-    "copymove: {'is_move': True, 'after': ['benchmarks/feedsim/feedsim_results*.txt', 'benchmarks/feedsim/feedsim-multi-inst-*.log']}"
+  "benchmark_args": [
+    "-n 1",
+    "--async-io",
+    "--io-dist=fixed",
+    "--io-mean=200",
+    "--workload=dlrm",
+    "--dlrm-model=models/dlrm_small.pt",
+    "--dlrm-batch-size=64",
+    "--dlrm-threads=1",
+    "--dlrm-inferences=1",
+    "--client-side-features=0",
+    "--client-batch-size=256",
+    "--client-inferences=64",
+    "--client-feature-seed=42",
+    "--client-num-dense=13",
+    "--client-num-sparse=26",
+    "--feature-extractors",
+    "--feature-complexity=5",
+    "--num-stories=400",
+    "--extractors-per-story=280",
+    "--story-processors-per-story=2",
+    "--stories-per-processor-pass=100",
+    "--silesia-dir=silesia",
+    "--stories-per-request=10",
+    "--mock-tls=1",
+    "--mock-zstd-frac=0.75",
+    "--mock-keepalive-interval-ms=200",
+    "--rpc-fanout-scale=0.05",
+    "--server-zstd=0",
+    "--sla-p95-ms=700"
   ],
-  "benchmark_name": "feedsim_autoscale",
+  "benchmark_name": "feedsim_dlrm",
   "machines": [
     {
       "cpu_architecture": "x86_64",
       "cpu_model": "<CPU-name>",
       "hostname": "<server-hostname>",
-      "kernel_version": "5.19.0-0_xxxx",
-      "mem_total_kib": "2377231352 KiB",
-      "num_logical_cpus": "380",
+      "kernel_version": "6.13.2-0_fbk8_0_g8695f611147d",
+      "mem_total_kib": "263374740 KiB",
+      "num_cpus_usable": 176,
+      "num_logical_cpus": "176",
       "os_distro": "centos",
-      "os_release_name": "CentOS Stream 8"
+      "os_release_name": "CentOS Stream 9",
+      "threads_per_core": "2"
     }
   ],
   "metadata": {
-    "L1d cache": "6 MiB (192 instances)",
-    "L1i cache": "6 MiB (192 instances)",
-    "L2 cache": "192 MiB (192 instances)",
-    "L3 cache": "768 MiB (24 instances)"
+    "L1d cache": "2.8 MiB (88 instances)",
+    "L1i cache": "2.8 MiB (88 instances)",
+    "L2 cache": "88 MiB (88 instances)",
+    "L3 cache": "176 MiB (11 instances)"
   },
   "metrics": {
     "1": {
-      "final_achieved_qps": 248.38,
-      "final_latency_msec": 310.9,
-      "final_requested_qps": 251.82
+      "final_achieved_qps": 278.84,
+      "final_latency_msec": 644.04,
+      "final_requested_qps": 281.03
     },
-    "2": {
-      "final_achieved_qps": 248.98,
-      "final_latency_msec": 308.31,
-      "final_requested_qps": 252.61
-    },
-    "3": {
-      "final_achieved_qps": 249.73,
-      "final_latency_msec": 305.82,
-      "final_requested_qps": 252.98
-    },
-    "4": {
-      "final_achieved_qps": 248.98,
-      "final_latency_msec": 305.22,
-      "final_requested_qps": 251.99
-    },
+    "is_fixed_qps": 0,
+    "max_qps": 278.84,
+    "min_qps": 278.84,
     "overall": {
-      "average_latency_msec": 307.56,
-      "final_achieved_qps": 996.07,
-      "final_requested_qps": 1009.4
+      "average_latency_msec": 644.04,
+      "final_achieved_qps": 278.84,
+      "final_requested_qps": 281.03
     },
-    "spawned_instances": "4",
-    "successful_instances": 4,
-    "target_latency_msec": "500",
-    "target_percentile": "95p",
-    "score": 17.4736842105
+    "score": 4.8919,
+    "spawned_instances": "1",
+    "successful_instances": 1,
+    "target_latency_msec": "700",
+    "target_percentile": "95p"
   },
-  "run_id": "2ef4dfad",
-  "timestamp": 1702590806
+  "run_id": "d8c6a288",
+  "timestamp": 1782368295
 }
 ```
 
-The result above is from an experiment on a system of 380-core CPU, where
-`feedsim_autoscale` would spawn four instances. The result report will include
-performance numbers of each individual instance (named `1` to `4`) as well as
-the aggregated overall performance (named `overall`) in the `metrics` section.
+Key fields are in `metrics.overall`:
 
-`overall` performance is what we care about. Its metrics are calculated as follows:
-  * `final_achieved_qps` - sum of `final_achieved_qps` of all individual instances
-  * `final_requested_qps` - sum of `final_requested_qps` of all individual instances
-  * `average_latency_msec` - average of final P95 latency of all individual instances
+- `final_achieved_qps` — the primary performance number. Max QPS the host
+  sustained with p95 ≤ 700 ms.
+- `average_latency_msec` — the observed p95 at that QPS. The latency number
+  can be around or below `target_latency_msec` (700) for a converged run.
+  This field is called "average" because it's the average of p95 latency
+  values observed from all benchmark instances (which will be discussed later).
+  It itself still indicates the tail p95 latency.
+- `final_requested_qps` — what the driver asked for. Should be within a few
+  percent of `final_achieved_qps` on a converged run.
 
-`final_achieved_qps` is the metric that measures the performance, measuring
-the max QPS FeedSim could achieve with the contraint of p95 latency being
-less than 500ms.
+`score` is `final_achieved_qps` divided by the QPS number achieved on an
+older reference system to reflect the platform's relative speedup.
 
-We expect all the individual instances have similar final achieved QPS numbers.
-If you see one or more instances have significantly lower performance than the
-others, it indicates the experiment is probably unsuccessful because the
-low-performance instances may have got killed earlier than they should. In this
-case, we suggest running this benchmark again.
+`is_fixed_qps` is `0` for the default search mode. It is `1` when you pass
+`-q` (see [Fixed-QPS experiments](#fixed-qps-experiments) below), and the
+`overall` block then reports observed p95 at the fixed load rather than a
+saturation point.
 
-Feedsim will generate detailed metrics reports at
-`benchmark_metrics_<run_id>/feedsim_results_<1~N>.txt` (N is the workload instance ID
-and each instanec will have its own CSV)
-in CSV format like the following:
+Per-instance CSVs live at
+`benchmark_metrics_<run_id>/feedsim_results_<1>.txt`; instance logs at
+`benchmark_metrics_<run_id>/feedsim-multi-inst-<1>.log`; the runtime
+breakdown at `benchmark_metrics_<run_id>/breakdown.csv`.
 
-```
-duration_secs,total_queries,requested_qps,achieved_qps,total_bytes_rx,total_bytes_tx,rx_MBps,tx_MBps,min_ms,avg_ms,50p_ms,90p_ms,95p_ms,99p_ms,99.9p_ms
-120,5267,0.00,41.46,85637186,15927408,0.64,0.12,388.134,958.509,913.313,956.414,991.523,1812.133,12232.154
-120,5571,0.00,43.86,90618516,16846704,0.68,0.13,388.134,910.627,918.002,960.395,1010.386,1050.379,1848.997
-120,5040,39.97,39.67,82279002,15240960,0.62,0.11,388.134,457.068,446.739,524.929,535.555,569.859,593.868
-120,2737,20.49,21.55,44727453,8276688,0.34,0.06,352.849,423.693,406.253,486.015,509.429,535.926,556.451
-......
+## Advanced usage
 
-```
+### Fixed-QPS experiments
 
-Besides, logs of individual instances will also be recorded at
-`benchmark_metrics_<run_id>/feedsim-multi-inst-<1~N>.log` for debugging.
-
-## Advanced Usage - Fixed-QPS experiment
-
-Rather than let feedsim's runner script search for an optimal QPS that meets the
-SLA, you can also choose to run feedsim at a fixed QPS and observe the latency.
-To do so, simply run the following:
-
-```sh
-./benchpress_cli.py run feedsim_autoscale -i '{"extra_args": "-q <QPS>"}'
-```
-`-q` follows the desired QPS you would like **each instance** to drive,
-and `-d` is an optional parameter stating the duration of the experiment
-(default is 300s). Note that the total runtime could be longer because
-feedsim needs to populate object graphs and perform a warmup. The default
-warmup period is 120s, and can be changed by specifying the optional
-parameter `-w`. Reducing warmup (and experiment) time can make the run
-faster, but may affect accuracy and end up with lower QPS than the machine
-can actually achieve.
-
-For example, if you would like to drive 250 QPS in each feedsim instance
-on a 380-core CPU system:
+Instead of searching for the SLA-bound QPS, drive a fixed QPS and observe
+latency:
 
 ```
-[root@<hostname> ~/external]# ./benchpress_cli.py run feedsim_autoscale -i '{"extra_args": "-q 250"}'
-Will run 1 job(s)
-......
-Results Report:
-{
-  "benchmark_args": [
-    "{num_instances}",
-    "{extra_args}"
-  ],
-  "benchmark_desc": "Aggregator like workload. Latency sensitive. Finds maximum QPS that system can sustain while keeping 95th percentile latency <= 500 msecs. Automatically spawns multiple workload instances at 100 cores per instance (rounded
-up).\n",
-  "benchmark_hooks": [
-    "cpu-mpstat: {'args': ['-u', '1']}",
-    "copymove: {'is_move': True, 'after': ['benchmarks/feedsim/feedsim_results*.txt', 'benchmarks/feedsim/feedsim-multi-inst-*.log']}"
-  ],
-  "benchmark_name": "feedsim_autoscale",
-  "machines": [
-    {
-      "cpu_architecture": "x86_64",
-      "cpu_model": "<CPU name>",
-      "hostname": "<hostname>",
-      "kernel_version": "5.19.0_xxxxx",
-      "mem_total_kib": "2377504144 KiB",
-      "num_logical_cpus": "380",
-      "os_distro": "centos",
-      "os_release_name": "CentOS Stream 9"
-    }
-  ],
-  "metadata": {
-    "L1d cache": "6 MiB (192 instances)",
-    "L1i cache": "6 MiB (192 instances)",
-    "L2 cache": "192 MiB (192 instances)",
-    "L3 cache": "768 MiB (24 instances)"
-  },
-  "metrics": {
-    "1": {
-      "final_achieved_qps": 246.6,
-      "final_latency_msec": 317.93,
-      "final_requested_qps": 250.0
-    },
-    "2": {
-      "final_achieved_qps": 246.71,
-      "final_latency_msec": 312.45,
-      "final_requested_qps": 250.0
-    },
-    "3": {
-      "final_achieved_qps": 246.73,
-      "final_latency_msec": 311.64,
-      "final_requested_qps": 250.0
-    },
-    "4": {
-      "final_achieved_qps": 246.4,
-      "final_latency_msec": 316.28,
-      "final_requested_qps": 250.0
-    },
-    "overall": {
-      "average_latency_msec": 314,
-      "final_achieved_qps": 986.44,
-      "final_requested_qps": 1000.0
-    },
-    "successful_instances": 4,
-    "target_latency_msec": "",
-    "target_percentile": ""
-  },
-  "run_id": "80c1764b",
-  "timestamp": 1703179008
-}
-Finished running "feedsim_autoscale": Aggregator like workload. Latency sensitive. Finds maximum QPS that system can sustain while keeping 95th percentile latency <= 500 msecs. Automatically spawns multiple workload instances at 100 cores per instance (rounded up).
- with uuid: 80c1764b
+./benchpress_cli.py run feedsim_dlrm -i '{"extra_args": "-q <QPS>"}'
 ```
 
-## Other extra args
+`-q` accepts either a single value or a comma-separated list of QPS values;
+in the latter case, FeedSim runs one experiment per value in sequence.
+`-d <seconds>` sets the per-experiment duration (default 300 s). Warmup
+adds ~120 s to each experiment, and object-graph population adds ~1–2 min
+on top; a single fixed-QPS point takes ~7 min end-to-end.
 
-Please refer to `./benchmarks/feedsim/run.sh -h` to see other available
-parameters that you can supply to the `extra_args` parameter:
+Example — sweep low-load points to inspect the p95 cliff at cold-channel:
 
 ```
-Usage: run.sh [OPTION]...
-
-    -h Display this help and exit
-    -t Number of threads to use for thrift serving. Large dataset kept per thread. Default: 216
-    -c Number of threads to use for fanout ranking work. Heavy CPU work. Default: 134
-    -s Number of threads to use for task-based serialization cpu work. Default: 55
-    -a When searching for the optimal QPS, automatically adjust the number of client driver threads by
-       min(requested_qps / 4, 384 / 5) in each iteration (experimental feature).
-    -q Number of QPS to request. If this is present, feedsim will run a fixed-QPS experiment instead of searching
-       for a QPS that meets latency target. If multiple comma-separated values are specified, a fixed-QPS experiment
-       will be run for each QPS value.
-    -d Duration of each load testing experiment, in seconds. Default: 300
-    -p Port to use by the LeafNodeRank server and the load drivers. Default: 11222
-    -o Result output file name. Default: "feedsim_results.txt"
+./benchpress_cli.py run feedsim_dlrm -i '{"extra_args": "-q 5,20,50,100,150"}'
 ```
+
+### Multi-instance (max throughput)
+
+If you encounter insufficient scalability / low CPU utilization problem on some
+new hardware platform in the future, or you want to test multi NUMA-node systems,
+you can try the multi-instance option in Feedsim V2. There are two ways to launch
+multiple instances:
+
+1. Specify `num_instances` parameter when running the `feedsim_dlrm` job. For example,
+`./benchpress_cli.py run feedsim_dlrm -i '{"num_instances": 2}'` will launch 2 sets of
+feedsim server, driver and mock_services instances.
+
+2. Use the `feedsim_autoscale_dlrm` job. This autoscale job will spawn `ceil(nproc / 100)`
+FeedSim instances, each pinned to its own CPU range via `taskset`, plus one driver
+and one `mock_services` process per instance (also `taskset`-isolated). For example: 
+```
+./benchpress_cli.py run feedsim_autoscale_dlrm
+```
+
+In multi-instance mode, the overall QPS is the sum across all instances. and the
+average latency will be the average of p95 latency values observed across all
+instances.
+
+### Other parameters
+
+This section lists additional parameters in `feedsim_dlrm` benchmark. These parameters
+are carefully tuned to make the benchmark's performance characteristics closely match
+the ranking & aggregation systems in production, so we **do not** recommend you change
+them just for better performance, you should change them only for research purpose.
+
+Job-level parameters (can be passed via `-i` flag in Benchpress CLI):
+
+| Var | Purpose | Default (`feedsim_dlrm`) |
+|---|---|---|
+| `num_instances` | Number of FeedSim instances to run in parallel. Defaults to 1 in `feedsim_dlrm`; set to -1 to autoscale for `feedsim_autoscale_dlrm`. | `1` |
+| `sla_p95_ms` | SLA target in ms. The runner searches for the highest QPS keeping p95 ≤ this. | `700` |
+| `io_dist` | I/O latency distribution: `fixed`, `exponential`, or `lognormal`. | `fixed` |
+| `io_mean` | Mean I/O latency in ms. | `200` |
+| `workload` | Ranking workload: `pagerank` or `dlrm`. `dlrm` is v2. | `dlrm` |
+| `dlrm_model` | Path to the TorchScript DLRM model (`.pt`). | `models/dlrm_small.pt` |
+| `dlrm_batch_size` | Batch size for DLRM inference. | `64` |
+| `dlrm_threads` | LibTorch intra-op thread count. | `1` |
+| `dlrm_inferences` | DLRM inference calls per request. | `1` |
+| `feature_complexity` | Complexity level (1–10) of the feature-extractor pipeline. Higher = more work per story. | `5` |
+| `num_stories` | Stories per request (server-side feature extraction). | `400` |
+| `extractors_per_story` | Feature extractors randomly selected per story. | `280` |
+| `story_processors_per_story` | Story-processor pipeline passes per story (0 disables). Mirrors prod scoring + filter + blend + serdes + topK. | `2` |
+| `stories_per_processor_pass` | MockStories per story-processor pass. | `100` |
+| `stories_per_request` | Silesia snippet count per request. | `10` |
+| `mock_tls` | Enable TLS on outbound `MockServicesClient` channels. | `1` |
+| `mock_zstd_frac` | Fraction of `MockServicesClient` channels with ZSTD enabled. | `0.75` |
+| `mock_keepalive_interval_ms` | Keepalive ping interval per channel (0 disables). Defeats the cold-channel p95 cliff at low QPS. | `200` |
+| `rpc_fanout_scale` | Scale factor applied to per-session fanout counts. | `0.05` |
+| `server_zstd` | Enable ZSTD compression on server-side response payloads. | `0` |
+| `client_side_features` | Enable client-side DLRM feature generation. | `0` |
+| `silesia_dir` | Silesia corpus directory (auto-detected in benchmarks/feedsim/silesia/). | `silesia` |
+| `extra_args` | Escape hatch — appended to the runner CLI verbatim. | `""` |
+
+Note:
+1. `io_dist` and `io_mean` will not actually be used in Feedsim V2, the actual
+RPC latency distribution is controlled by `rpc_dist.json`.
+2. Changing `workload` will not only change the type of ranking workload, but
+also change the entire request workflow. `dlrm` will use the new FeedSim v2
+path, whereas `pagerank` will use the legacy Feedsim V1 path.
+3. Meaning of `rpc_fanout_scale`: when it's 1, each request will fan out over 2000
+RPC requests to the mock_services (which is the average number of outbound RPC calls
+the ranking server will do for each incoming request). That will be too heavy for this
+benchmark, so we need to set this to a lower number.
+
+Runner-level parameters (can be passed via `extra_args` parameter):
+
+| Flag | Purpose | Default |
+|---|---|---|
+| `-q <QPS[,QPS...]>` | Run at fixed QPS instead of searching. | search mode |
+| `-d <sec>` | Per-experiment duration. | `300` |
+| `-p <port>` | `LeafNodeRank` listen port. | `11222` |
+| `-N` | No-retry mode. Skip sleep and PID checking in load test startup. | off |
+| `-D <sec>` | Drain time after each experiment. | `5` |
+| `-R / -P / -C` | Seeds for LeafNodeRank / PageRank / PointerChase RNGs. | time-based |
+| `-o <file>` | Result output filename. | `feedsim_results.txt` |
+
+For the full list of runner flags, see
+`./benchmarks/feedsim/run.sh -h`.
+
+## Legacy — `feedsim_autoscale` (v1)
+
+The v1 PageRank-based job and its 500ms SLA are documented in
+[README_v1.md](README_v1.md).
