@@ -21,8 +21,8 @@ void UcacheBenchOnRequest::onRequestThrift(
     apache::thrift::HandlerCallbackPtr<UcbGetReply> callback,
     UcbGetRequest&& request) {
   ucacheBenchOnRequestCommon(
-      std::move(callback), std::move(request), [this](auto&& cb, auto&& req) {
-        cb->result(server_->processUcbGetSync(req));
+      std::move(callback), std::move(request), [this](auto&& req) {
+        return server_->processUcbGetSync(req);
       });
 }
 
@@ -30,8 +30,8 @@ void UcacheBenchOnRequest::onRequestThrift(
     apache::thrift::HandlerCallbackPtr<UcbSetReply> callback,
     UcbSetRequest&& request) {
   ucacheBenchOnRequestCommon(
-      std::move(callback), std::move(request), [this](auto&& cb, auto&& req) {
-        cb->result(server_->processUcbSetSync(req));
+      std::move(callback), std::move(request), [this](auto&& req) {
+        return server_->processUcbSetSync(req);
       });
 }
 
@@ -39,8 +39,8 @@ void UcacheBenchOnRequest::onRequestThrift(
     apache::thrift::HandlerCallbackPtr<UcbDeleteReply> callback,
     UcbDeleteRequest&& request) {
   ucacheBenchOnRequestCommon(
-      std::move(callback), std::move(request), [this](auto&& cb, auto&& req) {
-        cb->result(server_->processUcbDeleteSync(req));
+      std::move(callback), std::move(request), [this](auto&& req) {
+        return server_->processUcbDeleteSync(req);
       });
 }
 
@@ -49,12 +49,12 @@ void UcacheBenchOnRequest::onRequestThrift(
         callback,
     facebook::memcache::McVersionRequest&& request) {
   ucacheBenchOnRequestCommon(
-      std::move(callback), std::move(request), [](auto&& cb, auto&& /* req */) {
+      std::move(callback), std::move(request), [](auto&& /* req */) {
         facebook::memcache::McVersionReply reply;
         reply.result() = carbon::Result::FOUND;
         reply.value() =
             *folly::IOBuf::copyBuffer("UcacheBench 1.0 (with Fiber support)");
-        cb->result(std::move(reply));
+        return reply;
       });
 }
 
