@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 680" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>FeedSim v2 architecture</title>
+  <desc>DriverNodeRank drives inbound Rocket/TLS requests into LeafNodeRank. Inside LeafNodeRank the request hops ThriftSrv.IO -> RANKER (feature extractors + story processors) -> SREventBase (fanout over MockServicesClient) -> mock_services -> GlobalCPUThread (DLRM inference + Silesia response). See ARCHITECTURE_v2.md for details.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#334155"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#1d4ed8"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#047857"/>
+    </marker>
+    <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#c2410c"/>
+    </marker>
+    <style>
+      .proc       { fill:#f8fafc; stroke:#0f172a; stroke-width:2.5; }
+      .procTitle  { font-size:20px; font-weight:800; fill:#0f172a; }
+      .procSub    { font-size:11px; fill:#64748b; }
+      .pool       { fill:#eef2ff; stroke:#4338ca; stroke-width:1.5; rx:6; }
+      .poolText   { font-size:12px; font-weight:700; fill:#3730a3; }
+      .poolSub    { font-size:10px; fill:#4338ca; }
+      .module     { fill:#fff7ed; stroke:#c2410c; stroke-width:1.2; rx:5; }
+      .moduleText { font-size:11px; fill:#7c2d12; }
+      .respPool   { fill:#dcfce7; stroke:#047857; stroke-width:1.5; rx:6; }
+      .respText   { font-size:12px; font-weight:700; fill:#065f46; }
+      .titleText  { font-size:22px; font-weight:800; fill:#0f172a; }
+      .subtitle   { font-size:12px; fill:#475569; }
+      .noteBox    { fill:#fef2f2; stroke:#b91c1c; stroke-width:1; rx:5; }
+      .noteText   { font-size:10.5px; fill:#7f1d1d; }
+      .legendText { font-size:11px; fill:#334155; }
+    </style>
+  </defs>
+
+  <!-- Title -->
+  <text x="560" y="34" class="titleText" text-anchor="middle">FeedSim v2 — components &amp; request flow</text>
+  <text x="560" y="52" class="subtitle" text-anchor="middle">Three processes on one host · fbthrift Rocket over TLS 1.3 · single request-response today</text>
+
+  <!-- Legend (single-column, wide gap between arrow and text, no overflow) -->
+  <g transform="translate(30,72)">
+    <rect x="0" y="0" width="340" height="112" rx="6" fill="#fff" stroke="#cbd5e1"/>
+
+    <line x1="16" y1="24" x2="72" y2="24" stroke="#1d4ed8" stroke-width="2.4" marker-end="url(#arrowBlue)"/>
+    <text x="82" y="28" class="legendText">inbound request (Rocket + TLS)</text>
+
+    <line x1="16" y1="48" x2="72" y2="48" stroke="#c2410c" stroke-width="2.4" marker-end="url(#arrowOrange)"/>
+    <text x="82" y="52" class="legendText">outbound fanout RPC (leaf → mock_services)</text>
+
+    <line x1="16" y1="72" x2="72" y2="72" stroke="#047857" stroke-width="2.4" stroke-dasharray="6 4" marker-end="url(#arrowGreen)"/>
+    <text x="82" y="76" class="legendText">response</text>
+
+    <line x1="16" y1="96" x2="72" y2="96" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+    <text x="82" y="100" class="legendText">executor hop (between thread pools)</text>
+  </g>
+
+  <!-- Note about single request-response -->
+  <g transform="translate(620,72)">
+    <rect x="0" y="0" width="470" height="112" class="noteBox"/>
+    <text x="14" y="20" class="noteText" font-weight="700">Single request-response today</text>
+    <text x="14" y="42" class="noteText">Multi-method, session-based Thrift interfaces are wired in</text>
+    <text x="14" y="58" class="noteText">LeafNodeRank but not exercised: every driver request is</text>
+    <text x="14" y="74" class="noteText">stand-alone. Multi-hop, session-driven flow is planned</text>
+    <text x="14" y="90" class="noteText">future work — see ARCHITECTURE_v2.md for details.</text>
+  </g>
+
+  <!-- =========================== DRIVER =========================== -->
+  <g transform="translate(30,220)">
+    <rect x="0" y="0" width="220" height="300" rx="12" class="proc"/>
+    <text x="110" y="30" class="procTitle" text-anchor="middle">DriverNodeRank</text>
+    <text x="110" y="48" class="procSub" text-anchor="middle">client · load generator</text>
+
+    <rect x="16" y="70" width="188" height="60" class="pool"/>
+    <text x="110" y="92" class="poolText" text-anchor="middle">Driver threads</text>
+    <text x="110" y="112" class="poolSub" text-anchor="middle">~nproc / 4</text>
+
+    <rect x="16" y="150" width="188" height="52" class="module"/>
+    <text x="110" y="170" class="moduleText" text-anchor="middle" font-weight="700">Request sampler</text>
+    <text x="110" y="188" class="moduleText" text-anchor="middle">req sizes from CDF</text>
+
+    <rect x="16" y="220" width="188" height="52" class="module"/>
+    <text x="110" y="240" class="moduleText" text-anchor="middle" font-weight="700">Latency recorder</text>
+    <text x="110" y="258" class="moduleText" text-anchor="middle">p50 / p95 / p99</text>
+  </g>
+
+  <!-- =========================== LEAF =========================== -->
+  <!-- Pool y-positions (abs, translate y=220):
+        ThriftSrv.IO   y=290..342
+        RANKER         y=360..490  (with 3 module boxes)
+        SREventBase    y=508..568
+        GlobalCPUThread y=586..646
+       Executor-hop arrows placed strictly between pool bottom and next pool top. -->
+  <g transform="translate(320,220)">
+    <rect x="0" y="0" width="500" height="440" rx="12" class="proc"/>
+    <text x="250" y="30" class="procTitle" text-anchor="middle">LeafNodeRank</text>
+    <text x="250" y="48" class="procSub" text-anchor="middle">system-under-test · fbthrift ThriftServer</text>
+
+    <!-- ThriftSrv.IO -->
+    <rect x="20" y="70" width="460" height="52" class="pool"/>
+    <text x="30" y="92" class="poolText">ThriftSrv.IO pool</text>
+    <text x="30" y="110" class="poolSub">fbthrift IO workers · accept + dispatch</text>
+
+    <!-- RANKER + modules -->
+    <rect x="20" y="140" width="460" height="130" class="pool"/>
+    <text x="30" y="162" class="poolText">RANKER pool</text>
+    <text x="30" y="180" class="poolSub">CPU-heavy per-request work</text>
+    <g transform="translate(38,196)">
+      <rect x="0" y="0" width="140" height="60" class="module"/>
+      <text x="70" y="22" class="moduleText" text-anchor="middle" font-weight="700">Feature extractors</text>
+      <text x="70" y="40" class="moduleText" text-anchor="middle">13 archetypes</text>
+      <text x="70" y="54" class="moduleText" text-anchor="middle">num_stories × per-story</text>
+    </g>
+    <g transform="translate(188,196)">
+      <rect x="0" y="0" width="140" height="60" class="module"/>
+      <text x="70" y="22" class="moduleText" text-anchor="middle" font-weight="700">Story processors</text>
+      <text x="70" y="40" class="moduleText" text-anchor="middle">score · filter · blend</text>
+      <text x="70" y="54" class="moduleText" text-anchor="middle">serdes · topK</text>
+    </g>
+    <g transform="translate(338,196)">
+      <rect x="0" y="0" width="130" height="60" class="module"/>
+      <text x="65" y="22" class="moduleText" text-anchor="middle" font-weight="700">Fanout planner</text>
+      <text x="65" y="40" class="moduleText" text-anchor="middle">samples rpc_dist.json</text>
+      <text x="65" y="54" class="moduleText" text-anchor="middle">× rpc_fanout_scale</text>
+    </g>
+
+    <!-- SREventBase -->
+    <rect x="20" y="288" width="460" height="60" class="pool"/>
+    <text x="30" y="310" class="poolText">SREventBase pool</text>
+    <text x="30" y="328" class="poolSub">one EventBase = one MockServicesClient · TLS + ZSTD + keepalive</text>
+    <text x="470" y="328" class="poolSub" text-anchor="end">folly::window(K=32)</text>
+
+    <!-- GlobalCPUThread post-fanout -->
+    <rect x="20" y="366" width="460" height="60" class="respPool"/>
+    <text x="30" y="388" class="respText">GlobalCPUThread pool</text>
+    <text x="30" y="406" class="poolSub" fill="#065f46">DLRM inference (LibTorch) · Silesia response payload</text>
+  </g>
+
+  <!-- =========================== MOCK_SERVICES =========================== -->
+  <g transform="translate(870,220)">
+    <rect x="0" y="0" width="220" height="300" rx="12" class="proc"/>
+    <text x="110" y="30" class="procTitle" text-anchor="middle">mock_services</text>
+    <text x="110" y="48" class="procSub" text-anchor="middle">downstream · fbthrift server</text>
+
+    <rect x="16" y="70" width="188" height="60" class="pool"/>
+    <text x="110" y="92" class="poolText" text-anchor="middle">IO worker pool</text>
+    <text x="110" y="112" class="poolSub" text-anchor="middle">TLS terminating (fizz)</text>
+
+    <rect x="16" y="150" width="188" height="52" class="module"/>
+    <text x="110" y="170" class="moduleText" text-anchor="middle" font-weight="700">~20 Thrift methods</text>
+    <text x="110" y="188" class="moduleText" text-anchor="middle">mcGet · fetchTopK · …</text>
+
+    <rect x="16" y="220" width="188" height="52" class="module"/>
+    <text x="110" y="240" class="moduleText" text-anchor="middle" font-weight="700">runSimulatedRpc</text>
+    <text x="110" y="258" class="moduleText" text-anchor="middle">sleep/spin · slice Silesia</text>
+  </g>
+
+  <!-- =========================== ARROWS ===========================
+       All arrow labels removed — legend covers meaning. Endpoints
+       are aligned to the process-box edges (Driver right = x=250;
+       Leaf left = x=320; Leaf right = x=820; Mock left = x=870). -->
+
+  <!-- Driver -> Leaf: driver right edge into ThriftSrv.IO center.
+       Driver right = x=250, mid-y of Driver-threads pool = 220+70+30 = 320.
+       Leaf ThriftSrv.IO mid-y = 220+70+26 = 316. -->
+  <line x1="250" y1="320" x2="320" y2="316" stroke="#1d4ed8" stroke-width="2.4" marker-end="url(#arrowBlue)"/>
+
+  <!-- Leaf response back to Driver: from GlobalCPUThread out to Driver latency recorder.
+       GlobalCPUThread mid-y_abs = 220+366+30 = 616. Leaf left = 320.
+       Route down-and-left from Leaf, curving back to Driver right edge at y=480 (recorder mid). -->
+  <path d="M 320,616 C 300,616 285,530 285,490 C 285,462 265,462 250,462" stroke="#047857" stroke-width="2.4" stroke-dasharray="6 4" fill="none" marker-end="url(#arrowGreen)"/>
+
+  <!-- ThriftSrv.IO -> RANKER (internal executor hop).
+       ThriftSrv.IO bottom_abs = 220+70+52 = 342. RANKER top_abs = 220+140 = 360.
+       Draw vertical arrow x=570 (leaf-center) between them. -->
+  <line x1="570" y1="342" x2="570" y2="360" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- RANKER -> SREventBase (internal executor hop).
+       RANKER bottom_abs = 220+140+130 = 490. SREventBase top_abs = 220+288 = 508. -->
+  <line x1="570" y1="490" x2="570" y2="508" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- SREventBase -> GlobalCPUThread (post-fanout continuation hop).
+       SREventBase bottom_abs = 220+288+60 = 568. GlobalCPUThread top_abs = 220+366 = 586. -->
+  <line x1="570" y1="568" x2="570" y2="586" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- Also show RANKER dispatching CPU work to GlobalCPUThread (DLRM inference
+       can be scheduled on the global CPU executor from RANKER as well, not
+       only via the post-fanout .via() hop). Route this arrow around the right
+       side of the leaf box (x=815) so it doesn't cross SREventBase content. -->
+  <path d="M 800,470 C 815,470 815,606 800,606" stroke="#334155" stroke-width="1.8" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- Leaf SREventBase -> mock_services (outbound fanout).
+       Enter mock at IO worker upper-half y=305 so the arrow visually
+       separates from the response arrow's return endpoint. -->
+  <path d="M 820,525 C 850,525 850,305 870,305" stroke="#c2410c" stroke-width="2.4" fill="none" marker-end="url(#arrowOrange)"/>
+
+  <!-- mock_services -> Leaf (fanout responses).
+       Depart mock at runSimulatedRpc module mid-y=466, return into
+       SREventBase pool lower-half y=551 so the two edges don't overlap. -->
+  <path d="M 870,466 C 850,466 850,551 820,551" stroke="#047857" stroke-width="2.4" stroke-dasharray="6 4" fill="none" marker-end="url(#arrowGreen)"/>
+</svg>
