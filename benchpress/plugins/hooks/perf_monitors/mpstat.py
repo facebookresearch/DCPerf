@@ -12,8 +12,8 @@ from . import Monitor
 
 
 class MPStat(Monitor):
-    def __init__(self, interval, job_uuid):
-        super(MPStat, self).__init__(interval, "mpstat", job_uuid)
+    def __init__(self, interval, job_uuid, subdir=None):
+        super(MPStat, self).__init__(interval, "mpstat", job_uuid, subdir=subdir)
         self.headers = []
 
     def run(self):

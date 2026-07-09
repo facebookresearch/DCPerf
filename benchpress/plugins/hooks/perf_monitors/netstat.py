@@ -14,8 +14,8 @@ from . import logger, Monitor
 
 
 class NetStat(Monitor):
-    def __init__(self, interval, job_uuid, additional_counters=()):
-        super(NetStat, self).__init__(interval, "net-stat", job_uuid)
+    def __init__(self, interval, job_uuid, additional_counters=(), subdir=None):
+        super(NetStat, self).__init__(interval, "net-stat", job_uuid, subdir=subdir)
         counters = {"rx_bytes", "rx_packets", "tx_bytes", "tx_packets"}
         self.counters = counters.union(set(additional_counters))
         self.run_collector = False

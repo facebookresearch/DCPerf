@@ -21,12 +21,30 @@ logger = logging.getLogger(__name__)
 
 class Monitor:
     def gen_path(self, filename):
-        return os.path.join(
-            get_artifacts_dir(), f"benchmark_metrics_{self.job_uuid}", filename
-        )
+        """Build a path under the job's benchmark_metrics directory.
 
-    def __init__(self, interval, name, job_uuid):
-        """Initialize some common parameters and storage variables"""
+        When ``self.subdir`` is set (per-stage perf collection in stage-aware
+        mode), the path is nested one level further so each stage gets its
+        own sub-folder. Without ``subdir`` the layout is unchanged from
+        legacy behavior:
+
+            benchmark_metrics_<uuid>/<filename>            # no subdir
+            benchmark_metrics_<uuid>/<subdir>/<filename>   # stage-aware mode
+        """
+        base = os.path.join(get_artifacts_dir(), f"benchmark_metrics_{self.job_uuid}")
+        if getattr(self, "subdir", None):
+            base = os.path.join(base, self.subdir)
+        return os.path.join(base, filename)
+
+    def __init__(self, interval, name, job_uuid, subdir=None):
+        """Initialize some common parameters and storage variables.
+
+        Args:
+            subdir: Optional sub-folder under benchmark_metrics_<uuid>/. Used
+                by the perf hook's stage-aware mode to give each WDL prod_set
+                sub-benchmark its own slice of perf data. None preserves the
+                original flat layout.
+        """
         self.name = name
         self.interval = interval
         # Reserved for result processing
@@ -34,8 +52,13 @@ class Monitor:
         # Reserved for original output of the monitoring process
         self.output = ""
         self.job_uuid = job_uuid
+        self.subdir = subdir
         self.logpath = self.gen_path(f"{name}.log")
         self.csvpath = self.gen_path(f"{name}.csv")
+        # Make sure the (possibly nested) directory exists before opening
+        # the log file. Stage-aware mode creates per-stage dirs lazily so we
+        # can't rely on the perf hook to have made them.
+        os.makedirs(os.path.dirname(self.logpath), exist_ok=True)
         self.logfile = open(self.logpath, "w", buffering=1)  # noqa: P201
 
     def __del__(self):

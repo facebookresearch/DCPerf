@@ -22,8 +22,8 @@ MULTIPLIERS = {
 
 
 class MemStat(Monitor):
-    def __init__(self, interval, job_uuid, additional_counters=()):
-        super(MemStat, self).__init__(interval, "mem-stat", job_uuid)
+    def __init__(self, interval, job_uuid, additional_counters=(), subdir=None):
+        super(MemStat, self).__init__(interval, "mem-stat", job_uuid, subdir=subdir)
         counters = {"MemTotal", "MemFree", "MemAvailable", "SwapTotal", "SwapFree"}
         self.counters = counters.union(set(additional_counters))
         self.run_collector = False
