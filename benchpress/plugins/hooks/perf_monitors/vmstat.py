@@ -14,8 +14,8 @@ from . import Monitor
 
 
 class VMStat(Monitor):
-    def __init__(self, interval, job_uuid):
-        super(VMStat, self).__init__(interval, "vmstat", job_uuid)
+    def __init__(self, interval, job_uuid, subdir=None):
+        super(VMStat, self).__init__(interval, "vmstat", job_uuid, subdir=subdir)
         self.run_collector = False
 
     def collect_vmstat_snapshot(self):

@@ -39,8 +39,10 @@ def unpack_perf_stat_line(line, delim=","):
 
 
 class PerfStat(Monitor):
-    def __init__(self, interval, job_uuid, additional_events=(), delim=","):
-        super(PerfStat, self).__init__(interval, "perf-stat", job_uuid)
+    def __init__(
+        self, interval, job_uuid, additional_events=(), delim=",", subdir=None
+    ):
+        super(PerfStat, self).__init__(interval, "perf-stat", job_uuid, subdir=subdir)
         self.events = ["instructions", "cycles"] + list(additional_events)
         self.delim = delim
 

@@ -14,8 +14,10 @@ from . import logger, Monitor
 
 
 class CPUFreq(Monitor):
-    def __init__(self, interval, job_uuid):
-        super(CPUFreq, self).__init__(interval, "cpufreq_cpuinfo", job_uuid)
+    def __init__(self, interval, job_uuid, subdir=None):
+        super(CPUFreq, self).__init__(
+            interval, "cpufreq_cpuinfo", job_uuid, subdir=subdir
+        )
         self.run_freq_collector = False
         self.supported = os.path.exists(
             "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq"
