@@ -13,7 +13,7 @@ import subprocess
 
 import numpy as np
 import pandas as pd
-from benchpress.lib.util import BENCHPRESS_ROOT, get_artifacts_dir
+from benchpress.lib.util import BENCHPRESS_ROOT
 
 from . import logger, Monitor
 
@@ -142,27 +142,30 @@ def get_os_release():
 
 
 class IntelPerfSpect(Monitor):
-    def __init__(self, interval, job_uuid, mux_interval_msecs=125, perfspect_path=None):
+    def __init__(
+        self,
+        interval,
+        job_uuid,
+        mux_interval_msecs=125,
+        perfspect_path=None,
+        subdir=None,
+    ):
         # NOTE: PerfSpect 1.x does not support configurable sampling intervals.
         # The 'interval' parameter is accepted here only for API compatibility
         # with the DEFAULT_OPTIONS in perf.py, but it is not actually used
         # by this implementation.
-        super(IntelPerfSpect, self).__init__(interval, "perfspect", job_uuid)
+        super(IntelPerfSpect, self).__init__(
+            interval, "perfspect", job_uuid, subdir=subdir
+        )
         self.mux_interval_msecs = mux_interval_msecs
         if perfspect_path is None:
             self.perfspect_path = os.path.join(BENCHPRESS_ROOT, "perfspect")
         else:
             self.perfspect_path = perfspect_path
-        self.collect_output_path = os.path.join(
-            get_artifacts_dir(),
-            "benchmark_metrics_" + self.job_uuid,
-            "perf-collect.csv",
-        )
-        self.postprocess_output_path = os.path.join(
-            get_artifacts_dir(),
-            "benchmark_metrics_" + self.job_uuid,
-            "topdown-intel.csv",
-        )
+        # Route both artifacts through gen_path so stage-aware mode (subdir set)
+        # nests them per-stage automatically.
+        self.collect_output_path = self.gen_path("perf-collect.csv")
+        self.postprocess_output_path = self.gen_path("topdown-intel.csv")
         if os.path.exists(
             os.path.join(self.perfspect_path, "perf-collect")
         ) and os.path.exists(os.path.join(self.perfspect_path, "perf-postprocess")):
@@ -237,21 +240,21 @@ class IntelPerfSpect3(Monitor):
         job_uuid,
         mux_interval_msecs=125,
         perfspect_path=None,
+        subdir=None,
     ):
-        super(IntelPerfSpect3, self).__init__(interval, "perfspect3", job_uuid)
+        super(IntelPerfSpect3, self).__init__(
+            interval, "perfspect3", job_uuid, subdir=subdir
+        )
         self.mux_interval_msecs = mux_interval_msecs
         if perfspect_path is None:
             self.perfspect_path = os.path.join(BENCHPRESS_ROOT, "perfspect")
         else:
             self.perfspect_path = perfspect_path
-        self.collect_output_path = os.path.join(
-            get_artifacts_dir(), "benchmark_metrics_" + self.job_uuid
-        )
-        self.postprocess_output_path = os.path.join(
-            get_artifacts_dir(),
-            "benchmark_metrics_" + self.job_uuid,
-            "topdown-intel.sys.csv",
-        )
+        # Routed through gen_path so stage-aware mode (subdir set) nests
+        # per-stage automatically. The collect dir is the parent benchmark
+        # metrics dir (perfspect writes its own files inside it).
+        self.collect_output_path = os.path.dirname(self.gen_path("placeholder"))
+        self.postprocess_output_path = self.gen_path("topdown-intel.sys.csv")
         if os.path.exists(os.path.join(self.perfspect_path, "perfspect")):
             self.supported = True
         else:
@@ -311,8 +314,9 @@ class BasePerfUtil(Monitor):
         perf_postproc_script_name,
         perfutils_path=None,
         perf_postproc_args=None,
+        subdir=None,
     ):
-        super(BasePerfUtil, self).__init__(interval, name, job_uuid)
+        super(BasePerfUtil, self).__init__(interval, name, job_uuid, subdir=subdir)
         if perfutils_path is None:
             self.perfutils_path = os.path.join(BENCHPRESS_ROOT, "perfutils")
         else:
@@ -322,16 +326,11 @@ class BasePerfUtil(Monitor):
         self.perf_postproc_addl_args = (
             list(perf_postproc_args) if perf_postproc_args else []
         )
-        self.postprocess_timeseries_output_path = os.path.join(
-            get_artifacts_dir(),
-            "benchmark_metrics_" + self.job_uuid,
-            f"{name}-timeseries.csv",
+        # Routed through gen_path so stage-aware mode nests per-stage.
+        self.postprocess_timeseries_output_path = self.gen_path(
+            f"{name}-timeseries.csv"
         )
-        self.postprocess_summary_output_path = os.path.join(
-            get_artifacts_dir(),
-            "benchmark_metrics_" + self.job_uuid,
-            f"{name}-summary.csv",
-        )
+        self.postprocess_summary_output_path = self.gen_path(f"{name}-summary.csv")
 
     def run(self):
         perf_collect_script = os.path.join(
@@ -391,7 +390,7 @@ class BasePerfUtil(Monitor):
 
 
 class AMDPerfUtil:
-    def __init__(self, interval, job_uuid, **kwargs):
+    def __init__(self, interval, job_uuid, subdir=None, **kwargs):
         self.cpuinfo = get_cpuinfo()
         self.cpu_vendor = get_cpu_vendor(self.cpuinfo)
         if self.cpu_vendor != "amd":
@@ -403,6 +402,7 @@ class AMDPerfUtil:
             "amd-perf-collector",
             perf_collect_script_name="collect_amd_perf_counters.sh",
             perf_postproc_script_name="generate_amd_perf_report.py",
+            subdir=subdir,
         )
         if self.amd_gen == "zen4":
             self.perfutil_zen4 = BasePerfUtil(
@@ -412,6 +412,7 @@ class AMDPerfUtil:
                 perf_collect_script_name="collect_amd_zen4_perf_counters.sh",
                 perf_postproc_script_name="generate_amd_perf_report.py",
                 perf_postproc_args=["--arch", "zen4"],
+                subdir=subdir,
             )
         elif self.amd_gen == "zen5":
             self.perfutil = BasePerfUtil(
@@ -421,6 +422,7 @@ class AMDPerfUtil:
                 perf_collect_script_name="collect_amd_zen5_perf_counters.sh",
                 perf_postproc_script_name="generate_amd_perf_report.py",
                 perf_postproc_args=["--arch", "zen5"],
+                subdir=subdir,
             )
         elif self.amd_gen == "zen5es":
             self.perfutil = BasePerfUtil(
@@ -430,6 +432,7 @@ class AMDPerfUtil:
                 perf_collect_script_name="collect_amd_zen5_perf_counters.sh",
                 perf_postproc_script_name="generate_amd_perf_report.py",
                 perf_postproc_args=["--arch", "zen5es"],
+                subdir=subdir,
             )
 
     def run(self):
@@ -456,8 +459,10 @@ class ARMPerfUtil(Monitor):
         "https://git.gitlab.arm.com/telemetry-solution/telemetry-solution.git"
     )
 
-    def __init__(self, job_uuid, interval=5, **kwargs):
-        super(ARMPerfUtil, self).__init__(interval, "arm-perf-collector", job_uuid)
+    def __init__(self, job_uuid, interval=5, subdir=None, **kwargs):
+        super(ARMPerfUtil, self).__init__(
+            interval, "arm-perf-collector", job_uuid, subdir=subdir
+        )
         self.avail = self.install_if_not_available()
         if not self.avail:
             logger.warning(
@@ -634,13 +639,14 @@ class ARMPerfUtil(Monitor):
 
 
 class NVPerfUtil(BasePerfUtil):
-    def __init__(self, interval, job_uuid, **kwargs):
+    def __init__(self, interval, job_uuid, subdir=None, **kwargs):
         super(NVPerfUtil, self).__init__(
             interval,
             job_uuid,
             "nv-perf-collector",
             perf_collect_script_name="collect_nvda_neoversev2_perf_counters.sh",
             perf_postproc_script_name="generate_arm_perf_report.py",
+            subdir=subdir,
         )
 
     def run(self):
@@ -648,13 +654,14 @@ class NVPerfUtil(BasePerfUtil):
 
 
 class NeoVerseV3PerfUtil(BasePerfUtil):
-    def __init__(self, interval, job_uuid, **kwargs):
+    def __init__(self, interval, job_uuid, subdir=None, **kwargs):
         super(NeoVerseV3PerfUtil, self).__init__(
             interval,
             job_uuid,
             "nv3-perf-collector",
             perf_collect_script_name="collect_neoversev3_perf_counters.sh",
             perf_postproc_script_name="generate_arm_neoversev3_perf_report.py",
+            subdir=subdir,
         )
 
     def run(self):

@@ -79,8 +79,8 @@ class Power(Monitor):
             except OSError as e:
                 return f"<err{e.errno}>"
 
-    def __init__(self, job_uuid, interval=1.0, sensor_interval_ms=None):
-        super(Power, self).__init__(interval, "power", job_uuid)
+    def __init__(self, job_uuid, interval=1.0, sensor_interval_ms=None, subdir=None):
+        super(Power, self).__init__(interval, "power", job_uuid, subdir=subdir)
         self.power_sensors = self.search_sensors()
         if sensor_interval_ms is None:
             sensor_interval_ms = 1000 * self.interval
