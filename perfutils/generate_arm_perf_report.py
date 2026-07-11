@@ -142,7 +142,7 @@ def get_duration_series(group):
 
 @skip_if_missing
 def timestamp(grouped_df):
-    ts_series = grouped_df.get_group("cycles").timestamp
+    ts_series = grouped_df.get_group("cpu_cycles").timestamp
     return {"name": "Timestamp_Secs", "series": ts_series}
 
 
@@ -181,7 +181,7 @@ def muopps(grouped_df):
 
 @skip_if_missing
 def ipc(grouped_df):
-    cycles_series = grouped_df.get_group("cycles").counter_value
+    cycles_series = grouped_df.get_group("cpu_cycles").counter_value
     inst_series = grouped_df.get_group("instructions").counter_value
     cycles_series.index = inst_series.index
 
@@ -638,7 +638,7 @@ def retiring_slots(grouped_df):
     op_retired_series = grouped_df.get_group("r3A").counter_value  # OP_RETIRED
     op_spec_series = grouped_df.get_group("r3B").counter_value  # OP_SPEC
     stall_slot_series = grouped_df.get_group("r3F").counter_value  # STALL_SLOT
-    cycles_series = grouped_df.get_group("cycles").counter_value
+    cycles_series = grouped_df.get_group("cpu_cycles").counter_value
 
     op_retired_series.index = cycles_series.index
     op_spec_series.index = cycles_series.index
@@ -660,7 +660,7 @@ def frontend_bound_slots(grouped_df):
         "r3E"  # STALL_SLOT_FRONTEND
     ).counter_value
     br_mis_pred_series = grouped_df.get_group("r10").counter_value  # BR_MISPRED
-    cycles_series = grouped_df.get_group("cycles").counter_value
+    cycles_series = grouped_df.get_group("cpu_cycles").counter_value
 
     stall_slot_fe_series.index = cycles_series.index
     br_mis_pred_series.index = cycles_series.index
@@ -681,7 +681,7 @@ def backend_bound_slots(grouped_df):
         "r3D"  # STALL_SLOT_BACKEND
     ).counter_value
     br_mis_pred_series = grouped_df.get_group("r10").counter_value  # BR_MISPRED
-    cycles_series = grouped_df.get_group("cycles").counter_value
+    cycles_series = grouped_df.get_group("cpu_cycles").counter_value
 
     stall_slot_be_series.index = cycles_series.index
     br_mis_pred_series.index = cycles_series.index
@@ -716,7 +716,7 @@ def nvidia_grace_frontend_bound_cycles(grouped_df):
     stall_cycles_fe_series = grouped_df.get_group(
         "r23"  # STALL_CYCLES_FRONTEND
     ).counter_value
-    cycles_series = grouped_df.get_group("cycles").counter_value
+    cycles_series = grouped_df.get_group("cpu_cycles").counter_value
 
     stall_cycles_fe_series.index = cycles_series.index
     return {
@@ -731,7 +731,7 @@ def nvidia_grace_backend_bound_cycles(grouped_df):
     stall_cycles_be_series = grouped_df.get_group(
         "r24"  # STALL_CYCLES_BACKEND
     ).counter_value
-    cycles_series = grouped_df.get_group("cycles").counter_value
+    cycles_series = grouped_df.get_group("cpu_cycles").counter_value
 
     stall_cycles_be_series.index = cycles_series.index
 
@@ -748,7 +748,7 @@ def nvidia_grace_frontend_backend_boundness(grouped_df):
         "r3F"  # STALL_SLOTS
     ).counter_value
     br_mis_pred_series = grouped_df.get_group("r10").counter_value  # BR_MISPRED
-    cycles_series = grouped_df.get_group("cycles").counter_value
+    cycles_series = grouped_df.get_group("cpu_cycles").counter_value
 
     stall_slot_series.index = cycles_series.index
     br_mis_pred_series.index = cycles_series.index
@@ -769,7 +769,7 @@ def bad_speculation(grouped_df):
     op_spec_series = grouped_df.get_group("r3B").counter_value  # OP_SPEC
     stall_slot_series = grouped_df.get_group("r3F").counter_value  # STALL_SLOT
     br_mis_pred_series = grouped_df.get_group("r10").counter_value  # BR_MISPRED
-    cycles_series = grouped_df.get_group("cycles").counter_value
+    cycles_series = grouped_df.get_group("cpu_cycles").counter_value
 
     op_retired_series.index = cycles_series.index
     op_spec_series.index = cycles_series.index
