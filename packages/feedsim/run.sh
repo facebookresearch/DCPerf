@@ -867,7 +867,6 @@ main() {
         $store_graph \
         $load_graph \
         $instrument_graph \
-        $feature_opts \
         $story_opts \
         $server_silesia_opts \
         $mock_services_opts \
