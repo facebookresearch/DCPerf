@@ -465,6 +465,12 @@ def compute_score_from_time(
     scores = []
     for key in sum_baseline:
         if key in sum_c and key not in skip_set:
+            # Some sub-metrics can measure 0 ns on fast CPUs (below the timer
+            # resolution), e.g. single_thread_lifo_trypost/trywait or the CHM
+            # empty()/size() ops. A 0 here is not a real data point; dividing by
+            # it would raise ZeroDivisionError and abort the whole prod_set run.
+            if sum_c[key] == 0:
+                continue
             scores.append(sum_baseline[key] / sum_c[key])
     score = geomean(scores)
     return score
