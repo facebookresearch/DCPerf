@@ -144,6 +144,16 @@ main() {
         #run
         benchreps_tell_state "start"
 
+        # Run benchmarks at highest CPU priority to reduce scheduler noise.
+        # nice -n -20 needs privilege (root/CAP_SYS_NICE); fall back to normal
+        # priority when unprivileged (e.g. inside an unprivileged VM guest) so
+        # the run does not abort with EPERM.
+        NICE="nice -n -20"
+        if ! $NICE true 2>/dev/null; then
+            NICE=""
+            echo "run_prod: cannot set nice -n -20 (no privilege); running at default priority"
+        fi
+
         for benchmark in $run_list; do
             # Remove old results
             rm -f "out_${benchmark}.txt" "out_${benchmark}.json"
@@ -156,14 +166,14 @@ main() {
             fi
             if [ "$benchmark" = "bench-memcmp" ]; then
                 pushd "${WDL_BUILD}/glibc-build"
-                bash -c "nice -n -20 ./testrun.sh ./benchtests/${benchmark} -- ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${WDL_ROOT}/${out_file}"
+                bash -c "$NICE ./testrun.sh ./benchtests/${benchmark} -- ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${WDL_ROOT}/${out_file}"
                 popd
             else
                 ENV_VARS=""
                 if [ "$benchmark" = "gemm_bench" ]; then
                     ENV_VARS="OMP_NUM_THREADS=1"
                 fi
-                bash -c "nice -n -20 env ${ENV_VARS} ./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
+                bash -c "$NICE env ${ENV_VARS} ./${benchmark} ${prod_benchmark_config[$benchmark]}" 2>&1 | tee -a "${out_file}"
             fi
         done
 
