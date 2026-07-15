@@ -2392,23 +2392,19 @@ def get_memory_info():
     dmidecode_out = subprocess.check_output(
         ["sudo", "dmidecode", "--type", "17"]
     ).decode("utf-8")
-    # Parse the output to find the relevant lines
-    lines = dmidecode_out.split("\n")
-    relevant_lines = []
-    p = False
-    for line in lines:
-        if line.strip() == "Memory Device":
-            p = True
-        elif line.strip() == "":
-            p = False
-        elif p:
-            relevant_lines.append(line)
-    # Filter out lines containing "cxl" and count the remaining lines with "Bank Locator"
+    # Count only POPULATED memory channels on socket 0. `dmidecode --type 17` prints a
+    # "Memory Device" block for every DIMM slot, including empty ones
+    # ("Size: No Module Installed"). Counting every "Bank Locator" over-counted channels
+    # on partially-populated systems (e.g. 10-of-12 on Turin), which inflated DRAM
+    # bandwidth by (slots / populated) since DRAM BW scales linearly with num_channels.
     num_channels = 0
-    for line in relevant_lines:
-        if "Bank Locator" in line and any(
-            x in line.lower() for x in ["p0", "socket 0", "node0"]
-        ):
+    for block in dmidecode_out.split("Memory Device")[1:]:
+        block_lines = block.split("\n")
+        bank_locator = next((ln for ln in block_lines if "Bank Locator" in ln), "")
+        size = next((ln for ln in block_lines if ln.strip().startswith("Size:")), "")
+        is_socket0 = any(x in bank_locator.lower() for x in ["p0", "socket 0", "node0"])
+        is_populated = bool(size.strip()) and "no module installed" not in size.lower()
+        if is_socket0 and is_populated:
             num_channels += 1
     # Get the DDR frequency
     ddr_freq_out = subprocess.check_output(["sudo", "dmidecode"]).decode("utf-8")
