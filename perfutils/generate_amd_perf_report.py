@@ -1526,6 +1526,32 @@ def zen5_l3_miss_ptc(grouped_df):
 
 
 @skip_if_missing
+def zen5_l3_mpki(grouped_df):
+    l3_lookup_state_l3_miss_series = grouped_df.get_group(
+        "l3_lookup_state.l3_miss"
+    ).counter_value
+    inst_series = grouped_df.get_group("instructions").counter_value
+    l3_lookup_state_l3_miss_series.index = inst_series.index
+    l3_mpki_series = l3_lookup_state_l3_miss_series.div(inst_series)
+    return {"name": "L3 MPKI", "series": l3_mpki_series, "prefix": 1000}
+
+
+@skip_if_missing
+def zen5_l3_miss_rate(grouped_df):
+    l3_lookup_state_l3_miss_series = grouped_df.get_group(
+        "l3_lookup_state.l3_miss"
+    ).counter_value
+    l3_lookup_state_l3_accesses_series = grouped_df.get_group(
+        "l3_lookup_state.all_coherent_accesses_to_l3"
+    ).counter_value
+    l3_lookup_state_l3_miss_series.index = l3_lookup_state_l3_accesses_series.index
+    l3_miss_rate_series = l3_lookup_state_l3_miss_series.div(
+        l3_lookup_state_l3_accesses_series
+    )
+    return {"name": "L3 Miss %", "series": l3_miss_rate_series, "prefix": 100}
+
+
+@skip_if_missing
 def zen5_l3_miss_avg_load_to_use_latency_ns(grouped_df):
     l3_xi_sampled_latency_all_series = grouped_df.get_group(
         "l3_xi_sampled_latency.all"
@@ -2517,6 +2543,8 @@ def main(
             zen5_hardware_prefetch_l1_dc_fills_pki(grouped_df),
             zen5_hardware_prefetch_l1_dc_fills_from_other_ccx_pki(grouped_df),
             zen5_l3_miss_ptc(grouped_df),
+            zen5_l3_mpki(grouped_df),
+            zen5_l3_miss_rate(grouped_df),
             zen5_l3_miss_avg_load_to_use_latency_ns(grouped_df),
             zen5_l1_itlb_miss_pki(grouped_df),
             zen5_l2_itlb_hit_pki(grouped_df),
