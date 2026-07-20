@@ -86,8 +86,8 @@ DATABASES = {
         "HOST": "localhost",
         "OPTIONS": {
             "replication": {
-                "strategy_class": "SimpleStrategy",
-                "replication_factor": 1,
+                "strategy_class": "NetworkTopologyStrategy",
+                "datacenter1": 1,
             },
             "connection": {"protocol_version": 4},
         },
