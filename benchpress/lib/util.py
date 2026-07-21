@@ -22,9 +22,19 @@ import click
 
 BENCHMARKS_ROOT = "benchmarks"
 
-# Root directory of the benchpress installation (where the binary is located)
-# This is used to resolve relative paths for scripts and tracking files
-BENCHPRESS_ROOT = os.path.dirname(os.path.realpath(sys.argv[0]))
+# Root directory of the benchpress installation (where the binary is located).
+# This is used to resolve relative paths for scripts and tracking files.
+#
+# IMPORTANT: use abspath, NOT realpath. The DCPerf fbpkg lays down a `v1/`
+# subdirectory whose `benchpress` (and fb_scripts/perfpub/perfutils) are
+# SYMLINKS back to the top-level tree, while `v1/packages/` holds the real
+# DCPerf v1 scripts. Running `cd v1 && ./benchpress -b v1 ...` is how a caller
+# selects the v1 benchmarks. realpath() would resolve the `v1/benchpress`
+# symlink back to the parent, making BENCHPRESS_ROOT point at the top-level
+# (main/v2-beta) tree and silently running the WRONG scripts. abspath()
+# preserves the symlinked directory, so `./packages/...` correctly resolves to
+# `v1/packages/...`. Do NOT revert this to realpath (see D93780009 regression).
+BENCHPRESS_ROOT = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 # Alternative base path for writing artifacts (benchmark_metrics, logs, etc.)
 # When set, all writable artifacts are redirected to this directory instead of
@@ -288,7 +298,9 @@ def initialize_env_vars(
         bp_env.update(env)
     out_path = pathlib.Path(
         os.path.join(
-            os.path.dirname(os.path.realpath(sys.argv[0])),
+            # abspath (not realpath) so the OUT dir lands under the same tree
+            # BENCHPRESS_ROOT points at -- critical for the v1/ symlinked tree.
+            BENCHPRESS_ROOT,
             BENCHMARKS_ROOT,
             job.benchmark_name,
         )
