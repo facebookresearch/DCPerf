@@ -84,3 +84,56 @@
   vars:
     - "scale=25"
     - "trials=3"
+
+# Multi-instance GAPBS on a PRE-BUILT graph. Launches {num_instances} core-pinned
+# gapbs instances of {bench}, each in its own systemd-run cgroup scope with
+# per-instance memory.low/high/max limits, then aggregates each instance's
+# Average Time (mean/min/max).
+#
+# Requirements / notes:
+#   * The graph must already exist. Build it once with:
+#       ./benchmarks/gapbs/generate_graph.sh -g 30 -k 33
+#     (generates kronecker30_k33.sg; ~350 GB, needs >=500 GB free.)
+#   * Per-instance memory limits require running benchpress as root; without
+#     root the runner falls back to taskset pinning WITHOUT memory limits.
+#   * mem_low/high/max accept human suffixes (e.g. 290G) or 'max' (unlimited).
+#   * Core layout counts PHYSICAL cores; SMT siblings are auto-added to the
+#     reserved cpuset. The kernel runs on threads_per_instance cores.
+#   * bench is one of: bc bfs cc pr sssp tc. graph_file is a base name (no
+#     extension) resolved per kernel: bc/bfs/cc/pr->.sg, sssp->.wsg, tc->U.sg.
+- benchmark: gapbs_multi
+  name: gapbs_multi
+  description: >
+    Multi-instance GAP benchmark. Launches {num_instances} core-pinned gapbs
+    instances, each in a systemd-run cgroup scope with per-instance
+    memory.low/high/max limits, on a pre-built graph. Aggregates per-instance
+    Average Time (mean/min/max).
+  args:
+    - '-n {num_instances}'
+    - '-b {bench}'
+    - '-f {graph_file}'
+    - '-t {trials}'
+    - '--core-start {core_start}'
+    - '-c {cores_per_instance}'
+    - '--core-stride {core_stride}'
+    - '-T {threads_per_instance}'
+    - '--mem-low {mem_low}'
+    - '--mem-high {mem_high}'
+    - '--mem-max {mem_max}'
+    - '{extra_args}'
+  vars:
+    - "num_instances=3"
+    - "bench=bc"
+    - "graph_file=kronecker30_k33"
+    - "trials=2"
+    - "core_start=0"
+    - "cores_per_instance=32"
+    - "core_stride=32"
+    - "threads_per_instance=16"
+    - "mem_low=290G"
+    - "mem_high=300G"
+    - "mem_max=310G"
+    # extra_args is passed verbatim, e.g. "--ccx" to bind each instance to an
+    # auto-detected CCX (sysfs L3 domain), "--mem-nodes 0,1" for DRAM+CXL, or
+    # "--no-cgroup" to disable scopes/limits (taskset-only).
+    - "extra_args="

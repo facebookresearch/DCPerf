@@ -51,4 +51,11 @@ cd ../../ || exit 1
 
 rm -rf build/
 
+# Copy the multi-instance runner + graph generator alongside the kernels so
+# benchpress can invoke them from ./benchmarks/gapbs/.
+for f in run-gapbs-multi.sh generate_graph.sh; do
+    cp "${SCRIPT_DIR}/${f}" "${GAPBS_INSTALLATION_PREFIX}/${f}"
+    chmod u+x "${GAPBS_INSTALLATION_PREFIX}/${f}"
+done
+
 echo "GAP benchmark suite (${GAPBS_GIT_COMMIT_TAG}) installed into ${GAPBS_INSTALLATION_PREFIX}"
