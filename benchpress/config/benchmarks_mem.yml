@@ -119,3 +119,24 @@ gapbs_tc:
     - build_time
     - trial_time
     - average_time
+
+# Multi-instance GAPBS. Launches N core-pinned gapbs instances, each in its own
+# systemd-run cgroup scope with per-instance memory.low/high/max limits, on a
+# pre-built graph. run-gapbs-multi.sh aggregates each instance's Average Time
+# (mean/min/max). Build graphs with ./benchmarks/gapbs/generate_graph.sh.
+gapbs_multi:
+  parser: gapbs
+  install_script: ./packages/gapbs/install_gapbs.sh
+  cleanup_script: ./packages/gapbs/cleanup_gapbs.sh
+  install_markers:
+    - ./benchmarks/gapbs/bc
+    - ./benchmarks/gapbs/run-gapbs-multi.sh
+  path: ./benchmarks/gapbs/run-gapbs-multi.sh
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+      - mem
+  metrics:
+    - average_time

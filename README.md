@@ -99,6 +99,12 @@ major production workloads listed as follows:
    <td>ffmpeg, svt-av1, libaom, x264</td>
    <td>Video Processing </td>
   </tr>
+  <tr>
+   <td><a href="packages/gapbs/README.md">GAPBS</a> (multi-instance)</td>
+   <td>C++</td>
+   <td>GAP Benchmark Suite, OpenMP, systemd cgroups</td>
+   <td>Graph Analytics, Large / Tiered Memory (CXL) </td>
+  </tr>
 </table>
 
 ### AI/ML Benchmarks
