@@ -27,7 +27,7 @@ try:
     from benchpress import PROJECT, VERSION  # @manual
 except ImportError:
     from benchpress.version import __PROJECT__ as PROJECT, __VERSION__ as VERSION
-from benchpress.lib.util import get_artifacts_dir, verify_install
+from benchpress.lib.util import BENCHPRESS_ROOT, get_artifacts_dir, verify_install
 
 try:
     from diagnosis_utils import DiagnosisRecorder  # pyre-ignore[21]
@@ -98,6 +98,94 @@ def _parse_json_or_file(value, arg_name):
 
 
 class RunCommand(BenchpressCommand):
+    # Directories under BENCHPRESS_ROOT that never contain workload source
+    # checkouts -- skipped while scanning for git repos to keep the walk cheap.
+    _WORKLOAD_VCS_SKIP_DIRS = frozenset(
+        {"perfutils", "perfpub", "fb_scripts", "bkc_configs", "bpkgs", "__pycache__"}
+    )
+    # Cap how deep we descend looking for `.git` dirs. Workload clones live at
+    # BENCHPRESS_ROOT/<repo> or BENCHPRESS_ROOT/benchmarks/<bench>/<repo>, so a
+    # shallow walk is enough and avoids traversing huge build trees.
+    _WORKLOAD_VCS_MAX_DEPTH = 4
+
+    def _git_field(self, repo_dir, args):
+        """Run a git command in ``repo_dir`` and return stripped stdout, or ''."""
+        try:
+            return subprocess.check_output(
+                ["git", "-C", repo_dir, *args],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=10,
+            ).strip()
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            return ""
+
+    def get_workload_vcs(self):
+        """Capture the git provenance of every workload repo cloned on this host.
+
+        DCPerf install scripts `git clone` the actual workloads (hhvm/oss-performance
+        for mediawiki, facebook/folly for tao_bench, cinder/pylibmc for django, etc.)
+        from GitHub. Many of those clones are unpinned (`git clone <url>` with no
+        ref), so the result depends on whatever the upstream default branch pointed
+        at when the box was installed. Neither the DCPerf harness version nor the
+        fbpkg uuid records this. To make results self-documenting we walk the
+        install tree for `.git` checkouts and record, per repo:
+
+            {"<relpath>": {"remote": <origin url>, "sha": <HEAD sha>,
+                           "ref": <branch/tag/"detached">, "dirty": <bool>}}
+
+        Keyed by path relative to BENCHPRESS_ROOT. Best-effort: any repo that
+        errors out is skipped, and the whole thing returns {} if git is missing.
+        """
+        result = {}
+        # Search the harness root and its benchmarks/ dir; both are shallow.
+        roots = [BENCHPRESS_ROOT, os.path.join(BENCHPRESS_ROOT, "benchmarks")]
+        seen = set()
+        for search_root in roots:
+            if not os.path.isdir(search_root):
+                continue
+            base_depth = search_root.rstrip(os.sep).count(os.sep)
+            for dirpath, dirnames, _files in os.walk(search_root):
+                depth = dirpath.count(os.sep) - base_depth
+                if depth >= self._WORKLOAD_VCS_MAX_DEPTH:
+                    dirnames[:] = []
+                # Prune noise + don't descend into found repos' own .git.
+                dirnames[:] = [
+                    d
+                    for d in dirnames
+                    if d != ".git" and d not in self._WORKLOAD_VCS_SKIP_DIRS
+                ]
+                if ".git" not in os.listdir(dirpath):
+                    continue
+                real = os.path.realpath(dirpath)
+                if real in seen:
+                    continue
+                seen.add(real)
+                # Found a repo root; don't descend further into it.
+                dirnames[:] = []
+                sha = self._git_field(dirpath, ["rev-parse", "HEAD"])
+                if not sha:
+                    continue
+                remote = self._git_field(
+                    dirpath, ["config", "--get", "remote.origin.url"]
+                )
+                ref = self._git_field(dirpath, ["rev-parse", "--abbrev-ref", "HEAD"])
+                if ref == "HEAD":
+                    # Detached; try to name it via an exact tag, else mark detached.
+                    ref = self._git_field(
+                        dirpath, ["describe", "--tags", "--exact-match"]
+                    )
+                    ref = ref or "detached"
+                status = self._git_field(dirpath, ["status", "--porcelain"])
+                relpath = os.path.relpath(dirpath, BENCHPRESS_ROOT)
+                result[relpath] = {
+                    "remote": remote,
+                    "sha": sha,
+                    "ref": ref,
+                    "dirty": bool(status),
+                }
+        return result
+
     def get_version_info(self, benchmarks_arg=None):
         """Get version information from various sources.
 
@@ -127,6 +215,14 @@ class RunCommand(BenchpressCommand):
             "uuid": "",
             "suite": suite,
             "dcperf_line": dcperf_line,
+            # Exact upstream SHAs of the workload repos actually cloned+run on
+            # this host (e.g. hhvm/oss-performance for mediawiki, facebook/folly
+            # for tao_bench). The harness version (source/version/uuid above)
+            # only identifies the DCPerf harness, NOT the workload code the
+            # install scripts `git clone` from GitHub -- those clones are often
+            # unpinned (floating HEAD), so this is the only record of what code
+            # produced the result. Empty dict if no git checkouts are found.
+            "workload_vcs": self.get_workload_vcs(),
         }
 
         # Check if METADATA file exists and is a valid JSON file
@@ -236,6 +332,18 @@ class RunCommand(BenchpressCommand):
             ),
             err=True,
         )
+        # Echo each cloned workload repo's SHA so the exact upstream code that
+        # ran is visible in the run log (also embedded in the metrics JSON).
+        for _repo, _vcs in sorted(version_info.get("workload_vcs", {}).items()):
+            click.echo(
+                "  workload {} @ {} ({}{})".format(
+                    _repo,
+                    (_vcs.get("sha", "") or "unknown")[:12],
+                    _vcs.get("ref", "") or "?",
+                    ", dirty" if _vcs.get("dirty") else "",
+                ),
+                err=True,
+            )
 
         history = History(args.results)
         now = datetime.now(timezone.utc)
