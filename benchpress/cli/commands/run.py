@@ -21,6 +21,12 @@ from benchpress.lib.history import History
 from benchpress.lib.hook_factory import HookFactory
 from benchpress.lib.job import get_target_jobs
 from benchpress.lib.reporter_factory import ReporterFactory
+
+try:
+    # pyre-ignore[21]
+    from benchpress import PROJECT, VERSION  # @manual
+except ImportError:
+    from benchpress.version import __PROJECT__ as PROJECT, __VERSION__ as VERSION
 from benchpress.lib.util import get_artifacts_dir, verify_install
 
 try:
@@ -92,16 +98,36 @@ def _parse_json_or_file(value, arg_name):
 
 
 class RunCommand(BenchpressCommand):
-    def get_version_info(self):
+    def get_version_info(self, benchmarks_arg=None):
         """Get version information from various sources.
+
+        Args:
+            benchmarks_arg: the value of the ``-b/--benchmarks`` CLI flag (e.g.
+                "v1"), used to record which benchmark suite / DCPerf line this
+                run used. ``None``/empty means the default (v2-beta) suite.
 
         Returns:
             dict: A dictionary containing version information with the following fields:
                 - source: "fbpkg", "git", "fixed", or "none"
                 - version: version ID
                 - uuid: full UUID representing the version
+                - suite: the benchmark suite selected via -b (e.g. "v1"), or
+                  "default" when no suite override was given
+                - dcperf_line: human-readable DCPerf line -- "v1" for the v1
+                  suite, "v2-beta" otherwise -- so the metrics unambiguously
+                  record which set of benchmarks ran
         """
-        version_info = {"source": "none", "version": "", "uuid": ""}
+        # Record the benchmark suite / DCPerf line up front so it is present on
+        # every version_info dict regardless of which source branch we take.
+        suite = benchmarks_arg if benchmarks_arg else "default"
+        dcperf_line = "v1" if benchmarks_arg == "v1" else "v2-beta"
+        version_info = {
+            "source": "none",
+            "version": "",
+            "uuid": "",
+            "suite": suite,
+            "dcperf_line": dcperf_line,
+        }
 
         # Check if METADATA file exists and is a valid JSON file
         if path.exists("METADATA"):
@@ -192,6 +218,24 @@ class RunCommand(BenchpressCommand):
         jobs = get_target_jobs(jobs, args.jobs).values()
 
         logger.info("Will run {} job(s)".format(len(jobs)))
+
+        # Resolve version info once and surface it prominently so operators can
+        # unambiguously tell WHICH DCPerf line / benchmark suite is running
+        # (v1 vs v2-beta) and which build. This is printed to stderr (not just
+        # buried in the metrics JSON) and also embedded in every metrics file.
+        version_info = self.get_version_info(getattr(args, "benchmarks", None))
+        click.echo(
+            "{} {} | suite={} | dcperf_line={} | build={} ({}) | uuid={}".format(
+                PROJECT,
+                VERSION,
+                version_info.get("suite", "default"),
+                version_info.get("dcperf_line", ""),
+                version_info.get("version", "") or "unknown",
+                version_info.get("source", "none"),
+                (version_info.get("uuid", "") or "")[:12],
+            ),
+            err=True,
+        )
 
         history = History(args.results)
         now = datetime.now(timezone.utc)
@@ -323,7 +367,7 @@ class RunCommand(BenchpressCommand):
 
             final_metrics["run_id"] = job.uuid
             final_metrics["timestamp"] = job.timestamp
-            final_metrics["version_info"] = self.get_version_info()
+            final_metrics["version_info"] = version_info
 
             final_metrics["benchmark_name"] = job.name
             final_metrics["benchmark_desc"] = job.description
