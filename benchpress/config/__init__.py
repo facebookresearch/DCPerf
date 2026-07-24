@@ -29,6 +29,7 @@ Constants:
 
 import importlib.resources
 import logging
+import os
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import IO, Iterator, Union
@@ -66,8 +67,17 @@ def register_benchmark_suite(name):
     )
 
 
+# The v1/wdl_v1 suites depend on internal-only resources, so they are hidden
+# from true open-source builds. They must also be available when running the
+# internal checkout directly (e.g. the benchpress_v1.sky CI workflow, which
+# runs `python3 benchpress_cli.py` from the source tree where is_opensource is
+# still True); that path sets IS_INTERNAL_TEST=1, so key off it as well.
+_enable_internal_suites = (not open_source) or os.environ.get("IS_INTERNAL_TEST") == "1"
+
 if not open_source:
     register_benchmark_suite("internal")
+
+if _enable_internal_suites:
     register_benchmark_suite("wdl_v1")
     register_benchmark_suite("v1")
 

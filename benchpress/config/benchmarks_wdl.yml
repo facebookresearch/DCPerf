@@ -7,6 +7,28 @@ wdl_bench:
   parser: wdl_bench
   install_script: ./packages/wdl_bench/install_wdl_bench.sh
   cleanup_script: ./packages/wdl_bench/cleanup_wdl_bench.sh
+  install_markers:
+    - ./benchmarks/wdl_bench/ProtocolBench
+    - ./benchmarks/wdl_bench/VarintUtilsBench
+    - ./benchmarks/wdl_bench/bench-memcmp
+    - ./benchmarks/wdl_bench/benchsleef128
+    - ./benchmarks/wdl_bench/concurrency_concurrent_hash_map_bench
+    - ./benchmarks/wdl_bench/container_hash_maps_bench
+    - ./benchmarks/wdl_bench/erasure_code_perf
+    - ./benchmarks/wdl_bench/hash_checksum_benchmark
+    - ./benchmarks/wdl_bench/hash_hash_benchmark
+    - ./benchmarks/wdl_bench/libaegis_benchmark
+    - ./benchmarks/wdl_bench/lzbench
+    - ./benchmarks/wdl_bench/memcpy_benchmark
+    - ./benchmarks/wdl_bench/memset_benchmark
+    - ./benchmarks/wdl_bench/openssl
+    - ./benchmarks/wdl_bench/random_benchmark
+    - ./benchmarks/wdl_bench/stdcpp_bench
+    - ./benchmarks/wdl_bench/synchronization_lifo_sem_bench
+    - ./benchmarks/wdl_bench/synchronization_small_locks_benchmark
+    - ./benchmarks/wdl_bench/vdso_bench
+    - ./benchmarks/wdl_bench/xxhash_benchmark
+    - ./benchmarks/wdl_bench/run.sh
   path: ./benchmarks/wdl_bench/run.sh
   tags:
     scope:
