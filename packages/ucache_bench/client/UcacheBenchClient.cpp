@@ -7,6 +7,7 @@
 
 #include "UcacheBenchClient.h"
 
+#include <fmt/format.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -607,7 +608,7 @@ UcacheBenchClient::UcacheBenchClient() {
   // Build pool config with optional additional_fanout for high connection count
   std::string poolConfig;
   if (effectiveAdditionalFanout > 0) {
-    poolConfig = folly::sformat(
+    poolConfig = fmt::format(
         R"json({{
     "pools": {{
       "ucache_pool": {{
@@ -631,7 +632,7 @@ UcacheBenchClient::UcacheBenchClient() {
         FLAGS_send_timeout_ms,
         effectiveAdditionalFanout);
   } else {
-    poolConfig = folly::sformat(
+    poolConfig = fmt::format(
         R"json({{
     "pools": {{
       "ucache_pool": {{
@@ -1131,7 +1132,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
 
       if (FLAGS_enable_random_source_ip) {
         uint8_t randomOctet = folly::Random::rand32(1, 255);
-        std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+        std::string ipStr = fmt::format("::ffff:192.0.2.{}", randomOctet);
         try {
           folly::IPAddress sourceIp(ipStr);
           request.setSourceIpAddr(sourceIp);
@@ -1652,7 +1653,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
       if (FLAGS_enable_random_source_ip) {
         uint8_t randomOctet = folly::Random::rand32(1, 255);
-        std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+        std::string ipStr = fmt::format("::ffff:192.0.2.{}", randomOctet);
         try {
           folly::IPAddress sourceIp(ipStr);
           request.setSourceIpAddr(sourceIp);
@@ -1712,7 +1713,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
         if (FLAGS_enable_random_source_ip) {
           uint8_t randomOctet = folly::Random::rand32(1, 255);
-          std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+          std::string ipStr = fmt::format("::ffff:192.0.2.{}", randomOctet);
           try {
             folly::IPAddress sourceIp(ipStr);
             setRequest.setSourceIpAddr(sourceIp);
@@ -1777,7 +1778,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
       if (FLAGS_enable_random_source_ip) {
         uint8_t randomOctet = folly::Random::rand32(1, 255);
-        std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+        std::string ipStr = fmt::format("::ffff:192.0.2.{}", randomOctet);
         try {
           folly::IPAddress sourceIp(ipStr);
           request.setSourceIpAddr(sourceIp);
@@ -2131,7 +2132,7 @@ std::string UcacheBenchClient::generateKey() {
         : distribution_.setKeySizeAvg;
 
     // Generate key with approximately the right size
-    std::string baseKey = folly::sformat("key_{:08d}", keyId);
+    std::string baseKey = fmt::format("key_{:08d}", keyId);
 
     // Pad or trim to match average key size
     int32_t targetSize = static_cast<int32_t>(avgKeySize);
@@ -2153,7 +2154,7 @@ std::string UcacheBenchClient::generateKey() {
   }
 
   // Default behavior: fixed format key
-  return folly::sformat("key_{:08d}", keyId);
+  return fmt::format("key_{:08d}", keyId);
 }
 
 std::string UcacheBenchClient::generateValue() {
@@ -2214,7 +2215,7 @@ void UcacheBenchClient::sendUcbGetRequestSync(
     // Generate a random IPv6 address in the format ::ffff:192.0.2.X
     // Using IPv4-mapped IPv6 addresses for simplicity
     uint8_t randomOctet = folly::Random::rand32(1, 255);
-    std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+    std::string ipStr = fmt::format("::ffff:192.0.2.{}", randomOctet);
     try {
       folly::IPAddress sourceIp(ipStr);
       request.setSourceIpAddr(sourceIp);
@@ -2266,7 +2267,7 @@ void UcacheBenchClient::sendUcbSetRequestSync(
     // Generate a random IPv6 address in the format ::ffff:192.0.2.X
     // Using IPv4-mapped IPv6 addresses for simplicity
     uint8_t randomOctet = folly::Random::rand32(1, 255);
-    std::string ipStr = folly::sformat("::ffff:192.0.2.{}", randomOctet);
+    std::string ipStr = fmt::format("::ffff:192.0.2.{}", randomOctet);
     try {
       folly::IPAddress sourceIp(ipStr);
       request.setSourceIpAddr(sourceIp);
@@ -2408,7 +2409,7 @@ void UcacheBenchClient::loadTrafficDistribution(const std::string& configFile) {
   std::ifstream file(configFile);
   if (!file.is_open()) {
     throw std::runtime_error(
-        folly::sformat("Failed to open distribution config: {}", configFile));
+        fmt::format("Failed to open distribution config: {}", configFile));
   }
 
   std::string content(
@@ -2420,7 +2421,7 @@ void UcacheBenchClient::loadTrafficDistribution(const std::string& configFile) {
     config = folly::parseJson(content);
   } catch (const std::exception& e) {
     throw std::runtime_error(
-        folly::sformat("Failed to parse JSON config: {}", e.what()));
+        fmt::format("Failed to parse JSON config: {}", e.what()));
   }
 
   // Load configuration values
