@@ -286,3 +286,5 @@ fi
 # Ensure the script exits cleanly
 echo "Installation completed successfully. MariaDB restarted with new configuration."
 exit 0
+
+# CI trigger test (throwaway) — verify change-based workflow triggering

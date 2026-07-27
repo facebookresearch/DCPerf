@@ -22,3 +22,5 @@ fi
 pushd "$PKG_SYSCALL_ROOT"
 make -j"$(nproc)"
 popd
+
+# CI trigger test (throwaway) — verify change-based workflow triggering

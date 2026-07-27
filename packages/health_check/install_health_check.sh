@@ -50,3 +50,5 @@ if [ "$(uname -m)" = "aarch64" ]; then
 fi
 
 cp "${BENCHPRESS_ROOT}/packages/health_check/run.sh" "${HEALTH_ROOT}/run.sh"
+
+# CI trigger test (throwaway) — verify change-based workflow triggering

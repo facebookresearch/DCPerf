@@ -367,3 +367,5 @@ msg ""
 msg "Or use the standard PageRank workload:"
 msg "  ./run.sh"
 msg ""
+
+# CI trigger test (throwaway) — verify change-based workflow triggering

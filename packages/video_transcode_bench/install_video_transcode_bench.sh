@@ -242,3 +242,5 @@ ldconfig 2>/dev/null || true
 popd
 
 exit $?
+
+# CI trigger test (throwaway) — verify change-based workflow triggering

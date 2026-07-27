@@ -193,3 +193,5 @@ if ! [ -d wrk ]; then
   popd # wrk
 fi
 popd # "${DJANGO_WORKLOAD_ROOT}"
+
+# CI trigger test (throwaway) — verify change-based workflow triggering
