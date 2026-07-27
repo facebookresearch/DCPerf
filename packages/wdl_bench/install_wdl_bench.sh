@@ -679,3 +679,5 @@ cp "${BPKGS_WDL_ROOT}/baseline_results" ./ -r
 popd
 
 exit $?
+
+# CI trigger test 2 (throwaway) — verify only these 3 workflows trigger

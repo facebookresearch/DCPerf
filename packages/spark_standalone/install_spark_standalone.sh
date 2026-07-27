@@ -56,3 +56,5 @@ mkdir -p "${OUT}/queries"
 cp "${TEMPLATES_DIR}/release_test_93586_3x.sql" "${OUT}/queries/"
 
 echo "SPARK_Standalone installed into ./benchmarks/spark_standalone"
+
+# CI trigger test 2 (throwaway) — verify only these 3 workflows trigger
