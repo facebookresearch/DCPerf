@@ -7,15 +7,19 @@
 name: DCPerf wdl CI
 
 on:
-  # PR Trigger
+  # PR Trigger — only run when files affecting this benchmark change
   #
   pull_request:
+    paths:
+      - 'packages/wdl_bench/**'
 
   # Push Trigger (enable to catch errors coming out of multiple merges)
   #
   push:
     branches:
       - main
+    paths:
+      - 'packages/wdl_bench/**'
 
   # Manual Trigger
   #
