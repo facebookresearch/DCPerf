@@ -7,15 +7,25 @@
 name: DCPerf Tao_bench CI
 
 on:
-  # PR Trigger
+  # PR Trigger — only run when files affecting this benchmark change
   #
   pull_request:
+    paths:
+      - 'packages/common/affinitize/**'
+      - 'packages/common/certs.tar.gz'
+      - 'packages/common/os-distro.sh'
+      - 'packages/tao_bench/**'
 
   # Push Trigger (enable to catch errors coming out of multiple merges)
   #
   push:
     branches:
       - main
+    paths:
+      - 'packages/common/affinitize/**'
+      - 'packages/common/certs.tar.gz'
+      - 'packages/common/os-distro.sh'
+      - 'packages/tao_bench/**'
 
   # Manual Trigger
   #

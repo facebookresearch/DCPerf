@@ -7,15 +7,19 @@
 name: DCPerf VideoTranscodeBench CI
 
 on:
-  # PR Trigger
+  # PR Trigger — only run when files affecting this benchmark change
   #
   pull_request:
+    paths:
+      - 'packages/video_transcode_bench/**'
 
   # Push Trigger (enable to catch errors coming out of multiple merges)
   #
   push:
     branches:
       - main
+    paths:
+      - 'packages/video_transcode_bench/**'
 
   # Manual Trigger
   #
