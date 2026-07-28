@@ -341,74 +341,93 @@
   args:
     - '--benchmark_format=json'
 
-- benchmark: pytorch_gemm_gpuless
-  name: pytorch_gemm_gpuless_stage1
-  description: GPU-less torch.mm dispatch overhead via TorchDispatchMode (no CUDA needed).
+- benchmark: pytorch_gemm_dispatch
+  name: pytorch_gemm_dispatch_stage1
+  description: Standalone GEMM dispatch overhead via TorchDispatchMode. Defaults to `mm`, uses spin delay by default, and exposes shared variables for `addmm`, `bmm`, and `linear`.
   args:
     - stage1
+    - '--op {op}'
     - '-m {m}'
     - '-n {n}'
     - '-k {k}'
+    - '--bmm-batch-size {bmm_batch_size}'
+    - '--addmm-bias-shape {addmm_bias_shape}'
+    - '--linear-prefix-shape {linear_prefix_shape}'
     - '-t {dtype}'
     - '--steps {steps}'
     - '--warmups {warmups}'
     - '--gpu-model {gpu_model}'
     - '--efficiency {efficiency}'
-    - '--no-sleep'
+    - '--delay-mode {delay_mode}'
   vars:
+    - 'op=mm'
     - 'm=1024'
     - 'n=1024'
     - 'k=1024'
+    - 'bmm_batch_size=1'
+    - 'addmm_bias_shape=auto'
+    - 'linear_prefix_shape=auto'
     - 'dtype=bfloat16'
     - 'steps=1000000'
     - 'warmups=10000'
     - 'gpu_model=gb200'
     - 'efficiency=0.5'
+    - 'delay_mode=spin'
 
-- benchmark: pytorch_gemm_gpuless
-  name: pytorch_gemm_gpuless_stage2_nosleep
-  description: GPU-less torch.mm full host-side overhead via mock_cuda (requires libcuda.so.1).
+- benchmark: pytorch_gemm_dispatch
+  name: pytorch_gemm_dispatch_stage2
+  description: Standalone GEMM full host-side overhead via mock_cuda. Defaults to `mm`, uses spin delay by default, and exposes shared variables for `addmm`, `bmm`, and `linear`.
   args:
     - stage2
+    - '--op {op}'
     - '-m {m}'
     - '-n {n}'
     - '-k {k}'
+    - '--bmm-batch-size {bmm_batch_size}'
+    - '--addmm-bias-shape {addmm_bias_shape}'
+    - '--linear-prefix-shape {linear_prefix_shape}'
     - '-t {dtype}'
     - '--steps {steps}'
     - '--warmups {warmups}'
     - '--gpu-model {gpu_model}'
     - '--efficiency {efficiency}'
-    - '--no-sleep'
+    - '--delay-mode {delay_mode}'
   vars:
+    - 'op=mm'
     - 'm=1024'
     - 'n=1024'
     - 'k=1024'
+    - 'bmm_batch_size=1'
+    - 'addmm_bias_shape=auto'
+    - 'linear_prefix_shape=auto'
     - 'dtype=bfloat16'
     - 'steps=1000000'
     - 'warmups=10000'
     - 'gpu_model=gb200'
     - 'efficiency=0.5'
+    - 'delay_mode=spin'
 
-- benchmark: pytorch_gemm_gpuless
-  name: pytorch_gemm_gpuless_stage2_spin
-  description: GPU-less torch.mm with spin delay (simulates GPU latency via clock_gettime polling).
+- benchmark: pytorch_gemm_dispatch
+  name: pytorch_gemm_dispatch_stage2_with_specs
+  description: Replay the shipped `model_c.yaml` GEMM workload via mock_cuda. Uses spin delay by default and can switch to `nop` through the shared `delay_mode` variable.
   args:
-    - stage2
-    - '-m {m}'
-    - '-n {n}'
-    - '-k {k}'
-    - '-t {dtype}'
-    - '--steps {steps}'
-    - '--warmups {warmups}'
+    - stage2_with_specs
+    - '{spec_path}'
+    - '--iterations {iterations}'
+    - '--warmup-iterations {warmup_iterations}'
+    - '--top-n {top_n}'
+    - '--min-weight {min_weight}'
+    - '--breakdown {breakdown}'
     - '--gpu-model {gpu_model}'
     - '--efficiency {efficiency}'
-    - '--delay-mode spin'
+    - '--delay-mode {delay_mode}'
   vars:
-    - 'm=1024'
-    - 'n=1024'
-    - 'k=1024'
-    - 'dtype=bfloat16'
-    - 'steps=1000000'
-    - 'warmups=10000'
+    - 'spec_path=gemm_specs/model_c.yaml'
+    - 'iterations=3'
+    - 'warmup_iterations=1'
+    - 'top_n=0'
+    - 'min_weight=0.0'
+    - 'breakdown=10'
     - 'gpu_model=gb200'
     - 'efficiency=0.5'
+    - 'delay_mode=spin'
