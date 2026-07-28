@@ -13,6 +13,7 @@ BENCHMARKS_DIR="$(pwd)/benchmarks/ai_wdl/pytorch_gemm_dispatch"
 MINICONDA_PREFIX="$(pwd)/build/miniconda"
 BUILD_ENV=pytorch_gemm_dispatch_env
 PYTHON_VERSION=3.12
+TORCH_VERSION=2.13.0
 
 # Source directory (co-located with this script)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd -P)"
@@ -195,22 +196,30 @@ setup_conda_environment() {
 
 install_pytorch() {
   if $HAS_CUDA_DRIVER; then
-    log_info "Installing PyTorch with CUDA support from conda-forge..."
-    # Detect driver's max supported CUDA version via nvidia-smi
-    local driver_cuda
-    driver_cuda=$(nvidia-smi 2>/dev/null | grep "CUDA Version:" | awk '{print $9}' || echo "12.8")
-    log_info "Driver supports CUDA ${driver_cuda}"
-    # CONDA_OVERRIDE_CUDA bypasses the __cuda virtual package check
-    CONDA_OVERRIDE_CUDA="${driver_cuda}" exec_with_retries 3 conda install \
-      -n "${BUILD_ENV}" -c conda-forge -y "pytorch>=2.9=cuda*" "cuda-version=${driver_cuda}.*"
+    # Detect the driver's max supported CUDA version and pick a matching
+    # PyTorch wheel index. GB200/B200 (sm_100) require CUDA 12.8+.
+    local driver_cuda cu_tag
+    driver_cuda=$(nvidia-smi 2>/dev/null | grep "CUDA Version:" | awk '{print $9}' || echo "13.0")
+    case "${driver_cuda}" in
+      13.*) cu_tag="cu130" ;;
+      12.9) cu_tag="cu129" ;;
+      *) cu_tag="cu128" ;;
+    esac
+    log_info "Driver supports CUDA ${driver_cuda}; installing PyTorch ${TORCH_VERSION} (${cu_tag}) via pip..."
+    # --extra-index-url lets the nvidia-* CUDA runtime deps resolve from PyPI
+    # when pypi.nvidia.com is unreachable (restricted networks).
+    exec_with_retries 3 conda run -n "${BUILD_ENV}" python -m pip install \
+      "torch==${TORCH_VERSION}" \
+      --index-url "https://download.pytorch.org/whl/${cu_tag}" \
+      --extra-index-url https://pypi.org/simple
 
     log_info "Verifying PyTorch CUDA installation..."
     conda run -n "${BUILD_ENV}" python -c \
-      "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.version.cuda}')"
+      "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.version.cuda}, arch: {torch.cuda.get_arch_list()}')"
   else
-    log_info "Installing PyTorch CPU from PyPI..."
-    conda run -n "${BUILD_ENV}" python -m pip install --pre torch \
-      --index-url https://download.pytorch.org/whl/cpu/
+    log_info "Installing PyTorch ${TORCH_VERSION} (CPU) via pip..."
+    exec_with_retries 3 conda run -n "${BUILD_ENV}" python -m pip install \
+      "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
 
     log_info "Verifying PyTorch CPU installation..."
     conda run -n "${BUILD_ENV}" python -c \
@@ -222,7 +231,7 @@ install_pytorch() {
 
 install_python_dependencies() {
   log_info "Installing benchmark Python dependencies..."
-  exec_with_retries 3 conda install -n "${BUILD_ENV}" -c conda-forge -y pyyaml
+  exec_with_retries 3 conda run -n "${BUILD_ENV}" python -m pip install pyyaml numpy
   log_info "Benchmark Python dependencies installed."
 }
 
