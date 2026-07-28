@@ -339,10 +339,24 @@ std::optional<void*> swapCallTarget(void* functionAddr, void* newTarget) {
   _(cuLibraryGetKernel)                                   \
   _(cuLibraryGetModule)                                   \
   _(cuKernelGetFunction)                                  \
+  _(cuKernelGetAttribute)                                 \
+  _(cuKernelSetAttribute)                                 \
+  _(cuKernelSetCacheConfig)                               \
   _(cuFuncGetAttribute)                                   \
   _(cuFuncSetAttribute)                                   \
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor)          \
   _(cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags) \
+  _(cuOccupancyAvailableDynamicSMemPerBlock)              \
+  _(cuOccupancyMaxActiveClusters)                         \
+  _(cuOccupancyMaxPotentialClusterSize)                   \
+  _(cuOccupancyMaxPotentialBlockSize)                     \
+  _(cuOccupancyMaxPotentialBlockSizeWithFlags)            \
+  _(cuFuncGetModule)                                      \
+  _(cuFuncIsLoaded)                                       \
+  _(cuFuncLoad)                                           \
+  _(cuFuncSetCacheConfig)                                 \
+  _(cuFuncSetSharedMemConfig)                             \
+  _(cuKernelGetLibrary)                                   \
   _(cuCtxCreate_v2)                                       \
   _(cuCtxGetCurrent)                                      \
   _(cuCtxGetDevice)                                       \
@@ -1095,6 +1109,188 @@ CUresult p_cuFuncGetAttribute(int* pi, int attrib, CUfunction hfunc) {
 }
 
 template <int N>
+CUresult
+p_cuKernelGetAttribute(int* pi, int attrib, CUkernel kernel, CUdevice dev) {
+  RETURN_REAL_IF_UNMOCKED(cuKernelGetAttribute, pi, attrib, kernel, dev);
+  if (!pi) {
+    return 0;
+  }
+  switch (attrib) {
+    case 0:
+      *pi = 1024;
+      break; // MAX_THREADS_PER_BLOCK
+    case 4:
+      *pi = 64;
+      break; // NUM_REGS
+    case 5:
+    case 6:
+      *pi = 90;
+      break; // PTX_VERSION / BINARY_VERSION
+    case 8:
+      *pi = 49152;
+      break; // MAX_DYNAMIC_SHARED_SIZE_BYTES
+    default:
+      *pi = 0;
+      break;
+  }
+  return 0;
+}
+
+template <int N>
+CUresult
+p_cuKernelSetAttribute(int attrib, int val, CUkernel kernel, CUdevice dev) {
+  RETURN_REAL_IF_UNMOCKED(cuKernelSetAttribute, attrib, val, kernel, dev);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuKernelSetCacheConfig(CUkernel kernel, int config, CUdevice dev) {
+  RETURN_REAL_IF_UNMOCKED(cuKernelSetCacheConfig, kernel, config, dev);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuOccupancyAvailableDynamicSMemPerBlock(
+    size_t* dynamicSmemSize,
+    CUfunction func,
+    int numBlocks,
+    int blockSize) {
+  RETURN_REAL_IF_UNMOCKED(
+      cuOccupancyAvailableDynamicSMemPerBlock,
+      dynamicSmemSize,
+      func,
+      numBlocks,
+      blockSize);
+  if (dynamicSmemSize) {
+    *dynamicSmemSize = 0;
+  }
+  return 0;
+}
+
+template <int N>
+CUresult p_cuOccupancyMaxActiveClusters(
+    int* numClusters,
+    CUfunction func,
+    const void* config) {
+  RETURN_REAL_IF_UNMOCKED(
+      cuOccupancyMaxActiveClusters, numClusters, func, config);
+  if (numClusters) {
+    *numClusters = 1;
+  }
+  return 0;
+}
+
+template <int N>
+CUresult p_cuOccupancyMaxPotentialClusterSize(
+    int* clusterSize,
+    CUfunction func,
+    const void* config) {
+  RETURN_REAL_IF_UNMOCKED(
+      cuOccupancyMaxPotentialClusterSize, clusterSize, func, config);
+  if (clusterSize) {
+    *clusterSize = 1;
+  }
+  return 0;
+}
+
+template <int N>
+CUresult p_cuOccupancyMaxPotentialBlockSize(
+    int* minGridSize,
+    int* blockSize,
+    CUfunction func,
+    void* blockSizeToDynamicSMemSize,
+    size_t dynamicSMemSize,
+    int blockSizeLimit) {
+  RETURN_REAL_IF_UNMOCKED(
+      cuOccupancyMaxPotentialBlockSize,
+      minGridSize,
+      blockSize,
+      func,
+      blockSizeToDynamicSMemSize,
+      dynamicSMemSize,
+      blockSizeLimit);
+  if (minGridSize) {
+    *minGridSize = 1;
+  }
+  if (blockSize) {
+    *blockSize = 128;
+  }
+  return 0;
+}
+
+template <int N>
+CUresult p_cuOccupancyMaxPotentialBlockSizeWithFlags(
+    int* minGridSize,
+    int* blockSize,
+    CUfunction func,
+    void* blockSizeToDynamicSMemSize,
+    size_t dynamicSMemSize,
+    int blockSizeLimit,
+    unsigned int flags) {
+  RETURN_REAL_IF_UNMOCKED(
+      cuOccupancyMaxPotentialBlockSizeWithFlags,
+      minGridSize,
+      blockSize,
+      func,
+      blockSizeToDynamicSMemSize,
+      dynamicSMemSize,
+      blockSizeLimit,
+      flags);
+  if (minGridSize) {
+    *minGridSize = 1;
+  }
+  if (blockSize) {
+    *blockSize = 128;
+  }
+  return 0;
+}
+
+template <int N>
+CUresult p_cuFuncGetModule(CUmodule* hmod, CUfunction hfunc) {
+  RETURN_REAL_IF_UNMOCKED(cuFuncGetModule, hmod, hfunc);
+  if (hmod) {
+    *hmod = fakeModule;
+  }
+  return 0;
+}
+
+template <int N>
+CUresult p_cuFuncIsLoaded(int* state, CUfunction function) {
+  RETURN_REAL_IF_UNMOCKED(cuFuncIsLoaded, state, function);
+  if (state) {
+    *state = 1; // CU_FUNCTION_LOADING_STATE_LOADED
+  }
+  return 0;
+}
+
+template <int N>
+CUresult p_cuFuncLoad(CUfunction function) {
+  RETURN_REAL_IF_UNMOCKED(cuFuncLoad, function);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuFuncSetCacheConfig(CUfunction hfunc, int config) {
+  RETURN_REAL_IF_UNMOCKED(cuFuncSetCacheConfig, hfunc, config);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuFuncSetSharedMemConfig(CUfunction hfunc, int config) {
+  RETURN_REAL_IF_UNMOCKED(cuFuncSetSharedMemConfig, hfunc, config);
+  return 0;
+}
+
+template <int N>
+CUresult p_cuKernelGetLibrary(CUlibrary* pLib, CUkernel kernel) {
+  RETURN_REAL_IF_UNMOCKED(cuKernelGetLibrary, pLib, kernel);
+  if (pLib) {
+    *pLib = fakeLibrary;
+  }
+  return 0;
+}
+
+template <int N>
 CUresult p_cuFuncSetAttribute(CUfunction hfunc, int attrib, int value) {
   RETURN_REAL_IF_UNMOCKED(cuFuncSetAttribute, hfunc, attrib, value);
   return 0;
@@ -1486,6 +1682,13 @@ std::mutex patchedMutex;
 
 void doPatch(const char* name, void** realFns, void* toPatch, void** ourFns) {
   std::lock_guard<std::mutex> guard(patchedMutex);
+  // cuGetProcAddress("cuCtxGetDevice") resolves to cuCtxGetDevice_v2 in newer
+  // CUDA runtimes; patching that variant under this name mis-associates its
+  // dispatch slot and crashes the real cuCtxGetDevice_v2 path. Stage 2 always
+  // runs on a real GPU, so leave device-context queries to the real driver.
+  if (std::strcmp(name, "cuCtxGetDevice") == 0) {
+    return;
+  }
   if (patched.count(toPatch)) {
     return;
   }
