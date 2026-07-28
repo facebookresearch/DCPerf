@@ -7,21 +7,25 @@
 
 """TorchDispatchMode-based interception of GEMM ops for GPU-less benchmarking.
 
-Intercepts aten.mm, aten.addmm, and aten.bmm at the Python dispatch level,
-optionally simulating GPU latency. Returns correctly-shaped CPU tensors
-without performing actual computation.
+Intercepts `aten::mm`, `aten::addmm`, `aten::bmm`, and `aten::linear` at the
+Python dispatch level, optionally simulating GPU latency. Returns
+correctly-shaped CPU tensors without performing actual computation.
 
 Pattern follows _FlopCounterMode in caffe2/torch/utils/flop_counter.py.
 """
 
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Protocol
 
 import torch
+from gemm_ops import gemm_spec_from_shapes
 from gpu_timing_model import compute_mm_latency, GPUTimingConfig
-from nop_delay import NopTimer
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+class DelayTimer(Protocol):
+    def delay_s(self, seconds: float) -> None: ...
 
 
 @dataclass
@@ -43,14 +47,15 @@ class GpulessMmStats:
         self.per_op_counts[op_name] = self.per_op_counts.get(op_name, 0) + 1
 
 
+_FUNC_TO_OP = {
+    torch.ops.aten.mm.default: "aten::mm",
+    torch.ops.aten.addmm.default: "aten::addmm",
+    torch.ops.aten.bmm.default: "aten::bmm",
+    torch.ops.aten.linear.default: "aten::linear",
+}
+
 # Ops we intercept
-_INTERCEPTED_OPS = frozenset(
-    {
-        torch.ops.aten.mm.default,
-        torch.ops.aten.addmm.default,
-        torch.ops.aten.bmm.default,
-    }
-)
+_INTERCEPTED_OPS = frozenset(_FUNC_TO_OP)
 
 
 class GpulessMmMode(TorchDispatchMode):
@@ -67,20 +72,20 @@ class GpulessMmMode(TorchDispatchMode):
         config: GPU timing configuration for latency simulation.
         sleep: If True, delay for the simulated latency duration.
             Set to False to measure pure host-side dispatch overhead.
-        nop_timer: If provided, use NOP spin loop for delay instead of
-            time.sleep. Required for sub-microsecond precision.
+        delay_timer: If provided, use a calibrated NOP timer or a spin timer
+            instead of time.sleep. Required for sub-microsecond precision.
     """
 
     def __init__(
         self,
         config: GPUTimingConfig | None = None,
         sleep: bool = True,
-        nop_timer: Optional[NopTimer] = None,
+        delay_timer: Optional[DelayTimer] = None,
     ) -> None:
         super().__init__()
         self.config = config or GPUTimingConfig()
         self.sleep = sleep
-        self.nop_timer = nop_timer
+        self.delay_timer = delay_timer
         self.stats = GpulessMmStats()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -89,44 +94,36 @@ class GpulessMmMode(TorchDispatchMode):
         if func not in _INTERCEPTED_OPS:
             return func(*args, **kwargs)
 
-        # Compute output shape and latency based on which op we intercepted
+        op_name = _FUNC_TO_OP[func]
         if func is torch.ops.aten.mm.default:
-            a, b = args[0], args[1]
-            m, k = a.shape
-            _, n = b.shape
-            out_shape = (m, n)
-            dtype = a.dtype
-            op_name = "aten.mm"
-
+            tensor_shapes = [tuple(args[0].shape), tuple(args[1].shape)]
+            dtype = args[0].dtype
         elif func is torch.ops.aten.addmm.default:
-            # addmm(bias, input, weight) -> bias + input @ weight
-            a, b = args[1], args[2]
-            m, k = a.shape
-            _, n = b.shape
-            out_shape = (m, n)
-            dtype = a.dtype
-            op_name = "aten.addmm"
-
+            tensor_shapes = [
+                tuple(args[0].shape),
+                tuple(args[1].shape),
+                tuple(args[2].shape),
+            ]
+            dtype = args[1].dtype
         elif func is torch.ops.aten.bmm.default:
-            a, b = args[0], args[1]
-            batch, m, k = a.shape
-            _, _, n = b.shape
-            out_shape = (batch, m, n)
-            dtype = a.dtype
-            op_name = "aten.bmm"
-
+            tensor_shapes = [tuple(args[0].shape), tuple(args[1].shape)]
+            dtype = args[0].dtype
         else:
-            # Should not reach here given _INTERCEPTED_OPS check above
-            return func(*args, **kwargs)
+            tensor_shapes = [tuple(args[0].shape), tuple(args[1].shape)]
+            if len(args) > 2 and args[2] is not None:
+                tensor_shapes.append(tuple(args[2].shape))
+            dtype = args[0].dtype
+
+        spec = gemm_spec_from_shapes(op_name, tensor_shapes)
 
         # Compute simulated latency
-        latency = compute_mm_latency(m, n, k, self.config)
-        self.stats.record(op_name, latency)
+        latency = compute_mm_latency(spec.effective_m, spec.n, spec.k, self.config)
+        self.stats.record(op_name.replace("::", "."), latency)
 
         if self.sleep:
-            if self.nop_timer is not None:
-                self.nop_timer.delay_s(latency)
+            if self.delay_timer is not None:
+                self.delay_timer.delay_s(latency)
             else:
                 time.sleep(latency)
 
-        return torch.zeros(out_shape, dtype=dtype, device="cpu")
+        return torch.zeros(spec.output_shape, dtype=dtype, device="cpu")

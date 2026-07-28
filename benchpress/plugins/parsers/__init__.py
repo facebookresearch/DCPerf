@@ -51,7 +51,7 @@ from .nnpi_net4 import NNPINet4Parser
 from .openssl_speed import OpensslSpeedParser
 from .ovs_ofperf import OvsOfperfParser
 from .perftest import PerftestParser
-from .pytorch_gemm_gpuless import PytorchGemmGpulessParser
+from .pytorch_gemm_dispatch import PytorchGemmDispatchParser
 from .rebatch import RebatchParser
 from .returncode import ReturncodeParser
 from .schbench import SchbenchParser
@@ -139,7 +139,7 @@ def register_parsers(factory):
     factory.register("adsim", AdSimParser)
     factory.register("cdn_bench", CDNBenchParser)
     factory.register("type_conversion", TypeConversionParser)
-    factory.register("pytorch_gemm_gpuless", PytorchGemmGpulessParser)
+    factory.register("pytorch_gemm_dispatch", PytorchGemmDispatchParser)
     factory.register("xsbench", XSBenchParser)
     if not open_source:
         factory.register("hackperf", HackperfParser)
