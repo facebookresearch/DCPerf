@@ -171,9 +171,9 @@ setup_miniconda() {
   export PATH="${MINICONDA_PREFIX}/bin:${PATH}"
   export CONDA="${MINICONDA_PREFIX}"
 
-  conda update -n base -c conda-forge -y conda
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+  conda update -n base -c conda-forge -y conda
 
   log_info "Miniconda setup complete."
 }
