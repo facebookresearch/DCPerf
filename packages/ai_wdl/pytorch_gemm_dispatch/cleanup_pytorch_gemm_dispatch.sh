@@ -6,6 +6,6 @@
 
 AI_BENCH_ROOT="$(dirname "$(readlink -f "$0")")"
 BENCHPRESS_ROOT="$(readlink -f "$AI_BENCH_ROOT/../../..")"
-BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks/ai_wdl/pytorch_gemm_gpuless"
+BENCHMARKS_DIR="${BENCHPRESS_ROOT}/benchmarks/ai_wdl/pytorch_gemm_dispatch"
 
 rm -rf "$BENCHMARKS_DIR"

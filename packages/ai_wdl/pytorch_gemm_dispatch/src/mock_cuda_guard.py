@@ -11,6 +11,9 @@ Provides mock_cuda_guard() context manager that patches libcuda.so.1's
 function table so CUDA driver calls return success instantly without
 GPU work. Compatible with NVIDIA driver 570.x+.
 
+Set `PYTORCH_GEMM_DISPATCH_MOCK_CUDA_VERBOSE=1` to enable native mock CUDA
+debug logging. By default, the C++ shim stays quiet.
+
 See docs/driver_binary_analysis.md for details on the binary patching.
 """
 
@@ -21,13 +24,17 @@ from typing import Generator, Optional
 import _mock_cuda_C as _C
 import torch
 
-# Patch at import time — installs our mock functions into
-# libcuda.so.1's function table. The mocks are disabled by default
-# (they forward to the real functions). Call enable_mock_cuda() to
-# activate the no-op behavior.
-_C.patch_mock_cuda()
-
 _mock_cuda_stream: Optional[torch.cuda.Stream] = None
+_mock_cuda_patched = False
+MOCK_CUDA_VERBOSE_ENV_VAR = "PYTORCH_GEMM_DISPATCH_MOCK_CUDA_VERBOSE"
+
+
+def _ensure_mock_cuda_patched() -> None:
+    global _mock_cuda_patched
+    if _mock_cuda_patched:
+        return
+    _C.patch_mock_cuda()
+    _mock_cuda_patched = True
 
 
 def _has_real_gpu() -> bool:
@@ -52,12 +59,14 @@ def _init_cuda_with_mock() -> None:
 
     PyTorch checks cuDriverGetVersion >= CUDA runtime version. When the
     driver is older (e.g. 570.x = CUDA 12.8 vs PyTorch CUDA 13.0), this
-    check fails. We temporarily enable mock so cuDriverGetVersion returns
-    a high value, then disable mock for normal operation.
+    check fails. We temporarily enable mock so cuDriverGetVersion reports
+    at least the CUDA 13.0 version expected by this build, then disable
+    mock for normal operation.
 
     Do NOT call torch.cuda.is_available() first — it triggers the same
     version check and caches the failure.
     """
+    _ensure_mock_cuda_patched()
     _C.enable_mock_cuda()
     try:
         torch.cuda.init()
@@ -90,6 +99,8 @@ def mock_cuda_guard() -> Generator[None, None, None]:
             "Use Stage 1 for CPU-only machines."
         )
 
+    _ensure_mock_cuda_patched()
+
     # Initialize CUDA (handles driver version mismatch via mock).
     _init_cuda_with_mock()
 
@@ -109,6 +120,7 @@ def mock_cuda_guard() -> Generator[None, None, None]:
 
 def mock_cuda() -> None:
     """Enable CUDA mocking (thread-local)."""
+    _ensure_mock_cuda_patched()
     _C.enable_mock_cuda()
 
 
