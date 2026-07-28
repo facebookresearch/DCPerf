@@ -371,7 +371,7 @@ def get_current_loop() -> asyncio.AbstractEventLoop:
         Event loop for this thread
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         if loop.is_closed():
             raise RuntimeError("Event loop is closed")
         return loop
