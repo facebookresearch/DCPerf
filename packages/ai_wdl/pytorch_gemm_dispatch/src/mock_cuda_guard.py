@@ -11,6 +11,9 @@ Provides mock_cuda_guard() context manager that patches libcuda.so.1's
 function table so CUDA driver calls return success instantly without
 GPU work. Compatible with NVIDIA driver 570.x+.
 
+Set `PYTORCH_GEMM_DISPATCH_MOCK_CUDA_VERBOSE=1` to enable native mock CUDA
+debug logging. By default, the C++ shim stays quiet.
+
 See docs/driver_binary_analysis.md for details on the binary patching.
 """
 
@@ -28,6 +31,7 @@ import torch
 _C.patch_mock_cuda()
 
 _mock_cuda_stream: Optional[torch.cuda.Stream] = None
+MOCK_CUDA_VERBOSE_ENV_VAR = "PYTORCH_GEMM_DISPATCH_MOCK_CUDA_VERBOSE"
 
 
 def _has_real_gpu() -> bool:
@@ -52,8 +56,9 @@ def _init_cuda_with_mock() -> None:
 
     PyTorch checks cuDriverGetVersion >= CUDA runtime version. When the
     driver is older (e.g. 570.x = CUDA 12.8 vs PyTorch CUDA 13.0), this
-    check fails. We temporarily enable mock so cuDriverGetVersion returns
-    a high value, then disable mock for normal operation.
+    check fails. We temporarily enable mock so cuDriverGetVersion reports
+    at least the CUDA 13.0 version expected by this build, then disable
+    mock for normal operation.
 
     Do NOT call torch.cuda.is_available() first — it triggers the same
     version check and caches the failure.

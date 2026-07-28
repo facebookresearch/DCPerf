@@ -5,25 +5,33 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Stage 2: GPU-less GEMM benchmark via mock_cuda.
+"""Stage 1: GPU-less GEMM benchmark via TorchDispatchMode interception.
 
-Measures the full host-side overhead of torch.mm including C++ dispatch,
-cuBLAS wrapper code, and CUDA driver API call overhead — everything except
-actual GPU kernel execution.
+Measures the Python-level dispatch overhead of one GEMM-like op by
+intercepting `aten::mm`, `aten::addmm`, `aten::bmm`, or `aten::linear`
+at the TorchDispatchMode level. Optionally simulates GPU latency to mimic
+real execution timing.
 
-Patches the function table in libcuda.so.1 so all CUDA driver calls
-(cuLaunchKernel, cuMemAlloc, etc.) return success instantly without GPU work.
+Key mode: --no-sleep disables simulated delay to measure pure host-side
+dispatch overhead, which is the primary metric for BTB analysis.
 
-Requires: CUDA drivers installed (libcuda.so.1 must be present), but no GPU.
+Runs on any machine — no GPU or CUDA drivers needed.
 """
 
 import argparse
+import sys
 import time
 
 import torch
-from gpu_timing_model import compute_mm_latency, GPUTimingConfig, variant_from_str
-from mock_cuda_guard import mock_cuda_guard
+from gemm_ops import (
+    add_standalone_gemm_shape_args,
+    describe_gemm_spec,
+    make_standalone_gemm_spec_from_args,
+    run_gemm_op,
+)
+from gpu_timing_model import GPUTimingConfig, variant_from_str
 from nop_delay import NopTimer, SpinTimer
+from stage1_dispatch_mode import GpulessMmMode
 from torch.profiler import profile, ProfilerActivity
 
 
@@ -36,11 +44,9 @@ _DTYPE_MAP = {
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="GPU-less GEMM benchmark (Stage 2: mock_cuda)"
+        description="GPU-less GEMM benchmark (Stage 1: TorchDispatchMode)"
     )
-    p.add_argument("-m", "--msize", type=int, default=1024, help="M dimension")
-    p.add_argument("-n", "--nsize", type=int, default=1024, help="N dimension")
-    p.add_argument("-k", "--ksize", type=int, default=1024, help="K dimension")
+    add_standalone_gemm_shape_args(p)
     p.add_argument(
         "-t",
         "--dtype",
@@ -89,18 +95,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_benchmark(args: argparse.Namespace) -> None:
-    m, n, k = args.msize, args.nsize, args.ksize
     dtype = _DTYPE_MAP[args.dtype]
-    flops_per_call = 2.0 * m * n * k
+    try:
+        spec = make_standalone_gemm_spec_from_args(args)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     variant = variant_from_str(args.gpu_model)
     config = GPUTimingConfig(variant=variant, efficiency=args.efficiency)
-    simulated_latency = compute_mm_latency(m, n, k, config)
-    simulated_latency_ns = simulated_latency * 1e9
-    do_sleep = not args.no_sleep
 
     delay_timer = None
-    if do_sleep:
+    if not args.no_sleep:
         if args.delay_mode == "spin":
             delay_timer = SpinTimer()
             print("Using spin delay (clock_gettime polling)", flush=True)
@@ -110,52 +116,66 @@ def run_benchmark(args: argparse.Namespace) -> None:
             print(f"  NOP rate: {nop_timer.nops_per_ns:.3f} nops/ns")
             delay_timer = nop_timer
 
-    with mock_cuda_guard():
-        # Create CUDA tensors (backed by fake memory under mock).
-        # Use empty() not randn() — randn launches a fill kernel which
-        # triggers cudart's arch check before our driver mock can intercept.
-        # Data content doesn't matter since no real computation occurs.
-        a = torch.empty(m, k, dtype=dtype, device="cuda:0")
-        b = torch.empty(k, n, dtype=dtype, device="cuda:0")
+    mode = GpulessMmMode(
+        config=config,
+        sleep=not args.no_sleep,
+        delay_timer=delay_timer,
+    )
 
-        # Warmup
+    # Create input tensors on CPU
+    tensors = [
+        torch.empty(spec.a_shape, dtype=dtype, device="cpu"),
+        torch.empty(spec.b_shape, dtype=dtype, device="cpu"),
+    ]
+    if spec.bias_shape is not None:
+        tensors.append(torch.empty(spec.bias_shape, dtype=dtype, device="cpu"))
+    tensors_tuple = tuple(tensors)
+
+    flops_per_call = spec.flops_per_call
+
+    # Warmup phase
+    with mode:
         for _ in range(args.warmups):
-            torch.mm(a, b)
-            if do_sleep and delay_timer is not None:
-                delay_timer.delay_ns(simulated_latency_ns)
-        pass  # torch.cuda.synchronize() omitted — no-op under mock
+            run_gemm_op(spec.op, tensors_tuple)
+    mode.stats.reset()
 
-        # Measured phase
-        activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
-        prof_ctx = profile(activities=activities) if args.trace else None
+    # Measured phase
+    with mode:
+        prof_ctx = profile(activities=[ProfilerActivity.CPU]) if args.trace else None
         if prof_ctx is not None:
             prof_ctx.__enter__()
         t0 = time.perf_counter()
         for _ in range(args.steps):
-            torch.mm(a, b)
-            if do_sleep and delay_timer is not None:
-                delay_timer.delay_ns(simulated_latency_ns)
-        pass  # torch.cuda.synchronize() omitted — no-op under mock
+            run_gemm_op(spec.op, tensors_tuple)
         t1 = time.perf_counter()
         if prof_ctx is not None:
             prof_ctx.__exit__(None, None, None)
 
     wall_time = t1 - t0
-    wall_per_call = wall_time / args.steps
-    total_simulated_gpu_time = simulated_latency * args.steps
+    calls = mode.stats.call_count
+    simulated_gpu_time = mode.stats.total_simulated_time_s
+
+    if calls == 0:
+        print("ERROR: No GEMM calls intercepted", file=sys.stderr)
+        sys.exit(1)
+
+    wall_per_call = wall_time / calls
+    simulated_per_call = simulated_gpu_time / calls
 
     if args.no_sleep:
         host_overhead_per_call = wall_per_call
     else:
-        host_overhead_per_call = wall_per_call - simulated_latency
+        host_overhead_per_call = wall_per_call - simulated_per_call
 
-    tfs = flops_per_call * args.steps / wall_time / 1e12 if wall_time > 0 else 0.0
+    simulated_tfs = flops_per_call * calls / wall_time / 1e12 if wall_time > 0 else 0.0
 
     # Report
     print(f"{'=' * 60}")
-    print("Stage 2: GPU-less GEMM Benchmark (mock_cuda)")
+    print("Stage 1: GPU-less GEMM Benchmark (TorchDispatchMode)")
     print(f"{'=' * 60}")
-    print(f"  Matrix:       ({m} x {k}) @ ({k} x {n})")
+    print(f"  Op:           {spec.op}")
+    print(f"  Shapes:       {describe_gemm_spec(spec)}")
+    print(f"  Effective GEMM: M={spec.effective_m} N={spec.n} K={spec.k}")
     print(f"  Dtype:        {args.dtype}")
     print(f"  GPU model:    {args.gpu_model} (efficiency={args.efficiency})")
     if args.no_sleep:
@@ -168,9 +188,12 @@ def run_benchmark(args: argparse.Namespace) -> None:
     print(f"  Total wall time:        {wall_time * 1e3:12.3f} ms")
     print(f"  Wall time / call:       {wall_per_call * 1e6:12.3f} us")
     if not args.no_sleep:
-        print(f"  Simulated GPU / call:   {simulated_latency * 1e6:12.3f} us")
+        print(f"  Simulated GPU / call:   {simulated_per_call * 1e6:12.3f} us")
     print(f"  Host overhead / call:   {host_overhead_per_call * 1e6:12.3f} us")
-    print(f"  Simulated TF/s:         {tfs:12.6f}")
+    print(f"  Simulated TF/s:         {simulated_tfs:12.6f}")
+    print(f"  Intercepted calls:      {calls}")
+    for op_name, count in sorted(mode.stats.per_op_counts.items()):
+        print(f"    {op_name}: {count}")
     print(f"{'=' * 60}")
 
     if args.trace and prof_ctx is not None:
