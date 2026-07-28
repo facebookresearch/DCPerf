@@ -302,7 +302,7 @@ For role "db":
     -y          number of cassandra concurrent writes (default 128)
     -b          ip address that cassandra will bind to (default to the first IP from "hostname -i": $(hostname -i))
     --thrift-server-workers
-                number of thrift server workers (default: min(nproc, 32))
+                number of thrift server workers (default: nproc; pass 0 for auto)
 
 
 EOF
@@ -481,7 +481,9 @@ start_thrift_servers() {
   if [ "$num_thrift_servers" -gt 0 ]; then
     export NUM_SERVERS="$num_thrift_servers"
   else
-    export NUM_SERVERS=16
+    # 0 (or unset) means auto: one thrift server worker per logical CPU.
+    NUM_SERVERS="$(nproc)"
+    export NUM_SERVERS
   fi
   cd "${SCRIPT_ROOT}/../django-workload/django-workload/django_workload/thrift" || exit 1
   bash manage_servers.sh start --with-haproxy
@@ -862,10 +864,9 @@ main() {
   stats_port=8001
 
   local thrift_server_workers
-  thrift_server_workers=32
-  if [ "$(nproc)" -lt "${thrift_server_workers}" ]; then
-    thrift_server_workers="$(nproc)"
-  fi
+  # 0 = auto: start one thrift server worker per logical CPU (nproc), resolved
+  # in start_thrift_servers(). Override with --thrift-server-workers N.
+  thrift_server_workers=0
 
   local use_jit
   use_jit=0
