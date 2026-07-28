@@ -9,10 +9,10 @@ set -Eeuo pipefail
 # Global Configuration
 ################################################################################
 
-BENCHMARKS_DIR="$(pwd)/benchmarks/ai_wdl/pytorch_gemm_gpuless"
+BENCHMARKS_DIR="$(pwd)/benchmarks/ai_wdl/pytorch_gemm_dispatch"
 MINICONDA_PREFIX="$(pwd)/build/miniconda"
-BUILD_ENV=pytorch_gemm_gpuless_env
-PYTHON_VERSION=3.13
+BUILD_ENV=pytorch_gemm_dispatch_env
+PYTHON_VERSION=3.12
 
 # Source directory (co-located with this script)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd -P)"
@@ -171,9 +171,9 @@ setup_miniconda() {
   export PATH="${MINICONDA_PREFIX}/bin:${PATH}"
   export CONDA="${MINICONDA_PREFIX}"
 
-  conda update -n base -c conda-forge -y conda
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+  conda update -n base -c conda-forge -y conda
 
   log_info "Miniconda setup complete."
 }
@@ -220,6 +220,12 @@ install_pytorch() {
   log_info "PyTorch installation complete."
 }
 
+install_python_dependencies() {
+  log_info "Installing benchmark Python dependencies..."
+  exec_with_retries 3 conda install -n "${BUILD_ENV}" -c conda-forge -y pyyaml
+  log_info "Benchmark Python dependencies installed."
+}
+
 ################################################################################
 # Build C Extensions
 ################################################################################
@@ -253,7 +259,7 @@ mock_cuda_ext = Extension(
 )
 
 setup(
-    name="pytorch_gemm_gpuless_extensions",
+    name="pytorch_gemm_dispatch_extensions",
     ext_modules=[nop_delay_ext, mock_cuda_ext],
 )
 SETUP_EOF
@@ -282,8 +288,10 @@ copy_sources() {
   local src="${PROJECT_SRC}"
 
   local py_files=(
+    gemm_ops.py
     stage1_benchmark.py
     stage2_benchmark.py
+    stage2_benchmark_with_specs.py
     stage1_dispatch_mode.py
     gpu_timing_model.py
     nop_delay.py
@@ -299,6 +307,23 @@ copy_sources() {
   done
 
   log_info "Source files copied."
+}
+
+copy_gemm_specs() {
+  log_info "Copying GEMM workload specs..."
+
+  local src_dir="${PROJECT_SRC}/gemm_specs"
+  local dst_dir="${BENCHMARKS_DIR}/gemm_specs"
+
+  mkdir -p "${dst_dir}"
+
+  if [ ! -d "${src_dir}" ]; then
+    echo "[WARN] GEMM spec directory not found: ${src_dir}"
+    return
+  fi
+
+  cp "${src_dir}"/*.yaml "${dst_dir}/"
+  log_info "GEMM workload specs copied."
 }
 
 ################################################################################
@@ -320,13 +345,13 @@ create_launcher() {
 
   cat > "${BENCHMARKS_DIR}/run.sh" << 'LAUNCHER_EOF'
 #!/bin/bash
-# Usage: ./run.sh <stage1|stage2> [args...]
+# Usage: ./run.sh <stage1|stage2|stage2_with_specs> [args...]
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
-BUILD_ENV="pytorch_gemm_gpuless_env"
+BUILD_ENV="pytorch_gemm_dispatch_env"
 MINICONDA="${REPO_ROOT}/build/miniconda"
 
 # Activate conda
@@ -345,62 +370,89 @@ fi
 STAGE="$1"
 shift || true
 
+resolve_cuda_support() {
+  local cuda_support
+  cuda_support="$(cat "${SCRIPT_DIR}/.cuda_support" 2>/dev/null || echo cpu)"
+  if [ "$cuda_support" = "cuda" ]; then
+    echo "$cuda_support"
+    return
+  fi
+
+  if ldconfig -p 2>/dev/null | grep -q "libcuda.so.1"; then
+    echo "cuda"
+    return
+  fi
+
+  for _dir in /usr/local/cuda-*/compat /usr/local/cuda/compat /usr/lib64 /usr/lib/x86_64-linux-gnu; do
+    if [ -f "${_dir}/libcuda.so.1" ]; then
+      export LD_LIBRARY_PATH="${_dir}:${LD_LIBRARY_PATH:-}"
+      echo "cuda"
+      return
+    fi
+  done
+
+  echo "cpu"
+}
+
 case "$STAGE" in
   stage1)
     exec python "${SCRIPT_DIR}/stage1_benchmark.py" "$@"
     ;;
   stage2)
-    # Stage 2 needs libcuda.so.1 (from real driver or cuda-compat).
-    # On GPU-less machines, mock_cuda provides cuGetExportTable dummy tables
-    # that let cudart initialize without real GPU hardware.
-    CUDA_SUPPORT="$(cat "${SCRIPT_DIR}/.cuda_support" 2>/dev/null || echo cpu)"
-    if [ "$CUDA_SUPPORT" != "cuda" ]; then
-      # Re-check at runtime in case cuda-compat was installed after benchpress install
-      if ldconfig -p 2>/dev/null | grep -q "libcuda.so.1"; then
-        CUDA_SUPPORT="cuda"
-      else
-        for _dir in /usr/local/cuda-*/compat /usr/local/cuda/compat /usr/lib64 /usr/lib/x86_64-linux-gnu; do
-          if [ -f "${_dir}/libcuda.so.1" ]; then
-            CUDA_SUPPORT="cuda"
-            export LD_LIBRARY_PATH="${_dir}:${LD_LIBRARY_PATH:-}"
-            break
-          fi
-        done
-      fi
-    fi
+    CUDA_SUPPORT="$(resolve_cuda_support)"
     if [ "$CUDA_SUPPORT" != "cuda" ]; then
       echo "WARNING: Stage 2 requires libcuda.so.1 but it is not available."
       echo "Falling back to stage1 (TorchDispatchMode interception)."
-      # Strip stage2-only args (--delay-mode <value>) before passing to stage1
-      stage1_args=()
-      while [ $# -gt 0 ]; do
-        case "$1" in
-          --delay-mode)
-            shift 2 || shift  # skip flag and its value
-            ;;
-          *)
-            stage1_args+=("$1")
-            shift
-            ;;
-        esac
-      done
-      exec python "${SCRIPT_DIR}/stage1_benchmark.py" "${stage1_args[@]}"
+      exec python "${SCRIPT_DIR}/stage1_benchmark.py" "$@"
     fi
     exec python "${SCRIPT_DIR}/stage2_benchmark.py" "$@"
     ;;
+  stage2_with_specs)
+    CUDA_SUPPORT="$(resolve_cuda_support)"
+    if [ "$CUDA_SUPPORT" != "cuda" ]; then
+      echo "ERROR: stage2_with_specs requires libcuda.so.1 but it is not available."
+      echo "Install a CUDA driver or cuda-compat package before running workload replay."
+      exit 1
+    fi
+    if [ $# -lt 1 ]; then
+      echo "ERROR: stage2_with_specs requires a YAML path."
+      echo "Example: $0 stage2_with_specs gemm_specs/model_c.yaml --iterations 3 --delay-mode spin"
+      exit 1
+    fi
+    YAML_PATH="$1"
+    shift
+    if [[ "${YAML_PATH}" != /* ]] && [ -f "${SCRIPT_DIR}/${YAML_PATH}" ]; then
+      YAML_PATH="${SCRIPT_DIR}/${YAML_PATH}"
+    fi
+    exec python "${SCRIPT_DIR}/stage2_benchmark_with_specs.py" "${YAML_PATH}" "$@"
+    ;;
   *)
-    echo "Usage: $0 <stage1|stage2> [benchmark args...]"
+    echo "Usage: $0 <stage1|stage2|stage2_with_specs> [benchmark args...]"
     echo ""
-    echo "  stage1  -- TorchDispatchMode interception (any machine, no CUDA needed)"
-    echo "  stage2  -- mock_cuda driver patching (requires CUDA drivers)"
+    echo "  stage1             -- Standalone GEMM interception via TorchDispatchMode"
+    echo "  stage2             -- Standalone GEMM dispatch via mock_cuda"
+    echo "  stage2_with_specs  -- Replay a YAML GEMM workload via mock_cuda"
     echo ""
-    echo "Common args:"
-    echo "  -m M -n N -k K    Matrix dimensions (default: 1024)"
-    echo "  -t DTYPE           float32, float16, bfloat16 (default: bfloat16)"
-    echo "  --steps N          Timed iterations (default: 100)"
-    echo "  --warmups N        Warmup iterations (default: 10)"
-    echo "  --no-sleep         Disable simulated GPU delay"
-    echo "  --gpu-model MODEL  gb200, gb300, h100 (default: gb200)"
+    echo "Standalone GEMM args:"
+    echo "  --op OP                mm, addmm, bmm, linear (default: mm)"
+    echo "  -m M -n N -k K         GEMM dimensions (default: 1024)"
+    echo "  --batch-size B         Batch size for bmm / leading dim shorthand for linear"
+    echo "  --addmm-bias-shape S   addmm bias/input shape"
+    echo "  --linear-prefix-shape S"
+    echo "  --linear-no-bias"
+    echo ""
+    echo "Shared args:"
+    echo "  -t DTYPE               float32, float16, bfloat16 (default: bfloat16)"
+    echo "  --steps N              Timed iterations (default: 100)"
+    echo "  --warmups N            Warmup iterations (default: 10)"
+    echo "  --gpu-model MODEL      gb200, gb300, h100 (default: gb200)"
+    echo "  --efficiency FRAC      GPU efficiency factor (default: 0.5)"
+    echo "  --no-sleep             Disable simulated GPU delay"
+    echo "  --delay-mode MODE      nop or spin"
+    echo ""
+    echo "Workload replay args:"
+    echo "  stage2_with_specs YAML_PATH [--iterations N] [--warmup-iterations N]"
+    echo "  [--top-n N] [--min-weight FRAC] [--breakdown N]"
     exit 1
     ;;
 esac
@@ -416,7 +468,7 @@ LAUNCHER_EOF
 
 main() {
   echo "################################################################################"
-  echo "# pytorch_gemm_gpuless Installation"
+  echo "# pytorch_gemm_dispatch Installation"
   echo "# $(date)"
   echo "################################################################################"
 
@@ -433,7 +485,9 @@ main() {
   setup_miniconda
   setup_conda_environment
   install_pytorch
+  install_python_dependencies
   copy_sources
+  copy_gemm_specs
   build_extensions
   create_launcher
 
@@ -441,14 +495,15 @@ main() {
   echo "# Installation Complete"
   echo "#"
   if $HAS_CUDA_DRIVER; then
-    echo "# CUDA drivers detected — both stage1 and stage2 available."
+    echo "# CUDA drivers detected — stage1, stage2, and stage2_with_specs available."
     echo "#"
-    echo "# Run: ./benchmarks/ai_wdl/pytorch_gemm_gpuless/run.sh stage1 --no-sleep --steps 1000000"
-    echo "# Run: ./benchmarks/ai_wdl/pytorch_gemm_gpuless/run.sh stage2 --no-sleep --steps 1000000"
+    echo "# Run: ./benchmarks/ai_wdl/pytorch_gemm_dispatch/run.sh stage1 --no-sleep --steps 1000000"
+    echo "# Run: ./benchmarks/ai_wdl/pytorch_gemm_dispatch/run.sh stage2 --no-sleep --steps 1000000"
+    echo "# Run: ./benchmarks/ai_wdl/pytorch_gemm_dispatch/run.sh stage2_with_specs gemm_specs/model_c.yaml --iterations 3 --delay-mode spin"
   else
     echo "# CPU-only mode — stage1 available, stage2 requires CUDA drivers."
     echo "#"
-    echo "# Run: ./benchmarks/ai_wdl/pytorch_gemm_gpuless/run.sh stage1 --no-sleep --steps 1000000"
+    echo "# Run: ./benchmarks/ai_wdl/pytorch_gemm_dispatch/run.sh stage1 --no-sleep --steps 1000000"
   fi
   echo "#"
   echo "# $(date)"
