@@ -29,6 +29,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <stdint.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdarg>
 #include <cstddef>
@@ -445,9 +446,59 @@ thread_local std::atomic<bool> mockCudaEnabled = false;
 // (GPU-less machine with only cuda-compat stub).
 std::atomic<bool> realDriverOK{false};
 
-// When mocking driver version queries, advertise at least CUDA 13.0 so
-// PyTorch's driver/runtime compatibility gate accepts the current build.
-constexpr int MIN_MOCK_DRIVER_VERSION = 13000;
+// If libcudart is already loaded, match or exceed its runtime version so
+// PyTorch's driver/runtime compatibility gate sees a compatible driver.
+// This avoids hard-coding a single CUDA 13.x floor while still giving us
+// a reasonable fallback when cudart isn't present yet.
+constexpr int FALLBACK_MOCK_DRIVER_VERSION = 13000;
+
+int queryCudaRuntimeVersion(void* handle) {
+  if (!handle) {
+    return 0;
+  }
+  using CudaRuntimeGetVersion = int (*)(int*);
+  auto runtimeVersionFn = reinterpret_cast<CudaRuntimeGetVersion>(
+      dlsym(handle, "cudaRuntimeGetVersion"));
+  if (!runtimeVersionFn) {
+    return 0;
+  }
+
+  int runtimeVersion = 0;
+  if (runtimeVersionFn(&runtimeVersion) != 0 || runtimeVersion <= 0) {
+    return 0;
+  }
+
+  return runtimeVersion;
+}
+
+int getRequiredDriverVersionFloor() {
+  int runtimeVersion = queryCudaRuntimeVersion(RTLD_DEFAULT);
+  if (runtimeVersion > 0) {
+    return std::max(runtimeVersion, FALLBACK_MOCK_DRIVER_VERSION);
+  }
+
+  constexpr const char* kCudaRuntimeLibs[] = {
+      "libcudart.so",
+      "libcudart.so.13",
+      "libcudart.so.13.0",
+      "libcudart.so.12",
+      "libcudart.so.12.0",
+  };
+
+  for (const char* libName : kCudaRuntimeLibs) {
+    void* handle = dlopen(libName, RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+      continue;
+    }
+    runtimeVersion = queryCudaRuntimeVersion(handle);
+    dlclose(handle);
+    if (runtimeVersion > 0) {
+      return std::max(runtimeVersion, FALLBACK_MOCK_DRIVER_VERSION);
+    }
+  }
+
+  return FALLBACK_MOCK_DRIVER_VERSION;
+}
 
 // GPU-less init mocks: return success with fake device info
 template <int N>
@@ -462,9 +513,10 @@ CUresult p_cuInit(unsigned int flags) {
     }
     return r;
   }
-  if (realDriverOK.load() && real_fn) {
+  if (real_fn) {
     auto r = real_fn(flags);
     if (r == 0) {
+      realDriverOK.store(true);
       return 0;
     }
   }
@@ -475,17 +527,17 @@ template <int N>
 CUresult p_cuDriverGetVersion(int* version) {
   RETURN_REAL_IF_UNMOCKED(cuDriverGetVersion, version);
   logMockCuda("[mock_cuda] cuDriverGetVersion called\n");
+  const int minVersion = getRequiredDriverVersionFloor();
   if (real_cuDriverGetVersion[N]) {
     int realVersion = 0;
     auto r = ((decltype(&p_cuDriverGetVersion<N>))real_cuDriverGetVersion[N])(
         &realVersion);
     if (r == 0) {
-      *version = realVersion < MIN_MOCK_DRIVER_VERSION ? MIN_MOCK_DRIVER_VERSION
-                                                       : realVersion;
+      *version = std::max(realVersion, minVersion);
       return 0;
     }
   }
-  *version = MIN_MOCK_DRIVER_VERSION;
+  *version = minVersion;
   return 0;
 }
 
@@ -1413,7 +1465,7 @@ CUresult p_cuGetExportTable(
       b[15],
       realDriverOK.load() ? 1 : 0);
   // Try real driver first — if it succeeds, use real tables.
-  if (realDriverOK.load() && real_cuGetExportTable[N]) {
+  if (real_cuGetExportTable[N]) {
     auto r = ((decltype(&p_cuGetExportTable<N>))real_cuGetExportTable[N])(
         ppExportTable, pExportTableId);
     logMockCuda("[mock_cuda]   real cuGetExportTable returned %d\n", r);

@@ -24,14 +24,17 @@ from typing import Generator, Optional
 import _mock_cuda_C as _C
 import torch
 
-# Patch at import time — installs our mock functions into
-# libcuda.so.1's function table. The mocks are disabled by default
-# (they forward to the real functions). Call enable_mock_cuda() to
-# activate the no-op behavior.
-_C.patch_mock_cuda()
-
 _mock_cuda_stream: Optional[torch.cuda.Stream] = None
+_mock_cuda_patched = False
 MOCK_CUDA_VERBOSE_ENV_VAR = "PYTORCH_GEMM_DISPATCH_MOCK_CUDA_VERBOSE"
+
+
+def _ensure_mock_cuda_patched() -> None:
+    global _mock_cuda_patched
+    if _mock_cuda_patched:
+        return
+    _C.patch_mock_cuda()
+    _mock_cuda_patched = True
 
 
 def _has_real_gpu() -> bool:
@@ -63,6 +66,7 @@ def _init_cuda_with_mock() -> None:
     Do NOT call torch.cuda.is_available() first — it triggers the same
     version check and caches the failure.
     """
+    _ensure_mock_cuda_patched()
     _C.enable_mock_cuda()
     try:
         torch.cuda.init()
@@ -95,6 +99,8 @@ def mock_cuda_guard() -> Generator[None, None, None]:
             "Use Stage 1 for CPU-only machines."
         )
 
+    _ensure_mock_cuda_patched()
+
     # Initialize CUDA (handles driver version mismatch via mock).
     _init_cuda_with_mock()
 
@@ -114,6 +120,7 @@ def mock_cuda_guard() -> Generator[None, None, None]:
 
 def mock_cuda() -> None:
     """Enable CUDA mocking (thread-local)."""
+    _ensure_mock_cuda_patched()
     _C.enable_mock_cuda()
 
 
