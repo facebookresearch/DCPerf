@@ -224,10 +224,12 @@ if [ "$VERSION_ID" -ge 10 ]; then
     sed -i '/UseBiasedLocking/d' "${CASSANDRA_ROOT}/conf/jvm.options"
     sed -i '/UseCondCardMark/d' "${CASSANDRA_ROOT}/conf/jvm.options"
     sed -i '/ParGCCardsPerStrideChunk/d' "${CASSANDRA_ROOT}/conf/jvm.options"
+fi
 
-    # Allow deprecated Security Manager for Cassandra on Java 21+
+# Allow deprecated Security Manager for Cassandra on Java 17+
+JAVA_MAJOR_VERSION=$(java -version 2>&1 | head -1 | sed 's/.*"\([0-9]\+\).*/\1/')
+if [ "$JAVA_MAJOR_VERSION" -ge 17 ] 2>/dev/null; then
     echo '-Djava.security.manager=allow' >> "${CASSANDRA_ROOT}/conf/jvm.options"
-    # Cassandra 5.x uses jvm-server.options
     if [ -f "${CASSANDRA_ROOT}/conf/jvm-server.options" ]; then
         echo '-Djava.security.manager=allow' >> "${CASSANDRA_ROOT}/conf/jvm-server.options"
     fi
@@ -268,6 +270,11 @@ pushd "${DJANGO_SERVER_ROOT}"
 
 # Install python3.14
 if ! [ -d Python-3.14.2 ]; then
+    dnf reinstall -y zlib-devel || dnf install -y zlib-ng-compat-devel || dnf install -y zlib-devel
+    dnf install -y libzstd-devel
+    if [ ! -e /usr/lib64/libz.so ] && [ -e /usr/lib64/libz.so.1 ]; then
+        ln -sf /usr/lib64/libz.so.1 /usr/lib64/libz.so
+    fi
     wget https://www.python.org/ftp/python/3.14.2/Python-3.14.2.tgz
     tar -xzf Python-3.14.2.tgz
     cd Python-3.14.2
@@ -302,6 +309,10 @@ echo "====================================================================="
 # Using meta/3.14 branch — includes gh-145615 mimalloc page leak fix
 CINDER_COMMIT="7627b90844073b94ef60415ed1f1248837bedef7"
 if ! [ -d "cinder" ]; then
+    dnf reinstall -y zlib-devel || dnf install -y zlib-ng-compat-devel || dnf install -y zlib-devel
+    if [ ! -e /usr/lib64/libz.so ] && [ -e /usr/lib64/libz.so.1 ]; then
+        ln -sf /usr/lib64/libz.so.1 /usr/lib64/libz.so
+    fi
     git clone https://github.com/facebookincubator/cinder.git
     pushd cinder
     git checkout "${CINDER_COMMIT}"
@@ -492,6 +503,10 @@ fi
 
 # Install CinderX in Cinder virtual environment (already activated)
 cd "${DJANGO_SERVER_ROOT}/cinderx"
+dnf reinstall -y zlib-devel || dnf install -y zlib-ng-compat-devel || dnf install -y zlib-devel
+if [ ! -e /usr/lib64/libz.so ] && [ -e /usr/lib64/libz.so.1 ]; then
+    ln -sf /usr/lib64/libz.so.1 /usr/lib64/libz.so
+fi
 # Python 3.12+ venvs no longer include setuptools by default.
 # CinderX uses setuptools.build_meta as its build backend, so we must
 # install it explicitly before --no-build-isolation.
