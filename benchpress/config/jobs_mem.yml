@@ -137,3 +137,46 @@
     # auto-detected CCX (sysfs L3 domain), "--mem-nodes 0,1" for DRAM+CXL, or
     # "--no-cgroup" to disable scopes/limits (taskset-only).
     - "extra_args="
+
+- benchmark: liblinear_multi
+  name: liblinear_multi
+  description: >
+    Multi-instance liblinear (multicore). Launches {num_instances} core-pinned
+    `train -m {threads_per_instance}` instances, each in a systemd-run cgroup
+    scope with per-instance memory.low/high/max limits, on a PRE-BUILT LIBSVM
+    dataset (build with packages/liblinear/generate_dataset.sh). Aggregates
+    per-instance train time (mean/min/max). Capacity/perf workload: model is
+    written to /dev/null, no predict step.
+  args:
+    - '-n {num_instances}'
+    - '-f {dataset}'
+    - '--solver {solver}'
+    - '--cost {cost}'
+    - '--bias {bias}'
+    - '--core-start {core_start}'
+    - '-c {cores_per_instance}'
+    - '--core-stride {core_stride}'
+    - '-T {threads_per_instance}'
+    - '--mem-low {mem_low}'
+    - '--mem-high {mem_high}'
+    - '--mem-max {mem_max}'
+    - '{extra_args}'
+  vars:
+    - "num_instances=4"
+    # Pre-built dataset basename under ./packages/liblinear/datasets (or an
+    # absolute .svm path). This default matches generate_dataset.sh defaults
+    # (--target-gib 190 -k 200 -n 2000000 --mode varied); build it first.
+    - "dataset=synth_varied_k200_n2000000_l63092187.svm"
+    - "solver=6"          # -s 6 = L1R_LR (transposes data ~2x resident)
+    - "cost=1"
+    - "bias=-1"           # -B only applied when >= 0
+    - "core_start=0"
+    - "cores_per_instance=32"
+    - "core_stride=32"
+    - "threads_per_instance=16"
+    - "mem_low=390G"
+    - "mem_high=395G"
+    - "mem_max=400G"
+    # extra_args is passed verbatim, e.g. "--eps 0.01", "--ccx",
+    # "--mem-nodes 0,1" (DRAM+CXL), or "--no-cgroup" (taskset-only, no limits).
+    - "extra_args="

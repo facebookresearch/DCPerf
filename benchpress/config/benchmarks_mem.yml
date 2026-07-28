@@ -140,3 +140,20 @@ gapbs_multi:
       - mem
   metrics:
     - average_time
+
+liblinear_multi:
+  parser: liblinear
+  install_script: ./packages/liblinear/install_liblinear.sh
+  cleanup_script: ./packages/liblinear/cleanup_liblinear.sh
+  install_markers:
+    - ./packages/liblinear/bin/train
+    - ./packages/liblinear/run-liblinear-multi.sh
+  path: ./packages/liblinear/run-liblinear-multi.sh
+  tags:
+    scope:
+      - kernel
+    component:
+      - cpu
+      - mem
+  metrics:
+    - train_time_sec
