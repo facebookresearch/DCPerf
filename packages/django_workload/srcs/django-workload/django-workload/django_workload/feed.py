@@ -8,6 +8,8 @@
 # that are used from a synchronous endpoint.
 import asyncio
 
+import later
+
 from .models import FeedEntryModel, UserModel
 from .users import suggested_users
 
@@ -22,7 +24,7 @@ def wait_for(coro):
     """
     try:
         # Try to get the running event loop
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
         # We're inside an async context already, which shouldn't happen
         # if this is called from a sync function. But if it does happen,
         # we can't use run_until_complete (would cause "This event is already running" error)
@@ -35,21 +37,8 @@ def wait_for(coro):
         # No running event loop - we can safely create one or use an existing one
         pass
 
-    # Try to get or create an event loop for this thread
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            # Event loop is closed, create a new one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-    except RuntimeError:
-        # No event loop exists for this thread (common in ThreadPoolExecutor)
-        # Create a new event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
     # Run the coroutine to completion
-    return loop.run_until_complete(coro)
+    return later.run_nested(coro)
 
 
 class Context(object):
