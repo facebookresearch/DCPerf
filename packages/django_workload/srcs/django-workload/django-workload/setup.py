@@ -23,6 +23,7 @@ setup(
     install_requires=[
         "django-cassandra-engine",
         "django-statsd-mozilla",
+        "later",
         "psutil",
         "pylibmc",
         "statsd >= 3.0",
