@@ -35,5 +35,5 @@ install_feedsim () {
 
   echo "[INSTALL] Installing FeedSim ..."
   (print_exec conda run --no-capture-output ${env_prefix} \
-    python ./benchpress_cli.py install feedsim_autoscale) || return 1
+    python ./benchpress_cli.py install feedsim_dlrm) || return 1
 }
