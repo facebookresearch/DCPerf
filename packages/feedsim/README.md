@@ -19,8 +19,10 @@ to ensure representative in compressibility. Because we replaced the fixed 200ms
 sleep with hundreds of concurrent real RPC communication to the `mock_services`
 module, the tail latency SLA is increased from 500ms to 700ms accordingly.
 
-For the legacy PageRank-based v1 job (`feedsim_autoscale`, 500 ms SLA), see
-[README_v1.md](README_v1.md).
+Because of the fundamental change in software architecture and threading model,
+the legacy PageRank-based v1 job will not be supported here. If you would like to
+run it, please check out the [main branch](https://github.com/facebookresearch/DCPerf/tree/main/packages/feedsim)
+for Github users or the `v1` folder under the DCPerf root for internal users.
 
 For the software architecture and request control/data flow of v2, see
 [ARCHITECTURE_v2.md](ARCHITECTURE_v2.md).
@@ -281,5 +283,8 @@ For the full list of runner flags, see
 
 ## Legacy — `feedsim_autoscale` (v1)
 
-The v1 PageRank-based job and its 500ms SLA are documented in
-[README_v1.md](README_v1.md).
+Again, due to the fundamental change in software architecture and threading model,
+the legacy PageRank-based v1 job has become inaccurate and will not be supported here. If you would like to
+run it, please check out the [main branch](https://github.com/facebookresearch/DCPerf/tree/main/packages/feedsim)
+for Github users or the `v1` folder under the DCPerf root for internal users.
+
