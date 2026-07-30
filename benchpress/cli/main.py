@@ -232,7 +232,13 @@ def setup_parser():
         "Can also be set via BENCHPRESS_ARTIFACTS_DIR env var.",
     )
     parser.add_argument("--verbose", "-v", action="count", default=0)
-    parser.add_argument("--version", action="version", version=f"{PROJECT} {VERSION}")
+    version_str = f"{PROJECT} {VERSION}"
+    # When invoked from the v1 folder the harness ships the frozen v1.0
+    # benchmark packages, so flag that explicitly in --version output.
+    cwd = os.getcwd()
+    if "/v1/" in cwd or cwd.endswith("/v1"):
+        version_str += " (v1.0 benchmark packages)"
+    parser.add_argument("--version", action="version", version=version_str)
 
     return parser
 
