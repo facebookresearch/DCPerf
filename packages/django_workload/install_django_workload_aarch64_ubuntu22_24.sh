@@ -434,6 +434,10 @@ echo "uwsgi installed in CPython venv"
 pip3.14 install django-cassandra-engine
 echo "django-cassandra-engine installed in CPython venv"
 
+# Install later (asyncio helpers) directly from PyPI; required by django-workload feed.py
+pip3.14 install later==26.6.1
+echo "later installed in CPython venv"
+
 # Install dependencies using third_party pip dependencies
 cd "${DJANGO_SERVER_ROOT}"
 pip3.14 install "django-statsd-mozilla" --no-index --find-links file://"${DJANGO_WORKLOAD_DEPS}"
@@ -483,6 +487,10 @@ echo "uwsgi installed in Cinder venv"
 # Install django-cassandra-engine directly from PyPI to avoid poetry build issues
 pip3.14 install django-cassandra-engine
 echo "django-cassandra-engine installed in Cinder venv"
+
+# Install later (asyncio helpers) directly from PyPI; required by django-workload feed.py
+pip3.14 install later==26.6.1
+echo "later installed in Cinder venv"
 
 # Install dependencies using third_party pip dependencies
 cd "${DJANGO_SERVER_ROOT}"
