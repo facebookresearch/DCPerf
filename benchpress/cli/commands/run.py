@@ -197,8 +197,12 @@ class RunCommand(BenchpressCommand):
         Returns:
             dict: A dictionary containing version information with the following fields:
                 - source: "fbpkg", "git", "fixed", or "none"
-                - version: version ID
-                - uuid: full UUID representing the version
+                - version: the DCPerf release version (``VERSION``, e.g.
+                  "v2.0-rc1") -- a stable, human-meaningful identifier rather
+                  than an fbpkg uuid or git sha. Still "v1" for the v1 suite.
+                - fbpkg_version: the fbpkg build version, only set when the
+                  harness runs from an fbpkg (source == "fbpkg"); "" otherwise
+                - uuid: full UUID representing the build (fbpkg uuid or git sha)
                 - suite: the benchmark suite selected via -b (e.g. "v1"), or
                   "default" when no suite override was given
                 - dcperf_line: human-readable DCPerf line -- "v1" for the v1
@@ -211,7 +215,8 @@ class RunCommand(BenchpressCommand):
         dcperf_line = "v1" if benchmarks_arg == "v1" else "v2-beta"
         version_info = {
             "source": "none",
-            "version": "",
+            "version": VERSION,
+            "fbpkg_version": "",
             "uuid": "",
             "suite": suite,
             "dcperf_line": dcperf_line,
@@ -232,7 +237,7 @@ class RunCommand(BenchpressCommand):
                     metadata = json.load(f)
                     if "version" in metadata and "uuid" in metadata:
                         version_info["source"] = "fbpkg"
-                        version_info["version"] = metadata["version"]
+                        version_info["fbpkg_version"] = metadata["version"]
                         version_info["uuid"] = metadata["uuid"]
                         # Add vcs_info if available
                         if "build" in metadata and "vcs_info" in metadata["build"]:
@@ -248,7 +253,6 @@ class RunCommand(BenchpressCommand):
             ).strip()
             if git_hash:
                 version_info["source"] = "git"
-                version_info["version"] = git_hash[:8]  # First 8 chars
                 version_info["uuid"] = git_hash
                 return version_info
         except (subprocess.SubprocessError, FileNotFoundError):
@@ -326,7 +330,9 @@ class RunCommand(BenchpressCommand):
                 VERSION,
                 version_info.get("suite", "default"),
                 version_info.get("dcperf_line", ""),
-                version_info.get("version", "") or "unknown",
+                version_info.get("fbpkg_version", "")
+                or version_info.get("version", "")
+                or "unknown",
                 version_info.get("source", "none"),
                 (version_info.get("uuid", "") or "")[:12],
             ),
