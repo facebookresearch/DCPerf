@@ -156,6 +156,8 @@ sed -i 's/django-cassandra-engine/django-cassandra-engine >= 1.5, < 1.6/' setup.
 # Install dependencies using third_party pip dependencies from manifold
 pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
+# Install later (asyncio helpers) directly from PyPI; required by django-workload feed.py
+pip install later==26.6.1
 pip install --no-build-isolation -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 
 # No need to copy template files as they are already in the srcs directory
@@ -174,6 +176,8 @@ pip install setuptools wheel
 # Install dependencies using third_party pip dependencies from manifold
 pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
+# Install later (asyncio helpers) directly from PyPI; required by django-workload feed.py
+pip install later==26.6.1
 pip install --no-build-isolation -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
 
 popd  # ${OUT}/django-workload/django-workload
