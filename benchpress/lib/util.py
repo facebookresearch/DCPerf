@@ -78,6 +78,35 @@ def resolve_script_path(script_path: str) -> str:
     return os.path.join(BENCHPRESS_ROOT, script_path)
 
 
+# Name of the marker file that pins an install to a fixed benchmark version.
+VERSION_MARKER_FILE = "VERSION"
+
+
+def get_fixed_benchmark_version() -> typing.Optional[str]:
+    """Return the fixed benchmark-version label pinned by a colocated marker.
+
+    The DCPerf fbpkg lays down a ``v1/`` folder holding the frozen v1.0
+    benchmark packages alongside a ``benchpress`` CLI symlink. A ``VERSION``
+    file sitting next to that CLI (i.e. directly under ``BENCHPRESS_ROOT``)
+    marks the install as shipping a fixed benchmark package set, with the
+    release label (e.g. ``"v1"``) as its contents.
+
+    Anchoring to ``BENCHPRESS_ROOT`` -- the directory of the CLI executable
+    itself -- rather than the current working directory avoids false positives
+    for unrelated paths that merely contain a ``v1`` component (e.g. running the
+    harness from ``/home/user/projects/v1/tmp``).
+
+    Returns the marker's stripped contents, or ``None`` when the marker is
+    absent or empty.
+    """
+    marker_path = os.path.join(BENCHPRESS_ROOT, VERSION_MARKER_FILE)
+    try:
+        with open(marker_path, "r") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 

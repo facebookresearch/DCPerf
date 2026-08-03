@@ -25,7 +25,12 @@ from benchpress.lib.job import Job, JobSuiteBuilder
 from benchpress.lib.job_listing import create_job_listing
 from benchpress.lib.reporter import JSONFileReporter, ScoreReporter, StdoutReporter
 from benchpress.lib.reporter_factory import ReporterFactory
-from benchpress.lib.util import generate_run_id, generate_timestamp, set_artifacts_dir
+from benchpress.lib.util import (
+    generate_run_id,
+    generate_timestamp,
+    get_fixed_benchmark_version,
+    set_artifacts_dir,
+)
 from benchpress.plugins.hooks import user_script
 
 from .commands.clean import CleanCommand
@@ -233,11 +238,12 @@ def setup_parser():
     )
     parser.add_argument("--verbose", "-v", action="count", default=0)
     version_str = f"{PROJECT} {VERSION}"
-    # When invoked from the v1 folder the harness ships the frozen v1.0
-    # benchmark packages, so flag that explicitly in --version output.
-    cwd = os.getcwd()
-    if "/v1/" in cwd or cwd.endswith("/v1"):
-        version_str += " (v1.0 benchmark packages)"
+    # A `VERSION` marker file colocated with the CLI (e.g. the fbpkg's v1/
+    # folder) pins the harness to a frozen benchmark package set; flag that
+    # explicitly in --version output.
+    fixed_version = get_fixed_benchmark_version()
+    if fixed_version:
+        version_str += f" ({fixed_version}.0 benchmark packages)"
     parser.add_argument("--version", action="version", version=version_str)
 
     return parser

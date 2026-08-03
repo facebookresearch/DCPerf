@@ -27,7 +27,12 @@ try:
     from benchpress import PROJECT, VERSION  # @manual
 except ImportError:
     from benchpress.version import __PROJECT__ as PROJECT, __VERSION__ as VERSION
-from benchpress.lib.util import BENCHPRESS_ROOT, get_artifacts_dir, verify_install
+from benchpress.lib.util import (
+    BENCHPRESS_ROOT,
+    get_artifacts_dir,
+    get_fixed_benchmark_version,
+    verify_install,
+)
 
 try:
     from diagnosis_utils import DiagnosisRecorder  # pyre-ignore[21]
@@ -258,11 +263,12 @@ class RunCommand(BenchpressCommand):
         except (subprocess.SubprocessError, FileNotFoundError):
             pass
 
-        # Check if current directory is under v1 folder
-        cwd = os.getcwd()
-        if "/v1/" in cwd or cwd.endswith("/v1"):
+        # A `VERSION` marker file colocated with the CLI (e.g. the fbpkg's v1/
+        # folder) pins this install to a fixed benchmark version.
+        fixed_version = get_fixed_benchmark_version()
+        if fixed_version:
             version_info["source"] = "fixed"
-            version_info["version"] = "v1"
+            version_info["version"] = fixed_version
             return version_info
 
         return version_info
