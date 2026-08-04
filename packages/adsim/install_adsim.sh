@@ -51,8 +51,15 @@ setup_directories() {
   # Create final benchmark output directory
   mkdir -p ${BENCHMARKS_DIR}
 
-  # Clean and recreate temporary build directory
-  rm -rf ${BUILD_DIR}
+  # Clean and recreate temporary build directory.
+  # SKIP_CLEAN=1 preserves an existing build dir so that deps/ and staging/ can
+  # be reused across iterations; otherwise every install rebuilds the whole
+  # dependency stack from scratch.
+  if [ "${SKIP_CLEAN}" = "1" ]; then
+    echo "[SETUP] SKIP_CLEAN=1 - preserving existing ${BUILD_DIR}"
+  else
+    rm -rf ${BUILD_DIR}
+  fi
   mkdir -p ${BUILD_DIR}
 
   # Enter build directory for subsequent operations
