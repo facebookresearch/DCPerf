@@ -15,7 +15,7 @@ install_packages() {
         # Note: fast_float and boost are built from source since system packages are too old
         # On CentOS Stream 10+, gcc-toolset-14 doesn't exist (GCC 14 is default);
         # use libatomic-devel directly. On older systems, try gcc-toolset-14-libatomic-devel.
-        sudo dnf install -y clang jemalloc-devel xxhash-devel bzip2-devel libomp-devel gengetopt python3-devel gtest-devel \
+        sudo dnf install -y cmake bison flex openssl-devel numactl-devel clang jemalloc-devel xxhash-devel bzip2-devel libomp-devel gengetopt python3-devel gtest-devel \
             double-conversion double-conversion-devel libsodium-devel \
             gflags-devel glog-devel libunwind-devel libevent-devel lz4-devel libzstd-devel snappy-devel xz-devel binutils-devel
         # Install libatomic — try gcc-toolset first (RHEL 9), fall back to base package (CentOS Stream 10+)
@@ -24,7 +24,7 @@ install_packages() {
         # Ubuntu/Debian systems - map package names to Ubuntu equivalents
         # Note: fast_float and boost are built from source since system packages are too old
         sudo apt-get update
-        sudo apt-get install -y clang libjemalloc-dev libxxhash-dev libbz2-dev libomp-dev gengetopt libatomic1 python3-dev libgtest-dev \
+        sudo apt-get install -y cmake bison flex libssl-dev libnuma-dev clang libjemalloc-dev libxxhash-dev libbz2-dev libomp-dev gengetopt libatomic1 python3-dev libgtest-dev \
             libdouble-conversion-dev libsodium-dev \
             libgflags-dev libgoogle-glog-dev libunwind-dev libevent-dev liblz4-dev libzstd-dev libsnappy-dev liblzma-dev libiberty-dev
     else
