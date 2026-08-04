@@ -54,12 +54,12 @@ export CXX="${ADSIM_CXX_COMPILER}"
 # Pin Facebook library versions for reproducible builds
 # Note: Facebook OSS libraries (folly, fizz, wangle, mvfst, fbthrift, fb303) are released
 # together with matching version tags to ensure compatibility
-FOLLY_VERSION=v2025.06.23.00
-FIZZ_VERSION=v2025.06.23.00
-WANGLE_VERSION=v2025.06.23.00
-MVFST_VERSION=v2025.06.23.00
-FBTHRIFT_VERSION=v2025.06.23.00
-FB303_VERSION=v2025.06.23.00
+FOLLY_VERSION=v2026.08.03.00
+FIZZ_VERSION=v2026.08.03.00
+WANGLE_VERSION=v2026.08.03.00
+MVFST_VERSION=v2026.08.03.00
+FBTHRIFT_VERSION=v2026.08.03.00
+FB303_VERSION=v2026.08.03.00
 
 # fast_float v8.0.0+ is required for folly's allow_leading_plus feature
 FAST_FLOAT_VERSION=v8.0.0
