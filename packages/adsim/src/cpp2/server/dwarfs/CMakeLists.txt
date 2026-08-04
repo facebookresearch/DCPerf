@@ -48,14 +48,14 @@ add_dependencies(gemm fbgemm)
 add_library(embedding Embedding.cc Embedding.h)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
-    target_compile_options(gemm PRIVATE
+    target_compile_options(embedding PRIVATE
         ${COROUTINES_FLAG}
         -m64
         -mavx2
         -mfma
         -masm=intel)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-    target_compile_options(gemm PRIVATE
+    target_compile_options(embedding PRIVATE
         ${COROUTINES_FLAG}
         -march=armv8.5-a+sve2
         -mcpu=native)
