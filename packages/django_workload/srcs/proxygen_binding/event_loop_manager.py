@@ -360,26 +360,6 @@ def initialize_thread_event_loop() -> asyncio.AbstractEventLoop:
     return manager.get_or_create_loop()
 
 
-def get_current_loop() -> asyncio.AbstractEventLoop:
-    """
-    Get event loop for current thread.
-
-    Raises:
-        RuntimeError: If event loop hasn't been initialized for this thread
-
-    Returns:
-        Event loop for this thread
-    """
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            raise RuntimeError("Event loop is closed")
-        return loop
-    except RuntimeError:
-        # No loop exists, create one
-        return initialize_thread_event_loop()
-
-
 def cleanup_thread_event_loop() -> None:
     """
     Clean up event loop for current thread.
