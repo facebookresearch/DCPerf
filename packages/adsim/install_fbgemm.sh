@@ -809,7 +809,7 @@ setup_directories() {
   # Change the current directory to the build directory
   # pushd saves the current directory on a stack so we can return to it later with popd
   echo "[SETUP] Changing to build directory..."
-  pushd ${FBGEMM_STAGING_DIR} || exist
+  pushd ${FBGEMM_STAGING_DIR} || exit 1
 
   echo "[SETUP] Directory setup complete."
 }
@@ -906,7 +906,7 @@ clone_fbgemm_repo() {
   echo "#!/bin/bash" > fbgemm/.github/scripts/fbgemm_gpu_postbuild.bash
 
   # Change the current directory to the FBGEMM GPU directory
-  pushd fbgemm/fbgemm_gpu || exist
+  pushd fbgemm/fbgemm_gpu || exit 1
 
   echo "[SETUP] FBGEMM repository setup complete."
 }
@@ -962,13 +962,13 @@ install_fbgemm() {
   echo "[BUILD] Building and installing FBGEMM..."
   # shellcheck disable=SC2086
   # print_exec conda run -n $BUILD_ENV python setup.py ${run_multicore} install --package_variant=cpu
-  popd || exist
-  pushd fbgemm || exist
+  popd || exit 1
+  pushd fbgemm || exit 1
   mkdir build
   cp ${ADSIM_PROJ_ROOT}/buildfiles/fbgemm/cmake.txt build
-  pushd build || exist
+  pushd build || exit 1
   source cmake.txt
-  popd || exist
+  popd || exit 1
 
   # Test if the FBGEMM library can be imported in the Conda environment
   # Generate a standalone executable for the project
@@ -1006,7 +1006,7 @@ cleanup() {
 
   # This restores the directory we were in before entering the build directory
   echo "[CLEANUP] Returning to original directory..."
-  popd || exist
+  popd || exit 1
 
   # Remove the build directory to clean up after the build process
   # This saves disk space by removing intermediate build files
