@@ -51,7 +51,11 @@ add_custom_command(
            ${GEN_DIR}/mock_services/MockAdsService.py
            ${GEN_DIR}/mock_services/__init__.py
     COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}
-    COMMAND ${THRIFT_COMPILER} --gen py -out ${GEN_DIR} ${THRIFT_SOURCE}
+    COMMAND ${THRIFT_COMPILER}
+            -I ${FBTHRIFT_PREFIX}/include
+            --gen py
+            -out ${GEN_DIR}
+            ${THRIFT_SOURCE}
     DEPENDS ${THRIFT_SOURCE}
     COMMENT "Generating Python Thrift bindings (OSS-compatible, pure Python, no async deps)"
     VERBATIM

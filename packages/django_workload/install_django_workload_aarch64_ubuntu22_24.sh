@@ -562,7 +562,7 @@ echo "Step 7: Building and Installing Proxygen"
 echo "====================================================================="
 
 # Clone Proxygen if not already present
-PROXYGEN_VERSION="v2025.10.13.00"
+PROXYGEN_VERSION="v2026.01.05.00"
 if [ ! -d "${DJANGO_WORKLOAD_ROOT}/proxygen" ]; then
     echo "Cloning Proxygen from GitHub..."
     cd "${DJANGO_WORKLOAD_ROOT}"
@@ -596,7 +596,7 @@ echo "====================================================================="
 echo "Step 7.5: Building and Installing fbthrift"
 echo "====================================================================="
 
-FBTHRIFT_VERSION="v2025.09.22.00"
+FBTHRIFT_VERSION="v2026.01.05.00"
 FBTHRIFT_PREFIX="${DJANGO_WORKLOAD_ROOT}/proxygen/proxygen/_build/deps"
 
 # Clone fbthrift if not already present
