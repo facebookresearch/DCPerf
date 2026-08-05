@@ -99,7 +99,7 @@ function parse_opts()
 }
 
 function log() {
-  if [ true == $VERBOSE_LOGGING ]; then
+  if [ "true" = "$VERBOSE_LOGGING" ]; then
     echo "$1"
   fi
 }
@@ -119,7 +119,7 @@ function measure_latency()
     log "QPS is 0, returning large latency value to avoid blocking"
     LATENCY=999999999
     ACHIEVED_QPS=0
-    if [ true == $CSV_LOGGING ]; then
+    if [ "true" = "$CSV_LOGGING" ]; then
       requested_qps="$1"
       sequence="$2"
       runtime="$3"
@@ -161,7 +161,7 @@ function measure_latency()
   ACHIEVED_QPS=$(cat "$THROUGHPUT_LOG")
   log "Latency $TGT_QUANTILE = $LATENCY; Achieved QPS = $ACHIEVED_QPS"
 
-  if [ true == $CSV_LOGGING ]; then
+  if [ "true" = "$CSV_LOGGING" ]; then
     requested_qps="$1"
     sequence="$2"
     runtime="$3"
@@ -173,6 +173,7 @@ function measure_latency()
 
 function coarse_search()
 {
+  local start_qps=1
   log "Starting coarse search to find maximum QPS..."
 
   # Find largest power of 2 <= NWORKERS
@@ -241,7 +242,7 @@ function binary_search()
 
   while [ "$qps_l" -lt $(( qps_r - 1 )) ]; do
     qps_m=$(( (qps_l + qps_r) / 2 ))
-    measure_latency $"$qps_m" "$SEQ" "$RUNTIME"
+    measure_latency "$qps_m" "$SEQ" "$RUNTIME"
     SEQ=$((SEQ + 1))
     lat=${LATENCY%.*}
 
@@ -262,12 +263,12 @@ function binary_search()
     qps_opt=$qps_r
     lat_opt=$lat_r
   fi
-  if [ true == "$CSV_LOGGING" ]; then
+  if [ "true" = "$CSV_LOGGING" ]; then
     final_qps=$(cat "$THROUGHPUT_LOG")
     echo "${SEQ},${qps_opt},${final_qps},${TGT_QUANTILE},${TGT_LATENCY},${lat_opt}"
   fi
 
-  measure_latency $"$qps_opt" "$SEQ" "$RUNTIME"
+  measure_latency "$qps_opt" "$SEQ" "$RUNTIME"
 
   log "Optimal QPS = $qps_opt, achieving latency = $lat_opt"
   log "$TREADMILL_EXE --hostname $ADSIM_HOST --port $ADSIM_PORT " \
@@ -276,7 +277,7 @@ function binary_search()
 }
 
 parse_opts "$@"
-if [ true == "$CSV_LOGGING" ]; then
+if [ "true" = "$CSV_LOGGING" ]; then
     echo "seq,requested_qps,achieved_qps,target_latency_quantile,target_latency_usec,achieved_latency_usec"
 fi
 # If min and max QPS are not manually specified, run coarse search to find them

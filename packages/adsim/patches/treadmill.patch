@@ -7416,7 +7416,7 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclude=gen-cpp2' '--exclude=build' '--exclude=third_party' treadmill-src/src/Treadmill.cpp treadmill/src/Treadmill.cpp
 --- treadmill-src/src/Treadmill.cpp	1969-12-31 16:00:00.000000000 -0800
 +++ treadmill/src/Treadmill.cpp	2025-08-04 15:44:21.787727598 -0700
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,131 @@
 +/*
 + *  Copyright (c) 2014, Facebook, Inc.
 + *  All rights reserved.
@@ -7540,7 +7540,9 @@ diff -wbBdu -ruN '--exclude=.git' '--exclude=*.rej' '--exclude=*.orig' '--exclud
 +  // Set the usage information
 +  std::string usage("Treadmill loadtester");
 +  google::SetUsageMessage(usage);
-+  const folly::Init init(&argc, &argv);
++  // Must outlive init(): ~folly::Init calls SingletonVault::destroyInstances(),
++  // so a plain local would tear the vault down before run() uses any singleton.
++  static const folly::Init init(&argc, &argv);
 +}
 +
 +} // namespace treadmill

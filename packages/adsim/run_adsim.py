@@ -230,7 +230,7 @@ def run_cmd(cmd: List[str], timeout=None, dryrun=False, verbose=False) -> str:
         print(" ".join(cmd))
     if dryrun:
         return None
-    if timeout <= 0:
+    if timeout is not None and timeout <= 0:
         timeout = None
 
     proc = subprocess.Popen(cmd)
