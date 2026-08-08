@@ -128,17 +128,67 @@ L2_CHI_BUSY='r198,r199,r19A,r19B,r19C'
 # sve_pred_full_spec (0x8076), sve_pred_partial_spec (0x8077)
 SVE_PRED='r8074,r8075,r8076,r8077'
 
-### CMN-Cypress Uncore PMU Events (SLC / System Level Cache) ---------
-### Auto-discover arm_cmn_N devices (one per chiplet on NV3).
-### HN-S (Home Node with SLC) events provide true SLC miss rate,
-### which is not observable from the core PMU on Neoverse V3.
+### Memory bandwidth + CMN uncore telemetry --------------------------------
+###
+### Doc basis (Arm):
+###   * Phoenix SoC Architecture Spec (110009_0100), "System Telemetry":
+###       - Table 15-6 (DMS Performance Telemetry): true memory bandwidth is
+###         measured at the DDR memory controller ("DMC Bandwidth Measurement").
+###         On this platform that PMU is exposed as arm_cspmu_mc_<N> (one per DDR
+###         data sub-channel); config=0 counts DDR data beats (32 B each).
+###       - Table 15-4 (CMN Performance Events): the HN-S "effectiveness" group
+###         (slc/sf hit, pocq occupancy, mc_requests, mc_retry).
+###   * CMN-S3 "Cyprus" mesh (arm_cmn identifier 0x43e = PART_CMN_S3; the Phoenix
+###     SoC spec names it "CMN-Cyprus Coherent Mesh Network"). HN-S PMU event
+###     0x0D = PMU_HN_MC_REQS_EVENT ("requests sent to MC"), with filter
+###     pmu_sn_home_sel [40:39]: 00=All, 01=SN-bound, 10=Home-bound. Perf exposes
+###     these as hns_mc_reqs_{local,remote}_{all,sn,home}. (Event encoding is
+###     shared with the CMN-700 TRM, doc 102308, cmn_hns_pmu_event_sel.)
+###
+### PRIMARY MEMORY BANDWIDTH = DMC PMU (arm_cspmu_mc, config=0 x 32 B), summed
+### over the ACTIVE data channels. This is Arm's documented true-DRAM-bandwidth
+### path, is bounded by the physical DDR ceiling, and is a SEPARATE PMU so it
+### does not consume the CMN DTC counter budget. Validated to within ~2% of
+### mm-mem across read/write/mixed loads.
+###
+### SECONDARY (locality only) = CMN HN-F mc_reqs with the SN filter
+### (hns_mc_reqs_{local,remote}_sn). "_sn" = requests dispatched to the memory
+### controller (Slave Node), i.e. actual DRAM accesses -- a bounded MESH
+### MC-REQUEST ESTIMATE + local/remote split. We deliberately AVOID the "_all"
+### filter for bandwidth: hns_mc_reqs_*_all = _home + _sn (arrival- plus
+### dispatch-side counts of overlapping requests), which OVER-READS past the
+### physical DRAM ceiling under saturated streaming. We also do not derive
+### bandwidth from XP DAT flits (they fire at every mesh crosspoint -> multi-hop
+### overcount).
+###
+### NOTE ON MULTIPLEXING: each CMN DTC exposes only ~4 usable PMU counters, and
+### system telemetry daemons (e.g. dynolog) may hold some. Keep the CMN group
+### lean so perf does not multiplex/scale the counts. The DMC (arm_cspmu_mc)
+### group uses its own counters and is collected separately.
+
+### DMC memory-controller PMU (primary bandwidth).
+### Active data-channel instances only; override with CSPMU_ACTIVE if the SoC
+### exposes a different active set (12 DIMMs x 2 sub-channels = 24 here).
+CSPMU_ACTIVE="${CSPMU_ACTIVE:-0 1 2 3 4 5 6 7 8 9 10 11 24 25 26 27 28 29 30 31 32 33 34 35}"
+DMC_MEM_EVENTS=""
+for i in ${CSPMU_ACTIVE}; do
+    [ -d "/sys/bus/event_source/devices/arm_cspmu_mc_${i}" ] && \
+        DMC_MEM_EVENTS+="arm_cspmu_mc_${i}/config=0/,"
+done
+DMC_MEM_EVENTS="${DMC_MEM_EVENTS%,}"
+
+### CMN HN-S effectiveness + MC-request-locality events (lean group).
 CMN_SLC_EVENTS=""
 for cmn_dev in $(find /sys/bus/event_source/devices/ -maxdepth 1 -name 'arm_cmn_*' -printf '%f\n' 2>/dev/null | sort); do
     CMN_SLC_EVENTS+="${cmn_dev}/hns_slc_sf_cache_access_all/,"
-    CMN_SLC_EVENTS+="${cmn_dev}/hns_cache_miss_all/,"
-    CMN_SLC_EVENTS+="${cmn_dev}/hns_cache_fill_all/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_sf_hit_all/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_mc_reqs_local_sn/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_mc_reqs_remote_sn/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_mc_retries_local_all/,"
     CMN_SLC_EVENTS+="${cmn_dev}/hns_mc_reqs_local_all/,"
-    CMN_SLC_EVENTS+="${cmn_dev}/hns_pocq_reqs_recvd_all/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_qos_pocq_occupancy_read/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/hns_qos_pocq_occupancy_write/,"
+    CMN_SLC_EVENTS+="${cmn_dev}/dtc_cycles/,"
 done
 CMN_SLC_EVENTS="${CMN_SLC_EVENTS%,}"
 
@@ -152,7 +202,7 @@ CPU_GROUP_MUX="${INSTRUCTIONS_RATE},${L1_DCACHE_MISSES},${L1_ICACHE_MISSES},${L2
 
 PERF_PID=
 wrapup() {
-  kill -INT "$PERF_PID"
+  kill -INT "$PERF_PID" 2>/dev/null
 }
 
 trap wrapup SIGINT SIGTERM
@@ -175,10 +225,17 @@ collect_counters() {
   fi
   interval_ms="$((interval * 1000))"
   # Core PMU events in a single multiplexed group, plus CMN uncore if available.
+  # The DMC (arm_cspmu_mc) group is a SEPARATE PMU with its own counters, so it
+  # is added as an independent -e group and does not compete with the CMN DTC
+  # counter budget.
   events="-e ${CPU_GROUP_MUX}"
+  if [[ -n "$DMC_MEM_EVENTS" ]]; then
+    events+=" -e ${DMC_MEM_EVENTS}"
+  fi
   if [[ -n "$CMN_SLC_EVENTS" ]]; then
     events+=" -e ${CMN_SLC_EVENTS}"
   fi
+
   if [[ -n "$outfile" ]]; then
     perf_stat "$events" "$interval_ms" > "$outfile"
   else
