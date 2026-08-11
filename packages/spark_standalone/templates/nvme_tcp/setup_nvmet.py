@@ -30,7 +30,7 @@ def build_nvme_cli(real):
     os.chdir(cli_util_path)
     exec_cmd("git checkout 274a49759c8cbdd991253455c64136e0ea73cb6b", for_real=True)
     exec_cmd("make clean", real)
-    exec_cmd("make && make install", real)
+    exec_cmd("make CFLAGS+='-Wno-error=enum-int-mismatch' && make install", real)
     logger.info(f"chdir to {ROOT_PATH}")
     os.chdir(ROOT_PATH)
     exec_cmd("nvme list", real)
