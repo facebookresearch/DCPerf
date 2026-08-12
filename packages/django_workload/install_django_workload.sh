@@ -14,16 +14,16 @@ DJANGO_REPO_ROOT="${DJANGO_WORKLOAD_ROOT}/django-workload"
 
 source "${BENCHPRESS_ROOT}/packages/common/os-distro.sh"
 
-if distro_is_like ubuntu && [ "$(uname -p)" = "aarch64" ]; then
+if distro_is_like ubuntu && [ "$(uname -m)" = "aarch64" ]; then
     "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64_ubuntu22.sh
     exit $?
 fi
-if distro_is_like ubuntu && [ "$(uname -p)" = "x86_64" ]; then
+if distro_is_like ubuntu && [ "$(uname -m)" = "x86_64" ]; then
     "${DJANGO_PKG_ROOT}"/install_django_workload_x86_64_ubuntu22.sh
     exit $?
 fi
 
-if [ "$(uname -p)" = "aarch64" ]; then
+if [ "$(uname -m)" = "aarch64" ]; then
     "${DJANGO_PKG_ROOT}"/install_django_workload_aarch64.sh
     exit $?
 fi
@@ -31,8 +31,10 @@ fi
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 VERSION_ID="$(awk -F "=" '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
-if [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -eq "9" ]; then
-    "${DJANGO_PKG_ROOT}"/install_django_workload_x86_64_centos9.sh
+if [ "$LINUX_DIST_ID" = "centos" ] && [ "$VERSION_ID" -ge 9 ]; then
+    # CentOS 10 dropped the python36 packages used by the default block below.
+    # Reuse the CentOS flow (generic python3 + python3.9 venv) for 9 and up.
+    "${DJANGO_PKG_ROOT}"/install_django_workload_x86_64_centos.sh
     exit $?
 fi
 
@@ -45,12 +47,12 @@ dnf install -y git memcached libmemcached-devel zlib-devel screen python36 \
 
 # Clone django-workload git repository
 git clone https://github.com/facebookarchive/django-workload
-# $OUT is set by benchpress and equal to "/path/to/benchpress/benchmarks"
-mv django-workload "${OUT}/"
+# $DJANGO_WORKLOAD_ROOT is set by benchpress and equal to "/path/to/benchpress/benchmarks"
+mv django-workload "${DJANGO_WORKLOAD_ROOT}/"
 
 # Download pip third-party dependencies for django-workload
-mkdir -p "${OUT}/django-workload/django-workload/third_party"
-pushd "${OUT}/django-workload/django-workload/third_party"
+mkdir -p "${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload/third_party"
+pushd "${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload/third_party"
 # cassandra-driver-3.19.0.tar.gz
 wget "https://files.pythonhosted.org/packages/1c/fe/e4df42a3e864b6b7b2c7f6050b66cafc7fba8b46da0dfb9d51867e171a77/cassandra-driver-3.19.0.tar.gz"
 # Cython-0.24.1.tar.gz
@@ -79,7 +81,7 @@ wget "https://files.pythonhosted.org/packages/c7/75/45234f7b441c59b1eefd31ba3d10
 popd
 
 # Copy run script w/ execute permissions
-install -m755 -D "${TEMPLATES_DIR}/run.sh" "${OUT}/bin/run.sh"
+install -m755 -D "${TEMPLATES_DIR}/run.sh" "${DJANGO_WORKLOAD_ROOT}/bin/run.sh"
 
 # 2. Install JDK
 #JDK_NAME=fb-jdk_8u60-64
@@ -102,24 +104,24 @@ update-alternatives --set keytool /usr/local/jdk-8u60-64/bin/keytool
 # Download Cassandra from third-party source
 cassandra_version=3.11.10
 wget "https://archive.apache.org/dist/cassandra/${cassandra_version}/apache-cassandra-${cassandra_version}-bin.tar.gz"
-tar -xvf "apache-cassandra-${cassandra_version}-bin.tar.gz" -C "$OUT"
+tar -xvf "apache-cassandra-${cassandra_version}-bin.tar.gz" -C "$DJANGO_WORKLOAD_ROOT"
 # Rename
-[ ! -d "$OUT/apache-cassandra" ] && mv "$OUT/apache-cassandra-${cassandra_version}" "$OUT/apache-cassandra"
-cd "$OUT/apache-cassandra" || exit 1
+[ ! -d "$DJANGO_WORKLOAD_ROOT/apache-cassandra" ] && mv "$DJANGO_WORKLOAD_ROOT/apache-cassandra-${cassandra_version}" "$DJANGO_WORKLOAD_ROOT/apache-cassandra"
+cd "$DJANGO_WORKLOAD_ROOT/apache-cassandra" || exit 1
 
 # Set JVM Options
 mv conf/jvm.options conf/jvm.options.bkp || exit 1
-cp "${TEMPLATES_DIR}/jvm.options" "${OUT}/apache-cassandra/conf/jvm.options" || exit 1
+cp "${TEMPLATES_DIR}/jvm.options" "${DJANGO_WORKLOAD_ROOT}/apache-cassandra/conf/jvm.options" || exit 1
 
 # Create data directories to use in configuring Cassandra
 mkdir -p /data/cassandra/{commitlog,data,saved_caches,hints}/
 chmod -R 0700 /data/cassandra
 
 # Copy configurations
-cp "${TEMPLATES_DIR}/cassandra.yaml" "${OUT}/apache-cassandra/conf/cassandra.yaml.template" || exit 1
+cp "${TEMPLATES_DIR}/cassandra.yaml" "${DJANGO_WORKLOAD_ROOT}/apache-cassandra/conf/cassandra.yaml.template" || exit 1
 
 # 5. Install Django and its dependencies
-cd "${OUT}/django-workload/django-workload" || exit 1
+cd "${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload" || exit 1
 
 # Create virtual env to run Python 3.6
 [ ! -d venv ] && python3.6 -m venv venv
@@ -133,15 +135,15 @@ set -u
 sed -i 's/django-cassandra-engine/django-cassandra-engine >= 1.5, < 1.6/' setup.py
 
 # Install dependencies using third_party pip dependencies from manifold
-pip install "Cython<0.25,>=0.20" --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
-pip install "django-statsd-mozilla" --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
-pip install numpy --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
-pip install -e . --no-index --find-links file://"$OUT/django-workload/django-workload/third_party"
+pip install "Cython<0.25,>=0.20" --no-index --find-links file://"$DJANGO_WORKLOAD_ROOT/django-workload/django-workload/third_party"
+pip install "django-statsd-mozilla" --no-index --find-links file://"$DJANGO_WORKLOAD_ROOT/django-workload/django-workload/third_party"
+pip install numpy --no-index --find-links file://"$DJANGO_WORKLOAD_ROOT/django-workload/django-workload/third_party"
+pip install -e . --no-index --find-links file://"$DJANGO_WORKLOAD_ROOT/django-workload/django-workload/third_party"
 
 # Configure Django and uWSGI
-cp "${TEMPLATES_DIR}/cluster_settings.py" "${OUT}/django-workload/django-workload/cluster_settings.py.template" || exit 1
-cp "${TEMPLATES_DIR}/uwsgi.ini" "${OUT}/django-workload/django-workload/uwsgi.ini" || exit 1
-cp "${TEMPLATES_DIR}/urls_template.txt" "${OUT}/django-workload/client/urls_template.txt" || exit 1
+cp "${TEMPLATES_DIR}/cluster_settings.py" "${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload/cluster_settings.py.template" || exit 1
+cp "${TEMPLATES_DIR}/uwsgi.ini" "${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload/uwsgi.ini" || exit 1
+cp "${TEMPLATES_DIR}/urls_template.txt" "${DJANGO_WORKLOAD_ROOT}/django-workload/client/urls_template.txt" || exit 1
 
 # Install the modified run-siege script
 cp "${TEMPLATES_DIR}/run-siege" "${DJANGO_REPO_ROOT}/client/run-siege" || exit 1
@@ -156,7 +158,7 @@ popd # ${DJANGO_REPO_ROOT}
 
 # Build oldisim icache buster library
 set +u
-if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
+if [ ! -f "${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload/libicachebuster.so" ]; then
     if [ -z "${IBCC}" ]; then
         IBCC="/bin/c++"
     fi
@@ -168,13 +170,13 @@ if [ ! -f "${OUT}/django-workload/django-workload/libicachebuster.so" ]; then
     ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -c ./ICacheBuster*.cc
     # shellcheck disable=SC2086
     ${IBCC} ${IB_CFLAGS} -Wall -Wextra -fPIC -shared -Wl,-soname,libicachebuster.so -o libicachebuster.so ./*.o
-    cp libicachebuster.so "${OUT}/django-workload/django-workload/libicachebuster.so" || exit 1
+    cp libicachebuster.so "${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload/libicachebuster.so" || exit 1
     cd ../ || exit 1
     rm -rfv build/
 fi
 
 # Apply Memcache tuning
-cd "${OUT}/django-workload/django-workload/django_workload" || exit 1
+cd "${DJANGO_WORKLOAD_ROOT}/django-workload/django-workload/django_workload" || exit 1
 git apply --check "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch" && git apply "${TEMPLATES_DIR}/0002-Memcache-Tuning.patch"
 # Apply db caching
 git apply --check "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch" && git apply "${TEMPLATES_DIR}/0003-bundle_tray_caching.patch"

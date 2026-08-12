@@ -5,11 +5,19 @@
 # LICENSE file in the root directory of this source tree.
 set -Eeuo pipefail
 
+# Newer OS/FW images ship CMake >= 4.0, which removed compatibility with
+# cmake_minimum_required(VERSION < 3.5). Several pinned deps built here
+# (e.g. gflags 2.2.2, glog 0.4.0 via folly getdeps; aom/ffmpeg CMake)
+# still declare old minimums and abort with "Compatibility with CMake
+# < 3.5 has been removed". Ask CMake to assume a 3.5 policy baseline for
+# those old projects. Harmless / no-op on CMake 3.x.
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+
 ##################### BENCHMARK CONFIG #########################
 
 declare -A REPOS=(
     ['aom']='https://aomedia.googlesource.com/aom'
-    ['ffmpeg']='https://git.ffmpeg.org/ffmpeg.git'
+    ['ffmpeg']='https://github.com/FFmpeg/FFmpeg.git'
     ['SVT-AV1']='https://gitlab.com/AOMediaCodec/SVT-AV1.git'
     ['vmaf']='https://github.com/Netflix/vmaf.git'
     ['aom-testing']='https://gitlab.com/AOMediaCodec/aom-testing.git'
@@ -29,7 +37,7 @@ declare -A TAGS=(
 ##################### SYS CONFIG AND DEPS #########################
 
 BPKGS_FFMPEG_ROOT="$(dirname "$(readlink -f "$0")")" # Path to dir with this file.
-ARCH="$(uname -p)"
+ARCH="$(uname -m)"
 BENCHPRESS_ROOT="$(readlink -f "$BPKGS_FFMPEG_ROOT/../..")"
 FFMPEG_ROOT="${BENCHPRESS_ROOT}/benchmarks/video_transcode_bench"
 FFMPEG_SOURCE="${FFMPEG_ROOT}/ffmpeg_sources"
@@ -39,12 +47,26 @@ FFMPEG_DATASETS="${FFMPEG_ROOT}/datasets/cuts"
 # Determine OS version
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
+# CentOS containers run as root but with root locked and no sudo PAM
+# setup until the workflow adds it — `sudo` fails there with
+# "account validation failure, is your account locked?" on dnf installs.
+SUDO=""
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y cmake autoconf automake flex bison \
+  SUDO="sudo"
+elif [ "$LINUX_DIST_ID" = "centos" ]; then
+  if sudo -n true 2>/dev/null; then
+    SUDO="sudo"
+  else
+    SUDO=""
+  fi
+fi
+
+if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  ${SUDO} apt install -y cmake autoconf automake flex bison \
     meson nasm clang patch git \
     python3-dev pkg-config time parallel p7zip
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y cmake autoconf automake flex bison \
+  ${SUDO} dnf install -y cmake autoconf automake flex bison \
     meson nasm clang patch \
     git python3-devel time parallel p7zip
 fi
@@ -59,7 +81,7 @@ mkdir -p "${FFMPEG_BUILD}"
 mkdir -p "${FFMPEG_DATASETS}"
 
 if ! [ -f "/usr/local/bin/cmake" ]; then
-    sudo ln -s /usr/bin/cmake /usr/local/bin/cmake
+    ${SUDO} ln -s /usr/bin/cmake /usr/local/bin/cmake
 fi
 
 ##################### BUILD AND INSTALL FUNCTIONS #########################
@@ -68,6 +90,10 @@ clone()
 {
     lib=$1
     repo=${REPOS[$lib]}
+    # Extract plain URL from markdown "[https://...](https://...)" if log rendered it that way
+    if [[ "$repo" == "["*"]("*")"* ]]; then
+        repo=$(echo "$repo" | sed -E 's/^\[//; s/\].*//')
+    fi
     if ! git clone "${repo}" "${lib}" 2>/dev/null && [ -d "${lib}" ]; then
         echo "Clone failed because the folder ${lib} exists"
         return 1
