@@ -21,6 +21,7 @@ MINICONDA_PREFIX=$(pwd)/build/miniconda
 # This is set to a recent commit for now, as the latest release doesn't include the arm-related CMake files fix.
 # This will be updated to the latest release once the fix is included.
 FBGEMM_VERSION=fd32631d837b41251311099c393af7d7be5cfbf5
+FBGEMM_DISABLE_ASAN_PATCH="$(pwd)/packages/ai_wdl/fbgemm/disable_fbgemm_asan.patch"
 
 # Version of PyTorch to install
 PYTORCH_VERSION=2.8.0
@@ -957,6 +958,16 @@ clone_fbgemm_repo() {
   git -C fbgemm_${FBGEMM_VERSION} cherry-pick 9df97a7090c2c5edecea4fd08bad11ab8a23284c
 
   apply_avx_compile_check_fix || return 1
+
+  # The upstream helper enables AddressSanitizer by default. Disable it for
+  # production performance benchmarks so instrumentation does not skew scores.
+  echo "[SETUP] Disabling FBGEMM AddressSanitizer instrumentation..."
+  if [ ! -f "${FBGEMM_DISABLE_ASAN_PATCH}" ]; then
+    echo "[ERROR] ASAN-disable patch not found: ${FBGEMM_DISABLE_ASAN_PATCH}"
+    return 1
+  fi
+  git -C fbgemm_${FBGEMM_VERSION} apply --check "${FBGEMM_DISABLE_ASAN_PATCH}" || return 1
+  git -C fbgemm_${FBGEMM_VERSION} apply "${FBGEMM_DISABLE_ASAN_PATCH}" || return 1
 
   # Disable the postbuild script to prevent race conditions during linking
   # This is a workaround for a known issue in the build process
