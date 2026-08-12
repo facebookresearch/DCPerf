@@ -73,6 +73,12 @@ cp "${BENCHPRESS_ROOT}/packages/feedsim/run-feedsim-multi.sh" "${FEEDSIM_ROOT_SR
 chmod u+x "${FEEDSIM_ROOT_SRC}/run.sh"
 chmod u+x "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 
+# Copy production size distribution JSONs (consumed by run.sh / DriverNodeRank).
+cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_req_sizes.json" "${FEEDSIM_ROOT_SRC}/feed_aggregator_req_sizes.json"
+cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_resp_sizes.json" "${FEEDSIM_ROOT_SRC}/feed_aggregator_resp_sizes.json"
+# Phase 6 session-mode driver loads rpc_dist.json from the FEEDSIM_ROOT runtime dir.
+cp "${BENCHPRESS_ROOT}/packages/feedsim/rpc_dist.json" "${FEEDSIM_ROOT_SRC}/rpc_dist.json"
+
 msg "Installing third-party dependencies..."
 # Sync feedsim source with --delete so `./benchpress install -f` actually picks up
 # source changes. The previous "skip if dir exists" guard meant -f never refreshed
@@ -264,6 +270,47 @@ if ! [ -f "${DLRM_MODEL_DIR}/dlrm_small.pt" ]; then
 else
     msg "[SKIPPED] DLRM model already installed"
 fi
+
+# Download Silesia compression corpus for story-based requests (Phase 3)
+SILESIA_DIR="${FEEDSIM_ROOT_SRC}/silesia"
+SILESIA_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-silesia/silesia.tar.gz"
+if ! [ -d "$SILESIA_DIR" ] || [ -z "$(ls -A "$SILESIA_DIR" 2>/dev/null)" ]; then
+    msg "Downloading Silesia corpus..."
+    mkdir -p "$SILESIA_DIR"
+    cd "$SILESIA_DIR" || { msg "[ERROR] cannot cd to $SILESIA_DIR"; exit 1; }
+    if wget -q "$SILESIA_URL" -O silesia.tar.gz 2>/dev/null; then
+        tar -xzf silesia.tar.gz && rm -f silesia.tar.gz
+        msg "Silesia corpus downloaded: $(ls | wc -l) files, $(du -sh . | cut -f1)"
+    else
+        msg "[INFO] GitHub dataset not available, trying original Silesia host..."
+        SILESIA_FALLBACK_URL="https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip"
+        if wget -q "$SILESIA_FALLBACK_URL" -O silesia.zip 2>/dev/null; then
+            unzip -q silesia.zip && rm -f silesia.zip
+            msg "Silesia corpus downloaded: $(ls | wc -l) files, $(du -sh . | cut -f1)"
+        else
+            msg "[WARNING] Silesia download failed — story-based requests will be unavailable"
+        fi
+    fi
+    cd "${FEEDSIM_THIRD_PARTY_SRC}"
+else
+    msg "[SKIPPED] Silesia corpus already present at $SILESIA_DIR"
+fi
+
+# Extract example TLS certs for mock_services (used when --tls_cert/--tls_key
+# are passed; see run-feedsim-multi.sh). The tarball ships example.crt and
+# example.key suitable for benchmark use only (no peer verification).
+CERTS_DIR="${FEEDSIM_ROOT_SRC}/certs"
+CERTS_TARBALL="${BENCHPRESS_ROOT}/packages/common/certs.tar.gz"
+if [ -f "$CERTS_TARBALL" ]; then
+    mkdir -p "$CERTS_DIR"
+    # --strip-components=1 drops the top-level `certs/` directory inside the
+    # tarball so the files land directly at $CERTS_DIR/example.{crt,key}.
+    tar -xzf "$CERTS_TARBALL" -C "$CERTS_DIR" --strip-components=1
+    msg "Extracted TLS certs to $CERTS_DIR"
+else
+    msg "[WARNING] $CERTS_TARBALL not found; TLS for mock_services will be unavailable"
+fi
+
 
 
 # Installing FeedSim
