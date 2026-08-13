@@ -809,14 +809,17 @@
     - '--local-hostname "{local_hostname}"'
     - '--shuffle-partitions {shuffle_partitions}'
     - '--skip-datagen {skip_datagen}'
+    - '--worker-cores "{worker_cores}"'
+    - '--worker-mem "{worker_mem}"'
   vars:
     - 'ipv4=0'
     - 'sanity=0'
     - 'dataset_name=bpc_t93586_s2_synthetic_1GB'
     - 'local_hostname='
     - 'shuffle_partitions=20'
-    # Reuse the warehouse instead of rebuilding it each run; the first run
-    # still builds. Set to 0 to force a rebuild.
+    - 'worker_cores='
+    - 'worker_mem='
+    # Skip the datagen phase and reuse the existing one. Set to 0 to force a rebuild.
     - 'skip_datagen=1'
   hooks:
     - hook: copymove

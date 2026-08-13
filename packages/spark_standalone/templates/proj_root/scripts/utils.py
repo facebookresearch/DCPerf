@@ -84,11 +84,12 @@ def read_sys_configs() -> Dict[str, int]:
             sys_configs["sockets"] = int(item["data"])
         if item["field"].startswith("Model name"):
             sys_configs["arch"] = item["data"]
-    sys_configs["cores"] = (
+    lscpu_cores = (
         sys_configs["threads_per_core"]
         * sys_configs["cores_per_socket"]
         * sys_configs["sockets"]
     )
+    sys_configs["cores"] = len(os.sched_getaffinity(0)) or lscpu_cores
     # memory
     mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     sys_configs["memory"] = int(mem_bytes / (1024.0**3))
