@@ -6,7 +6,7 @@ LICENSE file in the root directory of this source tree.
 -->
 # VideoTranscodeBench
 
-This is a benchmark based on ffmpeg that represents the video encoding workloads. It can apply different encoders and videos, and run them at various encoding levels.
+This is a benchmark based on ffmpeg that represents video encoding workloads. It can apply different encoders and videos, and run them at various encoding levels.
 
 ## Install VideoTranscodeBench
 Installing VideoTranscodeBench involves two steps.
@@ -19,9 +19,9 @@ Installing VideoTranscodeBench involves two steps.
 
 ### 2. Download and prepare datasets
 We recommend using the `El Fuente Test Sequence` from
-[CDVL](https://www.cdvl.org/). the CDVL website requires (free) registration, so
+[CDVL](https://www.cdvl.org/). The CDVL website requires (free) registration, so
 this step is not included in the install script. After registering and logging
-in, search for  `ElFuente Shots for SI/TI, Y4M format, 1080p 29.96fps` and
+in, search for `ElFuente Shots for SI/TI, Y4M format, 1080p 29.96fps` and
 download the zip file to your local machine. We recommend `p7zip` for
 decompression (and please ignore the header error during decompression). After
 decompression, move all the `.y4m` files to the folder
@@ -42,8 +42,8 @@ cp frames_y4m/*.y4m <path_to_DCPerf>/benchmarks/video_transcode_bench/datasets/c
 
 ### Example job - `video_transcode_bench_svt`
 
-`video_transcode_bench_svt` is the version of VideoTranscodeBench that use all
-CPU cores to conduct video encoding with `SVT-AV1` encoder.
+`video_transcode_bench_svt` is the version of VideoTranscodeBench that uses all
+CPU cores to conduct video encoding with the `SVT-AV1` encoder.
 
 To run VideoTranscodeBench, simply execute the following command
 
@@ -52,9 +52,9 @@ To run VideoTranscodeBench, simply execute the following command
 ```
 
 This job also has the following optional parameters:
-  - `runtime`: select a pre-defined set of levels to run based on the runtime length. Three options (`short|medium|long`) are avaiable.
+  - `runtime`: select a pre-defined set of levels to run based on the runtime length. Three options (`short|medium|long`) are available.
   - `output`: output file name.
-  - `levels`: manually specify the encoding levels of `SVT-AV1` encoder in the format of `low:high`. Default value is `0:0`, meaning is not specified, and the `runtime` parameter should be used instead.
+  - `levels`: manually specify the encoding levels of `SVT-AV1` encoder in the format of `low:high`. Default value is `0:0`, meaning it is not specified, and the `runtime` parameter should be used instead.
   - **The user can either pass `levels` or `runtime` to run the benchmark, but `runtime` is highly recommended.**
 
 
@@ -64,18 +64,65 @@ For example, If you would like to run predefined short workloads, you can run th
 ./benchpress_cli.py run video_transcode_bench_svt -i '{"runtime": "short"}'
 ```
 
-Another example. if you would like to run level 5 to 11, you can run the following:
+Another example: if you would like to run level 5 to 11, you can run the following:
 
 ```
 ./benchpress_cli.py run video_transcode_bench_svt -i '{"levels": "5:11"}'
 ```
 
-## VideoTranscodeBench Timed Mini (Two-Run Pattern)
+## DCPerf Mini
 
-The timed mini variant uses a two-run pattern to reduce execution time,
-similar to DjangoBench and SparkBench mini versions.
+Two mini variants shrink VideoTranscodeBench so it finishes in tens of
+seconds instead of tens of minutes, for compute- and memory-constrained
+environments such as emulators. They differ in how many runs they take and
+in which phases they measure:
 
-### Run 1: Prep (on a real machine with the full dataset)
+| | `video_transcode_bench_svt_mini` | `..._timed_mini_prep` + `..._timed_mini_reuse` |
+|---|---|---|
+| Phases measured | downscale **and** encode | encode only |
+| Source dataset (~42GB) needed | every run | prep run only |
+
+### Downscale + Encode: `video_transcode_bench_svt_mini`
+
+This mini job downscales the sampled clips and encodes them in the same run. Both the runtime and the peak memory vary
+from machine to machine: the defaults size themselves from the cores the job
+can actually use, so the same job is heavier on a large host than on a small
+one. Two recommend knobs to tune the runtime and peak memory usage of the benchmark:
+
+
+- `procs` is the number of concurrent single-threaded encoders. At `-1` it
+follows the usable core count, so the peak memory footprint scales with the
+machine (or with the cpuset the job runs in). To fit a memory budget, set
+`procs` explicitly:
+
+```
+./benchpress_cli.py run video_transcode_bench_svt_mini -i '{"procs": "6"}'
+```
+Memory usage varies from machine to machine, but a smaller `procs` always
+gives a smaller memory footprint. Tune it down if the test machine has limited
+memory capacity.
+
+
+- `sweep_stride` downsamples the number of encoding jobs, keeping one job out
+of every N. The default `3` therefore runs a third of them. Raise it to drop
+more jobs and shorten the run further, or lower it towards `1` for a fuller
+run:
+
+```
+./benchpress_cli.py run video_transcode_bench_svt_mini -i '{"sweep_stride": "3"}'
+```
+
+Because it drops whole jobs rather than shrinking them, it changes the
+runtime and the score's sample size but not the peak memory.
+
+### Encode-only: `..._timed_mini_prep` + `..._timed_mini_reuse`
+
+This variant splits the work in two so that the measured run contains only
+encoding, the same two-run pattern used by the DjangoBench and SparkBench
+minis. The prep run is not itself a measurement; it exists to produce the
+cached clips the reuse run consumes.
+
+#### Run 1: Prep (on a real machine with the full dataset)
 
 Run the prep variant to downscale a sampled subset of clips and cache them
 for reuse:
@@ -93,7 +140,7 @@ This creates the following cached artifacts inside
 
 Back up these files for use on other machines or emulators.
 
-### (Optional) Delete source dataset to save space
+#### (Optional) Delete source dataset to save space
 
 After the prep run, the original dataset (~42GB) in `datasets/cuts/` is no
 longer needed. You can delete it to reduce disk usage:
@@ -102,7 +149,7 @@ longer needed. You can delete it to reduce disk usage:
 rm -rf ./benchmarks/video_transcode_bench/datasets/cuts/
 ```
 
-### Run 2+: Reuse (on emulator or target machine)
+#### Run 2+: Reuse (on emulator or target machine)
 
 Copy the cached artifacts to the target machine, then run the reuse variant:
 
@@ -119,9 +166,7 @@ can be run repeatedly without re-prepping.
 If `resized_clips/` is not found, the reuse variant will exit with an error
 directing you to run the prep variant first.
 
-### Tuning parameters
-
-#### Sample rate (`sample_rate`)
+#### `sample_rate`
 
 The mini prep variant (`video_transcode_bench_svt_timed_mini_prep`) uses
 `sample_rate=0.2` by default, selecting ~20% of the source clips
@@ -141,12 +186,13 @@ and **image size**:
   effective measurement window.
 
 To override the default:
+
 ```bash
 ./benchpress_cli.py run video_transcode_bench_svt_timed_mini_prep \
   -i '{"sample_rate": "0.5"}'
 ```
 
-#### Fast jobs first (`--fast-jobs-first`)
+#### `fast_jobs_first`
 
 The prep variant uses `--fast-jobs-first` to reverse the command file order so
 that small-resolution (fast) encoding jobs run first. This is useful for the
@@ -164,7 +210,7 @@ Without `--fast-jobs-first`, the truncated subset includes a mix of clip sizes
 and resolutions, producing a throughput measurement that better reflects the
 full workload.
 
-### Full timed variant (prep/reuse)
+## Full timed variant (prep/reuse)
 
 The same two-run pattern is available for the full (non-mini) timed variant:
 
@@ -182,22 +228,22 @@ reuse variant can be compared with the prep variant and the original
 
 ## Note
 
-This benchmark normally takes around tens of minutes to finish, depending on the levels or predefined workload you choose. Note that lower levels (like level 1, 2, and 3) can take hours to complete. **We suggest starting form higher levels (or `short` as runtime) for fast iterations.** The default `runtime` is `medium`.
+This benchmark normally takes around tens of minutes to finish, depending on the levels or predefined workload you choose. Note that lower levels (like level 1, 2, and 3) can take hours to complete. **We suggest starting from higher levels (or `short` as runtime) for fast iterations.** The default `runtime` is `medium`.
 
 
-It is also recommended to turn on CPU boost before running this benchmark, otherwise it might yield very low result.
+It is also recommended to turn on CPU boost before running this benchmark, otherwise it might yield very low results.
 
 ## Encoders
 
-For now, this benchmark support three encoders -- `SVT-AV1`, `libaom`, and `x264` (`SVT-AV1` is the default one). To add more, please modify the `BENCHMARK CONFIG` section, adn the function `build_ffmpeg` in `./packages/video_transcode_bench/install_video_transcode_bench.sh`, as well as a new `build_encoder_name` function inside.
+For now, this benchmark supports three encoders -- `SVT-AV1`, `libaom`, and `x264` (`SVT-AV1` is the default one). To add more, please modify the `BENCHMARK CONFIG` section and the function `build_ffmpeg` in `./packages/video_transcode_bench/install_video_transcode_bench.sh`, as well as a new `build_encoder_name` function inside.
 
 ## Datasets
 
-For now, this benchmark support three videos -- `chimera`, `elfuente` and `elfuente_footmarket` (`chimera` is the default one in the scirpt). To add more, please modify the `BENCHMARK CONFIG` section and the `BUILD AND INSTALL ` section in  `./packages/video_transcode_bench/install_video_transcode_bench.sh`
+For now, this benchmark supports three videos -- `chimera`, `elfuente` and `elfuente_footmarket` (`chimera` is the default one in the script). To add more, please modify the `BENCHMARK CONFIG` section and the `BUILD AND INSTALL` section in `./packages/video_transcode_bench/install_video_transcode_bench.sh`.
 
 ## Reporting and Measurement
 
-After the ffmpeg benchmark finishing, benchpress will report the results in
+After the ffmpeg benchmark finishes, benchpress will report the results in
 JSON format like the following:
 
 ```
@@ -247,7 +293,7 @@ JSON format like the following:
 The result report will include performance numbers of each encoding level (named `level12` and `level13`), as well as the h-mean of all levels, in the `metrics` section.
 
 
-Ffmpeg will also generate metrics reports at
+ffmpeg will also generate a metrics report at
 `benchmark_metrics_<run_id>/video_transcode_bench_results.txt`
 
 

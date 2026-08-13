@@ -29,7 +29,7 @@ source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]|[--parallelism 0-6]|[--procs {number of jobs}]|[--sample-rate 0.0-1.0]|[--sampling-seed {seed}] [--sleep-before-perf {seconds}] [--max-time {seconds}] [--score-mode throughput|megapixel] [--output {output file name}]
+Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]|[--parallelism 0-6]|[--procs {number of jobs}]|[--sample-rate 0.0-1.0]|[--sampling-seed {seed}] [--sleep-before-perf {seconds}] [--max-time {seconds}] [--score-mode throughput|megapixel] [--sweep-stride {N}] [--output {output file name}]
 
     -h Display this help and exit
     --encoder encoder name. Default: svt
@@ -41,6 +41,7 @@ Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime lon
     --max-time max encoding time in seconds. 0 means no limit. Default: 0
     --score-mode scoring method: throughput (GB/s) or megapixel (MPx/s). Default: throughput
     --fast-jobs-first reverse command order so fast (small resolution) jobs run first
+    --sweep-stride {N} keep every Nth encode of the resolution x QP grid. 1 = keep all. Default: 1
     -output Result output file name. Default: "ffmpeg_video_workload_results.txt"
 EOF
 }
@@ -52,6 +53,31 @@ delete_replicas() {
         rm ./* -rf
         popd
     fi
+}
+
+# Keep every Nth QP from each generated command file.
+apply_sweep_stride() {
+    local stride="$1" test_id="$2" lo="$3" hi="$4"
+
+    if ! [[ "${stride}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Invalid sweep-stride '${stride}': expected a positive integer" 1>&2
+        return 1
+    fi
+
+    if [ "${stride}" -le 1 ]; then
+        return 0
+    fi
+
+    local m f total kept
+    for m in $(seq "${lo}" "${hi}"); do
+        f="run-${test_id}-m${m}.txt"
+        [ -f "${f}" ] || continue
+        total=$(wc -l < "${f}")
+        awk -v n="${stride}" 'NR % n == 1' "${f}" > "${f}.strided"
+        mv "${f}.strided" "${f}"
+        kept=$(wc -l < "${f}")
+        echo "sweep-stride ${stride}: ${f} ${total} -> ${kept} encodes"
+    done
 }
 
 collect_perf_record() {
@@ -106,6 +132,10 @@ main() {
     local keep_downscaled
     keep_downscaled=0
 
+    # Keep every Nth encode of the resolution x QP grid. 1 = keep all (default, unchanged behaviour)
+    local sweep_stride
+    sweep_stride=1
+
     # Create a backup of generate_commands_all.py before making any changes, to restore it later and avoid replicating changes for susequent runs
     cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.backup.py
 
@@ -147,6 +177,13 @@ main() {
             --fast-jobs-first)
                 fast_jobs_first="$2"
                 ;;
+            --sweep-stride)
+                if ! [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
+                    echo "Invalid --sweep-stride '$2': expected a positive integer" 1>&2
+                    exit 1
+                fi
+                sweep_stride="$2"
+                ;;
             --skip-downscale)
                 skip_downscale=1
                 ;;
@@ -166,7 +203,7 @@ main() {
         esac
 
         case $1 in
-            --levels|--encoder|--output|--runtime|--parallelism|--procs|--sample-rate|--sampling-seed|--sleep-before-perf|--max-time|--score-mode|--fast-jobs-first)
+            --levels|--encoder|--output|--runtime|--parallelism|--procs|--sample-rate|--sampling-seed|--sleep-before-perf|--max-time|--score-mode|--fast-jobs-first|--sweep-stride)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -297,7 +334,11 @@ main() {
         # Reuse command files and scripts from a prior prep run.
         # Command files are always stored in original order on disk.
         # fast_jobs_first reversal is applied at runtime in run-paral-cpu.sh.
-        true
+
+        if [ "${sweep_stride}" -gt 1 ]; then
+            echo "Note: --sweep-stride ${sweep_stride} is ignored on a --skip-downscale reuse run;" 1>&2
+            echo "      the reused command files already carry the prep run's stride." 1>&2
+        fi
     else
         # Use the Python script to modify generate_commands_all.py
         python3 ./modify_generate_commands_all.py --sample-rate ${sample_rate} --sampling-seed ${sampling_seed} --lp-number "${lp_number}" --num-pool "${num_pool}" --range "${range}" --encoder $encoder
@@ -305,6 +346,7 @@ main() {
         cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.debug.py
         #generate commands
         python3 ./generate_commands_all.py
+        apply_sweep_stride "$sweep_stride" "$enc_test_id" "$low" "$high"
     fi
 
     # Overwrite run-paral-cpu to use the timed parallel feeder.
