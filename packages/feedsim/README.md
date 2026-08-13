@@ -55,7 +55,7 @@ taskset -c 0-15 ./benchpress_cli.py install feedsim_dlrm
 Unlike FeedSim v1 which spawns a new FeedSim instance per 100 CPU cores,
 `feedsim_dlrm` is pinned to **one FeedSim instance per host** because the
 redesigned threading model in FeedSim v2 has overcome the scalability issue
-on ultra-high-core-count CPUs and ARM CPUs. 
+on ultra-high-core-count CPUs and ARM CPUs.
 
 The runner searches for the QPS that keeps 95th-percentile end-to-end
 latency at or below **700 ms**. When it converges it runs a final 5-minute
@@ -64,7 +64,7 @@ counters) during that final window. We expect the total wall-clock runtime
 to be around 30 minutes.
 
 Please make sure to turn CPU turbo-boost on before starting, or FeedSim may
-fail to converge and report a low QPS. 
+fail to converge and report a low QPS.
 
 ### Result report
 
@@ -175,6 +175,27 @@ Per-instance CSVs live at
 `benchmark_metrics_<run_id>/feedsim-multi-inst-<1>.log`; the runtime
 breakdown at `benchmark_metrics_<run_id>/breakdown.csv`.
 
+## DCPerf Mini: `feedsim_dlrm_mini`
+
+`thrift_threads` is the knob that controls peak memory usage. Each thrift serving
+thread keeps its own copy of the dataset, at roughly **0.33GB per thread**.
+It defaults to `0`, meaning `min(nproc, 216)`, so the footprint scales with
+the machine (or with the cpuset the job runs in).
+
+Please adjust it as following:
+
+```
+./benchpress_cli.py run feedsim_dlrm_mini -i '{"thrift_threads": "8"}'
+```
+
+| `thrift_threads` | Peak memory (measured, Grace) |
+|------------------|-------------------------------|
+| 6                | ~2.7GB                        |
+| 8                | ~3.3GB                        |
+| 16               | ~5.4GB                        |
+
+`thrift_threads=8` is the recommended value to stay under a 4GB budget.
+
 ## Advanced usage
 
 ### Fixed-QPS experiments
@@ -211,7 +232,7 @@ feedsim server, driver and mock_services instances.
 
 2. Use the `feedsim_autoscale_dlrm` job. This autoscale job will spawn `ceil(nproc / 100)`
 FeedSim instances, each pinned to its own CPU range via `taskset`, plus one driver
-and one `mock_services` process per instance (also `taskset`-isolated). For example: 
+and one `mock_services` process per instance (also `taskset`-isolated). For example:
 ```
 ./benchpress_cli.py run feedsim_autoscale_dlrm
 ```
@@ -287,4 +308,3 @@ Again, due to the fundamental change in software architecture and threading mode
 the legacy PageRank-based v1 job has become inaccurate and will not be supported here. If you would like to
 run it, please check out the [main branch](https://github.com/facebookresearch/DCPerf/tree/main/packages/feedsim)
 for Github users or the `v1` folder under the DCPerf root for internal users.
-
