@@ -58,6 +58,20 @@ def download_dataset(args):
 def install_database(args):
     metadata_dir = os.path.join(SPARK_DIR, "spark-4.0.3-bin-hadoop3", "metastore_db")
     database_dir = os.path.join(args.warehouse_dir, f"{args.dataset_name.lower()}.db")
+
+    # Require both: a half-present pair yields "Table or view not found".
+    if getattr(args, "skip_datagen", 0):
+        if os.path.exists(metadata_dir) and os.path.exists(database_dir):
+            print(
+                f"skip-datagen: reusing existing warehouse at {database_dir} "
+                f"and metastore at {metadata_dir}"
+            )
+            return
+        print(
+            "skip-datagen requested but warehouse or metastore is missing; "
+            "building the database this run"
+        )
+
     if os.path.exists(metadata_dir):
         print("Removing stale metastore_db to ensure tables are recreated")
         shutil.rmtree(metadata_dir)
@@ -456,6 +470,14 @@ def init_parser():
         type=int,
         default=0,
         help="sanity check for total read and write IOPS",
+    )
+    run_parser.add_argument(
+        "--skip-datagen",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="reuse an existing warehouse and metastore instead of rebuilding "
+        "them. Falls back to building if either is missing.",
     )
     run_parser.add_argument("--real", action="store_true", help="for real")
     setup_parser.set_defaults(func=setup)
