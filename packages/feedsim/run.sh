@@ -66,7 +66,7 @@ cat <<EOF
 Usage: ${0##*/} [OPTION]...
 
     -h Display this help and exit
-    -t Number of threads to use for thrift serving. Large dataset kept per thread. Default: $THRIFT_THREADS_DEFAULT
+    -t Number of threads to use for thrift serving. Large dataset kept per thread. 0 = use the default. Default: $THRIFT_THREADS_DEFAULT
     -c Number of threads to use for fanout ranking work. Heavy CPU work. Default: $RANKING_THREADS_DEFAULT
     -l Number of threads to use for load generation in the drivers. Default: $DRIVER_THREADS
     -a When searching for the optimal QPS, automatically adjust the number of client driver threads by
@@ -324,7 +324,11 @@ main() {
     while [ $# -ne 0 ]; do
         case $1 in
             -t)
-                thrift_threads="$2"
+                # 0 keeps THRIFT_THREADS_DEFAULT, so a job can request the
+                # core-scaled default and still expose -t for overriding.
+                if [ "$2" != "0" ]; then
+                    thrift_threads="$2"
+                fi
                 shift
                 ;;
             -c)
