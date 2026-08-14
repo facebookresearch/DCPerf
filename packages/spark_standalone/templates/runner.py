@@ -100,6 +100,12 @@ def install_database(args):
     if hasattr(args, "shuffle_partitions") and args.shuffle_partitions is not None:
         cmd_list.append("--shuffle-partitions")
         cmd_list.append(str(args.shuffle_partitions))
+    if getattr(args, "worker_cores", None):
+        cmd_list.append("--worker-cores")
+        cmd_list.append(str(args.worker_cores))
+    if getattr(args, "worker_mem", None):
+        cmd_list.append("--worker-mem")
+        cmd_list.append(str(args.worker_mem))
     cmd_list.append("--real")
     print("Create database from dataset")
     exec_cmd(" ".join(cmd_list), args.real)
@@ -200,6 +206,12 @@ def run_test(args):
     if hasattr(args, "shuffle_partitions") and args.shuffle_partitions is not None:
         cmd_list.append("--shuffle-partitions")
         cmd_list.append(str(args.shuffle_partitions))
+    if getattr(args, "worker_cores", None):
+        cmd_list.append("--worker-cores")
+        cmd_list.append(str(args.worker_cores))
+    if getattr(args, "worker_mem", None):
+        cmd_list.append("--worker-mem")
+        cmd_list.append(str(args.worker_mem))
     if hasattr(args, "query") and args.query:
         cmd_list.append("--query")
         cmd_list.append(args.query)
@@ -470,6 +482,20 @@ def init_parser():
         type=int,
         default=0,
         help="sanity check for total read and write IOPS",
+    )
+    run_parser.add_argument(
+        "--worker-cores",
+        type=str,
+        default="",
+        help="max cores per Spark worker, e.g. '16' or '8,8'. Empty (default) "
+        "derives it from the cores the job can actually use.",
+    )
+    run_parser.add_argument(
+        "--worker-mem",
+        type=str,
+        default="",
+        help="memory per Spark worker in GB, e.g. '16' or '8,8'. Empty "
+        "(default) derives it from total host memory.",
     )
     run_parser.add_argument(
         "--skip-datagen",

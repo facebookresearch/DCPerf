@@ -420,6 +420,25 @@ If you want to use the 1GB dataset, run the job with specifying the
 6. Run Spark mini on a real machine/emulator for the second time to reuse data,
 with the same commands and options.
 
+#### Tuning the peak memory usage
+
+`worker_cores` and `worker_mem` size the Spark cluster and together set peak
+memory. Each takes one value per worker -- `'8'` for a single worker, `'8,8'`
+for two -- and both default to empty, meaning derive automatically:
+`worker_cores` from the cores the job can actually use, `worker_mem` from
+total host memory. Either way the footprint scales with the machine.
+
+To set cores and memory per worker explicitly:
+
+```
+./benchpress_cli.py run spark_standalone_remote_mini \
+  -i '{"worker_cores": "8", "worker_mem": "8"}'
+```
+
+`worker_cores=8 worker_mem=8` is the recommended setting for a ~4GB memory
+usage budget.
+
+
 ## Reusing database on another machine
 
 Building database takes a considerable amount of time, so it's advisable to consider
