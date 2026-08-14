@@ -90,16 +90,38 @@ install_python_tools () {
   # shellcheck disable=SC2086
   (exec_with_retries 3 conda install ${env_prefix} -c conda-forge --override-channels -y \
     click \
-    numpy \
+    numpy=1.* \
     pandas \
     pyyaml \
-    tabulate) || return 1
+    tabulate \
+    packaging) || return 1
 
   # Check Python packages are importable
-  local import_tests=( click numpy pandas tabulate )
+  local import_tests=( click numpy pandas tabulate packaging )
   for p in "${import_tests[@]}"; do
     (test_python_import_package "${env_name}" "${p}") || return 1
   done
 
   echo "[INSTALL] Successfully installed all the build tools"
+}
+
+################################################################################
+# HHVM Setup
+################################################################################
+
+install_hhvm (){
+  echo "[INSTALL] Installing hhvm ..."
+  if which dnf; then
+  wget https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary.tar.xz
+  tar -Jxf hhvm-3.30-multplatform-binary.tar.xz
+  else
+  wget https://github.com/facebookresearch/DCPerf/releases/download/hhvm/hhvm-3.30-multplatform-binary-ubuntu.tar.xz
+  tar -Jxf hhvm-3.30-multplatform-binary-ubuntu.tar.xz
+  apt-get update
+  apt-get install -y libpcre3 libunwind8
+
+  fi
+  cd hhvm || return 1
+  bash -x ./pour-hhvm.sh
+  cd .. || return 1
 }

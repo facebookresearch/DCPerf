@@ -5,6 +5,13 @@
 # LICENSE file in the root directory of this source tree.
 
 set -Eeuo pipefail
+
+# Newer images ship CMake >= 4.0, which removed compatibility with
+# cmake_minimum_required(VERSION < 3.5). The pinned deps (gflags 2.2.2,
+# glog 0.4.0) still declare old minimums, so their configure aborts with
+# "Compatibility with CMake < 3.5 has been removed". Ask CMake to assume a
+# 3.5 policy baseline for those old projects. Harmless on CMake 3.x.
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 # trap cleanup SIGINT SIGTERM ERR EXIT
 
 # Constants
@@ -53,11 +60,39 @@ if ! [ -d "${FEEDSIM_ROOT_SRC}/src" ]; then
 else
     msg "[SKIPPED] copying feedsim src"
 fi
+
+# The pinned fbthrift lacks thrift/annotation/cpp.thrift, so strip that include
+# from ranking.thrift and rewrite the @cpp.Type{...} annotations to the older
+# (cpp.type=...)/(cpp.template=...) syntax the pinned fbthrift understands
+# (matches install_feedsim.sh for x86_64).
+RANKING_THRIFT="${FEEDSIM_ROOT_SRC}/src/workloads/ranking/if/ranking.thrift"
+if [ -f "$RANKING_THRIFT" ]; then
+    sed -i '/^include "thrift\/annotation\/cpp.thrift"/d' "$RANKING_THRIFT"
+    # The pinned fbthrift also lacks thrift/annotation/thrift.thrift; strip that
+    # include and its @thrift.* annotations too (else codegen fails with
+    # "Could not find include file thrift/annotation/thrift.thrift").
+    sed -i '/^include "thrift\/annotation\/thrift.thrift"/d' "$RANKING_THRIFT"
+    sed -i '/^@thrift\./d' "$RANKING_THRIFT"
+    # Stripping @thrift.AllowLegacyMissingUris orphans the bare ``package;``
+    # statement, which the pinned thrift1 rejects (syntax error, last token
+    # was 'package'). Remove the empty package declaration too.
+    sed -i '/^package;/d' "$RANKING_THRIFT"
+    sed -i 's/@cpp.Type{name = "\(.*\)"}//' "$RANKING_THRIFT"
+    sed -i 's/@cpp.Type{template = "\(.*\)"}//' "$RANKING_THRIFT"
+    sed -i 's/^typedef list<i64> SmallListI64/typedef list<i64> (cpp.type = "folly::small_vector<int64_t, 8>") SmallListI64/' "$RANKING_THRIFT"
+    sed -i 's/^typedef map<i16, i64> RankingPayloadIntMap/typedef map<i16, i64> (cpp.template = "folly::F14FastMap") RankingPayloadIntMap/' "$RANKING_THRIFT"
+    sed -i 's/^typedef map<i16, string> RankingPayloadStringMap/typedef map<i16, string> (cpp.template = "folly::F14FastMap") RankingPayloadStringMap/' "$RANKING_THRIFT"
+    sed -i 's/^typedef map<i16, SmallListI64> RankingPayloadVecMap/typedef map<i16, SmallListI64> (cpp.template = "folly::F14FastMap") RankingPayloadVecMap/' "$RANKING_THRIFT"
+fi
+
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
-    wget "https://ftp.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz"
+    # Source the download retry function
+    source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
+    # Use the OCF Berkeley GNU mirror; ftpmirror.gnu.org is not reachable through
+    download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
     tar -xf "gengetopt-2.23.tar.xz"
     cd "gengetopt-2.23"
     ./configure
@@ -177,16 +212,29 @@ do
 
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
-# If running on CentOS Stream 9, apply compatilibity patches to folly, rsocket and wangle
-# TODO: This is a temporary fix. In the long term we should seek to have feedsim
-# support the up-to-date version of these dependencies
+# Remove IoUring files from folly that cause compilation errors (matches
+# install_feedsim.sh for x86_64): IoUring.cpp fails to build here with a
+# "template with C linkage" cascade, and feedsim doesn't need io_uring.
+rm -f third_party/folly/folly/experimental/io/IoUring.cpp
+rm -f third_party/folly/folly/experimental/io/IoUring.h
+
+# On CentOS Stream 9/10 the pinned feedsim deps need compatibility patches to
+# build with the newer toolchain (gcc 11 on el9, gcc 15 on el10). Select the
+# patch set for the running distro.
+# TODO: temporary until feedsim moves to up-to-date deps.
 REPOS_TO_PATCH=(folly rsocket-cpp)
-#REPOS_TO_PATCH=(folly wangle rsocket-cpp)
 if grep -i 'centos stream release 9' /etc/*-release >/dev/null 2>&1; then
+    PATCH_DIR="centos-9-compatibility"
+elif grep -i 'centos stream release 10' /etc/*-release >/dev/null 2>&1; then
+    PATCH_DIR="centos-10-compatibility"
+else
+    PATCH_DIR=""
+fi
+if [ -n "$PATCH_DIR" ]; then
     for repo in "${REPOS_TO_PATCH[@]}"; do
         pushd "third_party/$repo" || exit 1
-        git apply --check "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff" && \
-            git apply "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff"
+        git apply --check "${FEEDSIM_ROOT}/patches/${PATCH_DIR}/${repo}.diff" && \
+            git apply "${FEEDSIM_ROOT}/patches/${PATCH_DIR}/${repo}.diff"
         popd || exit 1
     done
 fi

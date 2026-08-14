@@ -4,15 +4,17 @@
 # LICENSE file in the root directory of this source tree.
 
 # This workflow is used for DCPerf CI.
-name: DCPerf Django CI
+name: DCPerf Tao_bench CI
 
 on:
   # PR Trigger — only run when files affecting this benchmark change
   #
   pull_request:
     paths:
+      - 'packages/common/affinitize/**'
+      - 'packages/common/certs.tar.gz'
       - 'packages/common/os-distro.sh'
-      - 'packages/django_workload/**'
+      - 'packages/tao_bench/**'
 
   # Push Trigger (enable to catch errors coming out of multiple merges)
   #
@@ -20,8 +22,10 @@ on:
     branches:
       - main
     paths:
+      - 'packages/common/affinitize/**'
+      - 'packages/common/certs.tar.gz'
       - 'packages/common/os-distro.sh'
-      - 'packages/django_workload/**'
+      - 'packages/tao_bench/**'
 
   # Manual Trigger
   #
@@ -61,11 +65,11 @@ jobs:
     steps:
     - name: Setup Build Container (ubuntu-based)
       if: ${{ matrix.host-machine.type == 'ubuntu' }}
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget python3-dev
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode curl
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}
-      run: dnf update -y; dnf install -y git pciutils which python3-devel sudo shadow-utils passwd ; dnf group install -y "Development Tools" --exclude="texlive*"
+      run: dnf update -y; dnf install -y git pciutils which dmidecode sudo shadow-utils passwd
 
     - name: Fix PAM configuration for sudo
       if: ${{ matrix.host-machine.type == 'centos' }}
@@ -105,5 +109,5 @@ jobs:
     - name: Install Python Tools
       run: . $PRELUDE; install_python_tools $BUILD_ENV
 
-    - name: Install Django
-      run: . $PRELUDE; install_django $BUILD_ENV
+    - name: Install Tao_bench
+      run: . $PRELUDE; install_tao_bench $BUILD_ENV

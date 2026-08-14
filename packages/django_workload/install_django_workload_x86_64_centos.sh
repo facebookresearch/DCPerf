@@ -68,7 +68,7 @@ wget "https://files.pythonhosted.org/packages/8f/73/65eb1435e95eff569c6dc0f72fce
 # django-statsd-mozilla-0.3.16.tar.gz
 wget "https://files.pythonhosted.org/packages/ac/54/5fa99753dab7ced46129a4c95c777596a2e4094a8b0f65c8764d60d5cff4/django_statsd_mozilla-0.4.0-py3-none-any.whl"
 # numpy-1.19.5-cp36-cp36m-manylinux1_x86_64.whl
-wget "https://files.pythonhosted.org/packages/91/11/059ef2ef98f9eea49ece6d6046bc537c3050c575108a51a624a179c8e7e3/numpy-1.19.5-cp39-cp39-manylinux2014_aarch64.whl"
+wget "https://files.pythonhosted.org/packages/f7/50/02c0fb5d913901ad643934713a31567df9b5065c28efc9672b707f80dfb1/numpy-1.19.5-cp39-cp39-manylinux2010_x86_64.whl"
 # psutil-5.8.0.tar.gz
 wget "https://files.pythonhosted.org/packages/e1/b0/7276de53321c12981717490516b7e612364f2cb372ee8901bd4a66a000d7/psutil-5.8.0.tar.gz"
 # pylibmc-1.6.1-cp36-cp36m-manylinux1_x86_64.whl
@@ -140,14 +140,6 @@ if [ "$JAVA_MAJOR_VERSION" -ge 17 ] 2>/dev/null; then
     if [ -f "${CASSANDRA_ROOT}/conf/jvm-server.options" ]; then
         echo '-Djava.security.manager=allow' >> "${CASSANDRA_ROOT}/conf/jvm-server.options"
     fi
-fi
-
-# On aarch64 the JVM's minimum thread stack exceeds Cassandra's default -Xss256k
-# ("The stack size specified is too small, Specify at least 456k"), so the JVM
-# fails to start. Force 512k via cassandra-env.sh JVM_OPTS, which is applied last
-# and overrides jvm.options / jvm-server.options regardless of Cassandra version.
-if [ -f "conf/cassandra-env.sh" ] && ! grep -q 'Xss512k' conf/cassandra-env.sh; then
-    echo 'JVM_OPTS="$JVM_OPTS -Xss512k"' >> conf/cassandra-env.sh
 fi
 
 # Create data directories to use in configuring Cassandra

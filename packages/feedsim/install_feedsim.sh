@@ -31,7 +31,7 @@ die() {
   exit "$code"
 }
 
-ARCH="$(uname -p)"
+ARCH="$(uname -m)"
 if [ "$ARCH" = "aarch64" ]; then
   if distro_is_like ubuntu; then
     "${FEEDSIM_ROOT}"/install_feedsim_aarch64_ubuntu.sh
@@ -41,7 +41,7 @@ if [ "$ARCH" = "aarch64" ]; then
     exit $?
   fi
 fi
-if distro_is_like ubuntu && [ "$(uname -p)" = "x86_64" ]; then
+if distro_is_like ubuntu && [ "$(uname -m)" = "x86_64" ]; then
   "${FEEDSIM_ROOT}"/install_feedsim_x86_64_ubuntu.sh
   exit $?
 fi
@@ -64,6 +64,21 @@ chmod u+x "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 msg "Installing third-party dependencies..."
 cp -r "${BENCHPRESS_ROOT}/packages/feedsim/third_party" "${FEEDSIM_ROOT_SRC}"
 mv "${FEEDSIM_THIRD_PARTY_SRC}/src" "${FEEDSIM_ROOT_SRC}/src"
+
+RANKING_THRIFT="${FEEDSIM_ROOT_SRC}/src/workloads/ranking/if/ranking.thrift"
+if [ -f "$RANKING_THRIFT" ]; then
+    sed -i '/^include "thrift\/annotation\/cpp.thrift"/d' "$RANKING_THRIFT"
+    sed -i '/^include "thrift\/annotation\/thrift.thrift"/d' "$RANKING_THRIFT"
+    sed -i '/^@thrift.AllowLegacyMissingUris/d' "$RANKING_THRIFT"
+    sed -i '/^package;/d' "$RANKING_THRIFT"
+    sed -i 's/@cpp.Type{name = "\(.*\)"}//' "$RANKING_THRIFT"
+    sed -i 's/@cpp.Type{template = "\(.*\)"}//' "$RANKING_THRIFT"
+    sed -i 's/^typedef list<i64> SmallListI64/typedef list<i64> (cpp.type = "folly::small_vector<int64_t, 8>") SmallListI64/' "$RANKING_THRIFT"
+    sed -i 's/^typedef map<i16, i64> RankingPayloadIntMap/typedef map<i16, i64> (cpp.template = "folly::F14FastMap") RankingPayloadIntMap/' "$RANKING_THRIFT"
+    sed -i 's/^typedef map<i16, string> RankingPayloadStringMap/typedef map<i16, string> (cpp.template = "folly::F14FastMap") RankingPayloadStringMap/' "$RANKING_THRIFT"
+    sed -i 's/^typedef map<i16, SmallListI64> RankingPayloadVecMap/typedef map<i16, SmallListI64> (cpp.template = "folly::F14FastMap") RankingPayloadVecMap/' "$RANKING_THRIFT"
+fi
+
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
 # Installing cmake-3.14.5
@@ -85,7 +100,9 @@ export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-3.14.5/staging/bin:${PATH}"
 
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
-    wget "https://ftp.gnu.org/gnu/gengetopt/gengetopt-2.23.tar.xz"
+    # Source the download retry function
+    source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
+    download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
     tar -xf "gengetopt-2.23.tar.xz"
     cd "gengetopt-2.23"
     ./configure
@@ -102,6 +119,12 @@ if ! [ -d "boost_1_71_0" ] && ! grep -i 'centos stream release 9' /etc/*-release
     tar -xzf "boost_1_71_0.tar.gz"
     cd "boost_1_71_0"
     ./bootstrap.sh --without-libraries=python
+    if grep -qi 'centos stream release 10' /etc/*-release; then
+        # CentOS 10 ships glibc >= 2.34, where PTHREAD_STACK_MIN is a sysconf()
+        # call instead of a compile-time constant. That breaks boost 1.71's
+        # "#if PTHREAD_STACK_MIN > 0" preprocessor guard, so relax it to #ifdef.
+        sed -i 's/if PTHREAD_STACK_MIN > 0/ifdef PTHREAD_STACK_MIN/g' boost/thread/pthread/thread_data.hpp
+    fi
     ./b2 install
     cd ../
 elif grep -i 'centos stream release 9' /etc/*-release; then
@@ -188,15 +211,27 @@ do
     popd
 done < "${FEEDSIM_ROOT}/submodules.txt"
 
-# If running on CentOS Stream 9, apply compatilibity patches to folly, rsocket and wangle
+# Remove IoUring files from folly that cause compilation errors
+rm -f third_party/folly/folly/experimental/io/IoUring.cpp
+rm -f third_party/folly/folly/experimental/io/IoUring.h
+
+# If running on CentOS Stream 9 or 10, apply compatilibity patches to folly, rsocket and wangle
 # TODO: This is a temporary fix. In the long term we should seek to have feedsim
 # support the up-to-date version of these dependencies
 REPOS_TO_PATCH=(folly wangle rsocket-cpp)
+PATCH_DIR=""
 if grep -i 'centos stream release 9' /etc/*-release >/dev/null 2>&1; then
+    PATCH_DIR="centos-9-compatibility"
+elif grep -i 'centos stream release 10' /etc/*-release >/dev/null 2>&1; then
+    # CentOS 10 (GCC 14, glibc >= 2.34, OpenSSL 3) needs the newer-toolchain
+    # fixes (e.g. <system_error> in AtFork.cpp, -Werror off for GCC > 13).
+    PATCH_DIR="centos-10-compatibility"
+fi
+if [ -n "$PATCH_DIR" ]; then
     for repo in "${REPOS_TO_PATCH[@]}"; do
         pushd "third_party/$repo" || exit 1
-        git apply --check "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff" && \
-            git apply "${FEEDSIM_ROOT}/patches/centos-9-compatibility/${repo}.diff"
+        git apply --check "${FEEDSIM_ROOT}/patches/${PATCH_DIR}/${repo}.diff" && \
+            git apply "${FEEDSIM_ROOT}/patches/${PATCH_DIR}/${repo}.diff"
         popd || exit 1
     done
 fi

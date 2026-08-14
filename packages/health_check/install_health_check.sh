@@ -14,10 +14,24 @@ HEALTH_ROOT="${BENCHPRESS_ROOT}/benchmarks/health_check"
 # Determine OS version
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 
+# CentOS containers run as root but with root locked and no sudo PAM
+# setup until the workflow adds it — `sudo` fails there with
+# "account validation failure, is your account locked?" on dnf installs.
+SUDO=""
 if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
-  sudo apt install -y iperf3
+  SUDO="sudo"
 elif [ "$LINUX_DIST_ID" = "centos" ]; then
-  sudo dnf install -y iperf3
+  if sudo -n true 2>/dev/null; then
+    SUDO="sudo"
+  else
+    SUDO=""
+  fi
+fi
+
+if [ "$LINUX_DIST_ID" = "ubuntu" ]; then
+  ${SUDO} apt install -y iperf3 libnuma-dev libboost-program-options-dev libboost-system-dev
+elif [ "$LINUX_DIST_ID" = "centos" ]; then
+  ${SUDO} dnf install -y iperf3 numactl-devel boost-devel
 fi
 
 cd "$HEALTH_ROOT"

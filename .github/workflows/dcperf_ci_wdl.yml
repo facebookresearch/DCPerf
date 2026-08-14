@@ -4,15 +4,14 @@
 # LICENSE file in the root directory of this source tree.
 
 # This workflow is used for DCPerf CI.
-name: DCPerf Django CI
+name: DCPerf wdl CI
 
 on:
   # PR Trigger — only run when files affecting this benchmark change
   #
   pull_request:
     paths:
-      - 'packages/common/os-distro.sh'
-      - 'packages/django_workload/**'
+      - 'packages/wdl_bench/**'
 
   # Push Trigger (enable to catch errors coming out of multiple merges)
   #
@@ -20,8 +19,7 @@ on:
     branches:
       - main
     paths:
-      - 'packages/common/os-distro.sh'
-      - 'packages/django_workload/**'
+      - 'packages/wdl_bench/**'
 
   # Manual Trigger
   #
@@ -61,11 +59,18 @@ jobs:
     steps:
     - name: Setup Build Container (ubuntu-based)
       if: ${{ matrix.host-machine.type == 'ubuntu' }}
-      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget python3-dev
+      run: apt update -y; apt install -y build-essential git pciutils socat sudo wget dmidecode
 
     - name: Setup Build Container (centos-based)
       if: ${{ matrix.host-machine.type == 'centos' }}
-      run: dnf update -y; dnf install -y git pciutils which python3-devel sudo shadow-utils passwd ; dnf group install -y "Development Tools" --exclude="texlive*"
+      run: |
+        dnf update -y
+        dnf install -y git pciutils which dmidecode sudo shadow-utils passwd
+
+    - name: Checkout the Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: true
 
     - name: Fix PAM configuration for sudo
       if: ${{ matrix.host-machine.type == 'centos' }}
@@ -81,11 +86,6 @@ jobs:
       if: ${{ matrix.host-machine.type == 'centos' }}
       run: |
         passwd -u root
-
-    - name: Checkout the Repository
-      uses: actions/checkout@v4
-      with:
-        submodules: true
 
     - name: Free Disk Space on Host
       run: . $PRELUDE; free_disk_space_on_host
@@ -105,5 +105,5 @@ jobs:
     - name: Install Python Tools
       run: . $PRELUDE; install_python_tools $BUILD_ENV
 
-    - name: Install Django
-      run: . $PRELUDE; install_django $BUILD_ENV
+    - name: Install wdl
+      run: . $PRELUDE; install_wdl $BUILD_ENV
