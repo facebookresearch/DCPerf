@@ -202,6 +202,12 @@ minimal settings to enable quick testing and validation.
 A `breakdown.csv` file will be generated in the results to track runtime breakdowns,
 which can be used to filter metrics for the actual benchmark execution time.
 
+#### How to tune the memory usage
+
+`memsize` (the server cache) is the key knob that determines the memory usage of the benchmark.
+The default value is `0.25` which allocates about ~200MB memory.
+
+
 ### Result reporting
 
 Once the tao_bench benchmark finishes, benchpress will report the results in JSON format
