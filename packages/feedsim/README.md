@@ -69,7 +69,7 @@ fail to converge and report a low QPS.
 ### Result report
 
 After the run finishes, benchpress prints a JSON result. Example from a
-AMD Zen4 host (176 logical cores, 256 GB RAM):
+176-core x86 host (256 GB RAM):
 
 ```json
 {
@@ -241,6 +241,41 @@ In multi-instance mode, the overall QPS is the sum across all instances. and the
 average latency will be the average of p95 latency values observed across all
 instances.
 
+### Driver depth (fixing CPU/latency under-utilization)
+
+The `depth` parameter sets the driver's pipeline depth — the maximum number of
+outstanding (in-flight) requests per driver connection. The driver's total
+offered concurrency is `driver_threads × connections × depth`, so with the
+default `depth=1` the driver can cap the achievable load below what the server
+can actually handle.
+
+**Increase `depth` beyond 1 when the final benchmarking phase saturates neither
+CPU nor latency** — i.e. the final achieved p95 latency is well below the SLA
+limit (`sla_p95_ms`, default 700 ms) *and* the CPU utilization during the final
+5-minute benchmarking phase is less than ~90%. In that situation the reported QPS
+is limited by driver concurrency rather than by the server, so it understates the
+hardware's true capacity. Raising `depth` (start with `2`) lets the driver offer
+more concurrent load until the server becomes the bottleneck — either CPU-bound
+(~100% utilization) or latency-bound (p95 ≈ SLA). **This is likely necessary on
+high-performance ARM cores**, which can otherwise sit at 80–90% CPU with p95 far
+below the SLA at `depth=1`.
+
+```
+# Force driver depth 2
+./benchpress_cli.py run feedsim_dlrm -i '{"depth": 2}'
+```
+
+There is also an **adaptive depth** mechanism (on by default) that raises the
+depth automatically during the peak-finding stage until the server saturates
+(system CPU ≥ 95% or p95 ≥ SLA). It catches *severe* under-utilization early, but
+because it evaluates saturation on the high-load peak/search probes rather than
+on the final SLA-converged operating point, it **may not catch all
+under-utilization cases**. If you still observe under-utilization in the final
+result (low CPU + p95 well under SLA), increase `depth` manually as above. When
+adaptive depth is on, a manually-set `depth` acts as the starting floor the
+adaptive search raises from; to pin an exact fixed depth, also set the
+`FEEDSIM_ADAPTIVE_DEPTH_MAX=0` environment variable to disable adaptive search.
+
 ### Other parameters
 
 This section lists additional parameters in `feedsim_dlrm` benchmark. These parameters
@@ -254,6 +289,7 @@ Job-level parameters (can be passed via `-i` flag in Benchpress CLI):
 |---|---|---|
 | `num_instances` | Number of FeedSim instances to run in parallel. Defaults to 1 in `feedsim_dlrm`; set to -1 to autoscale for `feedsim_autoscale_dlrm`. | `1` |
 | `sla_p95_ms` | SLA target in ms. The runner searches for the highest QPS keeping p95 ≤ this. | `700` |
+| `depth` | Driver pipeline depth (max outstanding requests per connection; total in-flight = `driver_threads × connections × depth`). Raise (e.g. `2`) when the final phase saturates neither CPU nor latency — often needed on high-perf ARM. See [Driver depth](#driver-depth-fixing-cpulatency-under-utilization). | `1` |
 | `io_dist` | I/O latency distribution: `fixed`, `exponential`, or `lognormal`. | `fixed` |
 | `io_mean` | Mean I/O latency in ms. | `200` |
 | `workload` | Ranking workload: `pagerank` or `dlrm`. `dlrm` is v2. | `dlrm` |
