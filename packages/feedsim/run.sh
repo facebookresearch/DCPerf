@@ -831,7 +831,11 @@ main() {
     # client is launched through search_qps.sh, which does not reliably forward
     # the parent's exported env to the driver process, so FEEDSIM_DRIVER_TLS is
     # also injected directly on the driver command line via `driver_bin`.
-    driver_bin="build/workloads/ranking/DriverNodeRank"
+    # Per-run driver knobs are injected on the DriverNodeRank command line via
+    # `env VAR=val` (accumulated in driver_env), because search_qps.sh launches
+    # the driver as a bare `$command &` that does not reliably inherit the
+    # parent shell's exported env.
+    driver_env=""
     if [ "${FEEDSIM_DRIVER_TLS:-0}" = "1" ]; then
         driver_cert_dir="${FEEDSIM_ROOT}/certs"
         if [ ! -r "${driver_cert_dir}/example.crt" ] || [ ! -r "${driver_cert_dir}/example.key" ]; then
@@ -841,8 +845,21 @@ main() {
         export FEEDSIM_TLS_CERT="${driver_cert_dir}/example.crt"
         export FEEDSIM_TLS_KEY="${driver_cert_dir}/example.key"
         export FEEDSIM_DRIVER_TLS=1
-        driver_bin="env FEEDSIM_DRIVER_TLS=1 build/workloads/ranking/DriverNodeRank"
+        driver_env="${driver_env} FEEDSIM_DRIVER_TLS=1"
         echo "Driver↔Leaf TLS: ENABLED (cert=${driver_cert_dir}/example.crt, AES-GCM)"
+    fi
+    # FEEDSIM_STATS_WARMUP_SECS: drop the first N seconds of latency/throughput
+    # samples in each search_qps probe (DriverNodeRank resets its stats N secs
+    # in) so cold-start transients don't inflate the tail and make the search
+    # back off QPS prematurely. Default unset/0 (no warmup).
+    if [ -n "${FEEDSIM_STATS_WARMUP_SECS:-}" ] && [ "${FEEDSIM_STATS_WARMUP_SECS}" != "0" ]; then
+        driver_env="${driver_env} FEEDSIM_STATS_WARMUP_SECS=${FEEDSIM_STATS_WARMUP_SECS}"
+        echo "Driver stats warmup: ${FEEDSIM_STATS_WARMUP_SECS}s (dropping cold-start samples per probe)"
+    fi
+    if [ -n "$driver_env" ]; then
+        driver_bin="env${driver_env} build/workloads/ranking/DriverNodeRank"
+    else
+        driver_bin="build/workloads/ranking/DriverNodeRank"
     fi
     # MOCK_ZSTD_FRAC env consumed by MockServicesClient::resolveZstdFraction.
     # Always export so the configured default reaches the binary.
@@ -975,16 +992,29 @@ main() {
     # Override via --sla-p95-ms CLI flag (handled in arg parsing above).
     sla_arg="95p:${sla_p95_ms}"
 
+    # Adaptive driver depth (fleet default): search_qps raises the driver's
+    # pipeline --depth in the peak phase until the server saturates (system
+    # CPU>=95% or p95>=SLA), giving each platform just enough offered concurrency
+    # to reach a real bound instead of capping on driver concurrency.
+    # Enabled by default up to depth 8; set FEEDSIM_ADAPTIVE_DEPTH_MAX=0 to
+    # disable and fall back to the fixed FEEDSIM_DRIVER_DEPTH (default 1).
+    sqps_adaptive_arg=""
+    adaptive_depth_max="${FEEDSIM_ADAPTIVE_DEPTH_MAX:-8}"
+    if [ "$adaptive_depth_max" != "0" ]; then
+        sqps_adaptive_arg="-D ${adaptive_depth_max}"
+    fi
+
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
         echo "search_qps SLA: ${sla_arg}"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -w 15 -f 300 -s "$sla_arg" -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        scripts/search_qps.sh -t "${FEEDSIM_EXPERIMENT_TIME:-120}" -w 15 -f 300 -s "$sla_arg" $sqps_adaptive_arg -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             $driver_bin \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
                 --threads="${driver_threads}" \
                 --connections=4 \
+                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
@@ -993,10 +1023,11 @@ main() {
         benchreps_tell_state "before search_qps"
         echo "search_qps SLA: ${sla_arg}"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -a -w 15 -f 300 -s "$sla_arg" -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+        scripts/search_qps.sh -a -t "${FEEDSIM_EXPERIMENT_TIME:-120}" -w 15 -f 300 -s "$sla_arg" $sqps_adaptive_arg -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
             $driver_bin \
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port" \
+                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
@@ -1025,6 +1056,7 @@ main() {
                 --monitor_port "$client_monitor_port" \
                 --threads="${num_workers}" \
                 --connections="${num_connections}" \
+                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
