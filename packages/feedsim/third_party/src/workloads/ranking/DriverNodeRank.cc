@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -60,18 +62,47 @@ static std::unique_ptr<ranking::RpcDistRegistry> g_rpc_dist_registry;
 
 // Phase 6: per-driver-thread session orchestration executor. Sized
 // num_threads (one logical session per driver thread, mirroring the
-// legacy 1-cb-per-thread make-request loop). Named so Strobelight
-// categorizes the sessions cleanly.
+// legacy 1-cb-per-thread make-request loop). Named so profilers
+// categorize the sessions cleanly.
 static std::shared_ptr<folly::CPUThreadPoolExecutor> g_session_pool;
 
 const int kMaxRequestSize = 8192;
 const int kRecomputeQPSPeriod = 1;  // Reduced from 5 to 1 second for faster feedback
 
+// Deterministic per-thread RNG seed. The driver's per-thread RNGs used to be
+// seeded from std::random_device, making the generated request stream (sizes,
+// content) non-reproducible run-to-run. Seed from a fixed base so each thread
+// keeps an independent but reproducible sequence. Set FEEDSIM_RNG_RANDOM=1 to
+// restore the old non-deterministic seed.
+static bool feedsimRngRandom() {
+  static const bool kRandom = [] {
+    const char* e = std::getenv("FEEDSIM_RNG_RANDOM");
+    return e != nullptr && e[0] == '1';
+  }();
+  return kRandom;
+}
+
+static unsigned detRngSeed(unsigned base) {
+  if (feedsimRngRandom()) {
+    return std::random_device{}();
+  }
+  static std::atomic<unsigned> ctr{0};
+  return base + ctr.fetch_add(1) * 2654435761u;
+}
+
+static unsigned detRngSeedTid(unsigned base, int thread_id) {
+  if (feedsimRngRandom()) {
+    return static_cast<unsigned>(std::random_device{}()) +
+        static_cast<unsigned>(thread_id);
+  }
+  return base + static_cast<unsigned>(thread_id);
+}
+
 // Simple random string generator (replaces oldisim/Util.h RandomString)
 static std::string RandomString(size_t length) {
   static const char charset[] =
       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  thread_local std::mt19937 rng(std::random_device{}());
+  thread_local std::mt19937 rng(detRngSeed(0xD5117A2Du));
   std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
   std::string str(length, 0);
   for (size_t i = 0; i < length; ++i) {
@@ -202,15 +233,13 @@ void ThreadStartup(int thread_id,
 
   // Initialize Silesia RNG per thread
   if (g_silesia_loader && g_silesia_loader->isLoaded()) {
-    this_thread.silesia_rng.seed(
-        static_cast<unsigned>(std::random_device{}()) + thread_id);
+    this_thread.silesia_rng.seed(detRngSeedTid(0x51E51A00u, thread_id));
   }
 
   // Initialize request size sampler RNG per thread
   if ((g_req_size_sampler && g_req_size_sampler->isLoaded()) ||
       g_rpc_dist_registry) {
-    this_thread.req_size_rng.seed(
-        static_cast<unsigned>(std::random_device{}()) + 0xDEADBEEF + thread_id);
+    this_thread.req_size_rng.seed(detRngSeedTid(0xDEADBEEFu, thread_id));
   }
 
   // If user gave QPS target, initialize QPS modulation
@@ -574,7 +603,7 @@ std::string encodeGetAllStories(
 
 // ─── RunSession ─────────────────────────────────────────────────────────────
 //
-// Run one driver session per the prod multifeed_aggregator pipeline:
+// Run one driver session per the production aggregator pipeline:
 //   t=0     createAndPrimeSession           AWAIT
 //   t≈3ms   getStoriesUncompressed          HOLD future
 //   t≈3ms   streamData (parallel x N)       AWAIT
@@ -808,7 +837,7 @@ int main(int argc, char **argv) {
 
   // Phase 6: spin up the session orchestration pool. One worker per
   // driver thread mirrors the legacy 1-cb-per-thread model. Named so
-  // Strobelight categorizes the threads cleanly.
+  // profilers categorize the threads cleanly.
   if (args.rpc_dist_json_given) {
     g_session_pool = std::make_shared<folly::CPUThreadPoolExecutor>(
         args.threads_arg,
