@@ -120,10 +120,11 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
     -P          PID of the process to log runtime breakdowns. Optional
     -B          Folder to log runtime breakdowns. Optional
     -D          Adaptive depth: max driver pipeline depth. When set, the peak
-                phase raises the driver's --depth from 1 until the server is
-                saturated (system CPU >= 95% OR achieved p95 >= SLA), then holds
-                that depth for the QPS search. Overrides any --depth in the
-                driver command. Optional.
+                phase raises the driver's --depth until the server is saturated
+                (system CPU >= 95% OR achieved p95 >= SLA), then holds that depth
+                for the QPS search. The search STARTS from any --depth in the
+                driver command (default 1), so a manually-set --depth acts as a
+                floor. Optional.
 EOF
 }
 
@@ -394,12 +395,18 @@ fi
 # remaining argument is loadtest command
 command=$@
 
-# In adaptive-depth mode, search_qps owns the driver's --depth: strip any fixed
-# --depth from the command so our per-attempt --depth is the only one, and start
-# the peak search at depth=1.
+# In adaptive-depth mode, search_qps owns the driver's --depth: capture any fixed
+# --depth as the STARTING depth (so a manually-set --depth acts as a floor the
+# peak search raises from), then strip it so our per-attempt --depth is the only
+# one on the command. Default start is depth=1 (unchanged behavior).
+adaptive_start_depth=1
 if [ -n "$adaptive_depth_max" ]; then
+  fixed_depth=$(echo "$command" | grep -oE -- '--depth=[0-9]+' | head -1 | grep -oE '[0-9]+')
+  if [ -n "$fixed_depth" ] && [ "$fixed_depth" -gt 1 ]; then
+    adaptive_start_depth=$fixed_depth
+  fi
   command=$(echo "$command" | sed -E 's/[[:space:]]*--depth=[0-9]+//g')
-  adaptive_depth_arg="--depth=1"
+  adaptive_depth_arg="--depth=$adaptive_start_depth"
 fi
 
 # make sure latency_type and latency_target are specified
@@ -553,12 +560,14 @@ fi
 benchreps_tell_state "before peak_qps"
 if [ -n "$adaptive_depth_max" ]; then
   # Adaptive depth: the peak load test offers at most threads*connections*depth
-  # concurrent requests. Starting at depth=1, keep raising depth (and re-running
-  # peak) until the server saturates — system CPU >= 95% OR achieved p95 >= SLA
+  # concurrent requests. Starting at adaptive_start_depth, keep raising depth (and
+  # re-running peak) until the server saturates — system CPU >= 95% OR p95 >= SLA
   # — so platforms that need more offered concurrency reach a real bound instead
   # of capping on driver concurrency. The selected depth is then held for the
-  # QPS search / tuning / final phases.
-  cur_depth=1
+  # QPS search / tuning / final phases. The starting depth
+  # is the fixed --depth from the driver command (default 1), so a manually-set
+  # depth raises the floor.
+  cur_depth=$adaptive_start_depth
   while : ; do
     adaptive_depth_arg="--depth=$cur_depth"
     # Sample system CPU busy% over a mid-run window while the peak load runs.
