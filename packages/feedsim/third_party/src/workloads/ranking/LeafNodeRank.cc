@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -262,8 +263,8 @@ CSRGraph<int32_t> g_shared_graph;
 
 // Server-side Silesia corpus + response generator. When --silesia_dir is
 // given, response generation pulls bytes from the corpus instead of running
-// xor128() RNG, removing ~15% of CPU that would otherwise be wasted on RNG
-// (no production analog).
+// xor128() RNG, avoiding the CPU that response generation would otherwise
+// waste on RNG (no production analog).
 static std::unique_ptr<ranking::SilesiaLoader> g_silesia_loader;
 static std::unique_ptr<ranking::generators::SilesiaResponseGenerator>
     g_silesia_response_gen;
@@ -289,10 +290,9 @@ static ranking::RankingResponse generateResponse(int num_objects) {
 // Pre-built response template pool. Constructed once during server init
 // after --num_objects is parsed. Each request grabs one by index, mutates
 // only queryID (the only field a real aggregator would vary per-request),
-// then serializes. Eliminates ~5% of total CPU previously spent in
+// then serializes. Eliminates the CPU previously spent in
 // SilesiaResponseGenerator::generateRankingResponse + ~RankingObject
-// destructor chain (was RPC-DataGen=6.3% in the t31v5 profile; this drops
-// it to <0.5%).
+// destructor chain.
 //
 // To match prod's getStoriesUncompressed response_sizes distribution
 // (rpc_dist_v2.json: p50=173 KB, p99=2.7 MB, p99.9=6.5 MB), the pool
@@ -311,10 +311,57 @@ static std::vector<ranking::RankingResponse> g_response_templates;
 static std::vector<size_t> g_response_template_sizes;
 static std::atomic<size_t> g_response_template_idx{0};
 
+// Deterministic per-thread RNG seed. These per-request RNGs used to be seeded
+// from std::random_device, which made benchmark QPS non-reproducible run-to-run
+// (per-request response-size / fanout sampling shifted the SLA operating
+// point). Seed from a fixed base mixed with
+// a per-thread counter so each thread keeps an independent but reproducible
+// sequence. Set FEEDSIM_RNG_RANDOM=1 to restore the old non-deterministic seed.
+static bool feedsimRngRandom() {
+  static const bool kRandom = [] {
+    const char* e = std::getenv("FEEDSIM_RNG_RANDOM");
+    return e != nullptr && e[0] == '1';
+  }();
+  return kRandom;
+}
+
+static unsigned detRngSeed(unsigned base) {
+  if (feedsimRngRandom()) {
+    return std::random_device{}();
+  }
+  static std::atomic<unsigned> ctr{0};
+  return base + ctr.fetch_add(1) * 2654435761u;
+}
+
+// Deterministic per-thread seed variant for call sites that already have a
+// stable thread index.
+static unsigned detRngSeedTid(unsigned base, int thread_id) {
+  if (feedsimRngRandom()) {
+    return std::random_device{}() ^ static_cast<unsigned>(thread_id + 1);
+  }
+  return base ^ static_cast<unsigned>(thread_id + 1);
+}
+
+// Default deterministic seed for the logical workload RNGs (node/page/pointer).
+static constexpr unsigned kFeedsimDefaultSeed = 42u;
+
+// Resolve a logical workload RNG seed. When the option is not passed we use a
+// fixed default (reproducible runs); an explicit negative value opts back into
+// a time-based seed for callers that want non-determinism.
+static unsigned resolveSeed(bool given, long arg, unsigned deflt) {
+  if (!given) {
+    return deflt;
+  }
+  if (arg < 0) {
+    return static_cast<unsigned>(
+        std::chrono::system_clock::now().time_since_epoch().count());
+  }
+  return static_cast<unsigned>(arg);
+}
+
 // Pool of per-thread RNGs for response-size sampling (per-thread to avoid
 // shared-state contention; std::mt19937 is not thread-safe).
-static thread_local std::mt19937 g_response_size_rng{
-    std::random_device{}()};
+static thread_local std::mt19937 g_response_size_rng{detRngSeed(0xF00D5127u)};
 
 // Helper: measure the serialized size of a RankingResponse via CompactProto.
 // Used at pool init to build the (size → template) lookup table.
@@ -476,8 +523,7 @@ void ThreadStartup(
   // used elsewhere in this struct.
   this_thread.rpc_registry = g_rpc_registry.get();
   this_thread.rpc_silesia = g_rpc_silesia;
-  this_thread.rpc_rng.seed(
-      std::random_device{}() ^ static_cast<unsigned>(thread_id + 1));
+  this_thread.rpc_rng.seed(detRngSeedTid(0x2C519A00u, thread_id));
   if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
     auto evbs = srEventBasePool->getAllEventBases();
     this_thread.mock_clients.reserve(evbs.size());
@@ -507,29 +553,18 @@ void ThreadStartup(
   // Store shared DLRM ranker
   this_thread.dlrm_ranker = shared_dlrm_ranker;
 
-  unsigned noderank_seed;
-  if (args.node_rank_seed_given) {
-    noderank_seed = static_cast<unsigned>(args.node_rank_seed_arg);
-  } else {
-    noderank_seed = std::chrono::system_clock::now().time_since_epoch().count();
-  }
+  unsigned noderank_seed = resolveSeed(
+      args.node_rank_seed_given, args.node_rank_seed_arg, kFeedsimDefaultSeed);
 
-  unsigned pointer_chase_seed;
-  if (args.pointer_chase_seed_given) {
-    pointer_chase_seed = static_cast<unsigned>(args.pointer_chase_seed_arg);
-  } else {
-    pointer_chase_seed =
-        std::chrono::system_clock::now().time_since_epoch().count();
-  }
+  unsigned pointer_chase_seed = resolveSeed(
+      args.pointer_chase_seed_given,
+      args.pointer_chase_seed_arg,
+      kFeedsimDefaultSeed);
 
   // Only initialize PageRank if we're using it
   if (g_workload_type == WorkloadType::PAGERANK) {
-    unsigned page_rank_seed;
-    if (args.page_rank_seed_given) {
-      page_rank_seed = static_cast<unsigned>(args.page_rank_seed_arg);
-    } else {
-      page_rank_seed = std::chrono::system_clock::now().time_since_epoch().count();
-    }
+    unsigned page_rank_seed = resolveSeed(
+        args.page_rank_seed_given, args.page_rank_seed_arg, kFeedsimDefaultSeed);
     auto graph = params.makeGraphCopy(g_shared_graph);
     this_thread.page_ranker = std::make_unique<ranking::dwarfs::PageRank>(
         std::move(graph), args.cpu_threads_arg, page_rank_seed);
@@ -637,8 +672,7 @@ void ThreadStartup(
   // used elsewhere in this struct.
   this_thread.rpc_registry = g_rpc_registry.get();
   this_thread.rpc_silesia = g_rpc_silesia;
-  this_thread.rpc_rng.seed(
-      std::random_device{}() ^ static_cast<unsigned>(thread_id + 1));
+  this_thread.rpc_rng.seed(detRngSeedTid(0x2C519A00u, thread_id));
   if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
     auto evbs = srEventBasePool->getAllEventBases();
     this_thread.mock_clients.reserve(evbs.size());
@@ -664,27 +698,16 @@ void ThreadStartup(
       }
     }
   }
-  unsigned noderank_seed;
-  if (args.node_rank_seed_given) {
-    noderank_seed = static_cast<unsigned>(args.node_rank_seed_arg);
-  } else {
-    noderank_seed = std::chrono::system_clock::now().time_since_epoch().count();
-  }
+  unsigned noderank_seed = resolveSeed(
+      args.node_rank_seed_given, args.node_rank_seed_arg, kFeedsimDefaultSeed);
 
-  unsigned page_rank_seed;
-  if (args.page_rank_seed_given) {
-    page_rank_seed = static_cast<unsigned>(args.page_rank_seed_arg);
-  } else {
-    page_rank_seed = std::chrono::system_clock::now().time_since_epoch().count();
-  }
+  unsigned page_rank_seed = resolveSeed(
+      args.page_rank_seed_given, args.page_rank_seed_arg, kFeedsimDefaultSeed);
 
-  unsigned pointer_chase_seed;
-  if (args.pointer_chase_seed_given) {
-    pointer_chase_seed = static_cast<unsigned>(args.pointer_chase_seed_arg);
-  } else {
-    pointer_chase_seed =
-        std::chrono::system_clock::now().time_since_epoch().count();
-  }
+  unsigned pointer_chase_seed = resolveSeed(
+      args.pointer_chase_seed_given,
+      args.pointer_chase_seed_arg,
+      kFeedsimDefaultSeed);
 
   this_thread.page_ranker = std::make_unique<ranking::dwarfs::PageRank>(
       std::move(graph), args.cpu_threads_arg, page_rank_seed);
@@ -843,8 +866,8 @@ std::string decompressPayload(const std::string& data) {
 
 // FEEDSIM_SERVER_ZSTD env gate: when "0", server-side response compression
 // is bypassed (passthrough). Default behavior (ZSTD on) preserved. Lets the
-// bench match prod's lighter Compression CPU share (prod 3.9-5.2% vs bench
-// 6-10% in t41) without ripping out the entire ZSTD path. Decision is read
+// bench match prod's lighter Compression CPU share without ripping out the
+// entire ZSTD path. Decision is read
 // once per process to avoid getenv() on every request — kServerZstd is
 // shared with compressPayload below.
 namespace {
@@ -890,9 +913,8 @@ ranking::RankingResponse deserializePayload(const folly::IOBuf* buf) {
 // When --rpc_dist_path is set, request handlers replace
 // folly::futures::sleep(io_latency_ms) with a real fanout of Thrift RPCs to
 // a co-located mock_services Thrift server. Per-method call counts are
-// calibrated from production (ranking::perSessionCounts(), see
-// ~/feedsim_v2/docs/phase5_researcher_notes.md §4) and scaled by
-// --rpc_fanout_scale (default 0.025, ~94 RPCs/session).
+// calibrated from production (ranking::perSessionCounts()) and scaled by
+// --rpc_fanout_scale.
 //
 // Each RPC carries a payload sampled from the request_size percentile
 // distribution; the first 4 bytes are a big-endian uint32_t encoding the
@@ -1293,10 +1315,9 @@ static void runFeatureExtraction(
 
 // runStoryProcessing — companion to runFeatureExtraction. Issues
 // `num_stories * story_processors_per_story` pipeline passes per
-// request. The story-processor module is a mock for prod multifeed's
-// scoring + filter + blend + serdes + topK stages, which are
-// substantially distinct from feature extraction per the t31 prod-vs-
-// mock profile analysis.
+// request. The story-processor module is a mock for a production ranking
+// service's scoring + filter + blend + serdes + topK stages, which are
+// substantially distinct from feature extraction.
 static void runStoryProcessing(ThreadData& this_thread) {
   if (!this_thread.story_suite) {
     return;
@@ -1351,8 +1372,9 @@ void AsyncPageRankRequestHandler(
 
   // Run feature extraction if enabled
   runFeatureExtraction(this_thread);
-  // Run story processors (mirrors prod multifeed scoring+filter+blend+
-  // serdes+topK passes; runs only when --story_processors_per_story > 0).
+  // Run story processors (mirrors a production ranking service's scoring+
+  // filter+blend+serdes+topK passes; runs only when
+  // --story_processors_per_story > 0).
   runStoryProcessing(this_thread);
 
   // Stage 2: PageRank ranking workload (CPU-intensive, parallelized).
@@ -1444,8 +1466,7 @@ void AsyncPageRankRequestHandler(
       .thenValue([context_ptr](int /*final_result*/) {
         // Stage 5: serialize a pre-built response template (see
         // initResponseTemplatePool above). Replaces per-request response
-        // construction + destruction (was ~5% of total CPU under the
-        // RPC-DataGen category in the t31v5 profile).
+        // construction + destruction.
         ranking::RankingResponse& resp = pickResponseTemplate();
         auto payloadiobufq = serializePayload(resp);
         auto buf = payloadiobufq.move();
@@ -1566,9 +1587,8 @@ void DLRMRequestHandler(
   //   - Feature extraction in parallel: orchestrated by RANKER, the
   //     actual extractor work delegated to GlobalCPUThread (matches the
   //     prod thread-pool layout: ranking orchestration on RANKER, heavy
-  //     CPU extraction on GlobalCPUThread). Production multifeed
-  //     aggregator spends ~30-35% of CPU here, so we keep it in the
-  //     hot path.
+  //     CPU extraction on GlobalCPUThread). A production aggregator spends
+  //     a large share of CPU here, so we keep it in the hot path.
   //   - collectAll the two, then proceed to I/O fanout, pointer chase,
   //     response generation. Everything chains via futures so the
   //     dispatcher thread returns immediately.
@@ -1585,8 +1605,8 @@ void DLRMRequestHandler(
   auto cpuPool = this_thread.cpuThreadPool;
 
   // Stage A: hop to RANKER, then delegate feature extraction to
-  // GlobalCPUThread. Production multifeed_aggregator spends ~30-35% of
-  // CPU here, so we keep it on the hot path. Runs in parallel with
+  // GlobalCPUThread. A production aggregator spends a large share of CPU
+  // here, so we keep it on the hot path. Runs in parallel with
   // the DLRM inference that was already kicked off above (inference
   // executes on cpuThreadPool too, but folly's CPUThreadPoolExecutor
   // is multi-threaded so the two stages overlap).
@@ -1646,7 +1666,7 @@ void DLRMRequestHandler(
             });
       })
       .thenValue([context_ptr](int /*final_result*/) {
-        // Use the pre-built template pool to avoid the ~5% RPC-DataGen
+        // Use the pre-built template pool to avoid the RPC-DataGen
         // construction + destructor cost per request.
         ranking::RankingResponse& resp = pickResponseTemplate();
         folly::IOBufQueue bufq;
@@ -1738,7 +1758,7 @@ void PageRankRequestHandler(
   auto chaseFs = folly::collect(chaseFutures).get();
   int chaseResult = std::accumulate(chaseFs.begin(), chaseFs.end(), 0);
 
-  // Use the pre-built template pool to avoid the ~5% RPC-DataGen cost.
+  // Use the pre-built template pool to avoid the RPC-DataGen cost.
   ranking::RankingResponse& resp = pickResponseTemplate();
 
   // Serialize into FBThrift
@@ -1753,8 +1773,7 @@ void PageRankRequestHandler(
 // ============================================================================
 // Phase 6: real per-method handlers, replacing the Phase 4 shims.
 //
-// Each handler implements the per-method pipeline from
-// ~/feedsim_v2/docs/phase6_researcher_notes.md §4:
+// Each handler implements the per-method pipeline:
 //   - Deserialize on ThriftSrv.IO (the dispatcher thread).
 //   - Look up / mutate the per-thread session map (sharded by query_id).
 //   - For heavy methods, folly::via(rankerPool) to orchestrate, then
@@ -2552,8 +2571,7 @@ int main(int argc, char** argv) {
 
   // Load Silesia corpus if --silesia_dir was given. Server-side response
   // generation will then pull bytes from the corpus instead of running
-  // xor128() RNG (which previously consumed ~15% of CPU with no production
-  // analog).
+  // xor128() RNG (which has no production analog).
   if (args.silesia_dir_given) {
     g_silesia_loader = std::make_unique<ranking::SilesiaLoader>();
     if (!g_silesia_loader->loadDirectory(args.silesia_dir_arg)) {
@@ -2619,8 +2637,7 @@ int main(int argc, char** argv) {
   // (either Silesia or xor128) AND g_rpc_registry is loaded (so the pool
   // can shape itself to the response_sizes distribution). Each handler
   // grabs a template by index + mutates queryID, eliminating the
-  // per-request construct+destruct chain that was 6.3% of total CPU
-  // (RPC-DataGen) in the t31v5 profile.
+  // per-request construct+destruct chain.
   initResponseTemplatePool(args.num_objects_arg);
 
   int fake_argc = 1;
@@ -2629,8 +2646,8 @@ int main(int argc, char** argv) {
   folly::init(&fake_argc, &sargv);
 
   // Phase 4: production-shaped thread pools. Names (visible in
-  // /proc/$pid/task/*/comm and Strobelight) match the multifeed_aggregator
-  // prod profile: ThriftSrv.IO, RANKER, SREventBase, GlobalCPUThread.
+  // /proc/$pid/task/*/comm and profilers) match a production aggregator's
+  // thread profile: ThriftSrv.IO, RANKER, SREventBase, GlobalCPUThread.
   const unsigned int nproc = folly::available_concurrency();
 
   // GlobalCPUThread: shared folly singleton. DLRM inference, feature
@@ -2698,7 +2715,7 @@ int main(int argc, char** argv) {
     }
     folly::collectAll(std::move(cpuFutures)).get();
 
-    // Warm up SREventBase pool so threads spawn and Strobelight sees them
+    // Warm up SREventBase pool so threads spawn and are visible to profilers
     // even when nothing is dispatched there in Phase 4.
     std::vector<folly::Future<int>> srEbFutures;
     for (int i = 0; i < warmup_tasks; i++) {
@@ -2890,8 +2907,6 @@ int main(int argc, char** argv) {
 
   // Phase 6: register the 5 production-shaped inbound methods, each
   // wired to its real per-method handler (replaces the Phase 4 shims).
-  // See ~/feedsim_v2/docs/phase6_researcher_notes.md §4 for the
-  // per-handler stage breakdown and thread-pool routing.
   std::cout << "Registering Phase 6 per-method inbound handlers" << std::endl;
   server.registerQueryCallback(
       ranking::kCreateAndPrimeSessionRequestType,

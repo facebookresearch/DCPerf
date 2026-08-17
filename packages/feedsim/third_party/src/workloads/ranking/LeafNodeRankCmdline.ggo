@@ -35,9 +35,9 @@ option "max_response_size" - "Maximum response size in bytes returned by the lea
 option "compression_data_size" - "Number of bytes to compress per request." int default="131072"
 option "rank_trials_per_thread" - "Number of iterations each CPU thread executes of rank work." int default="1"
 option "min_icache_iterations" - "At least this number of icache busting iteration will be executed." int default="0"
-option "node_rank_seed" - "Seed for random number generator. If not provided, current time will be used." long optional
-option "page_rank_seed" - "Seed for PageRank random number generator. If not provided, current time will be used." long optional
-option "pointer_chase_seed" - "Seed for PointerChase random number generator. If not provided, current time will be used." long optional
+option "node_rank_seed" - "Seed for random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
+option "page_rank_seed" - "Seed for PageRank random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
+option "pointer_chase_seed" - "Seed for PointerChase random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
 option "chase_iterations" - "Number of chases to execute on handler thread." int default="5120"
 option "io_chase_iterations" - "Number of chases to execute on IO threads." int default="5120"
 option "io_time_ms" - "Milliseconds to sleep emualting I/O offcpu." int default="200"
@@ -79,19 +79,19 @@ option "stories_per_processor_pass" - "Number of MockStories per story-processor
 
 # Server-side response data source. When set, the response generator slices
 # bytes from Silesia files instead of running xor128 RNG. Removes the
-# ~15% of CPU that response generation otherwise burns on RNG.
+# CPU that response generation otherwise burns on RNG.
 option "silesia_dir" - "Path to Silesia corpus directory. When set, server-side response generation uses Silesia bytes instead of RNG." string typestr="directory" optional
 
 # Phase 5: outbound RPC fanout to mock_services. When --rpc_dist_path is set,
 # request handlers issue real Thrift RPCs to a co-located mock_services
 # instance instead of folly::futures::sleep. Fanout is calibrated from
-# rpc_dist.json (see ~/feedsim_v2/docs/phase5_researcher_notes.md §4) and
-# scaled by --rpc_fanout_scale. When --rpc_dist_path is empty, the legacy
+# rpc_dist.json and scaled by --rpc_fanout_scale. When --rpc_dist_path is
+# empty, the legacy
 # folly::futures::sleep path is used (regression safety net).
 option "rpc_dist_path" - "Path to rpc_dist.json. When set, request handlers fan out real RPCs to mock_services." string typestr="filename" default=""
 option "mock_services_host" - "Hostname for mock_services Thrift server." string default="127.0.0.1"
 option "mock_services_port" - "Port for mock_services Thrift server (matches mock_services --port)." int default="21222"
-option "rpc_fanout_scale" - "Scale factor applied to per-session fanout counts. Default 0.10 yields ~376 RPCs/session (vs ~3742 at scale=1.0); calibrated to raise outbound RPC volume so Encryption/RPC-Compression/RPC-AsyncIO shares match prod's multifeed_aggregator profile." double default="0.10"
+option "rpc_fanout_scale" - "Scale factor applied to per-session fanout counts. Default 0.10 yields ~376 RPCs/session (vs ~3742 at scale=1.0); calibrated to raise outbound RPC volume so Encryption/RPC-Compression/RPC-AsyncIO shares match a production aggregator profile." double default="0.10"
 # Diagnostic / isolation knob. When set, request handlers take the legacy
 # folly::futures::sleep path even if --rpc_dist_path is supplied, and the
 # per-thread MockServicesClient is not constructed (no connection to
@@ -99,12 +99,9 @@ option "rpc_fanout_scale" - "Scale factor applied to per-session fanout counts. 
 # integration tests without depending on the mock_services side process.
 option "use_legacy_sleep" - "Force legacy folly::futures::sleep path; skip MockServicesClient construction and outbound RPC fanout." flag off
 
-# Mitigation knob for the t25 cold-channel anti-pattern: when offered load is
-# low, MockServicesClient channels go idle between sparse session bursts.
-# Per-channel keepalive issues a 1-byte getStatus() ping every N ms to keep
-# the Rocket channel + EventBase warm, defeating the cold-wake + deep-C-state
-# penalty observed at low QPS on BGM (p95 cliff: 14x at q=5). 0 = disabled
-# (default = keepalive off so the anti-pattern stays observable for regression
-# tests). Recommended: 150-500ms. See ~/.claude/plans/ancient-launching-pizza.md
-# section "2026-05-27 -- t25" for the root-cause analysis.
+# Per-channel keepalive: when offered load is low, MockServicesClient channels
+# go idle between sparse session bursts. This issues a 1-byte getStatus() ping
+# every N ms to keep the Rocket channel + EventBase warm, defeating the
+# cold-wake + deep-C-state penalty observed at low QPS. 0 = disabled (default).
+# Recommended: 150-500ms.
 option "mock_keepalive_interval_ms" - "Interval (ms) between per-MockServicesClient keepalive pings. 0 = disabled." int default="0"

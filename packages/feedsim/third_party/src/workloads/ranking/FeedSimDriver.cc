@@ -227,7 +227,7 @@ void DriverStats::printStats(uint32_t type, double elapsed_secs) const {
 // global (one per process), constructed lazily on first use to avoid paying
 // the OpenSSL init cost when TLS is off. Closes the bench's Encryption CPU
 // undershoot on the driver↔server channel (paired with FeedSimServer's
-// FEEDSIM_TLS_CERT / FEEDSIM_TLS_KEY env vars). See t41 progress log.
+// FEEDSIM_TLS_CERT / FEEDSIM_TLS_KEY env vars).
 namespace {
 SSL_CTX* getDriverSslCtxOrNull() {
   static SSL_CTX* s_ctx = []() -> SSL_CTX* {
@@ -246,6 +246,17 @@ SSL_CTX* getDriverSslCtxOrNull() {
       return nullptr;
     }
     SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);
+    // Restrict the offered ciphers to AES-GCM so the connection negotiates
+    // hardware AES via libcrypto, matching prod's cipher. Without this,
+    // OpenSSL may pick ChaCha20-Poly1305, a cipher with no hardware-AES path,
+    // which runs the AEAD un-accelerated. Mirrors MockServicesClient's cipher
+    // pinning.
+    SSL_CTX_set_cipher_list(
+        ctx,
+        "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
+        "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"); // TLS 1.2
+    SSL_CTX_set_ciphersuites(
+        ctx, "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256"); // TLS 1.3
     std::cout << "FeedSimDriver: TLS enabled via FEEDSIM_DRIVER_TLS=1"
               << std::endl;
     return ctx;
@@ -852,6 +863,17 @@ void FeedSimDriver::enableMonitoring(uint16_t port) {
   impl_->monitor_port = port;
 }
 
+namespace {
+// One-shot timer callback used by FEEDSIM_STATS_WARMUP_SECS: drops all
+// latency/throughput samples collected so far so the final stats reflect only
+// the post-warmup (steady-state) window. Runs on the DriverThread's own event
+// base, so it never races that thread's logRequest()/logResponse() writes to
+// the same DriverStats.
+void resetDriverStatsCb(evutil_socket_t, short, void* arg) {
+  reinterpret_cast<DriverStats*>(arg)->reset();
+}
+} // namespace
+
 void FeedSimDriver::run(uint32_t num_threads, bool thread_pinning,
                         uint32_t num_connections_per_thread,
                         uint32_t max_connection_depth) {
@@ -863,6 +885,23 @@ void FeedSimDriver::run(uint32_t num_threads, bool thread_pinning,
   signal(SIGPIPE, SIG_IGN);
   impl_->running = true;
   impl_->total_stats = std::make_unique<DriverStats>(1000);
+
+  // FEEDSIM_STATS_WARMUP_SECS: when >0, each DriverThread drops the samples it
+  // collected in the first N seconds of the measurement window (a per-thread
+  // one-shot timer calls DriverStats::reset()). This excludes cold-start
+  // transients (connection ramp, cache/JIT warmup, first-touch faults) from
+  // the reported latency distribution, giving search_qps a more stable p95 so
+  // it doesn't back off QPS on a noisy tail.
+  int stats_warmup_secs = 0;
+  {
+    const char* e = std::getenv("FEEDSIM_STATS_WARMUP_SECS");
+    if (e != nullptr && e[0] != '\0') {
+      stats_warmup_secs = std::atoi(e);
+      if (stats_warmup_secs < 0) {
+        stats_warmup_secs = 0;
+      }
+    }
+  }
 
   // Barrier for thread init synchronization
   pthread_barrier_t init_barrier;
@@ -909,7 +948,7 @@ void FeedSimDriver::run(uint32_t num_threads, bool thread_pinning,
 
     // Start thread
     dt->thread = std::thread([this, &dt_ref = *dt, &init_barrier,
-                              thread_pinning, i]() {
+                              thread_pinning, i, stats_warmup_secs]() {
       // CPU affinity
       if (thread_pinning) {
         cpu_set_t mask;
@@ -940,6 +979,18 @@ void FeedSimDriver::run(uint32_t num_threads, bool thread_pinning,
 
       // Start making requests
       TestDriver::Impl::makeRequests(*dt_ref.driver);
+
+      // Schedule the cold-start stats reset on this thread's own base (added
+      // here, before dispatch, so it fires from this thread — no data race with
+      // the stats writes). Fires once ~stats_warmup_secs into steady traffic.
+      if (stats_warmup_secs > 0) {
+        struct timeval warmup_tv {
+          stats_warmup_secs, 0
+        };
+        event_base_once(
+            dt_ref.base, -1, EV_TIMEOUT, resetDriverStatsCb,
+            &dt_ref.driver->impl_->current_stats, &warmup_tv);
+      }
 
       // Run event loop
       event_base_dispatch(dt_ref.base);
@@ -1058,7 +1109,14 @@ void FeedSimDriver::run(uint32_t num_threads, bool thread_pinning,
   }
 
   double end_time = getTimeSec();
-  double elapsed = end_time - start_time;
+  // With a stats warmup, samples were reset ~stats_warmup_secs into the run, so
+  // the throughput denominator must be the post-warmup window (else QPS would
+  // be understated by counting post-warmup queries over the full duration).
+  double meas_start = start_time;
+  if (stats_warmup_secs > 0) {
+    meas_start = start_time + stats_warmup_secs;
+  }
+  double elapsed = end_time - meas_start;
 
   // Aggregate stats from all threads
   for (auto& dt : impl_->threads) {
