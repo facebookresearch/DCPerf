@@ -9,6 +9,8 @@
 #include <iostream>
 #include <random>
 
+#include "generated/extractor_helpers.h"
+
 void FeatureExtractorSuite::addExtractor(
     std::unique_ptr<FeatureExtractorBase> extractor) {
   extractors_.push_back(std::move(extractor));
@@ -138,10 +140,9 @@ void FeatureExtractorSuite::runFlatExtractors(
   // Per-call mutable state. CopyContext fields the generated extractors
   // mutate (example via emplace_back, structData via in-place
   // arithmetic) MUST NOT alias across concurrent invocations on the
-  // same suite — t27 forensic analysis showed SIGSEGV in
-  // vc_NNNN_NNNN -> std::vector<IdScorePair>::_M_realloc_insert ->
-  // je_large_dalloc, caused by concurrent emplace_back on the shared
-  // flat_example_.idScoreLists[i]. thread_local keeps allocator
+  // same suite: concurrent emplace_back on a shared
+  // flat_example_.idScoreLists[i] would corrupt the allocator and crash.
+  // thread_local keeps allocator
   // pressure low: each worker thread reuses its own buffers across
   // calls; only initialized on first call.
   thread_local MockFeatureExample local_example;
@@ -191,7 +192,15 @@ void FeatureExtractorSuite::runFlatExtractors(
   size_t start = flat_pos_.fetch_add(static_cast<size_t>(count),
                                      std::memory_order_relaxed) %
       total;
+  // Memory-streaming lever: FEEDSIM_SWEEP_N reads per call over a large
+  // read-only buffer, folded into live state so it can't be elided. No-op
+  // when FEEDSIM_SWEEP_N=0. Hoist the enabled check out of the loop.
+  const int sweep_n = dcperf::feature_extractors::helpers::sweepReadsPerCall();
   for (int i = 0; i < count; ++i) {
     flat_copies_[(start + static_cast<size_t>(i)) % total](&ctx);
+    if (sweep_n > 0) {
+      local_struct[0] += dcperf::feature_extractors::helpers::runStrideSweep(
+          start + static_cast<size_t>(i));
+    }
   }
 }
