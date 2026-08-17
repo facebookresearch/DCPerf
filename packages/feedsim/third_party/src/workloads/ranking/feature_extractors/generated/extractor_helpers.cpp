@@ -5,7 +5,11 @@
 
 #include "extractor_helpers.h"
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 namespace dcperf {
 namespace feature_extractors {
@@ -278,6 +282,82 @@ float cappedConvertFloat(double value, float min_val, float max_val) {
   float result = static_cast<float>(value);
   if (!isFiniteNonZero(result)) return 0.0f;
   return result;
+}
+
+// ======================================================================
+// Memory-streaming stride sweep (backend/DRAM-pressure lever)
+// ======================================================================
+
+namespace {
+
+struct SweepConfig {
+  std::vector<float> buf;  // process-wide, read-only after init
+  size_t size = 0;         // element count
+  int n = 0;               // reads per extractor call (FEEDSIM_SWEEP_N)
+  size_t stride = 16;      // element stride (FEEDSIM_SWEEP_STRIDE); 16 = 64B line
+};
+
+SweepConfig g_sweep;
+std::once_flag g_sweep_once;
+
+int envInt(const char* name, int fallback) {
+  const char* v = std::getenv(name);
+  if (v == nullptr || v[0] == '\0') {
+    return fallback;
+  }
+  int parsed = std::atoi(v);
+  return parsed;
+}
+
+void initSweep() {
+  // Defaults: 16 strided reads/call over a 64 MB DRAM-resident buffer at a
+  // 64 B (1 cache line) stride. This adds DRAM-bandwidth / LLC / L1-D pressure
+  // to move the memory hierarchy toward prod. Override any knob via the
+  // FEEDSIM_SWEEP_* env vars; set FEEDSIM_SWEEP_N=0 to disable entirely.
+  int mb = envInt("FEEDSIM_SWEEP_MB", 64);
+  if (mb < 1) {
+    mb = 1;
+  }
+  g_sweep.n = envInt("FEEDSIM_SWEEP_N", 16);
+  if (g_sweep.n < 0) {
+    g_sweep.n = 0;
+  }
+  int stride = envInt("FEEDSIM_SWEEP_STRIDE", 16);
+  g_sweep.stride = stride < 1 ? 1 : static_cast<size_t>(stride);
+  g_sweep.size = static_cast<size_t>(mb) * 1024 * 1024 / sizeof(float);
+  g_sweep.buf.resize(g_sweep.size);
+  // Fill with pseudo-random data so the compiler can't fold the buffer away.
+  uint64_t s = 0x9E3779B97F4A7C15ULL;
+  for (size_t i = 0; i < g_sweep.size; ++i) {
+    s = s * 6364136223846793005ULL + 1442695040888963407ULL;
+    g_sweep.buf[i] = static_cast<float>((s >> 40) & 0xFFFF) * 1e-3f;
+  }
+}
+
+} // namespace
+
+int sweepReadsPerCall() {
+  std::call_once(g_sweep_once, initSweep);
+  return g_sweep.n;
+}
+
+float runStrideSweep(uint64_t seed) {
+  const SweepConfig& c = g_sweep;
+  if (c.n == 0 || c.size == 0) {
+    return 0.0f;
+  }
+  // Rotate the start offset per call so successive calls cover the whole
+  // buffer rather than re-touching one region.
+  size_t off = (seed * 2654435761ULL) % c.size;
+  float acc = 0.0f;
+  for (int i = 0; i < c.n; ++i) {
+    acc += c.buf[off];
+    off += c.stride;
+    if (off >= c.size) {
+      off -= c.size;
+    }
+  }
+  return acc;
 }
 
 } // namespace helpers
