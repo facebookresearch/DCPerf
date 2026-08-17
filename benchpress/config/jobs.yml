@@ -311,14 +311,20 @@
         - '--use-async {use_async}'
         - '--base-port {base_port}'
         - '-T {stats_port}'
+        - '-w {server_workers}'
+        - '--thrift-server-workers {thrift_server_workers}'
+        - '--cassandra-heap {cassandra_heap}'
       vars:
-        - 'duration=1M'
+        - 'duration=3S'
         - 'iterations=1'
-        - 'reps=1000'
+        - 'reps=0'
         - 'interpreter=cpython'
         - 'use_async=1'
         - 'base_port=16668'
         - 'stats_port=8001'
+        - 'server_workers=0'
+        - 'thrift_server_workers=0'
+        - 'cassandra_heap=1536M'
   hooks:
     - hook: copymove
       options:

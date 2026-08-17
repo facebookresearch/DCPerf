@@ -205,6 +205,33 @@ Please create a backup of this folder to avoid data loss.
 
 These mini jobs will reuse the dataset generated in the previous step.
 
+
+#### How to tune the memory usage
+
+`server_workers` is the knob that dominates peak memory usage. Each uWSGI worker
+loads its own Python interpreter, Django and models, at roughly **0.57GB per
+worker**. It defaults to `0`, meaning one worker per usable core, so the
+footprint scales with the machine (or with the cpuset the job runs in).
+`thrift_server_workers` also defaults to `0` (per-core) but costs only
+~0.04GB each, so it is not the one to tune first.
+
+To adjust the memory usage, please see following commands:
+
+```
+./benchpress_cli.py run django_workload_mini -r standalone \
+  -i '{"server_workers": "2"}'
+```
+
+| `server_workers` | Peak memory usage (GB) |
+|------------------|-------------------------------|
+| 2                | ~3.8                        |
+| 8                | 6.86                        |
+| 16               | 12.08                       |
+
+`server_workers=2` is the recommended value to stay under a 4GB budget.
+
+The other large contributor is Cassandra's heap which is controled by `cassandra_heap` with default 1536M for the mini jobs right now.
+
 ### Parameters
 
 We provide the following parameters you can customize for DjangoBench workload:
@@ -260,6 +287,8 @@ Example:
 ```bash
 ./run.sh -r standalone --interpreter cinder --use-jit 1 --skip-datagen 0
 ```
+
+
 
 ## Reporting
 
