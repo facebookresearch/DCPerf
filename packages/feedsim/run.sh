@@ -53,10 +53,8 @@ if [[ "$IS_SMT_ON" = 1 ]]; then
 else
   RANKING_THREADS_DEFAULT="$(( $(nproc) * 15/20))"  # 15/20 is 0.75 cpu factor
 fi
-# Driver threads = nproc/4 across SMT-on / SMT-off. Previously the SMT-on
-# branch used nproc/5, which under-pinned driver work on big SMT boxes
-# (e.g. BGM 176 logical → 35 vs 44 threads). Standardizing both branches
-# at nproc/4 removes one source of cross-platform variance.
+# Driver threads = nproc/4 across SMT-on / SMT-off, so both branches pin
+# driver work consistently and avoid a source of cross-platform variance.
 DRIVER_THREADS="$(echo "scale=2; $(nproc) / 4.0 + 0.5 " | bc )"  # rounds nearest
 DRIVER_THREADS="${DRIVER_THREADS%.*}"  # Truncate decimal fraction.
 DRIVER_THREADS="$(echo "${BC_MAX_FN}; max(${DRIVER_THREADS:-0}, 4)" | bc )" # At least 4 threads.
@@ -295,9 +293,8 @@ main() {
     local stories_per_processor_pass
     stories_per_processor_pass="50"
 
-    # t43 c7 calibration knobs — promoted from env vars to CLI flags so they
-    # are visible in --help and surfaced in jobs.yml. Defaults match the
-    # balanced configuration documented in [[t43_c7_recommended]].
+    # Calibration knobs — promoted from env vars to CLI flags so they
+    # are visible in --help and surfaced in jobs.yml.
     local mock_tls
     mock_tls="1"
 
@@ -744,8 +741,8 @@ main() {
     fi
 
     # Build story-processor options. The story-processor mock module mirrors
-    # prod multifeed's scoring + filter + blend + serdes + topK passes (see
-    # ScoringPassProcessor, FilteringPassProcessor, ...). When
+    # a production ranking service's scoring + filter + blend + serdes + topK
+    # passes. When
     # story_processors_per_story > 0, LeafNodeRank's ThreadStartup
     # constructs a per-thread StoryProcessorSuite and runStoryProcessing
     # issues `num_stories * story_processors_per_story` pipeline passes
@@ -809,11 +806,7 @@ main() {
     # User-facing knobs (--mock-tls, --mock-zstd-frac, --server-zstd, etc.)
     # are translated to ENV VARS here. The C++ binaries (MockServicesClient,
     # LeafNodeRank, FeedSimServer, FeedSimDriver) read these env vars via
-    # std::getenv at thread/server startup. A previous refactor tried to
-    # promote them to gengetopt CLI flags; that caused a silent
-    # MockServicesClient TLS handshake regression (every connection
-    # ECONNRESET, falling back to folly::futures::sleep). Until the C++
-    # side adopts CLI flags safely, env-var plumbing is the proven path.
+    # std::getenv at thread/server startup.
     local mock_port="${MOCK_SERVICES_PORT:-21222}"
     local mock_services_opts="--rpc_dist_path=$rpc_dist_json"
     mock_services_opts="$mock_services_opts --mock_services_host=localhost"
@@ -827,15 +820,56 @@ main() {
     if [ "$mock_tls" = "1" ]; then
         export MOCK_TLS=1
     fi
+    # Driver↔Leaf TLS. When FEEDSIM_DRIVER_TLS=1 is passed in the environment,
+    # the DriverNodeRank client (reads FEEDSIM_DRIVER_TLS) wraps its
+    # bufferevents in OpenSSL, and the LeafNodeRank server needs a cert so
+    # FeedSimServer's accept path enables AsyncSSLSocket — wire the shared
+    # example cert/key into FEEDSIM_TLS_CERT/FEEDSIM_TLS_KEY. Both ends pin
+    # AES-GCM so the encrypted driver↔leaf volume registers as hardware crypto
+    # (matches prod's Rocket-over-TLS driver path). Default off. The LeafNodeRank
+    # server reads FEEDSIM_TLS_CERT/KEY from the exported env; the DriverNodeRank
+    # client is launched through search_qps.sh, which does not reliably forward
+    # the parent's exported env to the driver process, so FEEDSIM_DRIVER_TLS is
+    # also injected directly on the driver command line via `driver_bin`.
+    # Per-run driver knobs are injected on the DriverNodeRank command line via
+    # `env VAR=val` (accumulated in driver_env), because search_qps.sh launches
+    # the driver as a bare `$command &` that does not reliably inherit the
+    # parent shell's exported env.
+    driver_env=""
+    if [ "${FEEDSIM_DRIVER_TLS:-0}" = "1" ]; then
+        driver_cert_dir="${FEEDSIM_ROOT}/certs"
+        if [ ! -r "${driver_cert_dir}/example.crt" ] || [ ! -r "${driver_cert_dir}/example.key" ]; then
+            echo "ERROR: FEEDSIM_DRIVER_TLS=1 but ${driver_cert_dir}/example.{crt,key} not found" >&2
+            exit 1
+        fi
+        export FEEDSIM_TLS_CERT="${driver_cert_dir}/example.crt"
+        export FEEDSIM_TLS_KEY="${driver_cert_dir}/example.key"
+        export FEEDSIM_DRIVER_TLS=1
+        driver_env="${driver_env} FEEDSIM_DRIVER_TLS=1"
+        echo "Driver↔Leaf TLS: ENABLED (cert=${driver_cert_dir}/example.crt, AES-GCM)"
+    fi
+    # FEEDSIM_STATS_WARMUP_SECS: drop the first N seconds of latency/throughput
+    # samples in each search_qps probe (DriverNodeRank resets its stats N secs
+    # in) so cold-start transients don't inflate the tail and make the search
+    # back off QPS prematurely. Default unset/0 (no warmup).
+    if [ -n "${FEEDSIM_STATS_WARMUP_SECS:-}" ] && [ "${FEEDSIM_STATS_WARMUP_SECS}" != "0" ]; then
+        driver_env="${driver_env} FEEDSIM_STATS_WARMUP_SECS=${FEEDSIM_STATS_WARMUP_SECS}"
+        echo "Driver stats warmup: ${FEEDSIM_STATS_WARMUP_SECS}s (dropping cold-start samples per probe)"
+    fi
+    if [ -n "$driver_env" ]; then
+        driver_bin="env${driver_env} build/workloads/ranking/DriverNodeRank"
+    else
+        driver_bin="build/workloads/ranking/DriverNodeRank"
+    fi
     # MOCK_ZSTD_FRAC env consumed by MockServicesClient::resolveZstdFraction.
-    # Always export so the t43 c7 default 0.75 reaches the binary.
+    # Always export so the configured default reaches the binary.
     export MOCK_ZSTD_FRAC="$mock_zstd_frac"
     echo "MockServicesClient: TLS=${mock_tls} ZSTD_frac=${mock_zstd_frac} keepalive_ms=${mock_keepalive_interval_ms} fanout_scale=${rpc_fanout_scale}"
 
     # Server-side response compression. FEEDSIM_SERVER_ZSTD=0 disables
     # compressThrift/compressPayload (server bytes emitted uncompressed).
     # Default ON in the C++ source; we export "0" when user passes
-    # --server-zstd=0 (the t43 c7 default).
+    # --server-zstd=0.
     if [ "$server_zstd" != "1" ]; then
         export FEEDSIM_SERVER_ZSTD=0
         echo "Server-side response ZSTD: DISABLED (FEEDSIM_SERVER_ZSTD=0)"
@@ -848,8 +882,7 @@ main() {
     # parallel backend; OpenMP-backed builds (which Meta's internal
     # libtorch may use) read OMP_NUM_THREADS directly. Without this,
     # each ThriftSrv.IO worker calling forward() spawns nproc OMP
-    # threads, accumulating to nproc^2 GlobalCPUThread-named threads
-    # (= 7,744 on BGM per-instance after taskset). See t14 progress log.
+    # threads, accumulating to nproc^2 GlobalCPUThread-named threads.
     # shellcheck disable=SC2086
     env $preload_env OMP_NUM_THREADS=1 MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
@@ -955,20 +988,33 @@ main() {
     log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
 
     # SLA target for search_qps (95p latency in milliseconds). Default 700ms
-    # matches the prod multifeed aggregator's own end-to-end budget at p95.
+    # matches the production aggregator's own end-to-end budget at p95.
     # Override via --sla-p95-ms CLI flag (handled in arg parsing above).
     sla_arg="95p:${sla_p95_ms}"
+
+    # Adaptive driver depth (fleet default): search_qps raises the driver's
+    # pipeline --depth in the peak phase until the server saturates (system
+    # CPU>=95% or p95>=SLA), giving each platform just enough offered concurrency
+    # to reach a real bound instead of capping on driver concurrency.
+    # Enabled by default up to depth 8; set FEEDSIM_ADAPTIVE_DEPTH_MAX=0 to
+    # disable and fall back to the fixed FEEDSIM_DRIVER_DEPTH (default 1).
+    sqps_adaptive_arg=""
+    adaptive_depth_max="${FEEDSIM_ADAPTIVE_DEPTH_MAX:-8}"
+    if [ "$adaptive_depth_max" != "0" ]; then
+        sqps_adaptive_arg="-D ${adaptive_depth_max}"
+    fi
 
     if [ -z "$fixed_qps" ] && [ "$auto_driver_threads" != "1" ]; then
         benchreps_tell_state "before search_qps"
         echo "search_qps SLA: ${sla_arg}"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -w 15 -f 300 -s "$sla_arg" -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
-            build/workloads/ranking/DriverNodeRank \
+        scripts/search_qps.sh -t "${FEEDSIM_EXPERIMENT_TIME:-120}" -w 15 -f 300 -s "$sla_arg" $sqps_adaptive_arg -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+            $driver_bin \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
                 --threads="${driver_threads}" \
                 --connections=4 \
+                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
@@ -977,10 +1023,11 @@ main() {
         benchreps_tell_state "before search_qps"
         echo "search_qps SLA: ${sla_arg}"
         # shellcheck disable=SC2086
-        scripts/search_qps.sh -a -w 15 -f 300 -s "$sla_arg" -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
-            build/workloads/ranking/DriverNodeRank \
+        scripts/search_qps.sh -a -t "${FEEDSIM_EXPERIMENT_TIME:-120}" -w 15 -f 300 -s "$sla_arg" $sqps_adaptive_arg -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" $qps_threshold_args $no_retry_args -o "${FEEDSIM_ROOT}/${result_filename}" -- \
+            $driver_bin \
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port" \
+                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
@@ -1004,11 +1051,12 @@ main() {
            -P "$LEAF_PID" -B "$BREAKDOWN_FOLDER" \
            $qps_threshold_args $no_retry_args \
            -o "${FEEDSIM_ROOT}/${result_filename}" \
-           -- build/workloads/ranking/DriverNodeRank \
+           -- $driver_bin \
                 --server "0.0.0.0:$port" \
                 --monitor_port "$client_monitor_port" \
                 --threads="${num_workers}" \
                 --connections="${num_connections}" \
+                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
