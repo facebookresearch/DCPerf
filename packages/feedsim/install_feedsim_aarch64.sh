@@ -182,11 +182,15 @@ else
     msg "[SKIPPED] glog-${DEP_GFLAGS_VERSION}"
 fi
 
-DEP_JEMALLOC_VERSION="5.3.0"
+DEP_JEMALLOC_VERSION="${FEEDSIM_JEMALLOC_VERSION:-5.3.0}"
 # Installing JEMalloc
 if ! [ -d "jemalloc-${DEP_JEMALLOC_VERSION}" ]; then
     wget "https://github.com/jemalloc/jemalloc/releases/download/${DEP_JEMALLOC_VERSION}/jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2" -O "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2"
-    verify_checksum "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2" "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa"
+    if [ "${DEP_JEMALLOC_VERSION}" = "5.3.0" ]; then
+        verify_checksum "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2" "2db82d1e7119df3e71b7640219b6dfe84789bc0537983c3b7ac4f7189aecfeaa"
+    else
+        msg "[WARN] no pinned checksum for jemalloc ${DEP_JEMALLOC_VERSION}; skipping verify (official github release over https)"
+    fi
     bunzip2 "jemalloc-${DEP_JEMALLOC_VERSION}.tar.bz2"
     tar -xvf "jemalloc-${DEP_JEMALLOC_VERSION}.tar"
     cd "jemalloc-${DEP_JEMALLOC_VERSION}"
@@ -198,11 +202,15 @@ else
     msg "[SKIPPED] jemalloc-${DEP_JEMALLOC_VERSION}"
 fi
 
-DEP_LIBEVENT_VERSION="2.1.12-stable"
+DEP_LIBEVENT_VERSION="${FEEDSIM_LIBEVENT_VERSION:-2.1.12-stable}"
 # Installing libevent
 if ! [ -d "libevent-${DEP_LIBEVENT_VERSION}" ]; then
     wget "https://github.com/libevent/libevent/releases/download/release-${DEP_LIBEVENT_VERSION}/libevent-${DEP_LIBEVENT_VERSION}.tar.gz" -O "libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
-    verify_checksum "libevent-${DEP_LIBEVENT_VERSION}.tar.gz" "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
+    if [ "${DEP_LIBEVENT_VERSION}" = "2.1.12-stable" ]; then
+        verify_checksum "libevent-${DEP_LIBEVENT_VERSION}.tar.gz" "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb"
+    else
+        msg "[WARN] no pinned checksum for libevent ${DEP_LIBEVENT_VERSION}; skipping verify (official github release over https)"
+    fi
     tar -xzf "libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
     cd "libevent-${DEP_LIBEVENT_VERSION}"
     ./configure
@@ -219,7 +227,7 @@ msg "Installing third-party dependencies ... DONE"
 # PyTorch does not provide official pre-built LibTorch C++ binaries for ARM64
 # Linux via conda or download.pytorch.org/libtorch. The conda default channel
 # now ships CUDA-enabled libtorch (gpu_cuda130) even on aarch64, which fails
-# on machines without CUDA (e.g., Grace).
+# on machines without CUDA.
 # Instead, we install the CPU-only torch wheel via pip and extract the
 # libtorch cmake/headers/libs from the pip package.
 msg "Installing LibTorch via pip (CPU-only) for aarch64..."
@@ -242,9 +250,14 @@ if ! [ -d "libtorch" ]; then
     export PATH="${CONDA_DIR}/bin:${PATH}"
 
     # Install CPU-only PyTorch via pip — this is the only reliable way to get
-    # CPU-only libtorch on aarch64
-    msg "Installing PyTorch CPU-only via pip..."
-    pip install torch --index-url https://download.pytorch.org/whl/cpu
+    # CPU-only libtorch on aarch64. LIBTORCH_VERSION (env) pins the version;
+    # unset reproduces the v2 baseline (latest).
+    msg "Installing PyTorch CPU-only via pip (version='${LIBTORCH_VERSION:-latest}')..."
+    if [ -n "${LIBTORCH_VERSION:-}" ]; then
+        pip install "torch==${LIBTORCH_VERSION}+cpu" --index-url https://download.pytorch.org/whl/cpu
+    else
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+    fi
 
     # Also install libstdcxx-ng to ensure compatible C++ runtime
     eval "$("${CONDA_DIR}/bin/conda" shell.bash hook)"
