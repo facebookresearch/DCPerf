@@ -27,6 +27,7 @@
 
 #include <folly/MPMCQueue.h>
 #include <folly/container/F14Map.h>
+#include <folly/io/IOBuf.h>
 #include <folly/io/async/AsyncSSLSocket.h>
 #include <folly/io/async/AsyncServerSocket.h>
 #include <folly/io/async/AsyncSocket.h>
@@ -35,17 +36,30 @@
 #include <folly/io/async/EventBaseManager.h>
 #include <folly/io/async/SSLContext.h>
 
+#include <openssl/ssl.h>
+
 namespace feedsim {
+
+class ServerConnection;
 
 // ─── RequestContext implementation ──────────────────────────────────────────
 
 struct RequestContext::Impl {
-  // The socket fd to write the response back on.
-  // We use raw fd + write() because the response is a single small write
-  // and we want to avoid the complexity of AsyncSocket write callbacks.
+  // Plaintext path: the socket fd to write the response back on. We use raw
+  // fd + writev() because the response is a single small write and we want to
+  // avoid the complexity of AsyncSocket write callbacks.
   int fd;
   uint64_t received_time;
   bool response_sent;
+  // TLS path: raw fd writes bypass the TLS layer (they hit the TCP socket
+  // underneath AsyncSSLSocket, so the peer receives plaintext on an encrypted
+  // connection). When tls is true, the response must be written THROUGH the
+  // AsyncSSLSocket on its owning EventBase instead. sendResponse marshals the
+  // write onto evb and targets the connection via a weak_ptr so a response
+  // that completes after the connection closed is dropped safely.
+  bool tls = false;
+  folly::EventBase* evb = nullptr;
+  std::weak_ptr<ServerConnection> conn;
 };
 
 RequestContext::RequestContext(
@@ -69,6 +83,17 @@ RequestContext::RequestContext(RequestContext&& other) noexcept
 
 RequestContext::~RequestContext() = default;
 
+// Marshals a TLS response (header+payload already framed in buf) onto the
+// connection's EventBase and writes it through the AsyncSSLSocket. Defined
+// after ServerConnection (needs its full type); declared here so sendResponse
+// can call it. Safe if the connection has already closed.
+namespace {
+void enqueueTlsResponse(
+    std::weak_ptr<ServerConnection> conn,
+    folly::EventBase* evb,
+    std::unique_ptr<folly::IOBuf> buf);
+} // namespace
+
 void RequestContext::sendResponse(const void* data, uint32_t data_length) {
   if (!impl_ || impl_->response_sent) return;
   impl_->response_sent = true;
@@ -85,7 +110,21 @@ void RequestContext::sendResponse(const void* data, uint32_t data_length) {
 
   ResponsePacketHeader net = responseToNetwork(hdr);
 
-  // Use writev to send header + payload atomically
+  if (impl_->tls) {
+    // Raw fd writes bypass TLS, so build one contiguous frame (copying the
+    // payload synchronously — the caller may free `data` after we return) and
+    // hand it to the connection's EventBase to write through AsyncSSLSocket.
+    auto buf = folly::IOBuf::create(sizeof(net) + data_length);
+    memcpy(buf->writableData(), &net, sizeof(net));
+    if (data_length > 0) {
+      memcpy(buf->writableData() + sizeof(net), data, data_length);
+    }
+    buf->append(sizeof(net) + data_length);
+    enqueueTlsResponse(impl_->conn, impl_->evb, std::move(buf));
+    return;
+  }
+
+  // Plaintext path (unchanged): use writev to send header + payload atomically
   struct iovec iov[2];
   iov[0].iov_base = &net;
   iov[0].iov_len = sizeof(net);
@@ -122,15 +161,19 @@ void RequestContext::sendResponse(const void* data, uint32_t data_length) {
 
 // ─── ServerConnection: handles framing for one client connection ────────────
 
-class ServerConnection : public folly::AsyncTransport::ReadCallback {
+class ServerConnection
+    : public folly::AsyncTransport::ReadCallback,
+      public std::enable_shared_from_this<ServerConnection> {
  public:
   ServerConnection(
       folly::AsyncSocket::UniquePtr socket,
       int thread_id,
-      const folly::F14FastMap<uint32_t, QueryCallback>& callbacks)
+      const folly::F14FastMap<uint32_t, QueryCallback>& callbacks,
+      bool tls)
       : socket_(std::move(socket)),
         thread_id_(thread_id),
         callbacks_(callbacks),
+        tls_(tls),
         read_buf_(nullptr),
         read_buf_size_(0),
         data_offset_(0) {
@@ -143,6 +186,17 @@ class ServerConnection : public folly::AsyncTransport::ReadCallback {
   ~ServerConnection() override {
     delete[] read_buf_;
   }
+
+  // Called once right after construction so the connection keeps itself alive
+  // while registered as the socket's read callback (broken on EOF/error).
+  void attachSelf(std::shared_ptr<ServerConnection> self) {
+    self_ = std::move(self);
+  }
+
+  // Writes a fully-framed TLS response through the AsyncSSLSocket. MUST be
+  // invoked on the socket's EventBase thread. Defined out-of-line below
+  // (needs TlsWriteCallback's full definition).
+  void writeResponse(std::unique_ptr<folly::IOBuf> buf);
 
   // AsyncTransport::ReadCallback
   void getReadBuffer(void** bufReturn, size_t* lenReturn) override {
@@ -165,15 +219,14 @@ class ServerConnection : public folly::AsyncTransport::ReadCallback {
   }
 
   void readEOF() noexcept override {
-    // Client disconnected
-    socket_->close();
-    // Self-delete via destroy callback (see below)
-    delete this;
+    // Client disconnected. Break the self-reference so the object is destroyed
+    // once any in-flight TLS write callbacks release their refs. Hold a local
+    // ref so `this` stays valid until we return from the callback.
+    close();
   }
 
   void readErr(const folly::AsyncSocketException& ex) noexcept override {
-    socket_->close();
-    delete this;
+    close();
   }
 
  private:
@@ -199,6 +252,13 @@ class ServerConnection : public folly::AsyncTransport::ReadCallback {
         impl->fd = socket_->getNetworkSocket().toFd();
         impl->received_time = getTimeNano();
         impl->response_sent = false;
+        impl->tls = tls_;
+        if (tls_) {
+          // The response may be produced asynchronously on a pool thread; it
+          // must be written back through the AsyncSSLSocket on this EventBase.
+          impl->evb = socket_->getEventBase();
+          impl->conn = weak_from_this();
+        }
 
         RequestContext ctx(
             hdr.type, hdr.request_id, hdr.start_time,
@@ -216,12 +276,110 @@ class ServerConnection : public folly::AsyncTransport::ReadCallback {
     }
   }
 
+  void close() {
+    socket_->close();
+    // Hold a local ref so `this` survives until we return, then drop the
+    // self-reference. If TLS write callbacks are still outstanding they hold
+    // their own refs and the object lives until they complete.
+    auto keepalive = shared_from_this();
+    self_.reset();
+  }
+
   folly::AsyncSocket::UniquePtr socket_;
   int thread_id_;
   const folly::F14FastMap<uint32_t, QueryCallback>& callbacks_;
+  bool tls_;
+  std::shared_ptr<ServerConnection> self_;
   uint8_t* read_buf_;
   size_t read_buf_size_;
   size_t data_offset_;
+};
+
+// ─── TLS response write path ────────────────────────────────────────────────
+
+namespace {
+// Keeps the connection alive (via shared_ptr) until the AsyncSSLSocket finishes
+// encrypting and writing the response, then deletes itself.
+class TlsWriteCallback : public folly::AsyncWriter::WriteCallback {
+ public:
+  explicit TlsWriteCallback(std::shared_ptr<ServerConnection> conn)
+      : conn_(std::move(conn)) {}
+  void writeSuccess() noexcept override { delete this; }
+  void writeErr(
+      size_t /*bytesWritten*/,
+      const folly::AsyncSocketException& /*ex*/) noexcept override {
+    delete this;
+  }
+
+ private:
+  std::shared_ptr<ServerConnection> conn_;
+};
+
+void enqueueTlsResponse(
+    std::weak_ptr<ServerConnection> weak,
+    folly::EventBase* evb,
+    std::unique_ptr<folly::IOBuf> buf) {
+  if (evb == nullptr) {
+    return;
+  }
+  evb->runInEventBaseThread(
+      [weak = std::move(weak), buf = std::move(buf)]() mutable {
+        auto conn = weak.lock();
+        if (!conn) {
+          return; // connection closed before the response was ready
+        }
+        conn->writeResponse(std::move(buf));
+      });
+}
+} // namespace
+
+void ServerConnection::writeResponse(std::unique_ptr<folly::IOBuf> buf) {
+  // Runs on the socket's EventBase thread. The callback holds a ref that keeps
+  // this connection alive until the encrypted write completes.
+  auto* cb = new TlsWriteCallback(shared_from_this());
+  socket_->writeChain(cb, std::move(buf));
+}
+
+// ─── SslAcceptor: drives the server-side TLS handshake before wire reads ─────
+
+// A folly server-side AsyncSSLSocket does NOT auto-handshake when you merely
+// setReadCB — sslAccept() must be called to run the handshake. Until it
+// completes the socket can neither decrypt requests nor send responses. This
+// helper owns the socket during the handshake and, on success, hands it to a
+// ServerConnection (which then starts reading). It self-deletes either way.
+class SslAcceptor : public folly::AsyncSSLSocket::HandshakeCB {
+ public:
+  SslAcceptor(
+      folly::AsyncSSLSocket::UniquePtr socket,
+      int thread_id,
+      const folly::F14FastMap<uint32_t, QueryCallback>& callbacks)
+      : socket_(std::move(socket)),
+        thread_id_(thread_id),
+        callbacks_(callbacks) {}
+
+  void start() {
+    auto* raw = socket_.get();
+    raw->sslAccept(this);
+  }
+
+  void handshakeSuc(folly::AsyncSSLSocket* /*sock*/) noexcept override {
+    folly::AsyncSocket::UniquePtr base(socket_.release());
+    auto conn = std::make_shared<ServerConnection>(
+        std::move(base), thread_id_, callbacks_, /*tls=*/true);
+    conn->attachSelf(conn);
+    delete this;
+  }
+
+  void handshakeErr(
+      folly::AsyncSSLSocket* /*sock*/,
+      const folly::AsyncSocketException& /*ex*/) noexcept override {
+    delete this; // socket_ (and the fd) torn down with it
+  }
+
+ private:
+  folly::AsyncSSLSocket::UniquePtr socket_;
+  int thread_id_;
+  const folly::F14FastMap<uint32_t, QueryCallback>& callbacks_;
 };
 
 // ─── WorkerThread ───────────────────────────────────────────────────────────
@@ -268,27 +426,31 @@ class AcceptCallback : public folly::AsyncServerSocket::AcceptCallback {
     // (FEEDSIM_TLS_CERT/FEEDSIM_TLS_KEY env vars set at server startup),
     // wrap the accepted fd in folly::AsyncSSLSocket so the TLS handshake
     // is performed on the worker's EventBase before any wire reads. This
-    // closes the bench's Encryption CPU undershoot (prod ~3.3-3.6% vs
-    // bench ~0.9-1.5% in t41). Plain AsyncSocket preserves the original
-    // no-TLS behavior when the env vars are unset.
+    // closes the bench's Encryption CPU undershoot. Plain AsyncSocket
+    // preserves the original no-TLS behavior when the env vars are unset.
     auto ssl_ctx = ssl_ctx_;
     worker->evb->runInEventBaseThread(
         [fd, thread_id = worker->thread_id, &callbacks = callbacks_,
          evb = worker->evb.get(), ssl_ctx]() {
-          folly::AsyncSocket::UniquePtr socket;
           if (ssl_ctx) {
-            // AsyncSSLSocket server-side: pass true for the server flag.
-            // The handshake is initiated lazily on first read/write,
-            // matching the existing client's connect-then-write pattern.
+            // AsyncSSLSocket server-side: pass true for the server flag, then
+            // drive the handshake via sslAccept (SslAcceptor). The
+            // ServerConnection is created only after the handshake succeeds —
+            // reading/writing before that would see undecrypted bytes.
             folly::AsyncSSLSocket::UniquePtr ssl_sock(new folly::AsyncSSLSocket(
                 ssl_ctx, evb, folly::NetworkSocket::fromFd(fd), true));
-            socket.reset(ssl_sock.release());
+            auto* acceptor =
+                new SslAcceptor(std::move(ssl_sock), thread_id, callbacks);
+            acceptor->start();
           } else {
-            socket = folly::AsyncSocket::newSocket(
+            folly::AsyncSocket::UniquePtr socket = folly::AsyncSocket::newSocket(
                 evb, folly::NetworkSocket::fromFd(fd));
+            // ServerConnection keeps itself alive via a self-reference (set by
+            // attachSelf) until EOF/error.
+            auto conn = std::make_shared<ServerConnection>(
+                std::move(socket), thread_id, callbacks, /*tls=*/false);
+            conn->attachSelf(conn);
           }
-          // ServerConnection self-manages its lifetime
-          new ServerConnection(std::move(socket), thread_id, callbacks);
         });
   }
 
@@ -433,6 +595,16 @@ void FeedSimServer::run() {
         auto ctx = std::make_shared<folly::SSLContext>();
         ctx->loadCertificate(cert_env);
         ctx->loadPrivateKey(key_env);
+        // Restrict to AES-GCM so the negotiated cipher uses hardware AES via
+        // libcrypto, matching prod and the driver's pinned ciphers. Without
+        // this the server may accept ChaCha20-Poly1305, which has no
+        // hardware-AES path and runs the AEAD un-accelerated.
+        ctx->setCiphersOrThrow(
+            "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
+            "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"); // TLS 1.2
+        SSL_CTX_set_ciphersuites(
+            ctx->getSSLCtx(),
+            "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256"); // TLS 1.3
         // No ALPN — FeedSim uses its own custom binary protocol over the
         // TLS-wrapped socket, not Rocket. The client similarly does not
         // advertise ALPN.

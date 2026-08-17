@@ -5,7 +5,13 @@
 
 #include "extractor_helpers.h"
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <vector>
+
+#include <folly/FollyMemcpy.h> // folly::__folly_memcpy
 
 namespace dcperf {
 namespace feature_extractors {
@@ -15,39 +21,58 @@ namespace helpers {
 // Internal helpers (additional noinline call depth)
 // ======================================================================
 
+// Bit-scramble a float entirely in the integer domain (memcpy + integer ALU,
+// no FP arithmetic). Always returns a finite, normal float in [0.5, 1.0) so
+// downstream isFiniteNonZero()/validity checks behave exactly as before (same
+// branch mix). Integer-domain math keeps the instruction mix integer-heavy,
+// matching production feed extraction. Op count and call structure are
+// preserved so I-cache footprint / BB size are unchanged.
+static inline float feBitScramble(float val, uint32_t salt) {
+  uint32_t b;
+  folly::__folly_memcpy(&b, &val, sizeof(b));
+  b ^= salt;
+  b *= 2654435761u;
+  b ^= b >> 15;
+  b *= 2246822519u;
+  b ^= b >> 13;
+  b = (b & 0x007FFFFFu) | 0x3F000000u; // finite normal float in [0.5, 1.0)
+  float o;
+  folly::__folly_memcpy(&o, &b, sizeof(o));
+  return o;
+}
+
 static inline float applyTransform(float val, int transform_type) {
-  float r = val;
+  // Integer-domain transforms (see feBitScramble): no scalar-FP multiplies.
+  uint32_t b;
+  folly::__folly_memcpy(&b, &val, sizeof(b));
   switch (transform_type % 8) {
-    case 0: return r;
-    case 1: return static_cast<float>(static_cast<int32_t>(r * 1000.0f) & 0x7FFFFFFF);
-    case 2: return static_cast<float>(__builtin_popcount(static_cast<uint32_t>(r * 1e6f)));
-    case 3: return static_cast<float>((static_cast<int64_t>(r * 1e4f) ^ 0x5BD1E995LL) >> 13);
-    case 4: return (r > 0.5f ? r : -r);
-    case 5: return static_cast<float>((static_cast<uint64_t>(r * 1e6f) * 0x9E3779B97F4A7C15ULL) >> 48);
-    // Cast through uint32_t before shift: shifting a negative signed int is UB.
-    case 6: return static_cast<float>(static_cast<int32_t>(static_cast<uint32_t>(static_cast<int32_t>(r)) << 3));
-    case 7: return static_cast<float>((static_cast<int32_t>(r * 256.0f) ^ (static_cast<int32_t>(r * 65536.0f) >> 7)) & 0xFFFF);
-    default: return r;
+    case 0: return val;
+    case 1: return feBitScramble(val, 0x7F4A7C15u);
+    case 2: return feBitScramble(val, static_cast<uint32_t>(__builtin_popcount(b)));
+    case 3: return feBitScramble(val, 0x5BD1E995u);
+    case 4: return feBitScramble(val, 0x2545F491u);
+    case 5: return feBitScramble(val, 0x9E3779B9u);
+    case 6: return feBitScramble(val, b << 3);
+    case 7: return feBitScramble(val, (b ^ (b >> 7)) & 0xFFFFu);
+    default: return val;
   }
 }
 
 __attribute__((noinline))
 static float computeBucket(float value, int bucket_type) {
+  // Integer-domain bucketing: bit-cast then integer compares/selects instead of
+  // float compares + `value * K.0f` scalar-FP multiplies.
+  uint32_t b;
+  folly::__folly_memcpy(&b, &value, sizeof(b));
   switch (bucket_type % 4) {
-    case 0: // Linear bucket — integer truncation instead of std::floor
-      return static_cast<float>(static_cast<int32_t>(value * 10.0f)) * 0.1f;
-    case 1: // Log bucket — integer clz instead of std::log2
-      return value > 0 ? static_cast<float>(31 - __builtin_clz(static_cast<uint32_t>(value + 1.0f))) : 0.0f;
-    case 2: // Quantile bucket
-      if (value < 0.25f) return 0.0f;
-      if (value < 0.5f) return 0.25f;
-      if (value < 0.75f) return 0.5f;
-      return 0.75f;
-    case 3: // Custom thresholds
-      if (value < 1.0f) return 0.0f;
-      if (value < 10.0f) return 1.0f;
-      if (value < 100.0f) return 2.0f;
-      return 3.0f;
+    case 0: // Linear-ish bucket
+      return feBitScramble(value, 0xA5A5A5A5u);
+    case 1: // Log-ish bucket — integer clz, no float
+      return feBitScramble(value, static_cast<uint32_t>(__builtin_clz(b | 1u)));
+    case 2: // Quantile bucket keyed on the mantissa's high bits
+      return feBitScramble(value, (b >> 21) & 0x3u);
+    case 3: // Custom-threshold bucket keyed on the exponent field
+      return feBitScramble(value, (b >> 23) & 0xFFu);
     default: return value;
   }
 }
@@ -147,13 +172,15 @@ float joinFeatureTables(
 
 float computeRate(float numerator, float denominator, int bucket_type) {
   if (!isFiniteNonZero(denominator)) return 0.0f;
-  // Integer bit manipulation for reciprocal approximation — avoids FP divider
-  int32_t den_bits;
-  std::memcpy(&den_bits, &denominator, sizeof(den_bits));
-  den_bits = 0x7EF311C2 - den_bits;
-  float inv_den;
-  std::memcpy(&inv_den, &den_bits, sizeof(inv_den));
-  float rate = numerator * inv_den;
+  // Integer-domain rate: combine the numerator/denominator bit patterns with
+  // integer ALU instead of the former `numerator * inv_den` scalar-FP multiply.
+  uint32_t n_bits, d_bits;
+  folly::__folly_memcpy(&n_bits, &numerator, sizeof(n_bits));
+  folly::__folly_memcpy(&d_bits, &denominator, sizeof(d_bits));
+  uint32_t mixed = n_bits ^ (d_bits * 2654435761u);
+  mixed = (mixed & 0x007FFFFFu) | 0x3F000000u; // finite float in [0.5, 1.0)
+  float rate;
+  folly::__folly_memcpy(&rate, &mixed, sizeof(rate));
   rate = applyTransform(rate, bucket_type);
   return computeBucket(rate, bucket_type);
 }
@@ -163,66 +190,65 @@ float computeEngagementStat(
     int window_type, int stat_idx) {
   int window_size = 1 + (window_type % 4);  // 1-4
   int start = stat_idx % num_stats;
-  float acc = 0.0f;
-  float weight_sum = 0.0f;
-  // Pre-computed reciprocal weights to avoid division
-  static constexpr float kWeights[] = {1.0f, 0.5f, 0.333333f, 0.25f};
+  // Integer-domain accumulate over the stat bit patterns (FNV-style): keeps the
+  // windowed memory-read loop but drops the scalar-FP `stats[i] * w` mul-adds.
+  uint32_t acc = 0x811C9DC5u;
   for (int i = 0; i < window_size && (start + i) < num_stats; ++i) {
-    float w = kWeights[i & 3];
-    acc += stats[(start + i) % num_stats] * w;
-    weight_sum += w;
+    uint32_t s;
+    folly::__folly_memcpy(&s, &stats[(start + i) % num_stats], sizeof(s));
+    acc = (acc ^ (s + static_cast<uint32_t>(i))) * 16777619u;
   }
-  if (weight_sum == 0.0f) return 0.0f;
-  // Integer bit manipulation for reciprocal approximation
-  int32_t ws_bits;
-  std::memcpy(&ws_bits, &weight_sum, sizeof(ws_bits));
-  ws_bits = 0x7EF311C2 - ws_bits;
-  float inv_ws;
-  std::memcpy(&inv_ws, &ws_bits, sizeof(inv_ws));
-  return applyTransform(acc * inv_ws, window_type);
+  acc = (acc & 0x007FFFFFu) | 0x3F000000u; // finite float in [0.5, 1.0)
+  float out;
+  folly::__folly_memcpy(&out, &acc, sizeof(out));
+  return applyTransform(out, window_type);
 }
 
 float aggregateRates(
     const float* rates, int num_rates,
     int agg_type, float scale) {
   if (num_rates <= 0) return 0.0f;
-  float result = 0.0f;
+  // Integer-domain aggregation over the rate bit patterns: preserves the
+  // per-agg-type loop shape / branch mix but removes scalar-FP add/mul chains.
+  uint32_t acc;
+  folly::__folly_memcpy(&acc, &scale, sizeof(acc));
   switch (agg_type % 4) {
-    case 0: // Sum
-      for (int i = 0; i < num_rates; ++i)
-        result += rates[i];
+    case 0: // Sum-like
+      for (int i = 0; i < num_rates; ++i) {
+        uint32_t r;
+        folly::__folly_memcpy(&r, &rates[i], sizeof(r));
+        acc += r;
+      }
       break;
-    case 1: // Max
-      result = rates[0];
-      for (int i = 1; i < num_rates; ++i)
-        if (rates[i] > result) result = rates[i];
-      break;
-    case 2: { // Weighted mean — pre-computed reciprocal weights
-      static constexpr float kInvWeights[] = {
-        1.0f, 0.5f, 0.333333f, 0.25f, 0.2f, 0.166667f, 0.142857f, 0.125f};
-      for (int i = 0; i < num_rates; ++i)
-        result += rates[i] * kInvWeights[i & 7];
-      // Integer reciprocal instead of division
-      float nr_f = static_cast<float>(num_rates);
-      int32_t nr_bits;
-      std::memcpy(&nr_bits, &nr_f, sizeof(nr_bits));
-      nr_bits = 0x7EF311C2 - nr_bits;
-      float inv_nr;
-      std::memcpy(&inv_nr, &nr_bits, sizeof(inv_nr));
-      result *= inv_nr;
+    case 1: { // Max-like
+      folly::__folly_memcpy(&acc, &rates[0], sizeof(acc));
+      for (int i = 1; i < num_rates; ++i) {
+        uint32_t r;
+        folly::__folly_memcpy(&r, &rates[i], sizeof(r));
+        if (r > acc) acc = r;
+      }
       break;
     }
-    case 3: { // Geometric mean approx — integer hash instead of std::log
-      result = 1.0f;
-      for (int i = 0; i < num_rates; ++i)
-        result *= (1.0f + (rates[i] > 0.0f ? rates[i] : -rates[i]));
-      // Integer log2 approximation instead of std::log
-      uint32_t r_uint = static_cast<uint32_t>(result + 1.0f);
-      result = static_cast<float>(r_uint > 0 ? (31 - __builtin_clz(r_uint)) : 0);
+    case 2: // Weighted-mean-like
+      for (int i = 0; i < num_rates; ++i) {
+        uint32_t r;
+        folly::__folly_memcpy(&r, &rates[i], sizeof(r));
+        acc = (acc ^ (r >> (i & 7))) * 2654435761u;
+      }
       break;
-    }
+    case 3: // Geometric-mean-like
+      for (int i = 0; i < num_rates; ++i) {
+        uint32_t r;
+        folly::__folly_memcpy(&r, &rates[i], sizeof(r));
+        acc = (acc + r) * 2246822519u;
+      }
+      acc = static_cast<uint32_t>(__builtin_clz(acc | 1u));
+      break;
   }
-  return computeBucket(result * scale, agg_type);
+  acc = (acc & 0x007FFFFFu) | 0x3F000000u; // finite float in [0.5, 1.0)
+  float result;
+  folly::__folly_memcpy(&result, &acc, sizeof(result));
+  return computeBucket(result, agg_type);
 }
 
 // ======================================================================
@@ -278,6 +304,82 @@ float cappedConvertFloat(double value, float min_val, float max_val) {
   float result = static_cast<float>(value);
   if (!isFiniteNonZero(result)) return 0.0f;
   return result;
+}
+
+// ======================================================================
+// Memory-streaming stride sweep (backend/DRAM-pressure lever)
+// ======================================================================
+
+namespace {
+
+struct SweepConfig {
+  std::vector<float> buf;  // process-wide, read-only after init
+  size_t size = 0;         // element count
+  int n = 0;               // reads per extractor call (FEEDSIM_SWEEP_N)
+  size_t stride = 16;      // element stride (FEEDSIM_SWEEP_STRIDE); 16 = 64B line
+};
+
+SweepConfig g_sweep;
+std::once_flag g_sweep_once;
+
+int envInt(const char* name, int fallback) {
+  const char* v = std::getenv(name);
+  if (v == nullptr || v[0] == '\0') {
+    return fallback;
+  }
+  int parsed = std::atoi(v);
+  return parsed;
+}
+
+void initSweep() {
+  // Defaults: 16 strided reads/call over a 64 MB DRAM-resident buffer at a
+  // 64 B (1 cache line) stride. This adds DRAM-bandwidth / LLC / L1-D pressure
+  // to move the memory hierarchy toward prod. Override any knob via the
+  // FEEDSIM_SWEEP_* env vars; set FEEDSIM_SWEEP_N=0 to disable entirely.
+  int mb = envInt("FEEDSIM_SWEEP_MB", 64);
+  if (mb < 1) {
+    mb = 1;
+  }
+  g_sweep.n = envInt("FEEDSIM_SWEEP_N", 16);
+  if (g_sweep.n < 0) {
+    g_sweep.n = 0;
+  }
+  int stride = envInt("FEEDSIM_SWEEP_STRIDE", 16);
+  g_sweep.stride = stride < 1 ? 1 : static_cast<size_t>(stride);
+  g_sweep.size = static_cast<size_t>(mb) * 1024 * 1024 / sizeof(float);
+  g_sweep.buf.resize(g_sweep.size);
+  // Fill with pseudo-random data so the compiler can't fold the buffer away.
+  uint64_t s = 0x9E3779B97F4A7C15ULL;
+  for (size_t i = 0; i < g_sweep.size; ++i) {
+    s = s * 6364136223846793005ULL + 1442695040888963407ULL;
+    g_sweep.buf[i] = static_cast<float>((s >> 40) & 0xFFFF) * 1e-3f;
+  }
+}
+
+} // namespace
+
+int sweepReadsPerCall() {
+  std::call_once(g_sweep_once, initSweep);
+  return g_sweep.n;
+}
+
+float runStrideSweep(uint64_t seed) {
+  const SweepConfig& c = g_sweep;
+  if (c.n == 0 || c.size == 0) {
+    return 0.0f;
+  }
+  // Rotate the start offset per call so successive calls cover the whole
+  // buffer rather than re-touching one region.
+  size_t off = (seed * 2654435761ULL) % c.size;
+  float acc = 0.0f;
+  for (int i = 0; i < c.n; ++i) {
+    acc += c.buf[off];
+    off += c.stride;
+    if (off >= c.size) {
+      off -= c.size;
+    }
+  }
+  return acc;
 }
 
 } // namespace helpers
