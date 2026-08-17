@@ -192,15 +192,22 @@ void FeatureExtractorSuite::runFlatExtractors(
   size_t start = flat_pos_.fetch_add(static_cast<size_t>(count),
                                      std::memory_order_relaxed) %
       total;
-  // Memory-streaming lever: FEEDSIM_SWEEP_N reads per call over a large
-  // read-only buffer, folded into live state so it can't be elided. No-op
-  // when FEEDSIM_SWEEP_N=0. Hoist the enabled check out of the loop.
+  // Memory-streaming lever: FEEDSIM_SWEEP_N reads + FEEDSIM_SWEEP_WN writes per
+  // call over large buffers, folded into live state so they can't be elided.
+  // No-op when the respective knob is 0. Hoist the enabled checks out of the
+  // loop. Writes raise the DRAM write share toward prod's read:write ratio.
   const int sweep_n = dcperf::feature_extractors::helpers::sweepReadsPerCall();
+  const int sweep_wn = dcperf::feature_extractors::helpers::sweepWritesPerCall();
   for (int i = 0; i < count; ++i) {
     flat_copies_[(start + static_cast<size_t>(i)) % total](&ctx);
     if (sweep_n > 0) {
       local_struct[0] += dcperf::feature_extractors::helpers::runStrideSweep(
           start + static_cast<size_t>(i));
+    }
+    if (sweep_wn > 0) {
+      local_struct[0] +=
+          dcperf::feature_extractors::helpers::runStrideSweepWrite(
+              start + static_cast<size_t>(i));
     }
   }
 }
