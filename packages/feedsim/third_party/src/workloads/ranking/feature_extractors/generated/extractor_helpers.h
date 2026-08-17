@@ -57,8 +57,7 @@ float joinFeatureTables(
     int64_t primary_key, int join_type);
 
 // ======================================================================
-// Rate/counter computation helpers (simulate updateEtnadCounter,
-// computeImpressionBuckets, computeRateRatio)
+// Rate/counter computation helpers (simulate counter and rate/bucket updates)
 // ======================================================================
 
 // Compute rate from numerator/denominator with bucketing
@@ -114,6 +113,24 @@ bool validateFeatureValue(float value, int validation_type);
 // Capped type conversion with bounds checking
 __attribute__((noinline))
 float cappedConvertFloat(double value, float min_val, float max_val);
+
+// ======================================================================
+// Memory-streaming stride sweep (backend/DRAM-pressure lever)
+// ======================================================================
+// Reads FEEDSIM_SWEEP_N elements, FEEDSIM_SWEEP_STRIDE floats apart, from a
+// process-wide read-only buffer of FEEDSIM_SWEEP_MB megabytes. Adds genuine
+// memory-level-parallelism / working-set pressure per extractor call to close
+// the backend-bound / DRAM-bandwidth gap vs prod. All three knobs are read
+// from the environment once, so one build sweeps the full parameter space;
+// FEEDSIM_SWEEP_N=0 (default) makes it a no-op. Returns FEEDSIM_SWEEP_N (cached
+// after first call, which initializes the buffer).
+int sweepReadsPerCall();
+
+// Accumulate a strided walk seeded by `seed` (rotates the start offset so
+// successive calls cover the whole buffer). Caller folds the result into live
+// state to defeat dead-code elimination. Assumes sweepReadsPerCall() ran first.
+__attribute__((noinline))
+float runStrideSweep(uint64_t seed);
 
 } // namespace helpers
 } // namespace feature_extractors
