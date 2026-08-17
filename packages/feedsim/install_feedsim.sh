@@ -10,7 +10,20 @@ FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
 FEEDSIM_ROOT_SRC="${BENCHPRESS_ROOT}/benchmarks/feedsim"
 FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
-LIBTORCH_VERSION="2.8.0"
+LIBTORCH_VERSION="${LIBTORCH_VERSION:-2.13.0}"
+# When 1, fetch LibTorch by extracting it from the prebuilt torch CPU wheel
+# (download.pytorch.org/whl/cpu) instead of the libtorch-shared-with-deps zip.
+# Required for LibTorch >=2.9 (2.13.0 and later publish a wheel but no
+# standalone zip); harmless for older versions. Default 1 pairs with the
+# LIBTORCH_VERSION=2.13.0 default so the out-of-box install works without
+# additional env overrides.
+LIBTORCH_FROM_WHEEL="${LIBTORCH_FROM_WHEEL:-1}"
+# Dependency versions are env-overridable so experiments can bump them without
+# forking this script; defaults reproduce the v2 baseline exactly.
+JEMALLOC_VERSION="${FEEDSIM_JEMALLOC_VERSION:-5.3.0}"
+LIBEVENT_VERSION="${FEEDSIM_LIBEVENT_VERSION:-2.1.12-stable}"
+# Export so the aarch64 sub-installer (dispatched below) inherits the pins.
+export LIBTORCH_VERSION LIBTORCH_FROM_WHEEL FEEDSIM_JEMALLOC_VERSION FEEDSIM_LIBEVENT_VERSION
 DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-dlrm/dlrm_small.tar.gz"
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
 
@@ -45,7 +58,7 @@ dnf install -y bc ninja-build flex bison git texinfo binutils-devel \
     libsodium-devel libunwind-devel bzip2-devel double-conversion-devel \
     libzstd-devel lz4-devel xz-devel snappy-devel libtool bzip2 openssl-devel \
     zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq \
-    xxhash xxhash-devel unzip rsync liburing-devel
+    xxhash xxhash-devel unzip rsync liburing-devel python3-pip
 
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
@@ -178,30 +191,30 @@ else
 fi
 
 # Installing JEMalloc
-if ! [ -d "jemalloc-5.3.0" ]; then
-    wget "https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2"
-    bunzip2 "jemalloc-5.3.0.tar.bz2"
-    tar -xvf "jemalloc-5.3.0.tar"
-    cd "jemalloc-5.3.0"
+if ! [ -d "jemalloc-${JEMALLOC_VERSION}" ]; then
+    wget "https://github.com/jemalloc/jemalloc/releases/download/${JEMALLOC_VERSION}/jemalloc-${JEMALLOC_VERSION}.tar.bz2"
+    bunzip2 "jemalloc-${JEMALLOC_VERSION}.tar.bz2"
+    tar -xvf "jemalloc-${JEMALLOC_VERSION}.tar"
+    cd "jemalloc-${JEMALLOC_VERSION}"
     ./configure --enable-prof --enable-prof-libunwind
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] jemalloc-5.3.0"
+    msg "[SKIPPED] jemalloc-${JEMALLOC_VERSION}"
 fi
 
 # Installing libevent
-if ! [ -d "libevent-2.1.12-stable" ]; then
-    wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
-    tar -xzf "libevent-2.1.12-stable.tar.gz"
-    cd "libevent-2.1.12-stable"
+if ! [ -d "libevent-${LIBEVENT_VERSION}" ]; then
+    wget "https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}/libevent-${LIBEVENT_VERSION}.tar.gz"
+    tar -xzf "libevent-${LIBEVENT_VERSION}.tar.gz"
+    cd "libevent-${LIBEVENT_VERSION}"
     ./configure
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] libevent-2.1.12-stable"
+    msg "[SKIPPED] libevent-${LIBEVENT_VERSION}"
 fi
 
 msg "Installing third-party dependencies ... DONE"
@@ -218,12 +231,33 @@ else
 fi
 
 if ! [ -d "libtorch" ]; then
-    msg "Downloading LibTorch ${LIBTORCH_VERSION}..."
-    wget "${LIBTORCH_URL}" -O libtorch.zip
-    msg "Extracting LibTorch..."
-    unzip -q libtorch.zip
-    rm libtorch.zip
-    msg "LibTorch installed to ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+    if [ "${LIBTORCH_FROM_WHEEL}" = "1" ]; then
+        # Extract LibTorch from the prebuilt torch CPU wheel. The wheel's
+        # torch/ dir has the same lib/ include/ share/cmake/Torch/ layout as
+        # the standalone libtorch zip, so we just rename it to libtorch/.
+        msg "Downloading LibTorch ${LIBTORCH_VERSION} from torch CPU wheel..."
+        # pip on the box (3.9, or an internal stale mirror) can't see the cp310
+        # 2.13 wheels, so resolve the wheel href straight from the PEP-503 index
+        # and wget it. The C++ libtorch inside (torch/lib, torch/share/cmake) is
+        # Python-version independent, so the cp310 wheel is fine for our C++ link.
+        WHEEL_HREF="$(curl -s "https://download.pytorch.org/whl/cpu/torch/" \
+            | grep -oE "https://[^\"]*torch-${LIBTORCH_VERSION}[^\"]*cp310-cp310-manylinux_2_28_x86_64\.whl" \
+            | head -1)"
+        [ -n "${WHEEL_HREF}" ] || die "Could not find torch ${LIBTORCH_VERSION} x86_64 wheel in index"
+        msg "Wheel: ${WHEEL_HREF}"
+        wget "${WHEEL_HREF}" -O torch.whl
+        unzip -q torch.whl -d ./_torch_whl_x
+        mv ./_torch_whl_x/torch libtorch
+        rm -rf ./_torch_whl_x torch.whl
+        msg "LibTorch ${LIBTORCH_VERSION} extracted from wheel to ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+    else
+        msg "Downloading LibTorch ${LIBTORCH_VERSION}..."
+        wget "${LIBTORCH_URL}" -O libtorch.zip
+        msg "Extracting LibTorch..."
+        unzip -q libtorch.zip
+        rm libtorch.zip
+        msg "LibTorch installed to ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+    fi
 else
     msg "[SKIPPED] LibTorch already installed"
 fi
