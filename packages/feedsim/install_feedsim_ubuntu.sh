@@ -11,7 +11,14 @@ FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
 FEEDSIM_ROOT_SRC="${BENCHPRESS_ROOT}/benchmarks/feedsim"
 FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
-LIBTORCH_VERSION="2.8.0"
+LIBTORCH_VERSION="${LIBTORCH_VERSION:-2.13.0}"
+# When 1, fetch LibTorch by extracting it from the prebuilt torch CPU wheel
+# (download.pytorch.org/whl/cpu) instead of the libtorch-shared-with-deps zip.
+# Required for LibTorch >=2.9 (2.13.0 and later publish a wheel but no
+# standalone zip); harmless for older versions. Default 1 pairs with the
+# LIBTORCH_VERSION=2.13.0 default so the out-of-box install works without
+# additional env overrides.
+LIBTORCH_FROM_WHEEL="${LIBTORCH_FROM_WHEEL:-1}"
 DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-dlrm/dlrm_small.tar.gz"
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
 
@@ -30,7 +37,7 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    sysstat jq xxhash libxxhash-dev unzip rsync
+    sysstat jq xxhash libxxhash-dev unzip rsync curl
 
 # Install liburing >= 2.6 from source. Ubuntu's apt-shipped liburing (0.7 on
 # 20.04, 2.1 on 22.04) is older than folly's minimum, so folly's io_uring
@@ -213,12 +220,31 @@ else
 fi
 
 if ! [ -d "libtorch" ]; then
-    msg "Downloading LibTorch ${LIBTORCH_VERSION}..."
-    wget "${LIBTORCH_URL}" -O libtorch.zip
-    msg "Extracting LibTorch..."
-    unzip -q libtorch.zip
-    rm libtorch.zip
-    msg "LibTorch installed to ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+    if [ "${LIBTORCH_FROM_WHEEL}" = "1" ]; then
+        # Extract LibTorch from the prebuilt torch CPU wheel. The wheel's
+        # torch/ dir has the same lib/ include/ share/cmake/Torch/ layout as
+        # the standalone libtorch zip, so we just rename it to libtorch/.
+        msg "Downloading LibTorch ${LIBTORCH_VERSION} from torch CPU wheel..."
+        # The C++ libtorch inside (torch/lib, torch/share/cmake) is Python-
+        # version independent, so the cp310 wheel is fine for our C++ link.
+        WHEEL_HREF="$(curl -s "https://download.pytorch.org/whl/cpu/torch/" \
+            | grep -oE "https://[^\"]*torch-${LIBTORCH_VERSION}[^\"]*cp310-cp310-manylinux_2_28_x86_64\.whl" \
+            | head -1)"
+        [ -n "${WHEEL_HREF}" ] || die "Could not find torch ${LIBTORCH_VERSION} x86_64 wheel in index"
+        msg "Wheel: ${WHEEL_HREF}"
+        wget "${WHEEL_HREF}" -O torch.whl
+        unzip -q torch.whl -d ./_torch_whl_x
+        mv ./_torch_whl_x/torch libtorch
+        rm -rf ./_torch_whl_x torch.whl
+        msg "LibTorch ${LIBTORCH_VERSION} extracted from wheel to ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+    else
+        msg "Downloading LibTorch ${LIBTORCH_VERSION}..."
+        wget "${LIBTORCH_URL}" -O libtorch.zip
+        msg "Extracting LibTorch..."
+        unzip -q libtorch.zip
+        rm libtorch.zip
+        msg "LibTorch installed to ${FEEDSIM_THIRD_PARTY_SRC}/libtorch"
+    fi
 else
     msg "[SKIPPED] LibTorch already installed"
 fi
