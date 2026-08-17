@@ -15,7 +15,9 @@
 #include "MockServiceHandler.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <thread>
@@ -84,7 +86,24 @@ constexpr int32_t kSpinThresholdUs = 200;
 // or buggy client from triggering bad_alloc on small-RAM hosts.
 constexpr uint32_t kMaxResponseSize = 16 * 1024 * 1024;
 
-thread_local std::mt19937 tlRng{std::random_device{}()};
+// Deterministic per-thread RNG seed. This thread_local RNG (mock response-body
+// generation) used to be seeded from std::random_device, making benchmark
+// output non-reproducible run-to-run. Seed from a fixed base mixed with a
+// per-thread counter so each thread keeps an independent but reproducible
+// sequence. Set FEEDSIM_RNG_RANDOM=1 to restore the old non-deterministic seed.
+static unsigned detRngSeed(unsigned base) {
+  static const bool kRandom = [] {
+    const char* e = std::getenv("FEEDSIM_RNG_RANDOM");
+    return e != nullptr && e[0] == '1';
+  }();
+  if (kRandom) {
+    return std::random_device{}();
+  }
+  static std::atomic<unsigned> ctr{0};
+  return base + ctr.fetch_add(1) * 2654435761u;
+}
+
+thread_local std::mt19937 tlRng{detRngSeed(0x5EED3110u)};
 
 // Free function so async continuations can use it without capturing `this`.
 // Takes a shared_ptr by value so the SilesiaLoader outlives the continuation

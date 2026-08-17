@@ -31,6 +31,26 @@ echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
 function benchreps_tell_state () {
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
+
+# ─── CPU utilization helpers (used by adaptive depth) ────────────────────────
+# Read /proc/stat's aggregate cpu line and echo "total idle_all" jiffies.
+cpu_snapshot() {
+  local cpu u n s idle iow irq sirq st rest
+  read -r cpu u n s idle iow irq sirq st rest < /proc/stat
+  local idle_all=$((idle + iow))
+  local total=$((u + n + s + idle + iow + irq + sirq + st))
+  echo "$total $idle_all"
+}
+# System-wide CPU busy% (100 - idle%) measured over the next $1 seconds.
+cpu_busy_over() {
+  local secs="$1" s1 s2 t1 i1 t2 i2 dt di
+  s1=$(cpu_snapshot); t1=${s1% *}; i1=${s1#* }
+  sleep "$secs"
+  s2=$(cpu_snapshot); t2=${s2% *}; i2=${s2#* }
+  dt=$((t2 - t1)); di=$((i2 - i1))
+  if [ "$dt" -le 0 ]; then echo "0"; return; fi
+  echo "scale=1; (($dt - $di) * 100) / $dt" | bc
+}
 # Source runtime breakdown utilities if they exist
 if [ -f "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh" ]; then
     source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
@@ -99,6 +119,12 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
                 without retrying. Optional
     -P          PID of the process to log runtime breakdowns. Optional
     -B          Folder to log runtime breakdowns. Optional
+    -D          Adaptive depth: max driver pipeline depth. When set, the peak
+                phase raises the driver's --depth until the server is saturated
+                (system CPU >= 95% OR achieved p95 >= SLA), then holds that depth
+                for the QPS search. The search STARTS from any --depth in the
+                driver command (default 1), so a manually-set --depth acts as a
+                floor. Optional.
 EOF
 }
 
@@ -145,7 +171,7 @@ run_loadtest() {
   for r in $(seq 1 $load_test_retries); do
     # run the command, saving result to tmpfile
     local tmp_file=$(mktemp)
-    $command $threads_arg $qps_arg &>$tmp_file &
+    $command $threads_arg $qps_arg $adaptive_depth_arg &>$tmp_file &
     LOADTEST_PID=$!
 
     if [ "$no_retry_mode" = "1" ]; then
@@ -301,13 +327,18 @@ max_warmup_iterations=10
 no_retry_mode=""
 breakdown_pid=""
 breakdown_folder=""
+adaptive_depth_max=""   # -D: when set, search_qps raises driver --depth in the
+adaptive_depth_arg=""   # peak phase until the server saturates (CPU>=95% or p95>=SLA)
 
 OPTIND=1 # Reset is necessary if getopts was used previously in the script.  It is a good idea to make this local in a function.
-while getopts "ht:f:w:m:s:q:ao:r:x:NP:B:" opt; do
+while getopts "ht:f:w:m:s:q:ao:r:x:NP:B:D:" opt; do
   case "$opt" in
     h)
       show_help
       exit 0
+      ;;
+    D)
+      adaptive_depth_max=$OPTARG
       ;;
     t)
       experiment_time=$OPTARG
@@ -363,6 +394,20 @@ fi
 
 # remaining argument is loadtest command
 command=$@
+
+# In adaptive-depth mode, search_qps owns the driver's --depth: capture any fixed
+# --depth as the STARTING depth (so a manually-set --depth acts as a floor the
+# peak search raises from), then strip it so our per-attempt --depth is the only
+# one on the command. Default start is depth=1 (unchanged behavior).
+adaptive_start_depth=1
+if [ -n "$adaptive_depth_max" ]; then
+  fixed_depth=$(echo "$command" | grep -oE -- '--depth=[0-9]+' | head -1 | grep -oE '[0-9]+')
+  if [ -n "$fixed_depth" ] && [ "$fixed_depth" -gt 1 ]; then
+    adaptive_start_depth=$fixed_depth
+  fi
+  command=$(echo "$command" | sed -E 's/[[:space:]]*--depth=[0-9]+//g')
+  adaptive_depth_arg="--depth=$adaptive_start_depth"
+fi
 
 # make sure latency_type and latency_target are specified
 if [[ -z "$fixed_qps" ]] && ( [[ $latency_type = "" ]] || [[ $latency_target = "" ]] ); then
@@ -501,7 +546,7 @@ if [[ -n "$fixed_qps" ]]; then
   else
     for fixed_qps_el in $fixed_qps_array; do
       benchreps_tell_state "before fixed_qps_iter $fixed_qps_el"
-      run_loadtest measured_qps measured_latency $fixed_qps_el ""
+      run_loadtest measured_qps measured_latency $fixed_qps_el "$main_operation_name"
       printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps_el $measured_qps $measured_latency
       echo "final requested_qps = $fixed_qps_el, measured_qps = $measured_qps, latency = $measured_latency" >> $BREPS_LFILE
       benchreps_tell_state "after fixed_qps_iter $fixed_qps_el"
@@ -513,7 +558,42 @@ fi
 
 # find peak QPS
 benchreps_tell_state "before peak_qps"
-run_loadtest peak_qps measured_latency "" ""
+if [ -n "$adaptive_depth_max" ]; then
+  # Adaptive depth: the peak load test offers at most threads*connections*depth
+  # concurrent requests. Starting at adaptive_start_depth, keep raising depth (and
+  # re-running peak) until the server saturates — system CPU >= 95% OR p95 >= SLA
+  # — so platforms that need more offered concurrency reach a real bound instead
+  # of capping on driver concurrency. The selected depth is then held for the
+  # QPS search / tuning / final phases. The starting depth
+  # is the fixed --depth from the driver command (default 1), so a manually-set
+  # depth raises the floor.
+  cur_depth=$adaptive_start_depth
+  while : ; do
+    adaptive_depth_arg="--depth=$cur_depth"
+    # Sample system CPU busy% over a mid-run window while the peak load runs.
+    cpu_busy_file="/tmp/adaptive_cpu_busy_$$"
+    ( sleep 20; cpu_busy_over 40 > "$cpu_busy_file" ) &
+    cpu_sampler_pid=$!
+    run_loadtest peak_qps measured_latency "" ""
+    wait "$cpu_sampler_pid" 2>/dev/null
+    cpu_busy=$(cat "$cpu_busy_file" 2>/dev/null || echo 0)
+    rm -f "$cpu_busy_file"
+    cpu_sat=$(echo "${cpu_busy:-0} >= 95" | bc 2>/dev/null || echo 0)
+    lat_sat=$(echo "$measured_latency >= $latency_target" | bc 2>/dev/null || echo 0)
+    printf "adaptive-depth: depth=%d peak_qps=%.2f p95=%.2f cpu_busy=%s%% cpu_sat=%s lat_sat=%s\n" \
+      "$cur_depth" "$peak_qps" "$measured_latency" "${cpu_busy:-0}" "$cpu_sat" "$lat_sat"
+    echo "adaptive-depth: depth=$cur_depth peak_qps=$peak_qps p95=$measured_latency cpu_busy=${cpu_busy}% cpu_sat=$cpu_sat lat_sat=$lat_sat" >> $BREPS_LFILE
+    if [ "$cpu_sat" -eq 1 ] || [ "$lat_sat" -eq 1 ] || [ "$cur_depth" -ge "$adaptive_depth_max" ]; then
+      break
+    fi
+    cur_depth=$((cur_depth + 1))
+    sleep "$wait_time"
+  done
+  echo "adaptive-depth: SELECTED depth=$cur_depth (cpu_busy=${cpu_busy}%, p95=$measured_latency, sla=$latency_target)" >> $BREPS_LFILE
+  printf "adaptive-depth: selected depth=%d (cpu_busy=%s%%, p95=%.2f)\n" "$cur_depth" "${cpu_busy:-0}" "$measured_latency"
+else
+  run_loadtest peak_qps measured_latency "" ""
+fi
 printf "peak qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
 benchreps_tell_state "after peak_qps"
 
@@ -539,19 +619,49 @@ while [[ $loop_cond -eq 1 ]]; do
   run_loadtest measured_qps measured_latency $cur_qps ""
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
-  # set new QPS ranges
+  # Update search bounds using measured_qps (what the server actually sustained)
+  # rather than cur_qps (what the driver requested). On a server that saturates
+  # below cur_qps, using cur_qps as the "achievable" lower bound falsely inflates
+  # low_qps to a value the server never delivered.
+  #
+  # latency BAD:
+  #   - measured_qps >= cur_qps: high_qps = measured_qps (server delivered at
+  #     least what was asked; latency is the ceiling at that measured rate).
+  #   - measured_qps <  cur_qps: high_qps = measured_qps + (cur_qps - measured_qps) * SLA / latency
+  #     Rationale: when cur_qps is much larger than what the server can fulfill,
+  #     the surplus offered load queues up and exaggerates latency. The server
+  #     may deliver ~measured_qps at acceptable latency if the offered rate is
+  #     just slightly higher than measured (not far above it). SLA/latency scales
+  #     the search headroom by how badly latency violated SLA — barely-over-SLA
+  #     probes leave more room; badly-over-SLA probes shrink toward measured.
+  #
+  # latency GOOD:
+  #   - low_qps = measured_qps (measured is a sustained floor).
+  #   - If cur_qps > 1.01 * measured_qps (any noticeable gap between requested
+  #     and delivered — server at or near its ceiling), shrink high_qps by 0.96,
+  #     but never let high_qps drop below low_qps. Capping at low_qps ensures the
+  #     search terminates cleanly when it has converged (loop condition
+  #     high > low * 1.02 becomes false) instead of oscillating in a narrow
+  #     window near max_iters.
   latency_good=$(echo "$measured_latency <= $latency_target" | bc)
   if [[ $latency_good -eq 0 ]]; then
-    high_qps=$cur_qps
-  else
-    low_qps=$cur_qps
-    measured_qps_is_higher=$(echo "$measured_qps > $low_qps" | bc)
-    if [[ $measured_qps_is_higher -eq 1 ]] ; then
-      low_qps=$measured_qps
+    measured_ge_requested=$(echo "$measured_qps >= $cur_qps" | bc)
+    if [[ $measured_ge_requested -eq 1 ]]; then
+      high_qps=$measured_qps
+    else
+      high_qps=$(echo "scale=5; $measured_qps + ($cur_qps - $measured_qps) * $latency_target / $measured_latency" | bc)
     fi
-    measured_qps_gap=$(echo "$cur_qps > $measured_qps * 1.02" | bc)
+  else
+    low_qps=$measured_qps
+    measured_qps_gap=$(echo "$cur_qps > $measured_qps * 1.01" | bc)
     if [[ $measured_qps_gap -eq 1 ]] ; then
-      high_qps=$(echo "scale=5; $high_qps*0.96" | bc)
+      new_high_qps=$(echo "scale=5; $high_qps * 0.96" | bc)
+      high_below_low=$(echo "$new_high_qps < $low_qps" | bc)
+      if [[ $high_below_low -eq 1 ]]; then
+        high_qps=$low_qps
+      else
+        high_qps=$new_high_qps
+      fi
     fi
   fi
 
@@ -611,13 +721,17 @@ if [[ -n "$IS_AUTOSCALE_RUN" ]] && [[ "$IS_AUTOSCALE_RUN" -gt 1 ]]; then
     fi
 fi
 
-# do final measurement
+# do final measurement — this is the actual reported experiment window; log it
+# as main_benchmark in breakdown.csv so perfpub sees a valid time window (the
+# search/warmup/tuning probes above are informational and should not be logged
+# as the primary benchmark window). $main_operation_name comes from
+# packages/common/runtime_breakdown_utils.sh (sourced at the top of this script).
 benchreps_tell_state "before final_qps"
 experiment_time=$final_experiment_time
 if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
     collect_perf_record &
 fi
-run_loadtest measured_qps measured_latency $cur_qps ""
+run_loadtest measured_qps measured_latency $cur_qps "$main_operation_name"
 printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
 # report non-converging error if iteration reaches max tries
