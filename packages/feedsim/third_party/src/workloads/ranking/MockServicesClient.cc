@@ -28,6 +28,8 @@
 #include <folly/io/async/AsyncSocket.h>
 #include <folly/io/async/SSLContext.h>
 
+#include <openssl/ssl.h>
+
 #include <thrift/lib/cpp2/async/RocketClientChannel.h>
 #include <thrift/lib/thrift/gen-cpp2/RpcMetadata_types.h>
 
@@ -39,9 +41,9 @@ namespace {
 // AsyncSSLSocket (with ALPN "rs" so the server routes the connection into
 // the Rocket transport). MOCK_ZSTD_FRAC controls per-channel ZSTD compression:
 // set to a float in [0.0, 1.0] to enable ZSTD on that fraction of the
-// MockServicesClient instances (each leaf builds one client per SREventBase,
-// ~88-176 per process). Fractional enablement lets us match prod's partial
-// downstream-service compression footprint instead of all-or-nothing.
+// MockServicesClient instances (each leaf builds one client per SREventBase).
+// Fractional enablement models a partial downstream-service compression
+// footprint instead of all-or-nothing.
 // MOCK_COMPRESS_ZSTD remains supported for backwards compat: =1 maps to
 // frac=1.0, =0 maps to frac=0.0. Default if both unset: frac=1.0.
 bool envBoolTrue(const char* name, bool default_value) {
@@ -94,13 +96,11 @@ namespace ranking {
 // KeepaliveTimer fires a fire-and-forget getStatus() RPC every
 // keepalive_interval_ms to keep the underlying Rocket channel warm.
 //
-// Why this exists: t25 (2026-05-27) measured a 14x latency cliff on BGM at
-// low QPS, traced to cold MockServicesClient channels. After D105903218
-// each leaf thread owns one MockServicesClient per SREventBase (~123 on
-// BGM); at qps=5 most channels see no traffic for 100-300ms between
-// session bursts, then pay re-arm + deep C-state wake costs on the next
-// RPC. Per-channel keepalive defeats this by ensuring every channel sees
-// traffic at least every keepalive_interval_ms.
+// Why this exists: each leaf thread owns one MockServicesClient per
+// SREventBase. At low QPS most channels see no traffic for hundreds of ms
+// between request bursts, then pay re-arm + deep C-state wake costs on the
+// next RPC. Per-channel keepalive defeats this by ensuring every channel
+// sees traffic at least every keepalive_interval_ms.
 //
 // Thread-affinity: scheduled on the same EventBase as the parent
 // MockServicesClient, so the callback runs on the right thread to call
@@ -165,10 +165,8 @@ MockServicesClient::MockServicesClient(
   const bool use_tls = envBoolTrue("MOCK_TLS", false);
   // Per-channel ZSTD fraction: read MOCK_ZSTD_FRAC once per process; each
   // new MockServicesClient gets a monotonic index and decides ZSTD on/off
-  // deterministically. This lets us match prod's partial downstream-service
-  // compression footprint (some services compress, others don't) instead of
-  // the previous all-or-nothing knob. See t41 progress log + plan doc for
-  // bench-vs-prod hot-func gap analysis that motivated this knob.
+  // deterministically. This models a partial downstream-service compression
+  // footprint (some services compress, others don't).
   static const double kZstdFrac = resolveZstdFraction();
   const std::size_t my_idx =
       g_mock_client_idx.fetch_add(1, std::memory_order_relaxed);
@@ -191,6 +189,16 @@ MockServicesClient::MockServicesClient(
       // pinned fbthrift v2026.01.05.00). Without ALPN, the server may
       // reject the connection or fall back to the header-upgrade path.
       ssl_ctx->setAdvertisedNextProtocols({"rs"});
+      // Restrict the offered ciphers to AES-GCM so the connection negotiates
+      // hardware AES, matching prod's cipher. Without this, OpenSSL may pick
+      // ChaCha20-Poly1305, a cipher with no hardware-AES path, which runs the
+      // AEAD un-accelerated.
+      SSL_CTX_set_ciphersuites(
+          ssl_ctx->getSSLCtx(),
+          "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256"); // TLS 1.3
+      ssl_ctx->setCiphersOrThrow(
+          "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
+          "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"); // TLS 1.2
       folly::AsyncSSLSocket::UniquePtr ssl_sock(
           new folly::AsyncSSLSocket(ssl_ctx, evb_));
       // AsyncSSLSocket buffers writes until the TLS handshake completes,
@@ -225,8 +233,7 @@ MockServicesClient::MockServicesClient(
   // entirely. Probing here surfaces the failure as a constructor
   // exception, which the existing try/catch in ThreadStartup
   // (LeafNodeRank.cc) catches to reset mock_client and fall back to the
-  // legacy folly::futures::sleep path -- matching the regression-safety
-  // contract documented in phase5_researcher_notes.md.
+  // legacy folly::futures::sleep path.
   //
   // CRITICAL: the probe MUST be issued from the constructor's caller
   // thread, NOT from inside runInEventBaseThreadAndWait. The EventBase
