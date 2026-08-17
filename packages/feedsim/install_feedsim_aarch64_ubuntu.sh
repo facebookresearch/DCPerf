@@ -27,6 +27,7 @@ FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "$FEEDSIM_ROOT/../..")"
 FEEDSIM_ROOT_SRC="${BENCHPRESS_ROOT}/benchmarks/feedsim"
 FEEDSIM_THIRD_PARTY_SRC="${FEEDSIM_ROOT_SRC}/third_party"
+LIBTORCH_VERSION="${LIBTORCH_VERSION:-2.13.0}"
 DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-dlrm/dlrm_small.tar.gz"
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
 
@@ -34,7 +35,7 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    sysstat jq unzip xxhash libxxhash-dev libboost-all-dev rsync
+    sysstat jq unzip xxhash libxxhash-dev libboost-all-dev rsync curl
 
 # Install liburing >= 2.6 from source. Ubuntu's apt-shipped liburing is
 # older than folly's minimum, so folly's io_uring integration links
@@ -181,7 +182,7 @@ msg "Installing third-party dependencies ... DONE"
 # PyTorch does not provide official pre-built LibTorch C++ binaries for ARM64
 # Linux via conda or download.pytorch.org/libtorch. The conda default channel
 # now ships CUDA-enabled libtorch (gpu_cuda130) even on aarch64, which fails
-# on machines without CUDA (e.g., Grace).
+# on machines without CUDA.
 # Instead, we install the CPU-only torch wheel via pip and extract the
 # libtorch cmake/headers/libs from the pip package.
 msg "Installing LibTorch via pip (CPU-only) for aarch64..."
@@ -204,9 +205,14 @@ if ! [ -d "libtorch" ]; then
     export PATH="${CONDA_DIR}/bin:${PATH}"
 
     # Install CPU-only PyTorch via pip — this is the only reliable way to get
-    # CPU-only libtorch on aarch64
-    msg "Installing PyTorch CPU-only via pip..."
-    pip install torch --index-url https://download.pytorch.org/whl/cpu
+    # CPU-only libtorch on aarch64. LIBTORCH_VERSION (env) pins the version;
+    # empty falls back to pip's latest resolution.
+    msg "Installing PyTorch CPU-only via pip (version='${LIBTORCH_VERSION:-latest}')..."
+    if [ -n "${LIBTORCH_VERSION:-}" ]; then
+        pip install "torch==${LIBTORCH_VERSION}+cpu" --index-url https://download.pytorch.org/whl/cpu
+    else
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+    fi
 
     # Also install libstdcxx-ng to ensure compatible C++ runtime
     eval "$("${CONDA_DIR}/bin/conda" shell.bash hook)"
