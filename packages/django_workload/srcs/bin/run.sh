@@ -268,7 +268,7 @@ Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
     -h          display this help and exit
 For role "server", "clientserver":
-    -w          number of server workers (default NPROC)
+    -w          number of server workers, 0 = use the default (default NPROC)
     -c          ip address of the cassandra server (required)
     --interpreter
                 python interpreter to use (cpython or cinder, default is cpython)
@@ -300,6 +300,10 @@ For role "client":
     -z          ip address of the django server (required when role is 'client', default is ::1)
 For role "db":
     -y          number of cassandra concurrent writes (default 128)
+    --cassandra-heap
+                cassandra JVM heap size, e.g. 2G or 512M. Sets -Xms/-Xmx to
+                this value and -Xmn to a quarter of it, overriding conf/jvm.options
+                (default: unset, i.e. use conf/jvm.options unchanged)
     -b          ip address that cassandra will bind to (default to the first IP from "hostname -i": $(hostname -i))
     --thrift-server-workers
                 number of thrift server workers (default: nproc; pass 0 for auto)
@@ -592,6 +596,14 @@ ${python_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
       # we need to restart Cassandra after loaing an snapshot
       echo "Cassandra is loaded using the snapshot"
     fi
+
+    # Re-generate the database if not found one
+    if [ "$skip_data_setup" = true ] && [ -z "$(find \
+         "${CASSANDRA_DATA_PATH}/${KEY_SPACE_NAME}" -name '*-Data.db' -print -quit 2>/dev/null)" ]; then
+      echo "skip-data-setup requested but keyspace ${KEY_SPACE_NAME} is missing; generating the database this run"
+      skip_data_setup=false
+    fi
+
     if [ "$skip_data_setup" = false ] && ! [ "${SKIP_DATAGEN}" = 1 ]; then
       echo "Generating database "
       DJANGO_SETTINGS_MODULE=cluster_settings ./"${venv_dir}"/bin/django-admin flush
@@ -868,6 +880,9 @@ main() {
   # in start_thrift_servers(). Override with --thrift-server-workers N.
   thrift_server_workers=0
 
+  local cassandra_heap
+  cassandra_heap=
+
   local use_jit
   use_jit=0
 
@@ -903,6 +918,14 @@ main() {
         ;;
       --base-port=*)
         base_port="${1#*=}"
+        shift
+        ;;
+      --cassandra-heap)
+        cassandra_heap="$2"
+        shift 2
+        ;;
+      --cassandra-heap=*)
+        cassandra_heap="${1#*=}"
         shift
         ;;
       --thrift-server-workers)
@@ -955,8 +978,11 @@ main() {
   while getopts 'w:x:y:i:p:d:l:s:r:c:z:b:L:t:ST:h' OPTION "${@}"; do
     case "$OPTION" in
       w)
-        # Use readlink to get absolute path if relative is given
-        num_server_workers="${OPTARG}"
+        # 0 keeps the nproc default, so a job can request the core-scaled
+        # value and still expose -w for overriding.
+        if [ "${OPTARG}" != "0" ]; then
+          num_server_workers="${OPTARG}"
+        fi
         ;;
       x)
         num_client_workers="${OPTARG}"
@@ -1075,6 +1101,21 @@ main() {
   export SKIP_DATAGEN="${skip_datagen}"
 
 
+  # overwrite the cassandra heap size
+  if [ -n "$cassandra_heap" ]; then
+    if ! [[ "$cassandra_heap" =~ ^[0-9]+[GgMm]?$ ]]; then
+      echo "Invalid cassandra_heap: '$cassandra_heap' (expected e.g. 1536M or 2G)" >&2
+      exit 1
+    fi
+    _heap_n="${cassandra_heap%[GgMm]}"
+    case "${cassandra_heap#"$_heap_n"}" in
+      G|g) _heap_mb=$(( _heap_n * 1024 )) ;;
+      *)   _heap_mb="$_heap_n" ;;
+    esac
+    export JVM_EXTRA_OPTS="-Xms$(( _heap_mb / 2 ))M -Xmx${_heap_mb}M -Xmn$(( _heap_mb / 4 ))M"
+    echo "Cassandra heap override: ${JVM_EXTRA_OPTS}"
+  fi
+
   if [ "$role" = "db" ]; then
     start_thrift_servers "$thrift_server_workers"
     start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
@@ -1094,7 +1135,6 @@ main() {
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
       "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter" \
       "${use_async}" "${use_jit}" "${worker_transport}";
-    pgrep -f cassandra | xargs kill
 
   else
     echo "Role $role is invalid, it can only be 'db' or 'clientserver' or 'standalone'";
