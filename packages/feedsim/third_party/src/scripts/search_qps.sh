@@ -619,19 +619,49 @@ while [[ $loop_cond -eq 1 ]]; do
   run_loadtest measured_qps measured_latency $cur_qps ""
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
-  # set new QPS ranges
+  # Update search bounds using measured_qps (what the server actually sustained)
+  # rather than cur_qps (what the driver requested). On a server that saturates
+  # below cur_qps, using cur_qps as the "achievable" lower bound falsely inflates
+  # low_qps to a value the server never delivered.
+  #
+  # latency BAD:
+  #   - measured_qps >= cur_qps: high_qps = measured_qps (server delivered at
+  #     least what was asked; latency is the ceiling at that measured rate).
+  #   - measured_qps <  cur_qps: high_qps = measured_qps + (cur_qps - measured_qps) * SLA / latency
+  #     Rationale: when cur_qps is much larger than what the server can fulfill,
+  #     the surplus offered load queues up and exaggerates latency. The server
+  #     may deliver ~measured_qps at acceptable latency if the offered rate is
+  #     just slightly higher than measured (not far above it). SLA/latency scales
+  #     the search headroom by how badly latency violated SLA — barely-over-SLA
+  #     probes leave more room; badly-over-SLA probes shrink toward measured.
+  #
+  # latency GOOD:
+  #   - low_qps = measured_qps (measured is a sustained floor).
+  #   - If cur_qps > 1.01 * measured_qps (any noticeable gap between requested
+  #     and delivered — server at or near its ceiling), shrink high_qps by 0.96,
+  #     but never let high_qps drop below low_qps. Capping at low_qps ensures the
+  #     search terminates cleanly when it has converged (loop condition
+  #     high > low * 1.02 becomes false) instead of oscillating in a narrow
+  #     window near max_iters.
   latency_good=$(echo "$measured_latency <= $latency_target" | bc)
   if [[ $latency_good -eq 0 ]]; then
-    high_qps=$cur_qps
-  else
-    low_qps=$cur_qps
-    measured_qps_is_higher=$(echo "$measured_qps > $low_qps" | bc)
-    if [[ $measured_qps_is_higher -eq 1 ]] ; then
-      low_qps=$measured_qps
+    measured_ge_requested=$(echo "$measured_qps >= $cur_qps" | bc)
+    if [[ $measured_ge_requested -eq 1 ]]; then
+      high_qps=$measured_qps
+    else
+      high_qps=$(echo "scale=5; $measured_qps + ($cur_qps - $measured_qps) * $latency_target / $measured_latency" | bc)
     fi
-    measured_qps_gap=$(echo "$cur_qps > $measured_qps * 1.02" | bc)
+  else
+    low_qps=$measured_qps
+    measured_qps_gap=$(echo "$cur_qps > $measured_qps * 1.01" | bc)
     if [[ $measured_qps_gap -eq 1 ]] ; then
-      high_qps=$(echo "scale=5; $high_qps*0.96" | bc)
+      new_high_qps=$(echo "scale=5; $high_qps * 0.96" | bc)
+      high_below_low=$(echo "$new_high_qps < $low_qps" | bc)
+      if [[ $high_below_low -eq 1 ]]; then
+        high_qps=$low_qps
+      else
+        high_qps=$new_high_qps
+      fi
     fi
   fi
 
