@@ -202,11 +202,18 @@ minimal settings to enable quick testing and validation.
 A `breakdown.csv` file will be generated in the results to track runtime breakdowns,
 which can be used to filter metrics for the actual benchmark execution time.
 
-#### How to tune the memory usage
 
-`memsize` (the server cache) is the key knob that determines the memory usage of the benchmark.
-The default value is `0.25` which allocates about ~200MB memory.
+#### Larger working set: `..._mini_prep` + `..._mini_large`
 
+`tao_bench_standalone_mini_prep` fills a cache and persists it to the memory file
+described in [Memory file for fast warm restart](#memory-file-for-fast-warm-restart).
+`tao_bench_standalone_mini_large` then loads that file instead of warming up, which
+is what lets it measure a much larger cache -- `memsize=3` and still finish under 30s.
+
+```bash
+./benchpress_cli.py run tao_bench_standalone_mini_prep    # ~6min, once per host
+./benchpress_cli.py run tao_bench_standalone_mini_large   # ~28s, repeatable
+```
 
 ### Result reporting
 

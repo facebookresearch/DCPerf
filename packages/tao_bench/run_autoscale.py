@@ -327,7 +327,7 @@ def ensure_shm_capacity(required_gb):
         print(f"WARNING: Could not check /dev/shm capacity: {e}")
 
 
-def graceful_kill_pg(pid, use_sigusr1=False, grace_period=60):
+def graceful_kill_pg(pid, use_sigusr1=False, grace_period=60, proc=None):
     """Kill a process group, optionally sending SIGUSR1 first for graceful shutdown."""
     try:
         pgid = os.getpgid(pid)
@@ -339,11 +339,13 @@ def graceful_kill_pg(pid, use_sigusr1=False, grace_period=60):
             # Wait for graceful shutdown
             deadline = time.time() + grace_period
             while time.time() < deadline:
+                if proc is not None:
+                    proc.poll()
                 try:
-                    os.kill(pid, 0)  # Check if still alive
-                    time.sleep(0.5)
+                    os.killpg(pgid, 0)
                 except ProcessLookupError:
-                    return  # Process exited
+                    return  # Whole group exited
+                time.sleep(0.5)
             # Still alive after grace period, force kill
             print(f"Process group {pgid} didn't exit after SIGUSR1, force killing...")
         except (ProcessLookupError, PermissionError):
@@ -580,7 +582,7 @@ def run_server(args):
             )
             for p in procs:
                 if p.poll() is None:  # Process still running
-                    graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
+                    graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file), proc=p)
 
         # Ensure all processes are collected and output is flushed
         for p in procs:
@@ -599,7 +601,7 @@ def run_server(args):
 
         # Final cleanup to ensure process groups are terminated
         for p in procs:
-            graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
+            graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file), proc=p)
     else:
         # Original behavior with fixed timeout
         timeout = (
@@ -613,11 +615,11 @@ def run_server(args):
             try:
                 (out, err) = p.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
-                graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
+                graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file), proc=p)
                 (out, err) = p.communicate()
             finally:
                 # Ensure cleanup even if process completed successfully
-                graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file))
+                graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file), proc=p)
     for server in servers:
         server[1].close()
 
