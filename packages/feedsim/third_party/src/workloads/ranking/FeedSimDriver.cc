@@ -227,7 +227,7 @@ void DriverStats::printStats(uint32_t type, double elapsed_secs) const {
 // global (one per process), constructed lazily on first use to avoid paying
 // the OpenSSL init cost when TLS is off. Closes the bench's Encryption CPU
 // undershoot on the driver↔server channel (paired with FeedSimServer's
-// FEEDSIM_TLS_CERT / FEEDSIM_TLS_KEY env vars). See t41 progress log.
+// FEEDSIM_TLS_CERT / FEEDSIM_TLS_KEY env vars).
 namespace {
 SSL_CTX* getDriverSslCtxOrNull() {
   static SSL_CTX* s_ctx = []() -> SSL_CTX* {
@@ -246,6 +246,17 @@ SSL_CTX* getDriverSslCtxOrNull() {
       return nullptr;
     }
     SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);
+    // Restrict the offered ciphers to AES-GCM so the connection negotiates
+    // hardware AES via libcrypto, matching prod's cipher. Without this,
+    // OpenSSL may pick ChaCha20-Poly1305, a cipher with no hardware-AES path,
+    // which runs the AEAD un-accelerated. Mirrors MockServicesClient's cipher
+    // pinning.
+    SSL_CTX_set_cipher_list(
+        ctx,
+        "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
+        "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"); // TLS 1.2
+    SSL_CTX_set_ciphersuites(
+        ctx, "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256"); // TLS 1.3
     std::cout << "FeedSimDriver: TLS enabled via FEEDSIM_DRIVER_TLS=1"
               << std::endl;
     return ctx;
