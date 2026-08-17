@@ -113,11 +113,12 @@ Usage: ${0##*/} [OPTION]...
     --client-num-dense Number of dense features per sample (client-side). Default: 13
     --client-num-sparse Number of sparse features per sample (client-side). Default: 26
     --mock-tls Enable TLS on outbound MockServicesClient channels (0=off, 1=on). Default: 1.
-    --mock-zstd-frac Fraction in [0.0, 1.0] of MockServicesClient channels with ZSTD enabled. Default: 0.75 (t43 c7).
+    --mock-zstd-frac Fraction in [0.0, 1.0] of MockServicesClient channels with ZSTD enabled. Default: 0.75.
     --mock-keepalive-interval-ms Per-MockServicesClient keepalive ping interval (ms). 0=disabled. Default: 200.
-    --rpc-fanout-scale Scale factor applied to per-session fanout counts. Default: 0.05 (t43 c7).
-    --server-zstd Enable ZSTD compression on server-side response payloads (0=off, 1=on). Default: 0 (t43 c7).
+    --rpc-fanout-scale Scale factor applied to per-session fanout counts. Default: 0.05.
+    --server-zstd Enable ZSTD compression on server-side response payloads (0=off, 1=on). Default: 0.
     --sla-p95-ms search_qps SLA target (95th percentile latency in ms). Default: 700.
+    --depth Driver pipeline depth: max outstanding requests per driver connection (max in-flight = driver_threads * connections * depth). Default: 1 (or \$FEEDSIM_DRIVER_DEPTH). Raise (e.g. 2) when the final phase saturates neither CPU nor SLA latency; with adaptive depth on, this is the starting floor the peak search raises from.
 EOF
 }
 
@@ -312,6 +313,12 @@ main() {
 
     local sla_p95_ms
     sla_p95_ms="700"
+
+    # Driver pipeline depth (max outstanding requests per driver connection).
+    # Env var FEEDSIM_DRIVER_DEPTH is the fallback default; the --depth CLI flag
+    # (forwarded from the benchpress `depth` job parameter) overrides it.
+    local driver_depth
+    driver_depth="${FEEDSIM_DRIVER_DEPTH:-1}"
 
     if [ -z "$IS_AUTOSCALE_RUN" ]; then
        echo > $BREPS_LFILE
@@ -644,6 +651,13 @@ main() {
                 ;;
             --sla-p95-ms=*)
                 sla_p95_ms="${1#*=}"
+                ;;
+            --depth)
+                driver_depth="$2"
+                shift
+                ;;
+            --depth=*)
+                driver_depth="${1#*=}"
                 ;;
             -h|--help)
                 show_help >&2
@@ -997,7 +1011,9 @@ main() {
     # CPU>=95% or p95>=SLA), giving each platform just enough offered concurrency
     # to reach a real bound instead of capping on driver concurrency.
     # Enabled by default up to depth 8; set FEEDSIM_ADAPTIVE_DEPTH_MAX=0 to
-    # disable and fall back to the fixed FEEDSIM_DRIVER_DEPTH (default 1).
+    # disable and use the fixed driver_depth (--depth flag / FEEDSIM_DRIVER_DEPTH,
+    # default 1). When adaptive is on, driver_depth is the STARTING floor the peak
+    # search raises from (search_qps reads the --depth we pass below).
     sqps_adaptive_arg=""
     adaptive_depth_max="${FEEDSIM_ADAPTIVE_DEPTH_MAX:-8}"
     if [ "$adaptive_depth_max" != "0" ]; then
@@ -1014,7 +1030,7 @@ main() {
                 --monitor_port "$client_monitor_port" \
                 --threads="${driver_threads}" \
                 --connections=4 \
-                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
+                --depth="${driver_depth}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
@@ -1027,7 +1043,7 @@ main() {
             $driver_bin \
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port" \
-                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
+                --depth="${driver_depth}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
@@ -1056,7 +1072,7 @@ main() {
                 --monitor_port "$client_monitor_port" \
                 --threads="${num_workers}" \
                 --connections="${num_connections}" \
-                --depth="${FEEDSIM_DRIVER_DEPTH:-1}" \
+                --depth="${driver_depth}" \
                 $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
