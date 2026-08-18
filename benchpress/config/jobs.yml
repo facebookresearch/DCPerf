@@ -468,15 +468,14 @@
   benchmark: feedsim_autoscale
   description: >
     Single-instance aggregator workload with DLRM (Deep Learning Recommendation
-    Model) inference. Same t43 c7 calibration as feedsim_autoscale_dlrm but pinned
+    Model) inference. Same calibration as feedsim_autoscale_dlrm but pinned
     to ONE feedsim instance per host (overrides the autoscale "100 cores per
     instance" rule). Single-instance runs give better gen-over-gen correlation
     than multi-instance — there's no cross-instance mock_services queue contention
-    and no per-instance core-range fragmentation. Use this for cross-LSST CPU
+    and no per-instance core-range fragmentation. Use this for cross-platform CPU
     comparisons; use feedsim_autoscale_dlrm for max-throughput experiments on big
     multi-instance boxes. Finds maximum QPS that the system can sustain while
-    keeping 95th percentile latency <= 700ms (matches prod multifeed_aggregator's
-    own end-to-end p95 budget).
+    keeping 95th percentile latency <= 700ms.
   args:
     - '-n {num_instances}'
     - '--async-io'
@@ -501,17 +500,18 @@
     - '--stories-per-processor-pass={stories_per_processor_pass}'
     - '--silesia-dir={silesia_dir}'
     - '--stories-per-request={stories_per_request}'
-    # t43 c7 calibration (see ~/.claude/projects/.../memory/t43_c7_recommended.md)
+    # Calibration knobs.
     - '--mock-tls={mock_tls}'
     - '--mock-zstd-frac={mock_zstd_frac}'
     - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
     - '--rpc-fanout-scale={rpc_fanout_scale}'
     - '--server-zstd={server_zstd}'
     - '--sla-p95-ms={sla_p95_ms}'
+    - '--depth={depth}'
     - '{extra_args}'
   vars:
     # Hardcode num_instances=1: this job exists specifically for single-instance
-    # cross-LSST comparisons. If you want autoscale-by-cores, use
+    # cross-platform comparisons. If you want autoscale-by-cores, use
     # feedsim_autoscale_dlrm instead.
     - 'num_instances=1'
     - 'io_dist=fixed'
@@ -540,6 +540,12 @@
     - 'rpc_fanout_scale=0.05'
     - 'server_zstd=0'
     - 'sla_p95_ms=700'
+    # Driver pipeline depth (max outstanding requests per driver connection).
+    # Default 1. Raise (e.g. 2) if the final phase saturates neither CPU nor SLA
+    # latency (final p95 well below sla_p95_ms while CPU util < ~90%) — often
+    # needed on high-perf ARM cores. With adaptive depth on (the default), this is
+    # the starting floor the peak search raises from; see README "Driver depth".
+    - 'depth=1'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
@@ -662,11 +668,10 @@
   benchmark: feedsim_autoscale
   description: >
     Multi-instance aggregator workload with DLRM (Deep Learning Recommendation Model)
-    inference. Defaults bake in the t43 c7 calibration — the balanced
-    configuration that minimizes both gen-over-gen correlation gap AND
-    bench-vs-prod hot-function gap on CPL/BGM. Finds maximum QPS that the
-    system can sustain while keeping 95th percentile latency <= 700ms
-    (matches prod multifeed_aggregator's own end-to-end p95 budget).
+    inference. Defaults bake in the balanced calibration that minimizes both
+    the gen-over-gen correlation gap AND the bench-vs-prod hot-function gap.
+    Finds maximum QPS that the system can sustain while keeping 95th percentile
+    latency <= 700ms.
     Automatically spawns one workload instance per ~100 cores.
   args:
     - '-n {num_instances}'
@@ -692,13 +697,14 @@
     - '--stories-per-processor-pass={stories_per_processor_pass}'
     - '--silesia-dir={silesia_dir}'
     - '--stories-per-request={stories_per_request}'
-    # t43 c7 calibration knobs (t31 tracking: T269255604)
+    # Calibration knobs
     - '--mock-tls={mock_tls}'
     - '--mock-zstd-frac={mock_zstd_frac}'
     - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
     - '--rpc-fanout-scale={rpc_fanout_scale}'
     - '--server-zstd={server_zstd}'
     - '--sla-p95-ms={sla_p95_ms}'
+    - '--depth={depth}'
     - '{extra_args}'
   vars:
     - 'num_instances=-1'
@@ -706,10 +712,8 @@
     - 'io_mean=200'
     - 'workload=dlrm'
     - 'dlrm_model=models/dlrm_small.pt'
-    # t43 c7: bs=64 is the balanced choice across both gen-over-gen
-    # correlation (BGM/CPL = 4.25× → 2nd best of 12 cells) and prod
-    # hot-function gap (CPL 4th, BGM 5th). bs=32 wins peak QPS alone but
-    # breaks correlation (BGM stretches to 4.75× CPL).
+    # bs=64 is the balanced default across gen-over-gen correlation and
+    # hot-function fidelity.
     - 'dlrm_batch_size=64'
     - 'dlrm_threads=1'
     - 'dlrm_inferences=1'
@@ -721,27 +725,31 @@
     - 'client_num_sparse=26'
     - 'feature_complexity=5'
     # 400 x 280 = 112K extractor calls/req. Combined with the scaled-up
-    # story-processor pipeline (below) this matches prod's FE:story CPU
-    # ratio of ~1.3:1 (multifeed: FE 29%, story 22% on BGM Strobelight).
+    # story-processor pipeline (below) this approximates a production
+    # feature-extraction to story-processing CPU ratio.
     - 'num_stories=400'
     - 'extractors_per_story=280'
-    # Story-processor pipeline scaled 8x from t32 first attempt (was
-    # 1 pass/story * 25 stories/pass = 25 cmpns/story → 1.1% Ranking-Story
-    # on BGM, vs prod 9.3%). Bumped to 2 passes * 100 stories = 200
-    # comparisons/story, target ~9% Ranking-Story share.
+    # Story-processor pipeline: 2 passes * 100 stories = 200 comparisons/story,
+    # sized to approximate a production Ranking-Story CPU share.
     - 'story_processors_per_story=2'
     - 'stories_per_processor_pass=100'
     - 'silesia_dir=silesia'
     - 'stories_per_request=10'
-    # t43 c7: TLS+keepalive on mock_services, 75% of channels compress,
-    # rpc_fanout_scale=0.05 (~188 RPCs/session). Server-side ZSTD off
-    # (mock-side ZSTD provides the prod-realistic Compression share).
+    # TLS+keepalive on mock_services, a fraction of channels compress, with
+    # rpc_fanout_scale applied. Server-side ZSTD off (mock-side ZSTD provides
+    # a production-realistic Compression share).
     - 'mock_tls=1'
     - 'mock_zstd_frac=0.75'
     - 'mock_keepalive_interval_ms=200'
     - 'rpc_fanout_scale=0.05'
     - 'server_zstd=0'
     - 'sla_p95_ms=700'
+    # Driver pipeline depth (max outstanding requests per driver connection).
+    # Default 1. Raise (e.g. 2) if the final phase saturates neither CPU nor SLA
+    # latency (final p95 well below sla_p95_ms while CPU util < ~90%) — often
+    # needed on high-perf ARM cores. With adaptive depth on (the default), this is
+    # the starting floor the peak search raises from; see README "Driver depth".
+    - 'depth=1'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
@@ -795,13 +803,13 @@
     - '-P {page_rank_seed}'
     - '-C {pointer_chase_seed}'
     - '-N'
-    # t43 c7 calibration knobs (t31 tracking: T269255604)
     - '--mock-tls={mock_tls}'
     - '--mock-zstd-frac={mock_zstd_frac}'
     - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
     - '--rpc-fanout-scale={rpc_fanout_scale}'
     - '--server-zstd={server_zstd}'
     - '--sla-p95-ms={sla_p95_ms}'
+    - '--depth={depth}'
     - '{extra_args}'
   vars:
     - 'num_instances=-1'
@@ -811,8 +819,6 @@
     - 'dlrm_model=models/dlrm_small.pt'
     - 'dlrm_batch_size=64'
     - 'dlrm_threads=1'
-    # 8 inferences/req brings DLRM-Inference CPU share from 55-62% down
-    # toward prod multifeed_aggregator's Ranking-Prediction share of 7-13%.
     - 'dlrm_inferences=8'
     - 'client_side_features=0'
     - 'client_batch_size=256'
@@ -821,9 +827,6 @@
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
     - 'feature_complexity=5'
-    # 1800 stories x 50 extractors = 90K extractor calls/req. Tuned to
-    # push FeatureExtraction CPU share into prod's 30-35% band; 5K
-    # calls/req previously gave only 1.7-1.9%.
     - 'num_stories=1800'
     - 'extractors_per_story=50'
     - 'fixed_qps=100000'
@@ -835,13 +838,19 @@
     - 'node_rank_seed=54321'
     - 'page_rank_seed=12345'
     - 'pointer_chase_seed=98765'
-    # t43 c7 mock_services + TLS knobs (same baseline as feedsim_autoscale_dlrm)
+    # mock_services + TLS knobs (same baseline as feedsim_autoscale_dlrm)
     - 'mock_tls=1'
     - 'mock_zstd_frac=0.75'
     - 'mock_keepalive_interval_ms=200'
     - 'rpc_fanout_scale=0.05'
     - 'server_zstd=0'
     - 'sla_p95_ms=700'
+    # Driver pipeline depth (max outstanding requests per driver connection).
+    # Default 1. Raise (e.g. 2) if the final phase saturates neither CPU nor SLA
+    # latency (final p95 well below sla_p95_ms while CPU util < ~90%) — often
+    # needed on high-perf ARM cores. With adaptive depth on (the default), this is
+    # the starting floor the peak search raises from; see README "Driver depth".
+    - 'depth=1'
     - 'extra_args='
   hooks:
     - hook: copymove
