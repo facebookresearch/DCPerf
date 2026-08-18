@@ -132,6 +132,25 @@ int sweepReadsPerCall();
 __attribute__((noinline))
 float runStrideSweep(uint64_t seed);
 
+// Companion write sweep. The read sweep above only adds read traffic; this
+// adds FEEDSIM_SWEEP_WN streaming (non-temporal) writes per call into a
+// separate buffer of FEEDSIM_SWEEP_WMB megabytes, stepping FEEDSIM_SWEEP_WSTRIDE
+// floats each write, to raise the write share of DRAM bandwidth toward prod's
+// read:write ratio. Streaming stores keep the traffic as pure writes (no
+// read-for-ownership). Knobs are read once from the environment; the default 16
+// is a balanced cross-platform value, and FEEDSIM_SWEEP_WN=0 disables the
+// sweep (no-op, skips buffer allocation). Write stride/size default to the read
+// knobs. Returns FEEDSIM_SWEEP_WN (cached after first call, which allocates the
+// write buffer).
+int sweepWritesPerCall();
+
+// Perform a strided streaming-write walk seeded by `seed` (rotates the start
+// offset so successive calls cover the whole buffer). Returns one buffer
+// element so the caller can fold it into live state and keep the stores from
+// being eliminated. Assumes sweepWritesPerCall() ran first.
+__attribute__((noinline))
+float runStrideSweepWrite(uint64_t seed);
+
 } // namespace helpers
 } // namespace feature_extractors
 } // namespace dcperf

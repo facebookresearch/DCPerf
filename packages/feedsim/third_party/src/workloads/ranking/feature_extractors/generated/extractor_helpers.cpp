@@ -11,6 +11,10 @@
 #include <mutex>
 #include <vector>
 
+#if defined(__x86_64__)
+#include <emmintrin.h> // _mm_stream_si32 (non-temporal store)
+#endif
+
 #include <folly/FollyMemcpy.h> // folly::__folly_memcpy
 
 namespace dcperf {
@@ -317,10 +321,30 @@ struct SweepConfig {
   size_t size = 0;         // element count
   int n = 0;               // reads per extractor call (FEEDSIM_SWEEP_N)
   size_t stride = 16;      // element stride (FEEDSIM_SWEEP_STRIDE); 16 = 64B line
+  std::vector<float> wbuf; // separate write target (allocated only when wn > 0)
+  size_t wsize = 0;        // write buffer element count
+  int wn = 0;              // writes per extractor call (FEEDSIM_SWEEP_WN)
+  size_t wstride = 16;     // write stride (FEEDSIM_SWEEP_WSTRIDE)
 };
 
 SweepConfig g_sweep;
 std::once_flag g_sweep_once;
+
+// Non-temporal (streaming) float store: writes straight to memory, bypassing
+// the cache and its read-for-ownership, so the traffic lands as pure DRAM
+// writes rather than the read+write a normal store incurs. Falls back to a
+// plain store where a streaming store isn't available (e.g. aarch64 + GCC).
+inline void ntStoreFloat(float* dst, float value) {
+#if defined(__x86_64__)
+  int bits;
+  folly::__folly_memcpy(&bits, &value, sizeof(bits));
+  _mm_stream_si32(reinterpret_cast<int*>(dst), bits);
+#elif defined(__aarch64__) && defined(__clang__)
+  __builtin_nontemporal_store(value, dst);
+#else
+  *dst = value;
+#endif
+}
 
 int envInt(const char* name, int fallback) {
   const char* v = std::getenv(name);
@@ -354,6 +378,27 @@ void initSweep() {
     s = s * 6364136223846793005ULL + 1442695040888963407ULL;
     g_sweep.buf[i] = static_cast<float>((s >> 40) & 0xFFFF) * 1e-3f;
   }
+
+  // Companion write sweep: the read sweep above only adds read traffic, which
+  // leaves feedsim's read:write ratio above prod's. FEEDSIM_SWEEP_WN streaming
+  // writes/call over a separate DRAM-resident buffer raise the write share to
+  // move the ratio toward prod. Default 16 is a balanced cross-platform value;
+  // set FEEDSIM_SWEEP_WN=0 to disable (skips buffer allocation). Write
+  // stride/size default to the read knobs.
+  g_sweep.wn = envInt("FEEDSIM_SWEEP_WN", 16);
+  if (g_sweep.wn < 0) {
+    g_sweep.wn = 0;
+  }
+  int wstride = envInt("FEEDSIM_SWEEP_WSTRIDE", stride);
+  g_sweep.wstride = wstride < 1 ? 1 : static_cast<size_t>(wstride);
+  if (g_sweep.wn > 0) {
+    int wmb = envInt("FEEDSIM_SWEEP_WMB", mb);
+    if (wmb < 1) {
+      wmb = 1;
+    }
+    g_sweep.wsize = static_cast<size_t>(wmb) * 1024 * 1024 / sizeof(float);
+    g_sweep.wbuf.resize(g_sweep.wsize);
+  }
 }
 
 } // namespace
@@ -380,6 +425,32 @@ float runStrideSweep(uint64_t seed) {
     }
   }
   return acc;
+}
+
+int sweepWritesPerCall() {
+  std::call_once(g_sweep_once, initSweep);
+  return g_sweep.wn;
+}
+
+float runStrideSweepWrite(uint64_t seed) {
+  SweepConfig& c = g_sweep;
+  if (c.wn == 0 || c.wsize == 0) {
+    return 0.0f;
+  }
+  // Rotate the start offset per call so successive calls stream over the whole
+  // buffer instead of hammering one region.
+  size_t off = (seed * 2654435761ULL) % c.wsize;
+  for (int i = 0; i < c.wn; ++i) {
+    ntStoreFloat(&c.wbuf[off], static_cast<float>(seed) + static_cast<float>(i));
+    off += c.wstride;
+    if (off >= c.wsize) {
+      off -= c.wsize;
+    }
+  }
+  // Read one element from a region we didn't just write so the caller can fold
+  // it into live state; this keeps the streaming stores from being elided
+  // without stalling on the store buffer we just filled.
+  return c.wbuf[(off + c.wsize / 2) % c.wsize];
 }
 
 } // namespace helpers
