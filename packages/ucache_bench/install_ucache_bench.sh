@@ -194,7 +194,7 @@ echo ""
 echo "[5/15] Downloading fmt..."
 clone_or_update "https://github.com/fmtlib/fmt.git" "$DEPS_DIR/fmt" "11.0.2"
 
-WDL_VERSION_TAG="v2026.03.02.00"
+WDL_VERSION_TAG="v2026.08.17.00"
 # 5. folly (Facebook Open-source Library)
 echo ""
 echo "[5/13] Downloading folly..."
@@ -224,6 +224,46 @@ clone_or_update "https://github.com/facebook/mvfst.git" "$DEPS_DIR/mvfst" "$WDL_
 echo ""
 echo "[10/13] Downloading mcrouter..."
 clone_or_update "https://github.com/facebook/mcrouter.git" "$DEPS_DIR/mcrouter" "$WDL_VERSION_TAG"
+
+# The pinned OSS release predates CarbonThriftAdapter.h, but generated
+# UCacheBench Thrift types include it. Remove this shim after advancing the
+# dependency tag to a release that contains the header.
+CARBON_THRIFT_ADAPTER="$DEPS_DIR/mcrouter/mcrouter/lib/carbon/CarbonThriftAdapter.h"
+if [ ! -f "$CARBON_THRIFT_ADAPTER" ]; then
+    cat > "$CARBON_THRIFT_ADAPTER" <<'CARBON_THRIFT_ADAPTER_EOF'
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#pragma once
+
+#include <utility>
+
+namespace carbon::util {
+
+template <class Carbon, class Thrift>
+struct CarbonThriftAdapter {
+  static Carbon fromThrift(Thrift value) {
+    Carbon result;
+    static_cast<Thrift&>(result) = std::move(value);
+    return result;
+  }
+
+  static const Thrift& toThrift(const Carbon& value) {
+    return value;
+  }
+
+  static Thrift& toThrift(Carbon& value) {
+    return value;
+  }
+};
+
+} // namespace carbon::util
+CARBON_THRIFT_ADAPTER_EOF
+fi
 
 # 11. CacheLib (Facebook's caching engine)
 echo ""
