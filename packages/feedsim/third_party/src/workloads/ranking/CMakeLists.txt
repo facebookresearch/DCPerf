@@ -404,6 +404,27 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
     target_link_options(LeafNodeRank PRIVATE -Wl,--no-relax)
 endif()
 
+# DynamoRIO tracing support
+option(ENABLE_DR_TRACE "Enable DynamoRIO tracing hooks" OFF)
+if(ENABLE_DR_TRACE)
+    if(NOT DR_TRACE_DIR)
+        message(FATAL_ERROR "ENABLE_DR_TRACE=ON requires -DDR_TRACE_DIR=<path to packages/common/dr_trace>")
+    endif()
+    add_subdirectory(${DR_TRACE_DIR} ${CMAKE_BINARY_DIR}/dr_trace)
+    target_link_libraries(LeafNodeRank PRIVATE dr_trace)
+    if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+        # Without this the linker emits one RWE PT_LOAD, DR records LeafNodeRank
+        # as a single 465MB module, and raw2trace segfaults decoding the gap
+        # between segments. Scoped to the traced build so the default binary is
+        # unchanged.
+        target_link_options(LeafNodeRank PRIVATE -Wl,-z,separate-code)
+    endif()
+    # drsyms stubs must be compiled into the binary rather than libdr_trace.a so
+    # they resolve references from --whole-archive drmemtrace_drstatic before the
+    # linker finishes.
+    target_sources(LeafNodeRank PRIVATE ${DR_TRACE_DIR}/drsyms_stubs.c)
+endif()
+
 # Re-link libraries at the end to resolve circular static library dependencies
 # (folly/glog use gflags DEFINE_* macros, fbthrift has internal cross-lib refs)
 target_link_libraries(LeafNodeRank PRIVATE
