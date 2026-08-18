@@ -897,6 +897,15 @@ main() {
     # libtorch may use) read OMP_NUM_THREADS directly. Without this,
     # each ThriftSrv.IO worker calling forward() spawns nproc OMP
     # threads, accumulating to nproc^2 GlobalCPUThread-named threads.
+    # search_qps.sh mirrors LeafNodeRank.cc's dr_trace_enabled_for_port() to
+    # decide which instance to trigger, and needs this instance's data port.
+    export FEEDSIM_PORT="$port"
+    if [ "${DCPERF_DR_TRACE:-}" = 1 ]; then
+        # trace_init()'s mkdir is not recursive; a missing parent means mkfifo
+        # fails and the run silently produces no trace.
+        mkdir -p "${DR_TRACE_OUTDIR:-/tmp/drmemtrace_out}"
+    fi
+
     # shellcheck disable=SC2086
     env $preload_env OMP_NUM_THREADS=1 MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
@@ -1080,6 +1089,38 @@ main() {
     fi
 
     log_postprocessing_start "$BREAKDOWN_FOLDER" "$$"
+    if [ "${DCPERF_DR_TRACE:-}" = 1 ]; then
+        # Wait for the outdir to stop growing instead.
+        dr_out="${DR_TRACE_OUTDIR:-/tmp/drmemtrace_out}"
+        prev_size=-1
+        stable_for=0
+        waited=0
+        while [ "$waited" -lt "${DR_TRACE_FLUSH_TIMEOUT_SECONDS:-300}" ]; do
+            cur_size="$(du -sb "$dr_out" 2>/dev/null | cut -f1)"
+            if [ -z "$cur_size" ]; then
+                # du failed (outdir not created yet): not stable, keep waiting
+                # rather than exiting early and reporting an empty size.
+                stable_for=0
+            elif [ "$cur_size" = "$prev_size" ]; then
+                stable_for=$((stable_for + 5))
+                [ "$stable_for" -ge 15 ] && break
+            else
+                stable_for=0
+            fi
+            prev_size="$cur_size"
+            sleep 5
+            waited=$((waited + 5))
+        done
+        if [ "$stable_for" -ge 15 ]; then
+            echo "dr_trace: outdir stable at ${prev_size} bytes after ${waited}s"
+        else
+            last_size="$prev_size"
+            if [ -z "$last_size" ] || [ "$last_size" = "-1" ]; then
+                last_size="unreadable"
+            fi
+            echo "dr_trace: WARNING outdir still changing after ${waited}s (last size ${last_size}); trace may be truncated"
+        fi
+    fi
     sleep "$queue_drain_time" # wait for queue to drain
     kill -SIGINT $LEAF_PID || true > /dev/null # SIGINT so exits cleanly
     log_postprocessing_end "$BREAKDOWN_FOLDER" "$$"

@@ -83,11 +83,26 @@ static constexpr uint32_t kDrTraceDurationSeconds = 10;
 static constexpr int kFeedsimBasePort = 21212;
 
 static bool dr_trace_enabled_for_port(int port) {
+  const char* autoscale = std::getenv("IS_AUTOSCALE_RUN");
+  const bool multi_instance = autoscale != nullptr && std::atoi(autoscale) > 1;
   const char* only_port = std::getenv("DR_TRACE_PORT");
-  if (only_port != nullptr) {
-    return std::strcmp(only_port, "all") == 0 || std::atoi(only_port) == port;
+  // Empty-but-set is treated as unset, matching the shell mirror's [ -n ].
+  if (only_port != nullptr && only_port[0] != '\0') {
+    if (std::strcmp(only_port, "all") == 0) {
+      // Each instance derives the trigger pipe path from the shared outdir, so
+      // tracing all of them would have them fight over one pipe.
+      return !multi_instance;
+    }
+    return std::atoi(only_port) == port;
   }
-  return std::getenv("IS_AUTOSCALE_RUN") == nullptr || port == kFeedsimBasePort;
+  return !multi_instance || port == kFeedsimBasePort;
+}
+
+// Trigger mode. "pipe" (default) blocks on $DR_TRACE_OUTDIR/dr_trace_trigger so
+// search_qps.sh can start the trace during the converged-QPS window
+static const char* dr_trace_trigger_mode() {
+  const char* mode = std::getenv("DR_TRACE_TRIGGER");
+  return mode != nullptr ? mode : "pipe";
 }
 
 // Force -raw_compress none for LeafNodeRank only.
@@ -2995,12 +3010,20 @@ int main(int argc, char** argv) {
   debug_dump_thread.detach();
 
 #ifdef DR_TRACE_INCLUDED
+  // Establish the pipe for tracing
   if (dr_trace_enabled_for_port(args.port_arg)) {
-    dr_trace_disable_raw_compression();
-    trace_configure_env();
-    std::thread(
-        trace_execution_delay<kDrTraceDelaySeconds, kDrTraceDurationSeconds>)
-        .detach();
+    const char* trigger_mode = dr_trace_trigger_mode();
+    if (std::strcmp(trigger_mode, "off") != 0) {
+      dr_trace_disable_raw_compression();
+      trace_configure_env();
+      if (std::strcmp(trigger_mode, "delay") == 0) {
+        std::thread(
+            trace_execution_delay<kDrTraceDelaySeconds, kDrTraceDurationSeconds>)
+            .detach();
+      } else {
+        std::thread(trace_execution_pipe).detach();
+      }
+    }
   }
 #endif
 

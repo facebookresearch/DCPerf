@@ -311,6 +311,56 @@ collect_perf_record() {
     perf record -a -g -- sleep 5 >> /tmp/perf-record.log 2>&1
 }
 
+# Setup the pipe for the traced instance
+dr_trace_enabled_for_port() {
+    local port="${FEEDSIM_PORT:-}"
+    local multi_instance=0
+    if [ -n "${IS_AUTOSCALE_RUN:-}" ] && [ "${IS_AUTOSCALE_RUN}" -gt 1 ] 2>/dev/null; then
+        multi_instance=1
+    fi
+
+    if [ -n "${DR_TRACE_PORT:-}" ]; then
+        if [ "${DR_TRACE_PORT}" = "all" ]; then
+            [ "$multi_instance" = 0 ]
+            return
+        fi
+        [ "${DR_TRACE_PORT}" = "$port" ]
+        return
+    fi
+    if [ "$multi_instance" = 0 ]; then
+        return 0
+    fi
+    # Multi-instance with no port to check
+    [ -n "$port" ] && [ "$port" = "21212" ]
+}
+
+# Start the trace inside the converged-QPS window.
+trigger_dr_trace() {
+    [ "${DCPERF_DR_TRACE:-}" = 1 ] || return 0
+    if ! dr_trace_enabled_for_port; then
+        benchreps_tell_state "dr_trace: port ${FEEDSIM_PORT:-unknown} not selected, no trigger"
+        return 0
+    fi
+    local settle="${DR_TRACE_SETTLE_SECONDS:-30}"
+    local duration="${DR_TRACE_DURATION_SECONDS:-10}"
+    local fifo="${DR_TRACE_OUTDIR:-/tmp/drmemtrace_out}/dr_trace_trigger"
+    if [ $((settle + duration)) -ge "$experiment_time" ]; then
+        benchreps_tell_state "dr_trace: WARNING settle+duration ($settle+$duration) >= window $experiment_time"
+    fi
+    sleep "$settle"
+    if [ ! -p "$fifo" ]; then
+        benchreps_tell_state "dr_trace: no trigger fifo at $fifo, skipping"
+        return 0
+    fi
+    benchreps_tell_state "dr_trace: requesting ${duration}s trace via $fifo"
+    if timeout "${DR_TRACE_TRIGGER_TIMEOUT_SECONDS:-60}" \
+            bash -c 'printf "%s\n" "$1" > "$2"' _ "$duration" "$fifo"; then
+        benchreps_tell_state "dr_trace: trigger delivered"
+    else
+        benchreps_tell_state "dr_trace: trigger write timed out (no reader), continuing"
+    fi
+}
+
 # Initialize our own variables:
 experiment_time=120
 wait_time=5
@@ -537,6 +587,7 @@ if [[ -n "$fixed_qps" ]]; then
     if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
         collect_perf_record &
     fi
+    trigger_dr_trace &
     # $main_operation_name is defined in runtime_breakdown_utils.sh
     run_loadtest measured_qps measured_latency $fixed_qps "$main_operation_name"
 
@@ -712,7 +763,7 @@ if [[ -n "$IS_AUTOSCALE_RUN" ]] && [[ "$IS_AUTOSCALE_RUN" -gt 1 ]]; then
     num_ready_inst=$(grep --count "after gap_qps" $BREPS_LFILE)
     if [[ $num_ready_inst -lt $NUM_INSTANCES ]]; then
         result_filename=$(basename "$output_csv_file")
-        current_inst_num=$(echo "$result_filename" | sed -E "s/feedsim_results_([0-9]+).txt/\1/g")
+        current_inst_num=$(echo "$result_filename" | sed -E "s/feedsim_results_(fixqps-)?([0-9]+)\.txt/\2/")
         benchreps_tell_state "[Instance $current_inst_num] Waiting for other instances to finish \"gap_qps\" stage."
         while [[ $num_ready_inst -lt $NUM_INSTANCES ]]; do
             sleep 1
@@ -731,6 +782,7 @@ experiment_time=$final_experiment_time
 if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
     collect_perf_record &
 fi
+trigger_dr_trace &
 run_loadtest measured_qps measured_latency $cur_qps "$main_operation_name"
 printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
