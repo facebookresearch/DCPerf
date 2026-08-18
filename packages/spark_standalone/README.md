@@ -341,12 +341,14 @@ to access the data in it. Below lists the steps to download the dataset:
 Note on CentOS 8: please use `alternatives --config python3` to switch python3 to the newer
 version you installed for Benchpress
 
-Run the following command on the compute node to install and run
-spark_standalone benchmark
+### Recommended v2 job
+
+For DCPerf v2.0-rc1, we recommend the `spark_standalone_remote_3x` job. Install
+SparkBench with the base remote job, then run the recommended 3x query workload:
 
 ```
 ./benchpress_cli.py install spark_standalone_remote
-./benchpress_cli.py run spark_standalone_remote
+./benchpress_cli.py run spark_standalone_remote_3x
 ```
 
 **NOTE**: If your system and network need IPV4, please run the following to
