@@ -546,7 +546,7 @@ if [[ -n "$fixed_qps" ]]; then
   else
     for fixed_qps_el in $fixed_qps_array; do
       benchreps_tell_state "before fixed_qps_iter $fixed_qps_el"
-      run_loadtest measured_qps measured_latency $fixed_qps_el ""
+      run_loadtest measured_qps measured_latency $fixed_qps_el "$main_operation_name"
       printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $fixed_qps_el $measured_qps $measured_latency
       echo "final requested_qps = $fixed_qps_el, measured_qps = $measured_qps, latency = $measured_latency" >> $BREPS_LFILE
       benchreps_tell_state "after fixed_qps_iter $fixed_qps_el"
@@ -721,13 +721,17 @@ if [[ -n "$IS_AUTOSCALE_RUN" ]] && [[ "$IS_AUTOSCALE_RUN" -gt 1 ]]; then
     fi
 fi
 
-# do final measurement
+# do final measurement — this is the actual reported experiment window; log it
+# as main_benchmark in breakdown.csv so perfpub sees a valid time window (the
+# search/warmup/tuning probes above are informational and should not be logged
+# as the primary benchmark window). $main_operation_name comes from
+# packages/common/runtime_breakdown_utils.sh (sourced at the top of this script).
 benchreps_tell_state "before final_qps"
 experiment_time=$final_experiment_time
 if [ "${DCPERF_PERF_RECORD}" = 1 ] && ! [ -f "perf.data" ]; then
     collect_perf_record &
 fi
-run_loadtest measured_qps measured_latency $cur_qps ""
+run_loadtest measured_qps measured_latency $cur_qps "$main_operation_name"
 printf "final requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
 # report non-converging error if iteration reaches max tries
