@@ -107,6 +107,22 @@ rsync -a --exclude=src \
     "${FEEDSIM_THIRD_PARTY_SRC}/"
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
+# Optionally build DynamoRIO for tracing support.
+DR_TRACE_FLAGS=()
+if [ "${ENABLE_DR_TRACE:-0}" = "1" ]; then
+  msg "[DR_TRACE] Setting up DynamoRIO tracing support..."
+  BUILD_DIR="${FEEDSIM_THIRD_PARTY_SRC}"
+  export BUILD_DIR
+  # shellcheck disable=SC1091
+  source "${BENCHPRESS_ROOT}/packages/common/dr_trace/install_dynamorio.sh"
+  DR_TRACE_FLAGS=(
+    -DENABLE_DR_TRACE=ON
+    -DDR_INSTALL="${DR_INSTALL}"
+    -DDR_TRACE_DIR="${BENCHPRESS_ROOT}/packages/common/dr_trace"
+  )
+  msg "[DR_TRACE] DR_INSTALL=${DR_INSTALL}"
+fi
+
 # Installing cmake-4.0.3
 
 if ! [ -d "cmake-4.0.3" ]; then
@@ -380,6 +396,7 @@ cmake -G Ninja \
     -DFEEDSIM_USE_DLRM=ON \
     -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
     -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/libtorch" \
+    "${DR_TRACE_FLAGS[@]}" \
     ../
 
 # Dependencies (fmt, folly, fbthrift, etc.) are already installed above via

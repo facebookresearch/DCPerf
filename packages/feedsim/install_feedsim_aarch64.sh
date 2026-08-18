@@ -90,6 +90,22 @@ cp -f "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src/third_party/CMakeList
     "${FEEDSIM_ROOT_SRC}/src/third_party/CMakeLists.txt"
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
 
+# Optionally build DynamoRIO for tracing support.
+DR_TRACE_FLAGS=()
+if [ "${ENABLE_DR_TRACE:-0}" = "1" ]; then
+  msg "[DR_TRACE] Setting up DynamoRIO tracing support..."
+  BUILD_DIR="${FEEDSIM_THIRD_PARTY_SRC}"
+  export BUILD_DIR
+  # shellcheck disable=SC1091
+  source "${BENCHPRESS_ROOT}/packages/common/dr_trace/install_dynamorio.sh"
+  DR_TRACE_FLAGS=(
+    -DENABLE_DR_TRACE=ON
+    -DDR_INSTALL="${DR_INSTALL}"
+    -DDR_TRACE_DIR="${BENCHPRESS_ROOT}/packages/common/dr_trace"
+  )
+  msg "[DR_TRACE] DR_INSTALL=${DR_INSTALL}"
+fi
+
 DEP_CMAKE_VERSION="4.0.3"
 # Installing cmake
 if ! [ -d "cmake-${DEP_CMAKE_VERSION}-linux-aarch64" ]; then
@@ -415,6 +431,7 @@ cmake -G Ninja \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     -DFEEDSIM_USE_DLRM=ON \
     -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
+    "${DR_TRACE_FLAGS[@]}" \
     ../
 
 # Third-party deps (fmt, folly, fizz, wangle, mvfst, fbthrift) are built by this

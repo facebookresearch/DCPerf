@@ -73,6 +73,42 @@
 #include "dwarfs/dlrm.h"
 #endif
 
+#ifdef DR_TRACE_INCLUDED
+#include <cstdlib>
+#include <cstring>
+#include "dr_trace.h"
+static constexpr uint32_t kDrTraceDelaySeconds = 15;
+static constexpr uint32_t kDrTraceDurationSeconds = 10;
+
+static constexpr int kFeedsimBasePort = 21212;
+
+static bool dr_trace_enabled_for_port(int port) {
+  const char* only_port = std::getenv("DR_TRACE_PORT");
+  if (only_port != nullptr) {
+    return std::strcmp(only_port, "all") == 0 || std::atoi(only_port) == port;
+  }
+  return std::getenv("IS_AUTOSCALE_RUN") == nullptr || port == kFeedsimBasePort;
+}
+
+// Force -raw_compress none for LeafNodeRank only.
+static void dr_trace_disable_raw_compression() {
+  if (std::getenv("DYNAMORIO_OPTIONS") != nullptr) {
+    return;
+  }
+  const DrTraceConfig defaults;
+  const char* outdir = std::getenv("DR_TRACE_OUTDIR");
+  const char* verbose = std::getenv("DR_TRACE_VERBOSE");
+  const std::string opts = std::string(
+                               "-rstats_to_stderr -no_hook_vsyscall"
+                               " -disable_traces -no_enable_reset"
+                               " -client_lib ';;-offline -raw_compress none"
+                               " -verbose ") +
+      (verbose != nullptr ? verbose : std::to_string(defaults.verbose)) +
+      " -outdir " + (outdir != nullptr ? outdir : defaults.outdir) + "'";
+  setenv("DYNAMORIO_OPTIONS", opts.c_str(), 1);
+}
+#endif
+
 #include "if/gen-cpp2/ranking_types.h"
 
 #include "../search/ICacheBuster.h"
@@ -2957,6 +2993,16 @@ int main(int argc, char** argv) {
     }
   });
   debug_dump_thread.detach();
+
+#ifdef DR_TRACE_INCLUDED
+  if (dr_trace_enabled_for_port(args.port_arg)) {
+    dr_trace_disable_raw_compression();
+    trace_configure_env();
+    std::thread(
+        trace_execution_delay<kDrTraceDelaySeconds, kDrTraceDurationSeconds>)
+        .detach();
+  }
+#endif
 
   server.run();
 
