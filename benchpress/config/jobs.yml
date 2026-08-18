@@ -518,7 +518,11 @@
     - 'io_mean=200'
     - 'workload=dlrm'
     - 'dlrm_model=models/dlrm_small.pt'
-    - 'dlrm_batch_size=64'
+    # Calibrated recipe: minimizes all-metrics RMSE vs production (uArch +
+    # instruction mix + hot-function) while preserving gen-over-gen ranking
+    # across platforms. Pairs with the integer-domain feature-extractor helpers
+    # + memory-streaming stride-sweep (N=16, code default) earlier in this stack.
+    - 'dlrm_batch_size=32'
     - 'dlrm_threads=1'
     - 'dlrm_inferences=1'
     - 'client_side_features=0'
@@ -527,18 +531,18 @@
     - 'client_feature_seed=42'
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
-    - 'feature_complexity=5'
+    - 'feature_complexity=8'
     - 'num_stories=400'
-    - 'extractors_per_story=280'
+    - 'extractors_per_story=240'
     - 'story_processors_per_story=2'
-    - 'stories_per_processor_pass=100'
+    - 'stories_per_processor_pass=150'
     - 'silesia_dir=silesia'
     - 'stories_per_request=10'
     - 'mock_tls=1'
-    - 'mock_zstd_frac=0.75'
+    - 'mock_zstd_frac=0.9'
     - 'mock_keepalive_interval_ms=200'
-    - 'rpc_fanout_scale=0.05'
-    - 'server_zstd=0'
+    - 'rpc_fanout_scale=0.10'
+    - 'server_zstd=1'
     - 'sla_p95_ms=700'
     # Driver pipeline depth (max outstanding requests per driver connection).
     # Default 1. Raise (e.g. 2) if the final phase saturates neither CPU nor SLA
@@ -712,9 +716,11 @@
     - 'io_mean=200'
     - 'workload=dlrm'
     - 'dlrm_model=models/dlrm_small.pt'
-    # bs=64 is the balanced default across gen-over-gen correlation and
-    # hot-function fidelity.
-    - 'dlrm_batch_size=64'
+    # Calibrated recipe: minimizes all-metrics RMSE vs production (uArch +
+    # instruction mix + hot-function). bs=32 (with the integer-domain extractor
+    # helpers + stride-sweep earlier in this stack) raises SIMD toward prod and,
+    # at eps=240, preserves gen-over-gen ranking across platforms.
+    - 'dlrm_batch_size=32'
     - 'dlrm_threads=1'
     - 'dlrm_inferences=1'
     - 'client_side_features=0'
@@ -723,26 +729,26 @@
     - 'client_feature_seed=42'
     - 'client_num_dense=13'
     - 'client_num_sparse=26'
-    - 'feature_complexity=5'
-    # 400 x 280 = 112K extractor calls/req. Combined with the scaled-up
-    # story-processor pipeline (below) this approximates a production
-    # feature-extraction to story-processing CPU ratio.
+    - 'feature_complexity=8'
+    # 400 x 240 = 96K extractor calls/req. eps=240 holds Ranking-FeatureExtraction
+    # near the production share; the integer-domain helpers made each call cheaper.
     - 'num_stories=400'
-    - 'extractors_per_story=280'
-    # Story-processor pipeline: 2 passes * 100 stories = 200 comparisons/story,
-    # sized to approximate a production Ranking-Story CPU share.
+    - 'extractors_per_story=240'
+    # Story-processor pipeline: 2 passes * 150 stories = 300 comparisons/story,
+    # target a production-like Ranking-Story share.
     - 'story_processors_per_story=2'
-    - 'stories_per_processor_pass=100'
+    - 'stories_per_processor_pass=150'
     - 'silesia_dir=silesia'
     - 'stories_per_request=10'
-    # TLS+keepalive on mock_services, a fraction of channels compress, with
-    # rpc_fanout_scale applied. Server-side ZSTD off (mock-side ZSTD provides
-    # a production-realistic Compression share).
+    # TLS+keepalive on mock_services; mock_zstd_frac=0.9 + server_zstd=1 land
+    # Compression near the production share; rpc_fanout_scale=0.10 lands
+    # RPC-AsyncIO near production. DRIVER_TLS stays off (default): it overshoots
+    # Encryption without moving throughput.
     - 'mock_tls=1'
-    - 'mock_zstd_frac=0.75'
+    - 'mock_zstd_frac=0.9'
     - 'mock_keepalive_interval_ms=200'
-    - 'rpc_fanout_scale=0.05'
-    - 'server_zstd=0'
+    - 'rpc_fanout_scale=0.10'
+    - 'server_zstd=1'
     - 'sla_p95_ms=700'
     # Driver pipeline depth (max outstanding requests per driver connection).
     # Default 1. Raise (e.g. 2) if the final phase saturates neither CPU nor SLA
