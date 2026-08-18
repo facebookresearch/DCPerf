@@ -93,7 +93,7 @@ class AdSimCoWorker
       req->request() = task.msg;
       FizzStopTLSConnector connector;
       auto async_sock = connector.connect(addr_, &event_base_);
-      client_ = std::make_unique<AdSimAsyncClient>(
+      client_ = std::make_unique<apache::thrift::Client<AdSim>>(
           apache::thrift::RocketClientChannel::newChannel(
               std::move(async_sock)));
       auto resp_wrapper = folly::makeMoveWrapper(task.resp);
@@ -125,7 +125,7 @@ class AdSimCoWorker
   folly::SocketAddress addr_;
   folly::EventBase event_base_;
   std::unique_ptr<std::thread> worker_thread_;
-  std::unique_ptr<AdSimAsyncClient> client_;
+  std::unique_ptr<apache::thrift::Client<AdSim>> client_;
 };
 
 } // namespace facebook::cea::chips::adsim
