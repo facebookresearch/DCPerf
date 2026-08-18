@@ -31,6 +31,26 @@ echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
 function benchreps_tell_state () {
     date +"%Y-%m-%d_%T ${1}" >> $BREPS_LFILE
 }
+
+# ─── CPU utilization helpers (used by adaptive depth) ────────────────────────
+# Read /proc/stat's aggregate cpu line and echo "total idle_all" jiffies.
+cpu_snapshot() {
+  local cpu u n s idle iow irq sirq st rest
+  read -r cpu u n s idle iow irq sirq st rest < /proc/stat
+  local idle_all=$((idle + iow))
+  local total=$((u + n + s + idle + iow + irq + sirq + st))
+  echo "$total $idle_all"
+}
+# System-wide CPU busy% (100 - idle%) measured over the next $1 seconds.
+cpu_busy_over() {
+  local secs="$1" s1 s2 t1 i1 t2 i2 dt di
+  s1=$(cpu_snapshot); t1=${s1% *}; i1=${s1#* }
+  sleep "$secs"
+  s2=$(cpu_snapshot); t2=${s2% *}; i2=${s2#* }
+  dt=$((t2 - t1)); di=$((i2 - i1))
+  if [ "$dt" -le 0 ]; then echo "0"; return; fi
+  echo "scale=1; (($dt - $di) * 100) / $dt" | bc
+}
 # Source runtime breakdown utilities if they exist
 if [ -f "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh" ]; then
     source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
@@ -99,6 +119,11 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
                 without retrying. Optional
     -P          PID of the process to log runtime breakdowns. Optional
     -B          Folder to log runtime breakdowns. Optional
+    -D          Adaptive depth: max driver pipeline depth. When set, the peak
+                phase raises the driver's --depth from 1 until the server is
+                saturated (system CPU >= 95% OR achieved p95 >= SLA), then holds
+                that depth for the QPS search. Overrides any --depth in the
+                driver command. Optional.
 EOF
 }
 
@@ -145,7 +170,7 @@ run_loadtest() {
   for r in $(seq 1 $load_test_retries); do
     # run the command, saving result to tmpfile
     local tmp_file=$(mktemp)
-    $command $threads_arg $qps_arg &>$tmp_file &
+    $command $threads_arg $qps_arg $adaptive_depth_arg &>$tmp_file &
     LOADTEST_PID=$!
 
     if [ "$no_retry_mode" = "1" ]; then
@@ -301,13 +326,18 @@ max_warmup_iterations=10
 no_retry_mode=""
 breakdown_pid=""
 breakdown_folder=""
+adaptive_depth_max=""   # -D: when set, search_qps raises driver --depth in the
+adaptive_depth_arg=""   # peak phase until the server saturates (CPU>=95% or p95>=SLA)
 
 OPTIND=1 # Reset is necessary if getopts was used previously in the script.  It is a good idea to make this local in a function.
-while getopts "ht:f:w:m:s:q:ao:r:x:NP:B:" opt; do
+while getopts "ht:f:w:m:s:q:ao:r:x:NP:B:D:" opt; do
   case "$opt" in
     h)
       show_help
       exit 0
+      ;;
+    D)
+      adaptive_depth_max=$OPTARG
       ;;
     t)
       experiment_time=$OPTARG
@@ -363,6 +393,14 @@ fi
 
 # remaining argument is loadtest command
 command=$@
+
+# In adaptive-depth mode, search_qps owns the driver's --depth: strip any fixed
+# --depth from the command so our per-attempt --depth is the only one, and start
+# the peak search at depth=1.
+if [ -n "$adaptive_depth_max" ]; then
+  command=$(echo "$command" | sed -E 's/[[:space:]]*--depth=[0-9]+//g')
+  adaptive_depth_arg="--depth=1"
+fi
 
 # make sure latency_type and latency_target are specified
 if [[ -z "$fixed_qps" ]] && ( [[ $latency_type = "" ]] || [[ $latency_target = "" ]] ); then
@@ -513,7 +551,40 @@ fi
 
 # find peak QPS
 benchreps_tell_state "before peak_qps"
-run_loadtest peak_qps measured_latency "" ""
+if [ -n "$adaptive_depth_max" ]; then
+  # Adaptive depth: the peak load test offers at most threads*connections*depth
+  # concurrent requests. Starting at depth=1, keep raising depth (and re-running
+  # peak) until the server saturates — system CPU >= 95% OR achieved p95 >= SLA
+  # — so platforms that need more offered concurrency reach a real bound instead
+  # of capping on driver concurrency. The selected depth is then held for the
+  # QPS search / tuning / final phases.
+  cur_depth=1
+  while : ; do
+    adaptive_depth_arg="--depth=$cur_depth"
+    # Sample system CPU busy% over a mid-run window while the peak load runs.
+    cpu_busy_file="/tmp/adaptive_cpu_busy_$$"
+    ( sleep 20; cpu_busy_over 40 > "$cpu_busy_file" ) &
+    cpu_sampler_pid=$!
+    run_loadtest peak_qps measured_latency "" ""
+    wait "$cpu_sampler_pid" 2>/dev/null
+    cpu_busy=$(cat "$cpu_busy_file" 2>/dev/null || echo 0)
+    rm -f "$cpu_busy_file"
+    cpu_sat=$(echo "${cpu_busy:-0} >= 95" | bc 2>/dev/null || echo 0)
+    lat_sat=$(echo "$measured_latency >= $latency_target" | bc 2>/dev/null || echo 0)
+    printf "adaptive-depth: depth=%d peak_qps=%.2f p95=%.2f cpu_busy=%s%% cpu_sat=%s lat_sat=%s\n" \
+      "$cur_depth" "$peak_qps" "$measured_latency" "${cpu_busy:-0}" "$cpu_sat" "$lat_sat"
+    echo "adaptive-depth: depth=$cur_depth peak_qps=$peak_qps p95=$measured_latency cpu_busy=${cpu_busy}% cpu_sat=$cpu_sat lat_sat=$lat_sat" >> $BREPS_LFILE
+    if [ "$cpu_sat" -eq 1 ] || [ "$lat_sat" -eq 1 ] || [ "$cur_depth" -ge "$adaptive_depth_max" ]; then
+      break
+    fi
+    cur_depth=$((cur_depth + 1))
+    sleep "$wait_time"
+  done
+  echo "adaptive-depth: SELECTED depth=$cur_depth (cpu_busy=${cpu_busy}%, p95=$measured_latency, sla=$latency_target)" >> $BREPS_LFILE
+  printf "adaptive-depth: selected depth=%d (cpu_busy=%s%%, p95=%.2f)\n" "$cur_depth" "${cpu_busy:-0}" "$measured_latency"
+else
+  run_loadtest peak_qps measured_latency "" ""
+fi
 printf "peak qps = %.2f, latency = %.2f\n" $peak_qps $measured_latency
 benchreps_tell_state "after peak_qps"
 
