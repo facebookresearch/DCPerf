@@ -79,6 +79,23 @@ if ! [ -f "/usr/local/bin/cmake" ]; then
     ln -s /usr/bin/cmake /usr/local/bin/cmake
 fi
 
+# Folly requires APIs newer than Ubuntu 22.04's liburing 2.1; pin 2.12 for reproducible builds.
+LIBURING_VERSION="2.12"
+if [ "$LINUX_DIST_ID" = "ubuntu" ] && ! PKG_CONFIG_LIBDIR="${TAO_BENCH_DEPS}/lib/pkgconfig" \
+    pkg-config --atleast-version="${LIBURING_VERSION}" liburing; then
+    LIBURING_ROOT="${TAO_BENCH_ROOT}/liburing-${LIBURING_VERSION}"
+    if ! [ -d "${LIBURING_ROOT}" ]; then
+        git clone --branch "liburing-${LIBURING_VERSION}" --depth 1 \
+            https://github.com/axboe/liburing.git "${LIBURING_ROOT}"
+    fi
+    pushd "${LIBURING_ROOT}"
+    ./configure --prefix="${TAO_BENCH_DEPS}"
+    make -j"${NUM_BUILD_JOBS}"
+    make liburing.pc
+    make install
+    popd
+fi
+
 # Install openssl
 if ! [ -d "openssl" ]; then
     git clone --branch "${OPENSSL_BRANCH}" --depth 1 https://github.com/openssl/openssl.git
@@ -129,6 +146,8 @@ sed -i 's/FOLLY_ALWAYS_INLINE//g' "${TAO_BENCH_ROOT}/folly/folly/experimental/sy
 # Remove boost.log and boost.python from the build — they fail on aarch64 with GCC 14
 # (log: build failure; python: incompatible with NumPy 2.0) and neither is needed by folly
 sed -i '/^--with-log$/d;/^--with-python$/d' build/fbcode_builder/manifests/boost
+CMAKE_PREFIX_PATH="${TAO_BENCH_DEPS}" \
+PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" \
 OPENSSL_ROOT_DIR="${TAO_BENCH_DEPS}" ./build/fbcode_builder/getdeps.py --allow-system-packages build \
     --extra-cmake-defines '{"CMAKE_LIBRARY_ARCHITECTURE": "aarch64"}' \
     --scratch-path "${FOLLY_BUILD_ROOT}"
