@@ -370,7 +370,8 @@ function analyze_and_print_results() {
     echo "    \"successful_instances\": ${successful_insts},"
     echo "    \"min_qps\": ${min_qps},"
     echo "    \"max_qps\": ${max_qps},"
-    echo "    \"is_fixed_qps\": ${IS_FIXED_QPS}"
+    echo "    \"is_fixed_qps\": ${IS_FIXED_QPS},"
+    echo "    \"dr_trace\": ${DCPERF_DR_TRACE:-0}"
     echo "}"
     if [[ "$(echo "${min_qps} < 0.8 * ${max_qps}" | bc)" = "1" ]]; then
         # ceil(max_req_qps)
@@ -391,8 +392,10 @@ else
     is_unstable_run="$?"
 fi
 
-# rerun this program with fixed qps if detecting high variance
-if [[ "$is_unstable_run" = 1 ]] && [[ "$IS_FIXED_QPS" = 0 ]] && [[ -z "$IS_RERUN" ]]; then
+# rerun this program with fixed qps if detecting high variance.
+# Variance check is skipped when tracing is on.
+if [[ "$is_unstable_run" = 1 ]] && [[ "$IS_FIXED_QPS" = 0 ]] && [[ -z "$IS_RERUN" ]] \
+   && [[ "${DCPERF_DR_TRACE:-}" != 1 ]]; then
     max_req_qps="$(cat /tmp/max_req_qps)"
     echo "Detected unstable run - rerunning with fixed QPS at ${max_req_qps}..."
     # shellcheck disable=SC2068
