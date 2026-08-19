@@ -646,6 +646,7 @@ class NVPerfUtil(BasePerfUtil):
             "nv-perf-collector",
             perf_collect_script_name="collect_nvda_neoversev2_perf_counters.sh",
             perf_postproc_script_name="generate_arm_perf_report.py",
+            perf_postproc_args=["--arch", "grace"],
             subdir=subdir,
         )
 
@@ -660,7 +661,8 @@ class NeoVerseV3PerfUtil(BasePerfUtil):
             job_uuid,
             "nv3-perf-collector",
             perf_collect_script_name="collect_neoversev3_perf_counters.sh",
-            perf_postproc_script_name="generate_arm_neoversev3_perf_report.py",
+            perf_postproc_script_name="generate_arm_perf_report.py",
+            perf_postproc_args=["--arch", "neoversev3"],
             subdir=subdir,
         )
 
