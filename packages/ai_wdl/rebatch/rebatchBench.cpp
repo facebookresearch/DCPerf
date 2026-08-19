@@ -287,8 +287,8 @@ class TensorBatch {
  * prevent cache effects
  * 3. Multi-threading - Supports configurable number of worker threads
  * 4. Prefetching - Optional memory prefetching for improved performance
- * 5. Anti-optimization - Uses checksums to prevent compiler from optimizing
- * away operations
+ * 5. Anti-optimization - Uses a compiler barrier to prevent the compiler from
+ * optimizing away the memcpy operations
  */
 class RebatchBenchmark {
  public:
@@ -360,9 +360,6 @@ class RebatchBenchmark {
    * 5. Tracks performance statistics
    */
   void workerThread(size_t thread_id) {
-    // Checksum to prevent compiler from optimizing away memcpy operations
-    volatile uint64_t checksum = 0;
-
     while (!stop_flag_) {
       // Allocate a fresh output tensor for this batch
       char* output = new char[OUTPUT_TENSOR_SIZE];
@@ -437,6 +434,11 @@ class RebatchBenchmark {
           totalProcessedBytes += inputNbytes;
         }
       }
+
+      // The output buffer is never read elsewhere, so force the compiler to
+      // treat it as observed; otherwise the memcpy operations above can be
+      // elided as dead stores.
+      asm volatile("" : : "r,m"(output) : "memory");
 
       // Update statistics
       bytes_processed_[thread_id] += totalProcessedBytes;
