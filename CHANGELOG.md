@@ -4,6 +4,85 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 -->
+# v2.0-rc2
+
+This release-candidate cut captures further fine-tuning of the DCPerf v2
+benchmarks since v2.0-rc1, most notably FeedSim v2. `./benchpress_cli.py
+--version` and the benchmark result JSON reports now report `v2.0-rc2`.
+
+## FeedSim v2 fine-tuning
+
+This release fine-tunes FeedSim v2 to more closely model the performance and
+workload characteristics of a real-world ranking and aggregation service. The
+changes tighten the match to production along several axes:
+
+* **Gen-over-gen correlation**: a more stable and reproducible throughput search
+  (adaptive driver pipeline depth and measured-QPS search bounds) plus
+  deterministic per-request RNGs, so relative performance across CPU generations
+  tracks production more consistently run to run.
+* **Performance and microarchitecture behavior**: a memory-streaming stride
+  sweep adds tunable DRAM traffic per extractor call to bring the
+  memory-bandwidth, cache, and read:write profile closer to production.
+* **Instruction mix**: feature-extractor helper math runs in the integer domain,
+  making the instruction mix integer-heavy like production feed extraction.
+* **Hot function composition**: transport encryption (driver-to-leaf and
+  mock-services TLS with hardware AES-GCM) and a calibrated workload recipe shift
+  the CPU time distribution across extraction, inference, compression, and
+  serialization toward the production profile.
+
+## Additional highlights
+
+* Fixed AdSim install and execution (#784, #787, #785, #786).
+* Consolidated the AMD and ARM perf reporting scripts (#808).
+* Resolved #623 (#828), #797 (#818), #782 (#800), and #259 (#801).
+
+# v2.0-rc1
+
+As the existing benchmarks in DCPerf v2 are mostly ready to use, we're publishing this v2.0-rc1 release ahead of the formal DCPerf v2 release to provide a stable version handle for users who would like to have more reproducibility. Now, the `./benchpress_cli.py --version` command and benchmark result JSON reports will have `v2.0-rc1` as the version. We will release newer RC versions if we land more fine-tuning changes to the benchmarks, and the final v2.0 when everything is done.
+
+DCPerf v2.0 intends to support CentOS 9/10 and Ubuntu 22.04/24.04. We plan to add Docker option in the future.
+
+Currently the following benchmarks are ready to use:
+
+Main Benchmarks:
+- [TaoBench v2](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/tao_bench/README.md)
+  - TaoBench v2 job: [`tao_bench_autoscale_v2_beta`](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/tao_bench/README.md#experimental-tao_bench_autoscale_v2_beta)
+  - The v1 job `tao_bench_autoscale` and `tao_bench_standalone` is preserved.
+  - New feature: Auto-warmup and support for memory file to reduce execution time
+- [FeedSim v2](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/feedsim/README.md)
+  - FeedSim v2 job: `feedsim_dlrm`
+  - Software architecture introduction: [ARCHITECTURE_v2.md](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/feedsim/ARCHITECTURE_v2.md)
+  - **NOTE**: the legacy `feedsim_autoscale` job has been removed; if you would like to run FeedSim v1, please check out the `main` branch (or `v1` branch in the future) and install & run from there.
+- [DjangoBench v2](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/django_workload/README.md)
+  - DjangoBench v2 job: `django_workload_default`. No separate job for ARM.
+  - Software architecture introduction: [here](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/django_workload/srcs/proxygen_binding/README.md)
+  - **NOTE**: the same `django_workload_default` job will run DjangoBench v2, please checkout the `main` or `v1` branch if you wish to run DjangoBench v1
+- [Mediawiki](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/mediawiki/README.md)
+  - The workload is unchanged. The main update to Mediawiki is a scalability fix for CPUs of >=200 logical cores.
+- [SparkBench v2](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/spark_standalone/README.md)
+  - Changed Java runtime from OpenJDK 8 to GraalVM
+  - SparkBench v2 job: `spark_standalone_remote_3x`
+  - The original v1 job `spark_standalone_remote` job is preserved.
+- [VideoTranscodeBench](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/video_transcode_bench/README.md)
+  - The workload is unchanged. The main update is SVT-AV1 library version upgrade to expose newer optimizations especially for ARM CPUs.
+
+Micro-benchmarks:
+- Datacenter Tax and WDL
+  - [WDLBench v2](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/wdl_bench/README.md)
+- Graph and Tiered Memory Benchmarking
+  - [GABPS Bench](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/gapbs/README.md)
+- Kernel & HW Performance
+  - [Schbench](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/schbench/README.md)
+  - [Syscall](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/syscall/README.md)
+  - [HealthCheck](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/health_check/README.md)
+
+AI Micro-benchmarks:
+- [FBGEMM Embedding and Matmul](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/ai_wdl/fbgemm/README.md)
+- [Rebatching](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/ai_wdl/rebatch/README.md)
+- [Tensor Deserialization](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/ai_wdl/deser/README.md)
+- [Concurrent Hashmap](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/ai_wdl/chm/README.md)
+- [Pytorch GEMM Dispatch](https://github.com/facebookresearch/DCPerf/blob/v2-beta/packages/ai_wdl/pytorch_gemm_dispatch/README.md)
+
 # v1.0
 
 We are excited to release DCPerf v1.0 which is the first stable release of DCPerf. This
