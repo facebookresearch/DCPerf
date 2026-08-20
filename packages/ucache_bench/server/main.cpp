@@ -104,9 +104,14 @@ DEFINE_uint32(
     "0 = disabled.");
 
 // Configurable per-request CPU work
+// Off by default: the busy-work loop is a register-only spin that stays
+// resident in the uop cache, so it inflates IPC, Retiring, op-cache supply and
+// instructions/request all at once, which deflates every per-kilo-instruction
+// cache metric. Enable it only to hit a CPU-utilization target, accepting that
+// the micro-architectural profile stops matching production.
 DEFINE_uint32(
     cpu_work_us,
-    50,
+    0,
     "Microseconds of CPU busy-work per request. Simulates aggregate production "
     "overhead. 0 = disabled.");
 DEFINE_uint32(

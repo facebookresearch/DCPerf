@@ -22,6 +22,8 @@
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
 #include "cachelib/allocator/LruTailAgeStrategy.h"
 
+DECLARE_bool(enable_fibers);
+
 using namespace facebook::ucachebench;
 
 namespace facebook {
@@ -463,7 +465,14 @@ void UcacheBenchServer::runKcbDoubleLookup(const std::string& key) {
 
   // Second CacheLib lookup (matches production findSlow for derived item)
   auto derivedHandle = cache_->find(derivedKey);
-  folly::doNotOptimizeAway(derivedHandle != nullptr);
+  if (derivedHandle) {
+    // Production walks the derived item's payload after the second lookup.
+    // Reading it here is what makes this a real memory access rather than a
+    // hashtable probe that stops at a guaranteed miss.
+    auto crc = computeValueChecksum(
+        derivedHandle->getMemory(), derivedHandle->getSize());
+    folly::doNotOptimizeAway(crc);
+  }
 }
 
 // Per-thread CPU load measurement matching production shouldLoadShed().
@@ -514,13 +523,15 @@ void UcacheBenchServer::runPerRequestAllocations(
   std::string ticket(32, 'T');
   folly::doNotOptimizeAway(ticket.data());
 
-  // 4. Fiber task lambda capture allocation
-  // Production: UcacheRequestCommon.h:178 addTaskEager captures
-  // UcacheThriftCallback + Request + FiberToken in a heap-allocated lambda.
-  // Typical size: ~200-500 bytes depending on request type.
-  auto lambdaCapture = std::make_unique<char[]>(256);
-  std::memset(lambdaCapture.get(), 0, 256);
-  folly::doNotOptimizeAway(lambdaCapture.get());
+  // 4. Fiber task lambda capture allocation.
+  // Only stand in for it when fibers are disabled; with fibers on,
+  // ucacheBenchOnRequestCommon already does a real addTaskEager heap capture,
+  // so simulating one here double-counts the allocation.
+  if (!FLAGS_enable_fibers) {
+    auto lambdaCapture = std::make_unique<char[]>(256);
+    std::memset(lambdaCapture.get(), 0, 256);
+    folly::doNotOptimizeAway(lambdaCapture.get());
+  }
 
   // 5. KCB derived key construction (matches KcbKeyUtil.cpp:13-19)
   // Production: fmt::format("{}:kcb:{}", appKey, kcbId)
@@ -719,26 +730,15 @@ void UcacheBenchServer::runProductionGetOverhead(
     folly::doNotOptimizeAway(crc);
   }
 
-  // 11. Thrift compact protocol serialization simulation
-  // Production serializes every response through Thrift CompactProtocol.
-  // This involves varint encoding, field headers, and data copies.
-  simulateThriftSerialization(key, valueData, valueLen, hit);
-
-  // 12. IOBuf chain construction and manipulation
-  // Production builds multi-segment IOBuf chains for network responses.
-  if (hit && valueData && valueLen > 0) {
-    simulateIoBufProcessing(valueData, valueLen);
-  }
-
-  // 13. Response timestamp (matches ServiceRouterLoggingHandler post-write)
+  // 11. Response timestamp (matches ServiceRouterLoggingHandler post-write)
   clock_gettime(CLOCK_MONOTONIC, &ts);
   folly::doNotOptimizeAway(ts);
 
-  // 14. Per-request heap allocations (matches production key construction,
+  // 12. Per-request heap allocations (matches production key construction,
   // fiber task capture, egress hash vector, convertToIOBuf std::function)
   runPerRequestAllocations(key, hit ? valueLen : 0);
 
-  // 15. FiberToken global atomic contention
+  // 13. FiberToken global atomic contention
   // (matches UcacheIOThreadContext::FiberToken inc/dec per request)
   runFiberTokenContention();
 
@@ -777,9 +777,6 @@ void UcacheBenchServer::runProductionSetOverhead(
     auto crc = computeValueChecksum(valueData, valueLen);
     folly::doNotOptimizeAway(crc);
   }
-
-  // Thrift deserialization simulation (production deserializes SET request)
-  simulateThriftSerialization(key, valueData, valueLen, /*hit=*/true);
 
   // Hot key detection (same as GET path)
   runHotKeyDetection(keyHash);
@@ -940,7 +937,9 @@ UcbGetReply UcacheBenchServer::processUcbGetSync(const UcbGetRequest& req) {
   try {
     std::string keyStr = req.key()->fullKey().str();
 
-    simulatePerRequestOverhead(keyStr);
+    if (!config_.production_features_enabled) {
+      simulatePerRequestOverhead(keyStr);
+    }
 
     std::optional<BucketLocks::ReadLockHolder> bucketLock;
     if (bucketLocks_) {
@@ -994,7 +993,9 @@ UcbSetReply UcacheBenchServer::processUcbSetSync(const UcbSetRequest& req) {
   try {
     std::string keyStr = req.key()->fullKey().str();
 
-    simulatePerRequestOverhead(keyStr);
+    if (!config_.production_features_enabled) {
+      simulatePerRequestOverhead(keyStr);
+    }
 
     const auto& valueIoBuf = req.value();
     auto valueStr = valueIoBuf->to<std::string>();
