@@ -137,9 +137,9 @@ float runStrideSweep(uint64_t seed);
 // separate buffer of FEEDSIM_SWEEP_WMB megabytes, stepping FEEDSIM_SWEEP_WSTRIDE
 // floats each write, to raise the write share of DRAM bandwidth toward prod's
 // read:write ratio. Streaming stores keep the traffic as pure writes (no
-// read-for-ownership). Knobs are read once from the environment; the default 16
-// is a balanced cross-platform value, and FEEDSIM_SWEEP_WN=0 disables the
-// sweep (no-op, skips buffer allocation). Write stride/size default to the read
+// read-for-ownership). Knobs are read once from the environment; the default 0
+// disables the sweep (no-op, skips buffer allocation) and FEEDSIM_SWEEP_WN>0
+// enables it. Write stride/size default to the read
 // knobs. Returns FEEDSIM_SWEEP_WN (cached after first call, which allocates the
 // write buffer).
 int sweepWritesPerCall();

@@ -382,10 +382,10 @@ void initSweep() {
   // Companion write sweep: the read sweep above only adds read traffic, which
   // leaves feedsim's read:write ratio above prod's. FEEDSIM_SWEEP_WN streaming
   // writes/call over a separate DRAM-resident buffer raise the write share to
-  // move the ratio toward prod. Default 16 is a balanced cross-platform value;
-  // set FEEDSIM_SWEEP_WN=0 to disable (skips buffer allocation). Write
-  // stride/size default to the read knobs.
-  g_sweep.wn = envInt("FEEDSIM_SWEEP_WN", 16);
+  // move the ratio toward prod. Default 0 disables the sweep (no-op, skips
+  // buffer allocation); set FEEDSIM_SWEEP_WN>0 to enable. Write stride/size
+  // default to the read knobs.
+  g_sweep.wn = envInt("FEEDSIM_SWEEP_WN", 0);
   if (g_sweep.wn < 0) {
     g_sweep.wn = 0;
   }
