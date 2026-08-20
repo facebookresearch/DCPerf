@@ -107,7 +107,7 @@ class Power(Monitor):
         self.proc = threading.Thread(target=self.collector, name="power", args=())
         self.proc.start()
 
-    def terminate(self):
+    def terminate(self) -> None:
         self.run_power_collector = False
         if not hasattr(self, "proc"):
             return
