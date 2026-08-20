@@ -243,9 +243,11 @@ git apply --check "${TEMPLATES_DIR}/0001-oss-performance-scalable-hhvm.diff" \
 # templates/oss-performance-mediawiki/0006-oss-performance-reuse-mediawiki-hhvm.diff
 git apply --check "${TEMPLATES_DIR}/0006-oss-performance-reuse-mediawiki-hhvm.diff" \
     && git apply "${TEMPLATES_DIR}/0006-oss-performance-reuse-mediawiki-hhvm.diff"
-# Strip null bytes from nginx access log to fix UTF-8 errors in metrics on ARM
-git apply --check "${TEMPLATES_DIR}/0008-nginx-strip-null-bytes.diff" \
-    && git apply "${TEMPLATES_DIR}/0008-nginx-strip-null-bytes.diff"
+# Stream the nginx access log line-by-line (and strip null bytes) so metrics
+# collection does not overflow HHVM's ~2GB single-string limit on
+# high-throughput ARM hosts
+git apply --check "${TEMPLATES_DIR}/0008-nginx-stream-access-log.diff" \
+    && git apply "${TEMPLATES_DIR}/0008-nginx-stream-access-log.diff"
 
 # apply options for mediawiki mini patch
 git apply --check "${TEMPLATES_DIR}/0007-oss-performance-more-warmup-options.diff" \

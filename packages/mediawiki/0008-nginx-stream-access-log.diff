@@ -1,0 +1,38 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+diff --git a/base/NginxDaemon.php b/base/NginxDaemon.php
+index aa48307..608e8f1 100644
+--- a/base/NginxDaemon.php
++++ b/base/NginxDaemon.php
+@@ -47,13 +47,26 @@ final class NginxDaemon extends Process {
+     $page_results = Map {};
+ 
+     // Custom format: '$status $body_bytes_sent $request_time "$request"'
+-    $log = file_get_contents($this->options->tempDir.'/access.log');
+-    $entries = explode("\n", trim($log));
++    // Stream the access log one line at a time rather than slurping the whole
++    // file into a single string. On high-throughput hosts (many-core ARM, long
++    // wrk durations) the log can exceed HHVM's ~2GB single-string limit, and
++    // file_get_contents() then aborts the run with
++    // "StringBuffer exceeded 2147483623 bytes of memory".
++    $access_log = $this->options->tempDir.'/access.log';
+     $entries_by_request = array();
+-    foreach ($entries as $entry) {
++    $fh = fopen($access_log, 'r');
++    invariant($fh !== false, 'Failed to open nginx access log %s', $access_log);
++    while (($line = fgets($fh)) !== false) {
++      // Strip null bytes that can appear due to nginx log buffer races on
++      // high-throughput ARM systems, then drop the trailing newline.
++      $entry = rtrim(str_replace("\x00", "", $line), "\r\n");
++      if ($entry === '') {
++        continue;
++      }
+       $request = explode('"', $entry)[1];
+       $entries_by_request[$request][] = $entry;
+     }
++    fclose($fh);
+     $combined_times = Vector {};
+ 
+     foreach ($entries_by_request as $request => $entries) {
