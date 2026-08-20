@@ -398,16 +398,12 @@ def run_server(args: argparse.Namespace) -> None:
     if args.bucket_lock_power > 0:
         server_cmd.append(f"--bucket_lock_power={args.bucket_lock_power}")
 
-    # Configurable per-request CPU work
-    if args.cpu_work_us > 0:
-        server_cmd.append(f"--cpu_work_us={args.cpu_work_us}")
-    io_latency_us = getattr(args, "io_latency_us", None)
-    if io_latency_us is None:
-        io_latency_us = getattr(args, "io_latency_us", 0)
-    if io_latency_us and int(io_latency_us) > 0:
-        server_cmd.append(f"--io_latency_us={io_latency_us}")
-    elif getattr(args, "enable_fibers", False):
-        server_cmd.append("--io_latency_us=10")
+    # Configurable per-request CPU work. Always forward these, including 0:
+    # omitting the flag lets the server fall back to its own gflag default, so
+    # requesting 0 would silently enable whatever that default happens to be.
+    server_cmd.append(f"--cpu_work_us={args.cpu_work_us}")
+    io_latency_us = int(getattr(args, "io_latency_us", 0) or 0)
+    server_cmd.append(f"--io_latency_us={io_latency_us}")
 
     # Production-like per-request features
     if args.production_features:
