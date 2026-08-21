@@ -194,7 +194,7 @@ echo "JDK installed successfully"
 # Install Cassandra
 # Download Cassandra from third-party source
 if [ "$VERSION_ID" -ge 10 ]; then
-    cassandra_version=5.0.8
+    cassandra_version=5.0.9
 else
     cassandra_version=3.11.19
 fi
@@ -305,15 +305,14 @@ echo "====================================================================="
 echo "Step 5: Building Cinder 3.14"
 echo "====================================================================="
 
-# Download and build Cinder
-# Using meta/3.14 branch — includes gh-145615 mimalloc page leak fix
-CINDER_COMMIT="7627b90844073b94ef60415ed1f1248837bedef7"
+# Download and build MetaPython
+CINDER_COMMIT="81b5092b60e86d7ce588bc80028f117d0415b230"
 if ! [ -d "cinder" ]; then
     dnf reinstall -y zlib-devel || dnf install -y zlib-ng-compat-devel || dnf install -y zlib-devel
     if [ ! -e /usr/lib64/libz.so ] && [ -e /usr/lib64/libz.so.1 ]; then
         ln -sf /usr/lib64/libz.so.1 /usr/lib64/libz.so
     fi
-    git clone https://github.com/facebookincubator/cinder.git
+    git clone https://github.com/facebookincubator/MetaPython.git cinder
     pushd cinder
     git checkout "${CINDER_COMMIT}"
     mkdir -p cinder-build
@@ -501,7 +500,7 @@ echo "Step 6.5: Installing CinderX for JIT Support"
 echo "====================================================================="
 
 # Clone and install CinderX for JIT functionality
-CINDERX_COMMIT="6e0472215c9917c2b5c9777dd4702b5d84eb3111"
+CINDERX_COMMIT="5ffa367bb41a12d452eab9d7017fe324a6a5f090"
 if ! [ -d "${DJANGO_SERVER_ROOT}/cinderx" ]; then
     cd "${DJANGO_SERVER_ROOT}"
     git clone https://github.com/facebookincubator/cinderx.git
