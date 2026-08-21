@@ -135,6 +135,11 @@ struct UcacheBenchConfig {
   uint32_t cpu_work_us = 0; // 0 = disabled
   uint32_t io_latency_us = 0; // 0 = disabled, yields fiber to simulate I/O
 
+  // Mirrors the --enable_fibers flag. Carried on the config rather than read as
+  // a gflag here so this translation unit does not have to link the one that
+  // defines it.
+  bool fibers_enabled = true;
+
   // Navy (NVM/SSD cache) config (if navy_cache_size_mb > 0, hybrid mode is
   // enabled)
   std::string navy_cache_path = "/tmp/ucachebench_ssd";
@@ -229,12 +234,6 @@ class UcacheBenchServer {
 
   // Additional production-like CPU work
   uint32_t computeValueChecksum(const void* data, size_t len);
-  void simulateThriftSerialization(
-      const std::string& key,
-      const void* valueData,
-      size_t valueLen,
-      bool hit);
-  void simulateIoBufProcessing(const void* valueData, size_t valueLen);
 
   // Increment metrics based on current phase
   void recordGet(bool hit);

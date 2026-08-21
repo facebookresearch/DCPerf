@@ -23,6 +23,8 @@
 #include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/UcacheBenchServerOnRequestThrift.h"
 #endif
 
+DECLARE_bool(enable_fibers);
+
 DEFINE_uint32(port, 11212, "Port to listen on");
 
 // Admin server flags for multi-client coordination
@@ -104,9 +106,14 @@ DEFINE_uint32(
     "0 = disabled.");
 
 // Configurable per-request CPU work
+// Off by default: the busy-work loop is a register-only spin that stays
+// resident in the uop cache, so it inflates IPC, Retiring, op-cache supply and
+// instructions/request all at once, which deflates every per-kilo-instruction
+// cache metric. Enable it only to hit a CPU-utilization target, accepting that
+// the micro-architectural profile stops matching production.
 DEFINE_uint32(
     cpu_work_us,
-    50,
+    0,
     "Microseconds of CPU busy-work per request. Simulates aggregate production "
     "overhead. 0 = disabled.");
 DEFINE_uint32(
@@ -252,6 +259,8 @@ UcacheBenchConfig createConfigFromFlags() {
       config.io_latency_us = std::atoi(env);
     }
   }
+
+  config.fibers_enabled = FLAGS_enable_fibers;
 
   // Production-like per-request features
   config.production_features_enabled = FLAGS_production_features;
