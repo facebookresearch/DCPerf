@@ -93,6 +93,11 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/protocol/gen)
 
 # Add OSS_BUILD compile definition for open source build
 add_compile_definitions(OSS_BUILD)
+# mcrouter headers (e.g. McRouteHandleProvider-inl.h) guard Meta-internal-only
+# includes such as facebook/XdpTransport.h behind !MCROUTER_OSS_BUILD. The OSS
+# mcrouter repo does not ship those headers, so define MCROUTER_OSS_BUILD here
+# (mcrouter deps build defines it too) to compile those internal includes away.
+add_compile_definitions(MCROUTER_OSS_BUILD)
 
 # Disable fbtrace/contextprop which is internal Meta code not available in OSS
 add_compile_definitions(LIBMC_FBTRACE_DISABLE)
