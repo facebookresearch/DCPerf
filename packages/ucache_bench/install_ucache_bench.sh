@@ -194,12 +194,49 @@ echo ""
 echo "[5/15] Downloading fmt..."
 clone_or_update "https://github.com/fmtlib/fmt.git" "$DEPS_DIR/fmt" "11.0.2"
 
-WDL_VERSION_TAG="v2026.03.02.00"
+WDL_VERSION_TAG="v2026.08.24.00"
 # 5. folly (Facebook Open-source Library)
 echo ""
 echo "[5/13] Downloading folly..."
 clone_or_update "https://github.com/facebook/folly.git" "$DEPS_DIR/folly" "$WDL_VERSION_TAG"
 
+# Patch folly: disable liburing support for the pinned WDL tag.
+# At v2026.08.24.00 folly's io_uring code (IoUringZeroCopyBufferPool.cpp and its
+# callers in IoUringBackend.cpp / AsyncIoUringSocket.cpp / IoUringRecv.cpp) uses
+# bleeding-edge io_uring ZCRX-CTRL symbols (IORING_REGISTER_ZCRX_CTRL,
+# ZCRX_REG_IMPORT, io_uring_zcrx_ifq_reg.rx_buf_len, struct zcrx_ctrl,
+# ZCRX_FEATURE_RX_PAGE_SIZE, io_uring_query_zcrx, ...) that are absent from the
+# system liburing uapi (e.g. liburing-devel 2.12 on CentOS Stream 9). We force
+# FOLLY_HAS_LIBURING to 0 in folly/io/async/Liburing.h so the feature is compiled
+# out CONSISTENTLY at the definition AND every call site (patching only the one
+# .cpp leaves the callers referencing missing symbols -> undefined-reference link
+# failure at bin/mcrouter). folly's io_uring backend is not needed by UCacheBench;
+# the EventBase epoll backend is used. In fbcode this is a non-issue (Buck builds
+# folly against a matching liburing). Remove once the pinned tag advances to a
+# liburing with the ZCRX-CTRL ABI, or the host liburing is bumped.
+FOLLY_LIBURING_H="$DEPS_DIR/folly/folly/io/async/Liburing.h"
+if [ -f "$FOLLY_LIBURING_H" ] && ! grep -q "NAVI_DISABLE_LIBURING" "$FOLLY_LIBURING_H"; then
+    echo "  Patching folly Liburing.h (force FOLLY_HAS_LIBURING=0 for old system liburing)..."
+    python3 - "$FOLLY_LIBURING_H" <<'FOLLY_LIBURING_PY'
+import sys
+p=sys.argv[1]
+s=open(p).read()
+old="""#if defined(__linux__) && __has_include(<liburing.h>)
+#define FOLLY_HAS_LIBURING 1
+#else
+#define FOLLY_HAS_LIBURING 0
+#endif"""
+new="""/* NAVI_DISABLE_LIBURING: system liburing lacks the io_uring ZCRX-CTRL ABI that
+ * folly at this pinned WDL tag requires. Disable consistently at all call sites. */
+#define FOLLY_HAS_LIBURING 0"""
+if old in s:
+    s=s.replace(old,new,1)
+    open(p,"w").write(s)
+    print("    Liburing.h patched")
+else:
+    print("    WARN: Liburing.h gate not found verbatim (folly layout changed?)")
+FOLLY_LIBURING_PY
+fi
 # 6. fizz (TLS 1.3 library)
 echo ""
 echo "[6/13] Downloading fizz..."
@@ -661,10 +698,79 @@ if ! grep -q "GenericPiecesBase.cpp" "$CACHELIB_COMMON_CMAKE"; then
 fi
 
 # Build CacheLib using cmake
-cmake_build "$DEPS_DIR/CacheLib/cachelib" "$DEPS_DIR/CacheLib/build" \
+# Build ONLY the CacheLib libraries UCacheBench links, not `make all`.
+# UCacheBench's server links exactly: cachelib_allocator, cachelib_navy,
+# cachelib_shm, cachelib_common, cachelib_nvmitem, cachelib_datatype (all in the
+# allocator/navy/shm/common/datatype subdirs). It does NOT use cachelib_interface
+# or the cachebench tooling (cachelib_cachebench / cachelib_binary_trace_gen).
+# At the pinned WDL tag v2026.08.24.00 those unused targets fail to compile on
+# GCC 11 (a GCC ICE at gimplify.c:14924 on interface/components/FlashCacheComponent.cpp's
+# `co_return makeError(...)` coroutine, and -fpermissive alias-redeclaration errors
+# in cachebench object_cache headers via Stressor.cpp). Building only the needed
+# library targets sidesteps both — they are genuinely not linked by UCacheBench.
+# `make install` still runs to stage the .a files + headers (the DIRECTORY header
+# install and per-target installs cover everything UCacheBench includes).
+CACHELIB_SRC="$DEPS_DIR/CacheLib/cachelib"
+CACHELIB_BUILD_DIR="$DEPS_DIR/CacheLib/build"
+mkdir -p "$CACHELIB_BUILD_DIR"
+cd "$CACHELIB_BUILD_DIR"
+cmake "$CACHELIB_SRC" \
+    -DCMAKE_INSTALL_PREFIX="$STAGING_DIR" \
+    -DCMAKE_PREFIX_PATH="$STAGING_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
     $COMMON_CMAKE_FLAGS \
     -DBUILD_TESTS=OFF \
     -DBUILD_SHARED_LIBS=OFF
+# Build the 6 library targets UCacheBench needs (skips broken cachebench/interface tooling).
+make -j"$NPROC" \
+    cachelib_common \
+    cachelib_shm \
+    cachelib_navy \
+    cachelib_nvmitem \
+    cachelib_allocator \
+    cachelib_datatype
+# Install only those targets' components (avoids `install` pulling the unbuilt
+# aggregate `cachelib`/interface targets, which would error). Header directories
+# and each library are installed by their own per-target install() rules.
+for t in cachelib_common cachelib_shm cachelib_navy cachelib_nvmitem cachelib_allocator cachelib_datatype; do
+    cmake --install . --component "$t" 2>/dev/null || true
+done
+# Fallback: also stage the built .a files + headers directly, in case the build
+# does not define per-target install COMPONENTs (older CacheLib CMake).
+find "$CACHELIB_BUILD_DIR" -name 'libcachelib_*.a' -exec cp -v {} "$STAGING_DIR/lib/" \; 2>/dev/null || true
+# Install CacheLib headers (DIRECTORY install, cachebench/tests excluded) without
+# building unused targets. Copy the header trees UCacheBench includes.
+mkdir -p "$STAGING_DIR/include/cachelib"
+for hd in allocator common compact_cache datatype interface navy shm; do
+    (cd "$CACHELIB_SRC" && find "$hd" -name '*.h' -not -path '*/tests/*' -not -path '*/cachebench/*' | \
+        while read -r hf; do mkdir -p "$STAGING_DIR/include/cachelib/$(dirname "$hf")"; \
+        cp "$hf" "$STAGING_DIR/include/cachelib/$hf"; done) 2>/dev/null || true
+done
+# Also stage CacheLib's GENERATED thrift headers (gen-cpp2). These are produced
+# under the build tree (not the source tree), so the source-header copy above
+# misses them. CacheAllocator.h -> ... -> SList.h includes
+# cachelib/allocator/serialize/gen-cpp2/objects_types.h (and datastruct/,
+# memory/, navy/serialization/, common/, shm/ variants). Mirror every generated
+# cachelib/**/gen-cpp2/*.h from the build tree into the staging include tree,
+# preserving the cachelib/... relative path. Skip the CMakeFiles/*.dir build-artifact
+# copies and the cachebench/object_cache trees (unused by UCacheBench).
+find "$CACHELIB_BUILD_DIR" -type d -name gen-cpp2 2>/dev/null | while read -r gd; do
+    # rel path after the ".../build/" prefix, e.g. cachelib/allocator/serialize/gen-cpp2.
+    # NOTE: match skip patterns against REL (not the full path) — the absolute path
+    # contains ".../benchpress/benchmarks/..." which would spuriously match */benchmarks/*.
+    rel="${gd#"$CACHELIB_BUILD_DIR"/}"
+    case "$rel" in
+        cachelib/*) : ;;            # only the real cachelib/... generated trees
+        *) continue ;;
+    esac
+    case "$rel" in
+        */CMakeFiles/*|*/object_cache/*|*/tests/*|cachelib/benchmarks/*) continue ;;
+    esac
+    dest="$STAGING_DIR/include/$rel"
+    mkdir -p "$dest"
+    cp "$gd"/*.h "$dest"/ 2>/dev/null || true
+    cp "$gd"/*.tcc "$dest"/ 2>/dev/null || true
+done
 
 echo ""
 echo "=============================================="
