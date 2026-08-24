@@ -405,6 +405,19 @@ def run_server(args: argparse.Namespace) -> None:
     io_latency_us = int(getattr(args, "io_latency_us", 0) or 0)
     server_cmd.append(f"--io_latency_us={io_latency_us}")
 
+    # MM2Q (LRU container) settings
+    server_cmd.append(f"--mm_lru_refresh_time={args.mm_lru_refresh_time}")
+    server_cmd.append(f"--mm_lru_refresh_ratio={args.mm_lru_refresh_ratio}")
+    server_cmd.append(
+        f"--mm_try_lock_update={str(bool(args.mm_try_lock_update)).lower()}"
+    )
+    server_cmd.append(
+        f"--mm_update_on_read={str(bool(args.mm_update_on_read)).lower()}"
+    )
+    server_cmd.append(
+        f"--mm_update_on_write={str(bool(args.mm_update_on_write)).lower()}"
+    )
+
     # Production-like per-request features
     if args.production_features:
         server_cmd.append("--production_features=true")
@@ -842,6 +855,38 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Microseconds of CPU busy-work per request. 0=disabled.",
+    )
+
+    # MM2Q (LRU container) settings
+    server_parser.add_argument(
+        "--mm-lru-refresh-time",
+        type=int,
+        default=60,
+        help="Seconds before a hit re-attempts an LRU promotion. Cachelib default is 60.",
+    )
+    server_parser.add_argument(
+        "--mm-lru-refresh-ratio",
+        type=float,
+        default=0.0,
+        help="Derive LRU refresh time from tail age instead of --mm-lru-refresh-time. 0=disabled.",
+    )
+    server_parser.add_argument(
+        "--mm-try-lock-update",
+        type=int,
+        default=1,
+        help="Best-effort LRU promotion: skip the update when the MM mutex is contended.",
+    )
+    server_parser.add_argument(
+        "--mm-update-on-read",
+        type=int,
+        default=1,
+        help="Promote in the MM container on reads.",
+    )
+    server_parser.add_argument(
+        "--mm-update-on-write",
+        type=int,
+        default=0,
+        help="Promote in the MM container on writes.",
     )
 
     # CacheTable-style bucket locking
