@@ -1342,7 +1342,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   // Auto-concurrency: use large maxInflight for mcrouter (we control
   // concurrency via our own atomic counter), and split duration into ramp +
   // steady phases
-  uint32_t mcrouterMaxOutstanding = maxInflight;
+  // Keep mcrouter's outstanding semaphore well clear of our own concurrency
+  // limit. createSameThreadClient sets maximumOutstandingError, so a send that
+  // races the semaphore is completed immediately with LOCAL_ERROR instead of
+  // being queued — sizing both limits identically sheds load as errors.
+  uint32_t mcrouterMaxOutstanding = std::max(4u * maxInflight, 500u);
   std::atomic<uint32_t> dynamicMaxInflight{maxInflight};
   std::atomic<bool> inSteadyPhase{false};
   std::atomic<uint32_t> discoveredOptimalInflight{maxInflight};
@@ -1833,47 +1837,47 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       co_return;
     };
 
-    // Main loop - mirrors the warmup worker's proven pattern: self-throttle to
-    // a bounded number of outstanding requests, then pace with a 1ms sleep.
-    // This is CRITICAL in same-thread mode: workers run ON the proxy event
-    // base, and McRouter's send() BLOCKS the calling (event-base) thread when
-    // its maximumOutstanding limit is hit (counting semaphore wait). If we
-    // spawn unbounded (relying on McRouter backpressure), that block deadlocks
-    // the event base — it can't process responses, the semaphore never
-    // releases, and the measurement goes idle. By capping our own outstanding
-    // count below the client's maximumOutstanding, send() never blocks and load
-    // flows.
+    // Persistent completion-driven lanes: each lane holds exactly one request
+    // in flight and issues its next one the instant the previous completes.
+    //
+    // The previous design topped every worker back up to maxInflight and then
+    // slept 1ms. That sleep is a timer on the proxy EventBase, which is also
+    // serving this proxy's connections, so the wakeup slips under load: offered
+    // load arrives as millisecond bursts and queues inflate rather than
+    // pipelining. Measured residence was ~60ms at maxInflight=150 and ~258ms at
+    // 600 — which is why raising the window lowered throughput.
+    //
+    // Lanes cannot burst, so mcrouter's outstanding semaphore is never raced
+    // (see mcrouterMaxOutstanding, which is now decoupled from maxInflight;
+    // createSameThreadClient sets maximumOutstandingError, so a raced send is
+    // failed with LOCAL_ERROR rather than queued, silently shedding load).
     auto& myInflight = *workerInflight[workerId];
+    const uint32_t laneCount = maxInflight;
 
-    while (std::chrono::steady_clock::now() < endTime) {
-      uint32_t limit =
-          FLAGS_auto_concurrency ? dynamicMaxInflight.load() : maxInflight;
-      size_t cur = myInflight.load();
-      size_t n = (cur < limit) ? (limit - cur) : 0;
-      for (size_t i = 0; i < n && myInflight.load() < limit; i++) {
-        myInflight.fetch_add(1);
-        bool isGet = (folly::Random::randDouble01() < getRatio);
-        if (isGet) {
-          scope.add(
-              folly::coro::co_withExecutor(
-                  exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
+    for (uint32_t lane = 0; lane < laneCount; ++lane) {
+      scope.add(
+          folly::coro::co_withExecutor(
+              exe,
+              folly::coro::co_invoke([&, lane]() -> folly::coro::Task<void> {
+                while (std::chrono::steady_clock::now() < endTime) {
+                  // auto_concurrency shrinks the active window by parking
+                  // the highest-numbered lanes.
+                  if (FLAGS_auto_concurrency &&
+                      lane >= dynamicMaxInflight.load()) {
+                    co_await folly::futures::sleep(
+                        std::chrono::milliseconds(1));
+                    continue;
+                  }
+                  myInflight.fetch_add(1);
+                  if (folly::Random::randDouble01() < getRatio) {
                     co_await sendGetRequest();
-                    myInflight.fetch_sub(1);
-                    co_return;
-                  })));
-        } else {
-          scope.add(
-              folly::coro::co_withExecutor(
-                  exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
+                  } else {
                     co_await sendSetRequest();
-                    myInflight.fetch_sub(1);
-                    co_return;
-                  })));
-        }
-      }
-
-      // Pace like the warmup loop so responses get processed between batches.
-      co_await folly::futures::sleep(std::chrono::milliseconds(1));
+                  }
+                  myInflight.fetch_sub(1);
+                }
+                co_return;
+              })));
     }
 
     // Measurement window is over: cancel any still-outstanding requests and
