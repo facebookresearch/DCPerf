@@ -112,6 +112,19 @@ struct UcacheBenchConfig {
   uint64_t cachelib_num_shards = 0; // 0 = use default
   uint32_t min_alloc_size = 64; // Minimum allocation size in bytes
 
+  // MM2Q (LRU container) settings. These matter far more here than the hash
+  // table settings do: the MM container has a single mutex per pool, and with
+  // uniform random keys over a large keyspace an item's inter-access gap
+  // exceeds mm_lru_refresh_time, so nearly every hit tries to promote and
+  // serializes on that mutex. Production's skewed access mostly lands inside
+  // the refresh window and skips it. mm_try_lock_update makes promotion
+  // best-effort so a contended hit skips the update instead of blocking.
+  uint32_t mm_lru_refresh_time = 60; // seconds; cachelib default
+  double mm_lru_refresh_ratio = 0.0; // >0 overrides mm_lru_refresh_time
+  bool mm_try_lock_update = true;
+  bool mm_update_on_read = true;
+  bool mm_update_on_write = false;
+
   // Per-request CPU overhead simulation (LEGACY - use production_features)
   uint32_t cpu_overhead_level = 0;
 

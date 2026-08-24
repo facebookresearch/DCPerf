@@ -88,6 +88,26 @@ DEFINE_uint64(
     "Number of CacheLib shards (0 = use default)");
 DEFINE_uint32(min_alloc_size, 64, "Minimum allocation size in bytes");
 
+// MM2Q (LRU container) settings
+DEFINE_uint32(
+    mm_lru_refresh_time,
+    60,
+    "Seconds an item may go without an LRU promotion before the next hit "
+    "attempts one. Uniform random keys over a large keyspace exceed this gap "
+    "on nearly every hit, so every hit contends the per-pool MM mutex.");
+DEFINE_double(
+    mm_lru_refresh_ratio,
+    0.0,
+    "If > 0, derive the LRU refresh time from tail age instead of using "
+    "--mm_lru_refresh_time.");
+DEFINE_bool(
+    mm_try_lock_update,
+    true,
+    "Make LRU promotion best-effort: a hit that cannot take the MM mutex "
+    "skips the promotion instead of blocking on it.");
+DEFINE_bool(mm_update_on_read, true, "Promote in the MM container on reads");
+DEFINE_bool(mm_update_on_write, false, "Promote in the MM container on writes");
+
 // Per-request CPU overhead simulation
 DEFINE_uint32(
     cpu_overhead_level,
@@ -259,6 +279,12 @@ UcacheBenchConfig createConfigFromFlags() {
       config.io_latency_us = std::atoi(env);
     }
   }
+
+  config.mm_lru_refresh_time = FLAGS_mm_lru_refresh_time;
+  config.mm_lru_refresh_ratio = FLAGS_mm_lru_refresh_ratio;
+  config.mm_try_lock_update = FLAGS_mm_try_lock_update;
+  config.mm_update_on_read = FLAGS_mm_update_on_read;
+  config.mm_update_on_write = FLAGS_mm_update_on_write;
 
   config.fibers_enabled = FLAGS_enable_fibers;
 
