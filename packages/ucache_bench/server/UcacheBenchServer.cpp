@@ -463,7 +463,14 @@ void UcacheBenchServer::runKcbDoubleLookup(const std::string& key) {
 
   // Second CacheLib lookup (matches production findSlow for derived item)
   auto derivedHandle = cache_->find(derivedKey);
-  folly::doNotOptimizeAway(derivedHandle != nullptr);
+  if (derivedHandle) {
+    // Production walks the derived item's payload after the second lookup.
+    // Reading it here is what makes this a real memory access rather than a
+    // hashtable probe that stops at a guaranteed miss.
+    auto crc = computeValueChecksum(
+        derivedHandle->getMemory(), derivedHandle->getSize());
+    folly::doNotOptimizeAway(crc);
+  }
 }
 
 // Per-thread CPU load measurement matching production shouldLoadShed().
@@ -514,13 +521,15 @@ void UcacheBenchServer::runPerRequestAllocations(
   std::string ticket(32, 'T');
   folly::doNotOptimizeAway(ticket.data());
 
-  // 4. Fiber task lambda capture allocation
-  // Production: UcacheRequestCommon.h:178 addTaskEager captures
-  // UcacheThriftCallback + Request + FiberToken in a heap-allocated lambda.
-  // Typical size: ~200-500 bytes depending on request type.
-  auto lambdaCapture = std::make_unique<char[]>(256);
-  std::memset(lambdaCapture.get(), 0, 256);
-  folly::doNotOptimizeAway(lambdaCapture.get());
+  // 4. Fiber task lambda capture allocation.
+  // Only stand in for it when fibers are disabled; with fibers on,
+  // ucacheBenchOnRequestCommon already does a real addTaskEager heap capture,
+  // so simulating one here double-counts the allocation.
+  if (!config_.fibers_enabled) {
+    auto lambdaCapture = std::make_unique<char[]>(256);
+    std::memset(lambdaCapture.get(), 0, 256);
+    folly::doNotOptimizeAway(lambdaCapture.get());
+  }
 
   // 5. KCB derived key construction (matches KcbKeyUtil.cpp:13-19)
   // Production: fmt::format("{}:kcb:{}", appKey, kcbId)
@@ -719,26 +728,15 @@ void UcacheBenchServer::runProductionGetOverhead(
     folly::doNotOptimizeAway(crc);
   }
 
-  // 11. Thrift compact protocol serialization simulation
-  // Production serializes every response through Thrift CompactProtocol.
-  // This involves varint encoding, field headers, and data copies.
-  simulateThriftSerialization(key, valueData, valueLen, hit);
-
-  // 12. IOBuf chain construction and manipulation
-  // Production builds multi-segment IOBuf chains for network responses.
-  if (hit && valueData && valueLen > 0) {
-    simulateIoBufProcessing(valueData, valueLen);
-  }
-
-  // 13. Response timestamp (matches ServiceRouterLoggingHandler post-write)
+  // 11. Response timestamp (matches ServiceRouterLoggingHandler post-write)
   clock_gettime(CLOCK_MONOTONIC, &ts);
   folly::doNotOptimizeAway(ts);
 
-  // 14. Per-request heap allocations (matches production key construction,
+  // 12. Per-request heap allocations (matches production key construction,
   // fiber task capture, egress hash vector, convertToIOBuf std::function)
   runPerRequestAllocations(key, hit ? valueLen : 0);
 
-  // 15. FiberToken global atomic contention
+  // 13. FiberToken global atomic contention
   // (matches UcacheIOThreadContext::FiberToken inc/dec per request)
   runFiberTokenContention();
 
@@ -777,9 +775,6 @@ void UcacheBenchServer::runProductionSetOverhead(
     auto crc = computeValueChecksum(valueData, valueLen);
     folly::doNotOptimizeAway(crc);
   }
-
-  // Thrift deserialization simulation (production deserializes SET request)
-  simulateThriftSerialization(key, valueData, valueLen, /*hit=*/true);
 
   // Hot key detection (same as GET path)
   runHotKeyDetection(keyHash);
@@ -828,111 +823,6 @@ uint32_t UcacheBenchServer::computeValueChecksum(const void* data, size_t len) {
       reinterpret_cast<const uint8_t*>(data), len, /*startingChecksum=*/0);
 }
 
-// Simulate Thrift compact protocol serialization overhead.
-// Production serializes every response through Thrift compact protocol:
-// field headers (type + id), varint-encoded lengths, and value bytes.
-// This shows up as ~3-5% CPU in production perf profiles for high-QPS pools.
-void UcacheBenchServer::simulateThriftSerialization(
-    const std::string& key,
-    const void* valueData,
-    size_t valueLen,
-    bool hit) {
-  // Simulate compact protocol field encoding:
-  // - Result field (1 byte type + varint field id + varint value)
-  // - Flags field (same pattern)
-  // - Key field (type + id + varint length + key bytes)
-  // - Value field (type + id + varint length + value bytes for hits)
-  //
-  // We build a simulated serialization buffer matching the work done by
-  // apache::thrift::CompactProtocolWriter
-
-  // Pre-size buffer: header overhead + key + value
-  size_t estimatedSize = 64 + key.size() + (hit ? valueLen : 0);
-  std::string serBuf;
-  serBuf.reserve(estimatedSize);
-
-  // Field 1: result (compact protocol: delta field id + type nibble + value)
-  serBuf.push_back(0x15); // field delta=1, type=i32
-  // Varint encode the result
-  uint32_t result = hit ? 1 : 0;
-  while (result >= 0x80) {
-    serBuf.push_back(static_cast<char>(result | 0x80));
-    result >>= 7;
-  }
-  serBuf.push_back(static_cast<char>(result));
-
-  // Field 2: flags
-  serBuf.push_back(0x15); // field delta=1, type=i32
-  serBuf.push_back(0x00);
-
-  // Field 3: key as binary
-  serBuf.push_back(0x18); // field delta=1, type=binary
-  // Varint encode length
-  uint32_t keyLen = static_cast<uint32_t>(key.size());
-  while (keyLen >= 0x80) {
-    serBuf.push_back(static_cast<char>(keyLen | 0x80));
-    keyLen >>= 7;
-  }
-  serBuf.push_back(static_cast<char>(keyLen));
-  serBuf.append(key);
-
-  // Field 4: value as binary (for hits)
-  if (hit && valueData && valueLen > 0) {
-    serBuf.push_back(0x18); // field delta=1, type=binary
-    uint32_t vLen = static_cast<uint32_t>(valueLen);
-    while (vLen >= 0x80) {
-      serBuf.push_back(static_cast<char>(vLen | 0x80));
-      vLen >>= 7;
-    }
-    serBuf.push_back(static_cast<char>(vLen));
-    // Copy value data (simulates the actual serialization copy)
-    serBuf.append(
-        reinterpret_cast<const char*>(valueData),
-        std::min(valueLen, size_t(4096))); // Cap at 4KB to avoid huge copies
-  }
-
-  // Stop field
-  serBuf.push_back(0x00);
-
-  folly::doNotOptimizeAway(serBuf.data());
-  folly::doNotOptimizeAway(serBuf.size());
-}
-
-// Simulate IOBuf chain construction and manipulation.
-// Production builds response IOBuf chains with multiple segments:
-// header IOBuf -> value IOBuf -> trailer IOBuf.
-// The IOBuf allocation, chaining, and eventual coalescing adds overhead.
-void UcacheBenchServer::simulateIoBufProcessing(
-    const void* valueData,
-    size_t valueLen) {
-  if (!valueData || valueLen == 0) {
-    return;
-  }
-
-  // Simulate the work of building a multi-segment IOBuf response:
-  // 1. Allocate header IOBuf (protocol header + flags)
-  auto headerBuf = folly::IOBuf::create(32);
-  headerBuf->append(16); // 16 bytes of protocol header
-  std::memset(headerBuf->writableData(), 0x01, 16);
-
-  // 2. Wrap value data in an IOBuf (zero-copy reference)
-  auto valueBuf = folly::IOBuf::wrapBuffer(valueData, valueLen);
-
-  // 3. Chain them together (header -> value)
-  headerBuf->appendChain(std::move(valueBuf));
-
-  // 4. Compute total chain length (production does this for stats/logging)
-  size_t chainLen = headerBuf->computeChainDataLength();
-  folly::doNotOptimizeAway(chainLen);
-
-  // 5. Coalesce if needed (production coalesces small chains for network send)
-  if (chainLen < 2048) {
-    headerBuf->coalesce();
-  }
-
-  folly::doNotOptimizeAway(headerBuf->data());
-}
-
 UcbGetReply UcacheBenchServer::processUcbGetSync(const UcbGetRequest& req) {
   UcbGetReply reply;
   reply.result() = carbon::Result::NOTFOUND;
@@ -940,7 +830,9 @@ UcbGetReply UcacheBenchServer::processUcbGetSync(const UcbGetRequest& req) {
   try {
     std::string keyStr = req.key()->fullKey().str();
 
-    simulatePerRequestOverhead(keyStr);
+    if (!config_.production_features_enabled) {
+      simulatePerRequestOverhead(keyStr);
+    }
 
     std::optional<BucketLocks::ReadLockHolder> bucketLock;
     if (bucketLocks_) {
@@ -994,7 +886,9 @@ UcbSetReply UcacheBenchServer::processUcbSetSync(const UcbSetRequest& req) {
   try {
     std::string keyStr = req.key()->fullKey().str();
 
-    simulatePerRequestOverhead(keyStr);
+    if (!config_.production_features_enabled) {
+      simulatePerRequestOverhead(keyStr);
+    }
 
     const auto& valueIoBuf = req.value();
     auto valueStr = valueIoBuf->to<std::string>();
