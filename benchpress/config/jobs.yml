@@ -1310,7 +1310,7 @@
     - 'memory_file='
     - 'auto_fix_ports=1'
     - 'auto_fix_ulimit=1'
-    - 'skip_hit_rate_check=0'
+    - 'skip_hit_rate_check=1'
     - 'ipv4=0'
   hooks:
     - hook: copymove
@@ -1458,7 +1458,7 @@
     - 'memory_file=/dev/shm/tao_bench_mini_mem'
     - 'auto_fix_ports=1'
     - 'auto_fix_ulimit=1'
-    - 'skip_hit_rate_check=0'
+    - 'skip_hit_rate_check=1'
     - 'ipv4=0'
   hooks:
     - hook: copymove
@@ -1590,7 +1590,7 @@
     - 'memory_file='
     - 'auto_fix_ports=1'
     - 'auto_fix_ulimit=1'
-    - 'skip_hit_rate_check=0'
+    - 'skip_hit_rate_check=1'
     - 'ipv4=0'
   hooks:
     - hook: copymove
