@@ -19,7 +19,7 @@ can achieve.
 - **Thrift RPC Backend**: Mock Thrift servers provide realistic backend service calls
 - **Dynamic Load Generation**: wrk-based load generator with entity ID tracking for
   realistic /seen requests
-- **JIT Support**: Cinder JIT compilation support for x86 platforms
+- **JIT Support**: Cinder JIT compilation support for x86 and AArch64 platforms
 - **Dual Interpreter Support**: Choose between CPython and Cinder interpreters
 
 For more details about DjangoBench V2's software architecture, please refer to
@@ -129,7 +129,7 @@ To specify which interpreter to use, add the `interpreter` parameter to your com
 When running with a separate database server:
 
 ```
-# Run with Cinder and JIT (default for x86)
+# Run with Cinder and JIT (default)
 ./benchpress_cli.py run django_workload_default -r clientserver -i '{"db_addr": "<db-server-ip>"}'
 
 # Run with CPython
@@ -247,11 +247,11 @@ For `django_workload_default`:
     a fixed duration.  Unlike the behavior of Siege, now the total number of requests that wrk will send
     will be `reps`, _not_ `reps * iterations`.
   * `interpreter` \- Which python interpreter to use: choose between `cpython` or `cinder`.
-    Defaults to `cinder` for x86 jobs, `cpython` for ARM jobs.
+    Defaults to `cinder` for `django_workload_default` on x86 and ARM.
   * `use_async` \- If this is set to 1, DjangoBench will use the asynchronous server stack with
     load balancing; set to 0 means using the traditional stack. Defaults to 1.
-  * `use_jit` \- If this is set to a positive number, enables Cinder JIT (x86 only).
-    Defaults to 1 for x86 jobs, 0 for ARM jobs.
+  * `use_jit` \- If this is set to a positive number, enables Cinder JIT.
+    Defaults to 1 for `django_workload_default` on x86 and ARM.
   * `base_port` \- Starting port that the HTTP server workers will listen to.
     The range of `[base_port, base_port + nproc)` must be available. Defaults to 16668.
   * `stats_port` \- Load balancer stats port. Defaults to 8001.
@@ -455,7 +455,7 @@ If you encounter issues with the Thrift RPC servers:
 
 ### Cinder-specific issues
 
-**Note**: Cinder JIT is only supported on x86 platforms. It will not work on ARM.
+**Note**: Cinder JIT is supported on both x86 and AArch64 platforms.
 
 If you encounter issues when running with the Cinder interpreter:
 

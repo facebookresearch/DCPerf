@@ -321,11 +321,10 @@ echo "====================================================================="
 echo "Step 5: Building Cinder 3.14"
 echo "====================================================================="
 
-# Download and build Cinder
-# Using meta/3.14 branch at a known good commit for reproducibility
-CINDER_COMMIT="04f91c3659d8d2dfe4331a47548316289d2fa3f0"
+# Download and build MetaPython
+CINDER_COMMIT="81b5092b60e86d7ce588bc80028f117d0415b230"
 if ! [ -d "cinder" ]; then
-    git clone https://github.com/facebookincubator/cinder.git
+    git clone https://github.com/facebookincubator/MetaPython.git cinder
     pushd cinder
     git checkout "${CINDER_COMMIT}"
     mkdir -p cinder-build
@@ -516,7 +515,7 @@ echo "Step 6.5: Installing CinderX for JIT Support"
 echo "====================================================================="
 
 # Clone and install CinderX for JIT functionality
-CINDERX_COMMIT="497b2b671a8084345a8288cfbd9995acfab9dfbf"
+CINDERX_COMMIT="5ffa367bb41a12d452eab9d7017fe324a6a5f090"
 if ! [ -d "${DJANGO_SERVER_ROOT}/cinderx" ]; then
     cd "${DJANGO_SERVER_ROOT}"
     git clone https://github.com/facebookincubator/cinderx.git
