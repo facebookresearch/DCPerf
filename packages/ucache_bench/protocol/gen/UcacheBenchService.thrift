@@ -17,6 +17,7 @@ include "mcrouter/lib/network/gen/Common.thrift"
 include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/UcacheBench.thrift"
 
 cpp_include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/UcacheBenchMessages.h"
+cpp_include "mcrouter/lib/carbon/CarbonThriftAdapter.h"
 
 namespace cpp2 facebook.ucachebench.thrift
 namespace py3 facebook.ucachebench.thrift
@@ -32,19 +33,19 @@ service UcacheBench {
   Common_McVersionReply mcVersion(1: Common_McVersionRequest request)
 }
 
-@cpp.Type{name = "facebook::ucachebench::UcbDeleteReply"}
+@cpp.Adapter{name = "::carbon::util::CarbonThriftAdapter<facebook::ucachebench::UcbDeleteReply, ::facebook::ucachebench::thrift::UcbDeleteReply>"}
 typedef UcacheBench.UcbDeleteReply UcacheBench_UcbDeleteReply
-@cpp.Type{name = "facebook::ucachebench::UcbDeleteRequest"}
+@cpp.Adapter{name = "::carbon::util::CarbonThriftAdapter<facebook::ucachebench::UcbDeleteRequest, ::facebook::ucachebench::thrift::UcbDeleteRequest>"}
 typedef UcacheBench.UcbDeleteRequest UcacheBench_UcbDeleteRequest
-@cpp.Type{name = "facebook::ucachebench::UcbGetReply"}
+@cpp.Adapter{name = "::carbon::util::CarbonThriftAdapter<facebook::ucachebench::UcbGetReply, ::facebook::ucachebench::thrift::UcbGetReply>"}
 typedef UcacheBench.UcbGetReply UcacheBench_UcbGetReply
-@cpp.Type{name = "facebook::ucachebench::UcbGetRequest"}
+@cpp.Adapter{name = "::carbon::util::CarbonThriftAdapter<facebook::ucachebench::UcbGetRequest, ::facebook::ucachebench::thrift::UcbGetRequest>"}
 typedef UcacheBench.UcbGetRequest UcacheBench_UcbGetRequest
-@cpp.Type{name = "facebook::ucachebench::UcbSetReply"}
+@cpp.Adapter{name = "::carbon::util::CarbonThriftAdapter<facebook::ucachebench::UcbSetReply, ::facebook::ucachebench::thrift::UcbSetReply>"}
 typedef UcacheBench.UcbSetReply UcacheBench_UcbSetReply
-@cpp.Type{name = "facebook::ucachebench::UcbSetRequest"}
+@cpp.Adapter{name = "::carbon::util::CarbonThriftAdapter<facebook::ucachebench::UcbSetRequest, ::facebook::ucachebench::thrift::UcbSetRequest>"}
 typedef UcacheBench.UcbSetRequest UcacheBench_UcbSetRequest
-@cpp.Type{name = "facebook::memcache::McVersionReply"}
+@cpp.Adapter{name = "::carbon::util::CarbonThriftAdapter<facebook::memcache::McVersionReply, ::facebook::memcache::thrift::McVersionReply>"}
 typedef Common.McVersionReply Common_McVersionReply
-@cpp.Type{name = "facebook::memcache::McVersionRequest"}
+@cpp.Adapter{name = "::carbon::util::CarbonThriftAdapter<facebook::memcache::McVersionRequest, ::facebook::memcache::thrift::McVersionRequest>"}
 typedef Common.McVersionRequest Common_McVersionRequest
