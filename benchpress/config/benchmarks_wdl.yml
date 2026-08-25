@@ -10,7 +10,7 @@ wdl_bench:
   install_markers:
     - ./benchmarks/wdl_bench/ProtocolBench
     - ./benchmarks/wdl_bench/VarintUtilsBench
-    - ./benchmarks/wdl_bench/bench-memcmp
+    - ./benchmarks/wdl_bench/wdl_build/glibc-build/benchtests/bench-memcmp
     - ./benchmarks/wdl_bench/benchsleef128
     - ./benchmarks/wdl_bench/concurrency_concurrent_hash_map_bench
     - ./benchmarks/wdl_bench/container_hash_maps_bench
