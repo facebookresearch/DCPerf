@@ -434,13 +434,16 @@ build_glibc()
             }
             ')
         CENTOS_MAJOR="$(awk -F "=" '/^VERSION_ID=/ {print $2}' /etc/os-release | tr -d '"')"
+        GLIBC_RPM_VERSION="$(rpm -q --queryformat '%{VERSION}' glibc)"
+        GLIBC_RPM_RELEASE="$(rpm -q --queryformat '%{RELEASE}' glibc)"
         BASE_URL="https://mirror.stream.centos.org/${CENTOS_MAJOR}-stream/BaseOS/source/tree/"
+        KOJI_URL="https://kojihub.stream.centos.org/kojifiles/packages/${lib}/${GLIBC_RPM_VERSION}/${GLIBC_RPM_RELEASE}/src/${GLIBC_SPKG}.rpm"
         if dnf download --source "$GLIBC_SPKG" --setopt=timeout=60 >/dev/null 2>&1; then
             echo "${GLIBC_SPKG}.rpm downloaded from the default repo"
         elif dnf download --source "$GLIBC_SPKG" --repofrompath=src,"${BASE_URL}" --enablerepo=src --setopt=timeout=60 >/dev/null 2>&1; then
             echo "${GLIBC_SPKG}.rpm downloaded from the official CentOS repo"
-        elif curl -fLO "${BASE_URL}/Packages/${GLIBC_SPKG}.rpm" --connect-timeout 60 >/dev/null 2>&1 && rpm -K "${GLIBC_SPKG}.rpm" >/dev/null 2>&1; then
-            echo "${GLIBC_SPKG}.rpm downloaded from the official CentOS rpm package URL"
+        elif curl -fL --retry 3 --connect-timeout 60 -o "${GLIBC_SPKG}.rpm" "$KOJI_URL" >/dev/null 2>&1 && rpm -K "${GLIBC_SPKG}.rpm" >/dev/null 2>&1; then
+            echo "${GLIBC_SPKG}.rpm downloaded from CentOS Stream Koji"
         else
             echo "Failed to download ${GLIBC_SPKG}.rpm"
             exit 1

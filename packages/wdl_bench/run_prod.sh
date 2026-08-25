@@ -55,6 +55,17 @@ exec_non_json() {
   return 1
 }
 
+is_benchmark_supported() {
+    local benchmark="$1"
+
+    if [[ "$benchmark" == "benchsleef512" ]]; then
+        [[ "$(uname -m)" == "x86_64" ]] && grep -qwm1 avx512f /proc/cpuinfo
+        return
+    fi
+
+    return 0
+}
+
 run_list=""
 
 declare -A prod_benchmark_config=(
@@ -128,7 +139,9 @@ main() {
 
     valid_prod_benchmarks=()
     for bin in $prod_benchmark_candidates; do
-        if [ -f "./$bin" ]; then
+        if ! is_benchmark_supported "$bin"; then
+            echo "Skipping $bin (requires x86_64 with AVX-512F)"
+        elif [ -f "./$bin" ]; then
             valid_prod_benchmarks+=("$bin")
             # echo "Adding $bin to run list"
         elif [ "$bin" = "bench-memcmp" ] && [ -f "${WDL_BUILD}/glibc-build/benchtests/$bin" ]; then
