@@ -66,6 +66,7 @@ endif()
 # folly, and all other needed dependencies
 target_link_libraries(ucachebench_server PRIVATE
     ucachebench_protocol
+    ${ZSTD_LIBRARY}
     mcrouter::mcroutercore
     ${CACHELIB_LIBS}
     ${GTEST_LIBS}

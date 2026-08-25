@@ -16,6 +16,7 @@
 #include <folly/container/F14Map.h>
 #include <folly/fibers/TimedMutex.h>
 #include <folly/futures/Future.h>
+#include <zstd.h>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -124,6 +125,14 @@ struct UcacheBenchConfig {
   bool mm_try_lock_update = true;
   bool mm_update_on_read = true;
   bool mm_update_on_write = false;
+
+  // Dictionary ZSTD reply compression, mirroring the mcrouter
+  // CompressionCodecMap production installs per EventBase. Off by default;
+  // enabling it adds real codec code and streaming memory traffic that the
+  // benchmark otherwise has no analogue for.
+  uint32_t zstd_compress_pct = 0; // percent of cache hits to compress
+  int zstd_level = 1;
+  size_t zstd_dict_size = 65536;
 
   // Per-request CPU overhead simulation (LEGACY - use production_features)
   uint32_t cpu_overhead_level = 0;
@@ -285,6 +294,9 @@ class UcacheBenchServer {
     std::atomic<uint64_t> ticketChecks{0};
     std::atomic<uint64_t> overloadChecks{0};
     std::atomic<uint64_t> prefixCounterHits{0};
+    std::atomic<uint64_t> zstdBytesIn{0};
+    std::atomic<uint64_t> zstdBytesOut{0};
+    std::atomic<uint64_t> zstdErrors{0};
   } prodStats_;
 
   // ACL prefix table (simulates production granular ACL categories)
@@ -333,6 +345,22 @@ class UcacheBenchServer {
 
   // KCB double-lookup simulation (matches production Key Client Binding)
   void runKcbDoubleLookup(const std::string& key);
+
+  // Dictionary ZSTD reply compression. The CDict is immutable and shared; the
+  // CCtx is not thread-safe, so contexts and scratch buffers are per-thread.
+  struct ZstdThreadState {
+    std::unique_ptr<ZSTD_CCtx, size_t (*)(ZSTD_CCtx*)> cctx{
+        nullptr,
+        ZSTD_freeCCtx};
+    std::vector<char> out;
+  };
+  folly::ThreadLocal<ZstdThreadState> zstdContexts_;
+  std::unique_ptr<ZSTD_CDict, size_t (*)(ZSTD_CDict*)> zstdDict_{
+      nullptr,
+      ZSTD_freeCDict};
+  void initZstdDictionary();
+  void
+  compressReplyValue(uint64_t keyHash, const void* valueData, size_t valueLen);
 
   // Configurable CPU busy-work per request
   void runCpuBusyWork(const std::string& key);

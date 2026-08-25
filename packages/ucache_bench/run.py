@@ -405,6 +405,11 @@ def run_server(args: argparse.Namespace) -> None:
     io_latency_us = int(getattr(args, "io_latency_us", 0) or 0)
     server_cmd.append(f"--io_latency_us={io_latency_us}")
 
+    # Dictionary ZSTD reply compression
+    server_cmd.append(f"--zstd_compress_pct={args.zstd_compress_pct}")
+    server_cmd.append(f"--zstd_level={args.zstd_level}")
+    server_cmd.append(f"--zstd_dict_size={args.zstd_dict_size}")
+
     # MM2Q (LRU container) settings
     server_cmd.append(f"--mm_lru_refresh_time={args.mm_lru_refresh_time}")
     server_cmd.append(f"--mm_lru_refresh_ratio={args.mm_lru_refresh_ratio}")
@@ -855,6 +860,23 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Microseconds of CPU busy-work per request. 0=disabled.",
+    )
+
+    # Dictionary ZSTD reply compression
+    server_parser.add_argument(
+        "--zstd-compress-pct",
+        type=int,
+        default=0,
+        help="Percent of cache hits whose value is compressed. 0=disabled.",
+    )
+    server_parser.add_argument(
+        "--zstd-level", type=int, default=1, help="ZSTD compression level."
+    )
+    server_parser.add_argument(
+        "--zstd-dict-size",
+        type=int,
+        default=65536,
+        help="Size in bytes of the synthesized ZSTD dictionary.",
     )
 
     # MM2Q (LRU container) settings

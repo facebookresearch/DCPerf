@@ -41,6 +41,16 @@ find_package(folly CONFIG REQUIRED)
 find_package(gflags CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(Threads REQUIRED)
+# Dictionary ZSTD reply compression in the server needs the raw zstd C API;
+# folly's codec wrapper has no dictionary support. Located directly rather
+# than via find_package so this does not depend on FindZstd.cmake being on
+# CMAKE_MODULE_PATH; libzstd is installed by install_ucache_bench.sh.
+find_path(ZSTD_INCLUDE_DIR NAMES zstd.h)
+find_library(ZSTD_LIBRARY NAMES zstd)
+if(NOT ZSTD_INCLUDE_DIR OR NOT ZSTD_LIBRARY)
+  message(FATAL_ERROR "libzstd not found (install libzstd-devel / libzstd-dev)")
+endif()
+include_directories(${ZSTD_INCLUDE_DIR})
 
 # CacheLib - might be found differently
 find_package(cachelib CONFIG)
