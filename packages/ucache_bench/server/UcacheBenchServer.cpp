@@ -266,12 +266,27 @@ void UcacheBenchServer::setupCacheLib() {
         usableMemory / (1024.0 * 1024.0));
   }
 
-  poolId_ = cache_->addPool(config_.pool_name, usableMemory);
+  CacheAllocator::MMConfig mmConfig;
+  mmConfig.lruRefreshTime = config_.mm_lru_refresh_time;
+  mmConfig.lruRefreshRatio = config_.mm_lru_refresh_ratio;
+  mmConfig.tryLockUpdate = config_.mm_try_lock_update;
+  mmConfig.updateOnRead = config_.mm_update_on_read;
+  mmConfig.updateOnWrite = config_.mm_update_on_write;
+
+  poolId_ = cache_->addPool(
+      config_.pool_name, usableMemory, /*allocSizes=*/{}, mmConfig);
 
   if (config_.verbose) {
     printf(
-        "Hybrid cache initialized successfully with pool: %s\n",
-        config_.pool_name.c_str());
+        "Hybrid cache initialized successfully with pool: %s\n"
+        "  MM2Q: lruRefreshTime=%us, lruRefreshRatio=%.2f, tryLockUpdate=%d, "
+        "updateOnRead=%d, updateOnWrite=%d\n",
+        config_.pool_name.c_str(),
+        config_.mm_lru_refresh_time,
+        config_.mm_lru_refresh_ratio,
+        static_cast<int>(config_.mm_try_lock_update),
+        static_cast<int>(config_.mm_update_on_read),
+        static_cast<int>(config_.mm_update_on_write));
   }
 }
 
