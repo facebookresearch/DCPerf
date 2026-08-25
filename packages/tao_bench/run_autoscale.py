@@ -365,6 +365,34 @@ def run_server(args):
         required_gb = float(args.memsize) * args_utils.MEM_USAGE_FACTOR
         ensure_shm_capacity(required_gb)
 
+    # Fail fast if a warm restart is expected but any per-instance memory
+    # file is missing or empty.
+    if args.memory_file and args_utils.get_warmup_time(args) == 0:
+        missing = [
+            f"{args.memory_file}.{i}"
+            for i in range(args.num_servers)
+            if not os.path.exists(f"{args.memory_file}.{i}")
+            or os.path.getsize(f"{args.memory_file}.{i}") == 0
+        ]
+        if missing:
+            msg = (
+                "warm-restart file(s) missing: " + ", ".join(missing) + ". "
+                f"num_servers={args.num_servers} expects .0 through "
+                f".{args.num_servers - 1}; /dev/shm is cleared on reboot."
+            )
+            recorder.record_failure(
+                benchmark="tao_bench",
+                error_type="warm_restart_file_missing",
+                reason=msg,
+                solutions=[
+                    "Run the prep job on this host first, e.g. "
+                    "./benchpress run tao_bench_standalone_mini_prep, "
+                    "with the same memsize."
+                ],
+            )
+            print(f"ERROR: {msg}")
+            sys.exit(1)
+
     # Check if hostname resolves to IPv6 and warn if --ipv4 may be needed
     if not args.ipv4:
         server_hostname = (
