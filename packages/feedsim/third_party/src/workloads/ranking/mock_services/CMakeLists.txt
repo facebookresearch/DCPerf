@@ -190,6 +190,12 @@ target_link_libraries(mock_services
         # is a no-op. See the --gc-sections comment on the compile
         # options below for the CentOS path.
         ${LIBURING_LIBRARY}
+        # gflags: folly/glog use DEFINE_FLAG macros which reference
+        # google::FlagRegisterer. LeafNodeRank/DriverNodeRank link GFLAGS_TARGET
+        # (gflags_static for self-contained builds, gflags for traditional).
+        # mock_services was missing it, causing "undefined reference to
+        # FlagRegisterer" on static-link aarch64 builds.
+        ${GFLAGS_TARGET}
 )
 target_compile_options(mock_services PUBLIC
     -fno-omit-frame-pointer
