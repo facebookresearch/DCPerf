@@ -315,7 +315,7 @@
         - '--thrift-server-workers {thrift_server_workers}'
         - '--cassandra-heap {cassandra_heap}'
       vars:
-        - 'duration=3S'
+        - 'duration=15S'
         - 'iterations=1'
         - 'reps=0'
         - 'interpreter=cpython'
