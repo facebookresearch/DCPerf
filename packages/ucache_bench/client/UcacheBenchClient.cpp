@@ -2161,6 +2161,37 @@ std::string UcacheBenchClient::generateKey() {
   return fmt::format("key_{:08d}", keyId);
 }
 
+namespace {
+// Values are built from a small token vocabulary rather than random bytes.
+// Real cache payloads are serialized records and compress several-fold;
+// uniformly random bytes are incompressible, which would understate the cost
+// of the server's reply-compression codec and misrepresent the memory traffic
+// of copying them. Deterministic in the key hash so a given key keeps stable
+// content across SETs.
+constexpr const char* kValueTokens[] = {
+    "user_id",      "session",  "timestamp",  "region",     "payload",
+    "metadata",     "version",  "checksum",   "attributes", "profile",
+    "account",      "status",   "created_at", "updated_at", "expires",
+    "content_type", "encoding", "compressed", "shard",      "replica",
+    "true",         "false",    "null",       "value",
+};
+constexpr size_t kNumValueTokens =
+    sizeof(kValueTokens) / sizeof(kValueTokens[0]);
+
+std::string makeCompressibleValue(uint32_t valueSize, uint64_t seed) {
+  std::string value;
+  value.reserve(valueSize + 16);
+  uint64_t h = seed ? seed : 0x9E3779B97F4A7C15ULL;
+  while (value.size() < valueSize) {
+    h = folly::hash::twang_mix64(h);
+    value += kValueTokens[h % kNumValueTokens];
+    value.push_back((h & 1) ? '=' : ',');
+  }
+  value.resize(valueSize);
+  return value;
+}
+} // namespace
+
 std::string UcacheBenchClient::generateValue() {
   if (distribution_.enabled) {
     // Sample value size from production percentile distribution
@@ -2178,30 +2209,14 @@ std::string UcacheBenchClient::generateValue() {
       valueSize = 65536; // Cap at 64KB to match server's max allocation
     }
 
-    std::string value;
-    value.reserve(valueSize);
-
-    // Generate random value content
-    for (uint32_t i = 0; i < valueSize; ++i) {
-      value.push_back('a' + (folly::Random::rand32(26)));
-    }
-
-    return value;
+    return makeCompressibleValue(valueSize, folly::Random::rand64());
   }
 
   // Default behavior: random size between min and max
   uint32_t valueSize =
       folly::Random::rand32(FLAGS_value_size_min, FLAGS_value_size_max + 1);
 
-  std::string value;
-  value.reserve(valueSize);
-
-  // Generate random value content
-  for (uint32_t i = 0; i < valueSize; ++i) {
-    value.push_back('a' + (folly::Random::rand32(26)));
-  }
-
-  return value;
+  return makeCompressibleValue(valueSize, folly::Random::rand64());
 }
 
 // mcrouter operations using UcacheBench service

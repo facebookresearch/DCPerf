@@ -88,6 +88,19 @@ DEFINE_uint64(
     "Number of CacheLib shards (0 = use default)");
 DEFINE_uint32(min_alloc_size, 64, "Minimum allocation size in bytes");
 
+// Dictionary ZSTD reply compression
+DEFINE_uint32(
+    zstd_compress_pct,
+    0,
+    "Percent of cache hits whose value is compressed with a dictionary ZSTD "
+    "codec, mirroring the mcrouter CompressionCodecMap production installs. "
+    "0 = disabled.");
+DEFINE_int32(zstd_level, 1, "ZSTD compression level for reply compression");
+DEFINE_uint64(
+    zstd_dict_size,
+    65536,
+    "Size in bytes of the synthesized ZSTD compression dictionary");
+
 // MM2Q (LRU container) settings
 DEFINE_uint32(
     mm_lru_refresh_time,
@@ -279,6 +292,10 @@ UcacheBenchConfig createConfigFromFlags() {
       config.io_latency_us = std::atoi(env);
     }
   }
+
+  config.zstd_compress_pct = FLAGS_zstd_compress_pct;
+  config.zstd_level = FLAGS_zstd_level;
+  config.zstd_dict_size = FLAGS_zstd_dict_size;
 
   config.mm_lru_refresh_time = FLAGS_mm_lru_refresh_time;
   config.mm_lru_refresh_ratio = FLAGS_mm_lru_refresh_ratio;

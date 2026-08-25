@@ -30,6 +30,7 @@ namespace ucachebench {
 UcacheBenchServer::UcacheBenchServer(const UcacheBenchConfig& config)
     : config_(config) {
   setupCacheLib();
+  initZstdDictionary();
 
   // Initialize CacheTable-style bucket locks if enabled
   if (config_.bucket_lock_power > 0) {
@@ -467,6 +468,102 @@ void UcacheBenchServer::runEgressRateLimiting(
   }
 }
 
+// Vocabulary used to synthesize the ZSTD dictionary. Production trains its
+// dictionary on real traffic; the benchmark's values are generated from a
+// comparable token vocabulary on the client, so a dictionary built from these
+// tokens gives a similar hit rate against the corpus without shipping a
+// trained artifact.
+constexpr const char* kValueTokens[] = {
+    "user_id",      "session",  "timestamp",  "region",     "payload",
+    "metadata",     "version",  "checksum",   "attributes", "profile",
+    "account",      "status",   "created_at", "updated_at", "expires",
+    "content_type", "encoding", "compressed", "shard",      "replica",
+    "true",         "false",    "null",       "value",
+};
+constexpr size_t kNumValueTokens =
+    sizeof(kValueTokens) / sizeof(kValueTokens[0]);
+
+// Dictionary ZSTD reply compression.
+//
+// Production installs an mcrouter CompressionCodecMap per EventBase and
+// compresses replies with a trained ZSTD dictionary, holding a per-EventBase
+// ZSTD_CCtx and a shared ZSTD_CDict. That is real code and real streaming
+// memory traffic that this benchmark otherwise has no analogue for. Mirrors
+// mcrouter/lib/ZstdCompressionCodec: shared CDict built once, per-thread CCtx
+// and output buffer reused across requests so the per-request cost is codec
+// work rather than allocation.
+void UcacheBenchServer::compressReplyValue(
+    uint64_t keyHash,
+    const void* valueData,
+    size_t valueLen) {
+  if (config_.zstd_compress_pct == 0 || !zstdDict_) {
+    return;
+  }
+  // Sample by key hash so the same key is consistently compressed or not,
+  // rather than flipping per request.
+  if ((keyHash % 100) >= config_.zstd_compress_pct) {
+    return;
+  }
+
+  auto& ctx = *zstdContexts_;
+  if (!ctx.cctx) {
+    ctx.cctx.reset(ZSTD_createCCtx());
+    if (!ctx.cctx) {
+      return;
+    }
+  }
+  const size_t bound = ZSTD_compressBound(valueLen);
+  if (ctx.out.size() < bound) {
+    ctx.out.resize(bound);
+  }
+
+  const size_t written = ZSTD_compress_usingCDict(
+      ctx.cctx.get(),
+      ctx.out.data(),
+      ctx.out.size(),
+      valueData,
+      valueLen,
+      zstdDict_.get());
+  if (ZSTD_isError(written)) {
+    prodStats_.zstdErrors.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  prodStats_.zstdBytesIn.fetch_add(valueLen, std::memory_order_relaxed);
+  prodStats_.zstdBytesOut.fetch_add(written, std::memory_order_relaxed);
+  folly::doNotOptimizeAway(ctx.out.data());
+}
+
+// Build the shared compression dictionary once at startup. Production trains
+// its dictionary on real traffic; we synthesize one from the same token
+// vocabulary the client draws values from, which gives a comparable hit rate
+// against the value corpus without shipping a trained artifact.
+void UcacheBenchServer::initZstdDictionary() {
+  if (config_.zstd_compress_pct == 0) {
+    return;
+  }
+  std::string sample;
+  sample.reserve(config_.zstd_dict_size);
+  uint64_t h = 0x9E3779B97F4A7C15ULL;
+  while (sample.size() < config_.zstd_dict_size) {
+    h = folly::hash::twang_mix64(h);
+    sample += kValueTokens[h % kNumValueTokens];
+    sample.push_back(' ');
+  }
+  sample.resize(config_.zstd_dict_size);
+
+  zstdDict_.reset(
+      ZSTD_createCDict(sample.data(), sample.size(), config_.zstd_level));
+  if (!zstdDict_ && config_.verbose) {
+    printf("WARNING: ZSTD_createCDict failed; reply compression disabled\n");
+  } else if (config_.verbose) {
+    printf(
+        "ZSTD reply compression: %u%% of hits, level=%d, dict=%zuB\n",
+        config_.zstd_compress_pct,
+        config_.zstd_level,
+        config_.zstd_dict_size);
+  }
+}
+
 // KCB (Key Client Binding) double-lookup simulation.
 // Production does TWO CacheLib lookups when KCB IDs mismatch:
 // first findSlow() for master item, then another findSlow() for derived item.
@@ -741,6 +838,12 @@ void UcacheBenchServer::runProductionGetOverhead(
   if (hit && valueData && valueLen > 0) {
     auto crc = computeValueChecksum(valueData, valueLen);
     folly::doNotOptimizeAway(crc);
+  }
+
+  // 10b. Dictionary ZSTD reply compression (matches the mcrouter
+  // CompressionCodecMap production installs per EventBase).
+  if (hit && valueData && valueLen > 0) {
+    compressReplyValue(keyHash, valueData, valueLen);
   }
 
   // 11. Response timestamp (matches ServiceRouterLoggingHandler post-write)
