@@ -911,6 +911,31 @@ install_pytorch() {
   echo "[SETUP] PyTorch installation complete."
 }
 
+# Apply the upstream PR 5846 fix so AVX variants are selected by compiler
+# support rather than by executing them on the build host. Runtime checks omit
+# AVX-512 objects on hosts such as T1_MLN and leave fbgemm.so with unresolved
+# symbols required by fbgemm_gpu_tbe_inference.so.
+apply_avx_compile_check_fix() {
+  local find_avx="fbgemm_${FBGEMM_VERSION}/cmake/modules/FindAVX.cmake"
+
+  if ! grep -Fqx 'INCLUDE(CheckSourceRuns)' "${find_avx}" || \
+      ! grep -Fq 'CHECK_SOURCE_RUNS' "${find_avx}"; then
+    echo "[ERROR] FindAVX.cmake does not contain the expected PR 5846 preimage." >&2
+    return 1
+  fi
+
+  sed -i \
+    -e 's/INCLUDE(CheckSourceRuns)/INCLUDE(CheckSourceCompiles)/' \
+    -e 's/CHECK_SOURCE_RUNS(/CHECK_SOURCE_COMPILES(/' \
+    "${find_avx}"
+
+  if ! grep -Fqx 'INCLUDE(CheckSourceCompiles)' "${find_avx}" || \
+      ! grep -Fq 'CHECK_SOURCE_COMPILES' "${find_avx}"; then
+    echo "[ERROR] Failed to apply the PR 5846 FindAVX.cmake substitutions." >&2
+    return 1
+  fi
+}
+
 # Function to clone the FBGEMM repository
 # This downloads the FBGEMM source code from GitHub
 clone_fbgemm_repo() {
@@ -928,6 +953,8 @@ clone_fbgemm_repo() {
   git -C fbgemm_${FBGEMM_VERSION} checkout ${FBGEMM_VERSION}
  # Cherry-pick the latest commit from the FBGEMM main branch to fix issue https://github.com/pytorch/FBGEMM/pull/5037
   git -C fbgemm_${FBGEMM_VERSION} cherry-pick 9df97a7090c2c5edecea4fd08bad11ab8a23284c
+
+  apply_avx_compile_check_fix || return 1
 
   # Disable the postbuild script to prevent race conditions during linking
   # This is a workaround for a known issue in the build process
