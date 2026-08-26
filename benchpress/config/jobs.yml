@@ -1471,6 +1471,154 @@
           - 'client_*.log'
           - 'perf.data'
 
+- benchmark: tao_bench_standalone
+  name: tao_bench_standalone_mini_prep
+  description:
+      Phase 1 of the large-working-set Mini pair. Fills a 2.25GB cache from
+      cold and persists it to a memory file on tmpfs, so that
+      tao_bench_standalone_mini_large can start warm. Run once per host
+      before the measurement job; it is a setup step and is not itself
+      subject to the Mini runtime budget.
+  args:
+    - '--num-servers={num_servers}'
+    - '--memsize={memsize}'
+    - '--fast-threads-ratio={fast_threads_ratio}'
+    - '--slow-to-fast-ratio={slow_to_fast_ratio}'
+    - '--warmup-time={warmup_time}'
+    - '--test-time={test_time}'
+    - '--num-clients={num_clients}'
+    - '--clients-per-thread={clients_per_thread}'
+    - '--bind-cpu={bind_cpu}'
+    - '--bind-mem={bind_mem}'
+    - '--stats-interval={stats_interval}'
+    - '--port-number-start={port_number_start}'
+    - '--disable-tls={disable_tls}'
+    - '--timeout-buffer={timeout_buffer}'
+    - '--num-slow-threads={num_slow_threads}'
+    - '--num-fast-threads={num_fast_threads}'
+    - '--num-client-threads={num_client_threads}'
+    - '--warmup-timeout-buffer={warmup_timeout_buffer}'
+    - '--test-timeout-buffer={test_timeout_buffer}'
+    - '--postprocessing-timeout-buffer={postprocessing_timeout_buffer}'
+    - '--poll-interval={poll_interval}'
+    - '--memory-file={memory_file}'
+    - '--auto-fix-ports={auto_fix_ports}'
+    - '--auto-fix-ulimit={auto_fix_ulimit}'
+    - '--skip-hit-rate-check={skip_hit_rate_check}'
+    - '--ipv4={ipv4}'
+  vars:
+    - 'num_servers=0'
+    - 'memsize=3'
+    - 'fast_threads_ratio=0.75'
+    - 'slow_to_fast_ratio=3'
+    - 'warmup_time=300'
+    - 'test_time=10'
+    - 'num_clients=2'
+    - 'clients_per_thread=190'
+    - 'bind_cpu=1'
+    - 'bind_mem=1'
+    - 'stats_interval=1000'
+    - 'port_number_start=11211'
+    - 'disable_tls=0'
+    - 'timeout_buffer=60'
+    - 'num_slow_threads=0'
+    - 'num_fast_threads=0'
+    - 'num_client_threads=0'
+    - 'warmup_timeout_buffer=0'
+    - 'test_timeout_buffer=0'
+    - 'postprocessing_timeout_buffer=60'
+    - 'poll_interval=0.2'
+    - 'memory_file=/dev/shm/tao_bench_mini_mem'
+    - 'auto_fix_ports=1'
+    - 'auto_fix_ulimit=1'
+    # The prep run is cold by definition and cannot reach the 0.88 floor.
+    - 'skip_hit_rate_check=1'
+    - 'ipv4=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
+          - 'tao-bench-server-*.log'
+          - 'client_*.log'
+          - 'perf.data'
+
+- benchmark: tao_bench_standalone
+  name: tao_bench_standalone_mini_large
+  description:
+      Phase 2 of the large-working-set Mini pair. Restores the cache that
+      tao_bench_standalone_mini_prep persisted, so a 2.25GB working set
+      reaches its steady-state hit ratio immediately instead of warming for
+      minutes. Requires tao_bench_standalone_mini_prep to have been run on
+      this host with the same memsize.
+  args:
+    - '--num-servers={num_servers}'
+    - '--memsize={memsize}'
+    - '--fast-threads-ratio={fast_threads_ratio}'
+    - '--slow-to-fast-ratio={slow_to_fast_ratio}'
+    - '--warmup-time={warmup_time}'
+    - '--test-time={test_time}'
+    - '--num-clients={num_clients}'
+    - '--clients-per-thread={clients_per_thread}'
+    - '--bind-cpu={bind_cpu}'
+    - '--bind-mem={bind_mem}'
+    - '--stats-interval={stats_interval}'
+    - '--port-number-start={port_number_start}'
+    - '--disable-tls={disable_tls}'
+    - '--timeout-buffer={timeout_buffer}'
+    - '--num-slow-threads={num_slow_threads}'
+    - '--num-fast-threads={num_fast_threads}'
+    - '--num-client-threads={num_client_threads}'
+    - '--warmup-timeout-buffer={warmup_timeout_buffer}'
+    - '--test-timeout-buffer={test_timeout_buffer}'
+    - '--postprocessing-timeout-buffer={postprocessing_timeout_buffer}'
+    - '--poll-interval={poll_interval}'
+    - '--memory-file={memory_file}'
+    - '--auto-fix-ports={auto_fix_ports}'
+    - '--auto-fix-ulimit={auto_fix_ulimit}'
+    - '--skip-hit-rate-check={skip_hit_rate_check}'
+    - '--ipv4={ipv4}'
+  vars:
+    - 'num_servers=0'
+    - 'memsize=3'
+    - 'fast_threads_ratio=0.75'
+    - 'slow_to_fast_ratio=3'
+    # The cache is already warm, so no warmup phase is needed.
+    - 'warmup_time=0'
+    - 'test_time=15'
+    - 'num_clients=2'
+    - 'clients_per_thread=190'
+    - 'bind_cpu=1'
+    - 'bind_mem=1'
+    - 'stats_interval=1000'
+    - 'port_number_start=11211'
+    - 'disable_tls=0'
+    - 'timeout_buffer=8'
+    - 'num_slow_threads=0'
+    - 'num_fast_threads=0'
+    - 'num_client_threads=0'
+    - 'warmup_timeout_buffer=0'
+    - 'test_timeout_buffer=0'
+    - 'postprocessing_timeout_buffer=60'
+    - 'poll_interval=0.2'
+    - 'memory_file=/dev/shm/tao_bench_mini_mem'
+    - 'auto_fix_ports=1'
+    - 'auto_fix_ulimit=1'
+    - 'skip_hit_rate_check=0'
+    - 'ipv4=0'
+  hooks:
+    - hook: copymove
+      options:
+        is_move: true
+        after:
+          - 'benchmarks/tao_bench/server*.csv'
+          - 'benchmarks/tao_bench/breakdown.csv'
+          - 'tao-bench-server-*.log'
+          - 'client_*.log'
+          - 'perf.data'
+
 - benchmark: tao_bench_autoscale
   name: tao_bench_autoscale_v2_beta
   description:
