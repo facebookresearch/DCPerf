@@ -7,13 +7,33 @@
 import argparse
 import logging
 import os
+import shlex
 import socket
+import subprocess
 import time
 
 from utils import exec_cmd, InfoLogFormat, is_distro_like, run_cmd, setup_logger
 
 
 logger = setup_logger(__name__, logging.INFO, InfoLogFormat)
+
+
+ENUM_INT_MISMATCH_FLAG = "-Wno-error=enum-int-mismatch"
+
+
+def compiler_supports_flag(flag):
+    compiler = shlex.split(os.environ.get("CC", "cc"))
+    try:
+        result = subprocess.run(
+            compiler + ["-x", "c", "-c", "-o", os.devnull, flag, "-"],
+            input=b"int x;\n",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
 
 
 def build_nvme_cli(real):
@@ -30,7 +50,13 @@ def build_nvme_cli(real):
     os.chdir(cli_util_path)
     exec_cmd("git checkout 274a49759c8cbdd991253455c64136e0ea73cb6b", for_real=True)
     exec_cmd("make clean", real)
-    exec_cmd("make CFLAGS+='-Wno-error=enum-int-mismatch' && make install", real)
+    if compiler_supports_flag(ENUM_INT_MISMATCH_FLAG):
+        exec_cmd(f"make CFLAGS+='{ENUM_INT_MISMATCH_FLAG}' && make install", real)
+    else:
+        logger.info(
+            f"Compiler does not support {ENUM_INT_MISMATCH_FLAG}; building without it"
+        )
+        exec_cmd("make && make install", real)
     logger.info(f"chdir to {ROOT_PATH}")
     os.chdir(ROOT_PATH)
     exec_cmd("nvme list", real)
