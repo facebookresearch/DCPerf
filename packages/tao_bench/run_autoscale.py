@@ -385,8 +385,8 @@ def run_server(args):
                 error_type="warm_restart_file_missing",
                 reason=msg,
                 solutions=[
-                    "Run the prep job on this host first, e.g. "
-                    "./benchpress run tao_bench_standalone_mini_prep, "
+                    "Run the matching prep job on this host first "
+                    "(tao_bench_v1_mini_prep or tao_bench_v2_mini_prep), "
                     "with the same memsize."
                 ],
             )

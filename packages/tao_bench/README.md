@@ -203,17 +203,29 @@ A `breakdown.csv` file will be generated in the results to track runtime breakdo
 which can be used to filter metrics for the actual benchmark execution time.
 
 
-#### Larger working set: `..._mini_prep` + `..._mini_large`
+#### Larger working set: `tao_bench_v1_mini` and `tao_bench_v2_mini`
 
-`tao_bench_standalone_mini_prep` fills a cache and persists it to the memory file
-described in [Memory file for fast warm restart](#memory-file-for-fast-warm-restart).
-`tao_bench_standalone_mini_large` then loads that file instead of warming up, which
-is what lets it measure a much larger cache -- `memsize=3` and still finish under 30s.
+Two warm-restart Mini pairs, one per TaoBench server configuration. Each prep job
+fills a cache and persists it to the memory file described in
+[Memory file for fast warm restart](#memory-file-for-fast-warm-restart); the
+measurement job then loads that file instead of warming up, which is what lets it
+measure a much larger cache -- `memsize=3` -- and still finish under 30s.
 
 ```bash
-./benchpress_cli.py run tao_bench_standalone_mini_prep    # ~6min, once per host
-./benchpress_cli.py run tao_bench_standalone_mini_large   # ~28s, repeatable
+# v1 server configuration, matching tao_bench_autoscale
+./benchpress_cli.py run tao_bench_v1_mini_prep    # ~6min, once per host
+./benchpress_cli.py run tao_bench_v1_mini         # ~28s, repeatable
+
+# v2 server configuration, matching tao_bench_autoscale_v2_beta
+./benchpress_cli.py run tao_bench_v2_mini_prep    # ~6min, once per host
+./benchpress_cli.py run tao_bench_v2_mini         # ~28s, repeatable
 ```
+
+The pairs differ only in the server-side threading knobs, so running both
+isolates the v1-vs-v2 difference. They use separate memory files
+(`/dev/shm/tao_bench_v1_mini_mem` and `..._v2_mini_mem`), so both can be prepped
+and run independently on one host. `/dev/shm` does not survive a reboot, so the
+prep job must be re-run after one.
 
 ### Result reporting
 
