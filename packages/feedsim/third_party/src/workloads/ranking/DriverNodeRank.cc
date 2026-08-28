@@ -66,7 +66,6 @@ static std::unique_ptr<ranking::RpcDistRegistry> g_rpc_dist_registry;
 // categorize the sessions cleanly.
 static std::shared_ptr<folly::CPUThreadPoolExecutor> g_session_pool;
 
-const int kMaxRequestSize = 8192;
 const int kRecomputeQPSPeriod = 1;  // Reduced from 5 to 1 second for faster feedback
 
 // Deterministic per-thread RNG seed. The driver's per-thread RNGs used to be
@@ -82,14 +81,6 @@ static bool feedsimRngRandom() {
   return kRandom;
 }
 
-static unsigned detRngSeed(unsigned base) {
-  if (feedsimRngRandom()) {
-    return std::random_device{}();
-  }
-  static std::atomic<unsigned> ctr{0};
-  return base + ctr.fetch_add(1) * 2654435761u;
-}
-
 static unsigned detRngSeedTid(unsigned base, int thread_id) {
   if (feedsimRngRandom()) {
     return static_cast<unsigned>(std::random_device{}()) +
@@ -98,21 +89,7 @@ static unsigned detRngSeedTid(unsigned base, int thread_id) {
   return base + static_cast<unsigned>(thread_id);
 }
 
-// Simple random string generator (replaces oldisim/Util.h RandomString)
-static std::string RandomString(size_t length) {
-  static const char charset[] =
-      "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  thread_local std::mt19937 rng(detRngSeed(0xD5117A2Du));
-  std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
-  std::string str(length, 0);
-  for (size_t i = 0; i < length; ++i) {
-    str[i] = charset[dist(rng)];
-  }
-  return str;
-}
-
 struct ThreadData {
-  std::string random_string;
   double qps_per_thread;
   uint64_t request_delay; // This is per thread
   feedsim::TestDriver *test_driver;
@@ -173,12 +150,7 @@ void RecomputeDelayTimerHandler(evutil_socket_t listener, int16_t flags,
   if (args.rpc_dist_json_given) {
     cur_count = stats.getSessionCount();
   } else {
-    uint32_t request_type = (args.client_side_features_given ||
-                             args.silesia_dir_given ||
-                             args.req_size_dist_given)
-        ? ranking::kDLRMRequestType
-        : ranking::kPageRankRequestType;
-    cur_count = stats.getQueryCount(request_type);
+    cur_count = stats.getQueryCount(ranking::kDLRMRequestType);
   }
 
   double measured_qps = static_cast<double>(cur_count) / elapsed_secs;
@@ -213,8 +185,6 @@ void ThreadStartup(int thread_id,
                    std::vector<ThreadData> &thread_data) {
   ThreadData &this_thread = thread_data[thread_id];
 
-  // Initialize random string with random bits
-  this_thread.random_string = RandomString(kMaxRequestSize);
 
   // Store pointer to test_driver
   this_thread.test_driver = &test_driver;
@@ -345,13 +315,8 @@ void MakeRequest(int thread_id, feedsim::TestDriver &test_driver,
                  std::vector<ThreadData> &thread_data) {
   ThreadData &this_thread = thread_data[thread_id];
 
-  bool use_serialized_request = args.client_side_features_given ||
-                                args.silesia_dir_given ||
-                                args.req_size_dist_given;
-
-  if (use_serialized_request) {
-    // Serialized RankingRequest mode (client features, stories, or padding)
-    ranking::RankingRequest request;
+  // Serialized RankingRequest mode (client features, stories, or padding)
+  ranking::RankingRequest request;
     request.request_id() = static_cast<int64_t>(thread_id);
 
     // Add DLRM features if client-side feature generation is enabled
@@ -412,12 +377,6 @@ void MakeRequest(int thread_id, feedsim::TestDriver &test_driver,
                             reinterpret_cast<const char*>(buf->data()),
                             buf->length(),
                             this_thread.request_delay);
-  } else {
-    // Original mode: send random string payload
-    test_driver.sendRequest(ranking::kPageRankRequestType,
-                            this_thread.random_string.c_str(), 3000,
-                            this_thread.request_delay);
-  }
 }
 
 // ─── Phase 6: Session orchestration helpers ────────────────────────────────
@@ -887,11 +846,8 @@ int main(int argc, char **argv) {
     // sharded by type today, so this is purely cosmetic.
     driver_node.registerRequestType(
         ranking::kGetStoriesUncompressedRequestType);
-  } else if (args.client_side_features_given || args.silesia_dir_given ||
-             args.req_size_dist_given) {
-    driver_node.registerRequestType(ranking::kDLRMRequestType);
   } else {
-    driver_node.registerRequestType(ranking::kPageRankRequestType);
+    driver_node.registerRequestType(ranking::kDLRMRequestType);
   }
 
   // Enable remote monitoring
