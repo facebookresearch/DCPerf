@@ -33,15 +33,12 @@ else
 fi
 NUM_INSTANCES="$(( ( PHYS_CORES + 49 ) / 50 ))"
 
-NUM_ICACHE_ITERATIONS="1600000"
-
 show_help() {
 cat <<EOF
 Usage: ${0##*/} [OPTION]...
 
     -h Display this help and exit
     -n Number of parallel instances to run. Default: $(( ( PHYS_CORES + 49 ) / 50 ))
-    -i Number of icache iterations to use. Default: 1600000
 
 Any remaining arguments are passed to run.sh
 
@@ -59,10 +56,6 @@ while [ $# -ne 0 ]; do
                 NUM_INSTANCES="$2"
             fi
             ;;
-        -i)
-            NUM_ICACHE_ITERATIONS="$2"
-            ;;
-
         -h|--help)
             show_help >&2
             exit 1
@@ -312,10 +305,10 @@ for i in $(seq 1 ${NUM_INSTANCES}); do
         start_mock_services "$MOCK_PORT" "$CORE_RANGE" "$MOCK_LOG" "$MOCK_IO_THREADS"
     fi
 
-    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -i ${NUM_ICACHE_ITERATIONS} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
+    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
     echo "$CMD" > "${FEEDSIM_LOG_PREFIX}${i}.log"
     # shellcheck disable=SC2068,SC2069
-    IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -i "${NUM_ICACHE_ITERATIONS}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
+    IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
     PIDS+=("$!")
     PHY_CORE_ID=$((PHY_CORE_ID + CORES_PER_INST))
     SMT_ID=$((SMT_ID + CORES_PER_INST))

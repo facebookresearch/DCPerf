@@ -9,8 +9,6 @@
 
 #pragma once
 
-#ifdef FEEDSIM_USE_DLRM
-
 // Forward declare torch types to avoid including LibTorch headers here.
 // This prevents conflicts between LibTorch's c10 library and oldisim's Log.h.
 namespace torch {
@@ -154,5 +152,3 @@ class DLRM {
 
 } // namespace dwarfs
 } // namespace ranking
-
-#endif // FEEDSIM_USE_DLRM

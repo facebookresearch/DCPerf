@@ -96,30 +96,6 @@ target_link_libraries(rankingThriftDataGen
     INTERFACE ranking-cpp2
 )
 
-# Build Ranking Dwarfs library
-add_library(rankingDwarfs STATIC
-    dwarfs/pagerank.cpp
-    dwarfs/pagerank.h
-)
-add_dependencies(rankingDwarfs
-    folly
-)
-target_include_directories(rankingDwarfs
-    PUBLIC
-        dwarfs/
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../
-    PRIVATE
-        ${FOLLY_INCLUDE_DIR}
-)
-target_link_libraries(rankingDwarfs
-    PUBLIC
-        gapbs
-    PRIVATE
-        ${FOLLY_LIBRARIES}
-)
-target_compile_options(rankingDwarfs PRIVATE -fvisibility=hidden)
-
 # Feature Extractors library (6 manual + generated variants for I-cache pressure)
 # generated_sources.cmake is produced by generate_extractors.py during install
 set(GENERATED_SOURCES_CMAKE "${CMAKE_CURRENT_SOURCE_DIR}/feature_extractors/generated/generated_sources.cmake")
@@ -237,36 +213,31 @@ target_compile_options(storyProcessors PRIVATE
     -fno-plt
 )
 
-# DLRM support (optional, requires LibTorch)
-option(FEEDSIM_USE_DLRM "Enable DLRM workload with LibTorch" OFF)
+# DLRM support (requires LibTorch)
+find_package(Torch REQUIRED)
+message(STATUS "DLRM enabled with LibTorch: ${TORCH_LIBRARIES}")
 
-if(FEEDSIM_USE_DLRM)
-    find_package(Torch REQUIRED)
-    message(STATUS "DLRM enabled with LibTorch: ${TORCH_LIBRARIES}")
-
-    add_library(rankingDLRM STATIC
-        dwarfs/dlrm.cpp
-        dwarfs/dlrm.h
-    )
-    add_dependencies(rankingDLRM folly)
-    target_compile_definitions(rankingDLRM PUBLIC FEEDSIM_USE_DLRM)
-    target_include_directories(rankingDLRM
-        PUBLIC
-            dwarfs/
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../../
-            ${TORCH_INCLUDE_DIRS}
-        PRIVATE
-            ${FOLLY_INCLUDE_DIR}
-    )
-    target_link_libraries(rankingDLRM
-        PUBLIC
-            ${TORCH_LIBRARIES}
-        PRIVATE
-            ${FOLLY_LIBRARIES}
-    )
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
-endif()
+add_library(rankingDLRM STATIC
+    dwarfs/dlrm.cpp
+    dwarfs/dlrm.h
+)
+add_dependencies(rankingDLRM folly)
+target_include_directories(rankingDLRM
+    PUBLIC
+        dwarfs/
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../
+        ${TORCH_INCLUDE_DIRS}
+    PRIVATE
+        ${FOLLY_INCLUDE_DIR}
+)
+target_link_libraries(rankingDLRM
+    PUBLIC
+        ${TORCH_LIBRARIES}
+    PRIVATE
+        ${FOLLY_LIBRARIES}
+)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
 # Generate getopts for LeafNodeRank
 add_custom_command(
@@ -345,11 +316,10 @@ target_include_directories(LeafNodeRank
 set(LEAF_NODE_RANK_LIBS
     FeedSimFramework
     leafNodeRankcmdline
-    rankingDwarfs
     featureExtractors
     storyProcessors
-    icachebuster
     PointerChaser
+    rankingDLRM
     ${FOLLY_LIBRARIES}
     ${FMT_LIBRARIES}
     ${IBERTY_LIBRARIES}
@@ -362,12 +332,7 @@ set(LEAF_NODE_RANK_LIBS
     ${FBTHRIFT_LIBRARIES}
 )
 
-# Add DLRM library if enabled
-if(FEEDSIM_USE_DLRM)
-    list(APPEND LEAF_NODE_RANK_LIBS rankingDLRM)
-    target_compile_definitions(LeafNodeRank PRIVATE FEEDSIM_USE_DLRM)
-    target_include_directories(LeafNodeRank PRIVATE ${TORCH_INCLUDE_DIRS})
-endif()
+target_include_directories(LeafNodeRank PRIVATE ${TORCH_INCLUDE_DIRS})
 
 target_link_libraries(LeafNodeRank
     PRIVATE

@@ -4,8 +4,6 @@
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  */
 
-#ifdef FEEDSIM_USE_DLRM
-
 #include "dlrm.h"
 
 // Include LibTorch headers only in the implementation file
@@ -350,5 +348,3 @@ void DLRM::warmup(int num_iterations) {
 
 } // namespace dwarfs
 } // namespace ranking
-
-#endif // FEEDSIM_USE_DLRM

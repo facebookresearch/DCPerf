@@ -429,7 +429,6 @@ cmake -G Ninja \
     -DCMAKE_C_FLAGS_RELEASE="$FS_CFLAGS" \
     -DCMAKE_CXX_FLAGS_RELEASE="$FS_CXXFLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
-    -DFEEDSIM_USE_DLRM=ON \
     -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
     "${DR_TRACE_FLAGS[@]}" \
     ../
