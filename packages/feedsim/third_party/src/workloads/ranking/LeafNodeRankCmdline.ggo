@@ -22,25 +22,12 @@ args "-c cc --show-required -C --default-optional -l"
 option "verbose" v "Verbosity. Repeat for more verbose." multiple
 option "quiet" - "Disable log messages."
 
-option "graph_scale" - "Generate 2^scale uniform-random graph." int default="4"
-option "graph_degree" - "Average degree for synthetic graph." int default="16"
-option "graph_max_iters" - "Perform at most 'graph_max_iters' iterations during PageRank." int default="10"
-option "graph_subset" - "Perform partial PageRank over these numbers of nodes. 0 indicates all nodes." int default="3145728"
 option "num_objects" - "Number of objects to serialize." int default="40"
 option "random_data_size" - "Number of bytes of string random data." int default="3145728"
-option "store_graph" - "Enable storing the generated graph to a file." string typestr="filename" optional
-option "load_graph" - "Enable loading a graph from a file instead of generating one." string typestr="filename" optional
-option "instrument_graph" - "Enable timing instrumentation for graph operations (build, store, load)."
-option "max_response_size" - "Maximum response size in bytes returned by the leaf server." int default="131072"
 option "compression_data_size" - "Number of bytes to compress per request." int default="131072"
-option "rank_trials_per_thread" - "Number of iterations each CPU thread executes of rank work." int default="1"
-option "min_icache_iterations" - "At least this number of icache busting iteration will be executed." int default="0"
 option "node_rank_seed" - "Seed for random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
-option "page_rank_seed" - "Seed for PageRank random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
 option "pointer_chase_seed" - "Seed for PointerChase random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
 option "chase_iterations" - "Number of chases to execute on handler thread." int default="5120"
-option "io_chase_iterations" - "Number of chases to execute on IO threads." int default="5120"
-option "io_time_ms" - "Milliseconds to sleep emualting I/O offcpu." int default="200"
 option "threads" - "Number of threads to use for serving." int default="1"
 option "cpu_threads" - "Number of threads to use for computation." int default="1"
 option "srv_threads" - "Number of threads for srv computation." int default="1"
@@ -54,7 +41,6 @@ option "noaffinity" - "Specify to disable thread pinning"
 option "noloadbalance" - "Specify to disable thread load balancing"
 
 # DLRM (FeedSim v2) options
-option "workload_type" - "Type of ranking workload: pagerank or dlrm." string values="pagerank","dlrm" default="pagerank"
 option "dlrm_model_path" - "Path to TorchScript DLRM model file (.pt)." string typestr="filename" optional
 option "dlrm_batch_size" - "Batch size for DLRM inference." int default="256"
 option "dlrm_inferences_per_request" - "Number of DLRM inference calls per request." int default="64"

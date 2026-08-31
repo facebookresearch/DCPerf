@@ -75,19 +75,14 @@ Usage: ${0##*/} [OPTION]...
     -d Duration of each load testing experiment, in seconds. Default: 300
     -p Port to use by the LeafNodeRank server and the load drivers. Default: 11222
     -o Result output file name. Default: "feedsim_results.txt"
-    -S Store the generated graph to a file (requires a file path)
-    -L Load a graph from a file instead of generating one (requires a file path)
-    -I Enable timing instrumentation for graph operations (build, store, load)
     -r QPS increase threshold for steady state detection during warmup (in percentage). If specified and greater than zero, warmup continues until
        QPS increase is less than this threshold percentage of the previous QPS.
     -x Maximum number of warmup iterations when using QPS threshold. Default: 10
     -N No retry mode. Skip sleep and PID checking in load test startup, break immediately without retrying.
     -D Drain time in seconds. Time to wait for queue to drain after experiments. Default: 5
     -R Seed for LeafNodeRank random number generator. If not provided, current time will be used.
-    -P Seed for PageRank random number generator. If not provided, current time will be used.
     -C Seed for PointerChase random number generator. If not provided, current time will be used.
-    --workload Workload type: 'pagerank' (default) or 'dlrm'. Requires DLRM-enabled build.
-    --dlrm-model Path to DLRM TorchScript model file (.pt). Required when --workload=dlrm is used.
+    --dlrm-model Path to DLRM TorchScript model file (.pt).
     --dlrm-batch-size DLRM batch size for inference. Default: 256
     --dlrm-inferences Number of DLRM inference calls per request. Default: 64
     --dlrm-threads Number of LibTorch threads for DLRM inference. Default: 1
@@ -170,19 +165,6 @@ main() {
     local result_filename
     result_filename="feedsim_results.txt"
 
-    local icache_iterations
-    icache_iterations="1600000"
-
-    # Graph storage and loading options
-    local store_graph
-    store_graph=""
-
-    local load_graph
-    load_graph=""
-
-    local instrument_graph
-    instrument_graph=""
-
     local qps_threshold
     qps_threshold=""
 
@@ -198,16 +180,10 @@ main() {
     local leafnoderank_seed
     leafnoderank_seed=""
 
-    local pagerank_seed
-    pagerank_seed=""
-
     local pointerchase_seed
     pointerchase_seed=""
 
     # DLRM options
-    local workload_type
-    workload_type="pagerank"
-
     local dlrm_model_path
     dlrm_model_path=""
 
@@ -366,25 +342,6 @@ main() {
                 result_filename="$2"
                 shift
                 ;;
-            -i)
-                icache_iterations="$2"
-                shift
-                ;;
-            -S)
-                if [ "$2" != "default_do_not_store" ]; then
-                    store_graph="--store_graph=$2"
-                fi
-                shift
-                ;;
-            -L)
-                if [ "$2" != "default_do_not_load" ]; then
-                    load_graph="--load_graph=$2"
-                fi
-                shift
-                ;;
-            -I)
-                instrument_graph="--instrument_graph"
-                ;;
             -r)
                 if [[ "$2" -gt 0 ]]; then
                     qps_threshold="$2"
@@ -408,20 +365,9 @@ main() {
                 leafnoderank_seed="--node_rank_seed=$2"
                 shift
                 ;;
-            -P)
-                pagerank_seed="--page_rank_seed=$2"
-                shift
-                ;;
             -C)
                 pointerchase_seed="--pointer_chase_seed=$2"
                 shift
-                ;;
-            --workload)
-                workload_type="$2"
-                shift
-                ;;
-            --workload=*)
-                workload_type="${1#*=}"
                 ;;
             --dlrm-model)
                 dlrm_model_path="$2"
@@ -694,42 +640,31 @@ main() {
 
     cd "${FEEDSIM_ROOT_SRC}"
 
-    # Build DLRM options if workload type is dlrm
+    # Build DLRM options
     local dlrm_opts=""
-    if [ "$workload_type" = "dlrm" ]; then
-        if [ -z "$dlrm_model_path" ]; then
-            die "DLRM workload requires --dlrm-model <model_path> to specify the TorchScript model"
-        fi
-
-        # Resolve dlrm_model_path: if relative, prepend FEEDSIM_ROOT
-        if [[ "$dlrm_model_path" != /* ]]; then
-            dlrm_model_path="${FEEDSIM_ROOT}/${dlrm_model_path}"
-        fi
-
-        dlrm_opts="--workload_type=dlrm --dlrm_model_path=$dlrm_model_path --dlrm_batch_size=$dlrm_batch_size --dlrm_inferences_per_request=$dlrm_inferences_per_request --dlrm_threads=$dlrm_threads"
-        echo "Using DLRM workload with model: $dlrm_model_path"
-        if [ "$client_side_features" != "0" ]; then
-            echo "  Client-side feature generation: ENABLED"
-            echo "    Batch size: $client_batch_size"
-            echo "    Inferences: $client_inferences"
-            echo "    Seed: $client_feature_seed"
-            echo "    Dense features: $client_num_dense"
-            echo "    Sparse features: $client_num_sparse"
-        fi
-
-        # Set LD_LIBRARY_PATH for LibTorch if needed
-        if [ -d "${FEEDSIM_ROOT}/third_party/libtorch/lib" ]; then
-            export LD_LIBRARY_PATH="${FEEDSIM_ROOT}/third_party/libtorch/lib:${LD_LIBRARY_PATH:-}"
-        fi
-    else
-        dlrm_opts="--workload_type=pagerank"
-        echo "Using PageRank workload"
+    if [ -z "$dlrm_model_path" ]; then
+        die "DLRM workload requires --dlrm-model <model_path> to specify the TorchScript model"
     fi
 
-    # ICacheBuster only for PAGERANK workload
-    local icache_opts=""
-    if [ "$workload_type" = "pagerank" ]; then
-        icache_opts="--min_icache_iterations=$icache_iterations"
+    # Resolve dlrm_model_path: if relative, prepend FEEDSIM_ROOT
+    if [[ "$dlrm_model_path" != /* ]]; then
+        dlrm_model_path="${FEEDSIM_ROOT}/${dlrm_model_path}"
+    fi
+
+    dlrm_opts="--dlrm_model_path=$dlrm_model_path --dlrm_batch_size=$dlrm_batch_size --dlrm_inferences_per_request=$dlrm_inferences_per_request --dlrm_threads=$dlrm_threads"
+    echo "Using DLRM workload with model: $dlrm_model_path"
+    if [ "$client_side_features" != "0" ]; then
+        echo "  Client-side feature generation: ENABLED"
+        echo "    Batch size: $client_batch_size"
+        echo "    Inferences: $client_inferences"
+        echo "    Seed: $client_feature_seed"
+        echo "    Dense features: $client_num_dense"
+        echo "    Sparse features: $client_num_sparse"
+    fi
+
+    # Set LD_LIBRARY_PATH for LibTorch if needed
+    if [ -d "${FEEDSIM_ROOT}/third_party/libtorch/lib" ]; then
+        export LD_LIBRARY_PATH="${FEEDSIM_ROOT}/third_party/libtorch/lib:${LD_LIBRARY_PATH:-}"
     fi
 
     # Build async I/O options (Phase 3)
@@ -910,28 +845,20 @@ main() {
     env $preload_env OMP_NUM_THREADS=1 MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
         --monitor_port="$monitor_port" \
-        --graph_scale=21 \
-        --graph_subset=2000000 \
         --threads="$thrift_threads" \
         --cpu_threads="$ranking_cpu_threads" \
         --timekeeper_threads=2 \
         --io_threads="$EVENTBASE_THREADS_DEFAULT" \
         --srv_threads="$SRV_THREADS_DEFAULT" \
         --num_objects=2000 \
-        --graph_max_iters=1 \
         --noaffinity \
-        $icache_opts \
         $dlrm_opts \
         $async_io_opts \
         $feature_opts \
-        $store_graph \
-        $load_graph \
-        $instrument_graph \
         $story_opts \
         $server_silesia_opts \
         $mock_services_opts \
         $leafnoderank_seed \
-        $pagerank_seed \
         $pointerchase_seed >> $BREPS_LFILE 2>&1 &
 
     LEAF_PID=$!

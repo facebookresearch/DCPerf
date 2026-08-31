@@ -67,11 +67,8 @@
 #include "RequestTypes.h"
 
 #include "TimekeeperPool.h"
-#include "dwarfs/pagerank.h"
 
-#ifdef FEEDSIM_USE_DLRM
 #include "dwarfs/dlrm.h"
-#endif
 
 #ifdef DR_TRACE_INCLUDED
 #include <cstdlib>
@@ -126,7 +123,6 @@ static void dr_trace_disable_raw_compression() {
 
 #include "if/gen-cpp2/ranking_types.h"
 
-#include "../search/ICacheBuster.h"
 #include "../search/PointerChase.h"
 
 #include "SilesiaLoader.h"
@@ -148,13 +144,10 @@ static void dr_trace_disable_raw_compression() {
 // Shared configuration flags
 static gengetopt_args_info args;
 
-constexpr auto kMaxResponseSize = 1u << 12u;
 const auto kNumNops = 6;
 const auto kNumNopIterations = 60;
 const auto kNumCompressIterations = 100;
-const auto kNumICacheBusterMethods = 100000;
 const auto kPointerChaseSize = 10000000;
-const auto kPageRankThreshold = 1e-4;
 
 // I/O latency distribution types for Phase 3
 enum class IOLatencyDistType {
@@ -229,12 +222,8 @@ struct ThreadData {
   // pipelines can hit the same ThreadData. mt19937 is not thread-safe, so
   // serialize with this mutex.
   std::mutex rpc_rng_mutex;
-  std::unique_ptr<ranking::dwarfs::PageRank> page_ranker;
-#ifdef FEEDSIM_USE_DLRM
   std::shared_ptr<ranking::dwarfs::DLRM> dlrm_ranker;
-#endif
   std::unique_ptr<search::PointerChase> pointer_chaser;
-  std::unique_ptr<ICacheBuster> icache_buster;
   std::default_random_engine rng;
   std::gamma_distribution<double> latency_distribution;
   std::string random_string;
@@ -299,18 +288,6 @@ struct ThreadData {
     }
   }
 };
-
-// Enum for workload type
-enum class WorkloadType {
-  PAGERANK,
-  DLRM
-};
-
-// Global workload type
-static WorkloadType g_workload_type = WorkloadType::PAGERANK;
-
-// Global graph that will be shared across threads
-CSRGraph<int32_t> g_shared_graph;
 
 // Server-side Silesia corpus + response generator. When --silesia_dir is
 // given, response generation pulls bytes from the corpus instead of running
@@ -547,11 +524,9 @@ static ranking::RankingResponse& pickResponseTemplate() {
   return resp;
 }
 
-#ifdef FEEDSIM_USE_DLRM
 void ThreadStartup(
     int thread_id,
     std::vector<ThreadData>& thread_data,
-    ranking::dwarfs::PageRankParams& params,
     const std::shared_ptr<folly::Executor>& cpuThreadPool,
     const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvCPUThreadPool,
     const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
@@ -612,21 +587,6 @@ void ThreadStartup(
       args.pointer_chase_seed_arg,
       kFeedsimDefaultSeed);
 
-  // Only initialize PageRank if we're using it
-  if (g_workload_type == WorkloadType::PAGERANK) {
-    unsigned page_rank_seed = resolveSeed(
-        args.page_rank_seed_given, args.page_rank_seed_arg, kFeedsimDefaultSeed);
-    auto graph = params.makeGraphCopy(g_shared_graph);
-    this_thread.page_ranker = std::make_unique<ranking::dwarfs::PageRank>(
-        std::move(graph), args.cpu_threads_arg, page_rank_seed);
-  }
-
-  // ICacheBuster only for PAGERANK workload (used by PageRank request handlers)
-  if (g_workload_type == WorkloadType::PAGERANK) {
-    this_thread.icache_buster =
-        std::make_unique<ICacheBuster>(kNumICacheBusterMethods);
-  }
-
   this_thread.pointer_chaser = std::make_unique<search::PointerChase>(
       kPointerChaseSize, pointer_chase_seed);
   this_thread.rng.seed(noderank_seed);
@@ -685,146 +645,6 @@ void ThreadStartup(
     this_thread.io_exponential_dist = std::exponential_distribution<double>(rate);
   } else if (io_dist_str == "lognormal") {
     this_thread.io_latency_dist_type = IOLatencyDistType::LOGNORMAL;
-    double mean = static_cast<double>(args.io_latency_mean_ms_arg);
-    double stddev = static_cast<double>(args.io_latency_stddev_ms_arg);
-    double variance = stddev * stddev;
-    double mu = std::log(mean * mean / std::sqrt(variance + mean * mean));
-    double sigma = std::sqrt(std::log(1.0 + variance / (mean * mean)));
-    this_thread.io_lognormal_dist = std::lognormal_distribution<double>(mu, sigma);
-  } else {
-    this_thread.io_latency_dist_type = IOLatencyDistType::FIXED;
-  }
-}
-#endif
-
-void ThreadStartup(
-    int thread_id,
-    std::vector<ThreadData>& thread_data,
-    ranking::dwarfs::PageRankParams& params,
-    const std::shared_ptr<folly::Executor>& cpuThreadPool,
-    const std::shared_ptr<folly::CPUThreadPoolExecutor>& srvCPUThreadPool,
-    const std::shared_ptr<folly::IOThreadPoolExecutor>& ioThreadPool,
-    const std::shared_ptr<folly::IOThreadPoolExecutor>& srEventBasePool,
-    const std::shared_ptr<ranking::TimekeeperPool>& timekeeperPool) {
-  auto& this_thread = thread_data[thread_id];
-  auto graph = params.makeGraphCopy(g_shared_graph);
-  this_thread.cpuThreadPool = cpuThreadPool;
-  this_thread.srvCPUThreadPool = srvCPUThreadPool;
-  this_thread.ioThreadPool = ioThreadPool;
-  this_thread.srEventBasePool = srEventBasePool;
-  this_thread.timekeeperPool = timekeeperPool;
-
-  // Phase 5: populate per-thread RPC fanout state. registry / silesia
-  // pointers are global (initialized in main() if --rpc_dist_path was
-  // set); mock_clients are constructed lazily here so they live on
-  // threads from the SREventBase pool. Seed the fanout RNG with
-  // hardware_destructive seed mixing so each thread gets independent
-  // sample sequences without sharing the std::default_random_engine
-  // used elsewhere in this struct.
-  this_thread.rpc_registry = g_rpc_registry.get();
-  this_thread.rpc_silesia = g_rpc_silesia;
-  this_thread.rpc_rng.seed(detRngSeedTid(0x2C519A00u, thread_id));
-  if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
-    auto evbs = srEventBasePool->getAllEventBases();
-    this_thread.mock_clients.reserve(evbs.size());
-    for (size_t i = 0; i < evbs.size(); ++i) {
-      try {
-        this_thread.mock_clients.push_back(
-            std::make_unique<ranking::MockServicesClient>(
-                evbs[i].get(),
-                args.mock_services_host_arg,
-                static_cast<uint16_t>(args.mock_services_port_arg),
-                std::chrono::milliseconds(
-                    args.mock_keepalive_interval_ms_arg)));
-      } catch (const std::exception& e) {
-        std::cerr << "Failed to connect to mock_services on "
-                  << args.mock_services_host_arg << ":"
-                  << args.mock_services_port_arg
-                  << " (thread " << thread_id << ", evb " << i << "): "
-                  << e.what()
-                  << ". Falling back to legacy folly::futures::sleep path."
-                  << std::endl;
-        this_thread.mock_clients.clear();
-        break;
-      }
-    }
-  }
-  unsigned noderank_seed = resolveSeed(
-      args.node_rank_seed_given, args.node_rank_seed_arg, kFeedsimDefaultSeed);
-
-  unsigned page_rank_seed = resolveSeed(
-      args.page_rank_seed_given, args.page_rank_seed_arg, kFeedsimDefaultSeed);
-
-  unsigned pointer_chase_seed = resolveSeed(
-      args.pointer_chase_seed_given,
-      args.pointer_chase_seed_arg,
-      kFeedsimDefaultSeed);
-
-  this_thread.page_ranker = std::make_unique<ranking::dwarfs::PageRank>(
-      std::move(graph), args.cpu_threads_arg, page_rank_seed);
-  // ICacheBuster only for PAGERANK workload
-  if (g_workload_type == WorkloadType::PAGERANK) {
-    this_thread.icache_buster =
-        std::make_unique<ICacheBuster>(kNumICacheBusterMethods);
-  }
-  this_thread.pointer_chaser = std::make_unique<search::PointerChase>(
-      kPointerChaseSize, pointer_chase_seed);
-  this_thread.rng.seed(noderank_seed);
-
-  const double alpha = 0.7;
-  const double beta = 20000;
-  this_thread.latency_distribution =
-      std::gamma_distribution<double>(alpha, beta);
-
-  this_thread.random_string = RandomString(args.random_data_size_arg);
-
-  // Initialize feature extraction suite if enabled
-  if (args.feature_extractors_given) {
-    this_thread.feature_suite = std::make_unique<FeatureExtractorSuite>();
-    // Add 6 hand-written extractors
-    this_thread.feature_suite->addExtractor(
-        std::make_unique<HashLookupExtractor>());
-    this_thread.feature_suite->addExtractor(
-        std::make_unique<FeatureLayoutExtractor>());
-    this_thread.feature_suite->addExtractor(
-        std::make_unique<EmbeddingLookupExtractor>());
-    this_thread.feature_suite->addExtractor(
-        std::make_unique<ContainerExtractor>());
-    this_thread.feature_suite->addExtractor(
-        std::make_unique<TreeTraversalExtractor>());
-    this_thread.feature_suite->addExtractor(
-        std::make_unique<BitsetExtractor>());
-    // Add generated extractors (1035 variants, each dispatches to 1 of 1000 copies)
-    auto generated = dcperf::feature_extractors::generated::createGeneratedExtractors();
-    for (auto& ext : generated) {
-      this_thread.feature_suite->addExtractor(std::move(ext));
-    }
-    this_thread.feature_suite->initializeAll(
-        args.feature_complexity_arg, noderank_seed);
-    this_thread.feature_suite->initializeFlatDispatch(noderank_seed);
-  }
-
-  // Initialize story-processor suite if enabled.
-  if (args.story_processors_per_story_arg > 0) {
-    this_thread.story_suite =
-        std::make_unique<dcperf::story_processors::StoryProcessorSuite>();
-    this_thread.story_suite->initialize(
-        args.feature_complexity_arg,
-        noderank_seed ^ 0xbeefbeefbeefbeefull,
-        static_cast<size_t>(args.stories_per_processor_pass_arg));
-  }
-
-  // Phase 3: Initialize I/O latency distributions
-  this_thread.io_latency_mean_ms = args.io_latency_mean_ms_arg;
-  std::string io_dist_str = args.io_latency_distribution_arg;
-  if (io_dist_str == "exponential") {
-    this_thread.io_latency_dist_type = IOLatencyDistType::EXPONENTIAL;
-    // Exponential distribution with rate lambda = 1/mean
-    double rate = 1.0 / static_cast<double>(args.io_latency_mean_ms_arg);
-    this_thread.io_exponential_dist = std::exponential_distribution<double>(rate);
-  } else if (io_dist_str == "lognormal") {
-    this_thread.io_latency_dist_type = IOLatencyDistType::LOGNORMAL;
-    // Convert mean and stddev to lognormal parameters (mu, sigma)
     double mean = static_cast<double>(args.io_latency_mean_ms_arg);
     double stddev = static_cast<double>(args.io_latency_stddev_ms_arg);
     double variance = stddev * stddev;
@@ -1182,7 +1002,6 @@ static folly::Future<folly::Unit> simulateIoOrFanout(
       .thenValue([](folly::Unit) { return folly::unit; });
 }
 
-#ifdef FEEDSIM_USE_DLRM
 // Distribute `total_num_inferences` across cpu_threads_arg fan-out
 // futures and return how many inferences each shard should run. The last
 // shard absorbs any remainder so the sum equals total_num_inferences.
@@ -1246,7 +1065,6 @@ static folly::Future<int> dlrmInferenceClientSide(
         return std::accumulate(results.begin(), results.end(), 0);
       });
 }
-#endif
 
 /**
  * Populate feature inputs from story content bytes.
@@ -1381,158 +1199,6 @@ static void runStoryProcessing(ThreadData& this_thread) {
   this_thread.story_suite->runPipelinePasses(passes);
 }
 
-/**
- * Phase 3: Async (non-blocking) request handler using continuation-passing style.
- *
- * This handler implements the same logic as PageRankRequestHandler but without
- * blocking .get() calls. This eliminates thread starvation on high-core CPUs
- * by returning immediately and processing the response asynchronously.
- *
- * Key differences from the blocking handler:
- * 1. No blocking .get() calls on the I/O future
- * 2. Response is sent in the final continuation
- * 3. All I/O stages are chained via .thenValue()/.thenVia()
- * 4. Uses configurable I/O latency distributions
- *
- * CRITICAL: The RequestContext is moved into a shared_ptr to extend its lifetime
- * beyond the handler return. The server framework destroys the context after
- * the handler returns, but we need it to survive until the async callback.
- */
-void AsyncPageRankRequestHandler(
-    int thread_id,
-    feedsim::RequestContext& context,
-    std::vector<ThreadData>& thread_data) {
-  auto& this_thread = thread_data[thread_id];
-
-  // Move the RequestContext into a shared_ptr to extend its lifetime
-  // beyond the handler return for async work.
-  auto context_ptr = std::make_shared<feedsim::RequestContext>(std::move(context));
-
-  // Stage 1: ICacheBuster (synchronous, adds I-cache pressure) - PAGERANK only
-  if (this_thread.icache_buster) {
-    const int min_iterations = std::max(args.min_icache_iterations_arg, 0);
-    const int num_iterations =
-        static_cast<int>(this_thread.latency_distribution(this_thread.rng)) +
-        min_iterations;
-    ICacheBuster& buster = *this_thread.icache_buster;
-
-    for (int i = 0; i < num_iterations; i++) {
-      buster.RunNextMethod();
-    }
-  }
-
-  // Run feature extraction if enabled
-  runFeatureExtraction(this_thread);
-  // Run story processors (mirrors a production ranking service's scoring+
-  // filter+blend+serdes+topK passes; runs only when
-  // --story_processors_per_story > 0).
-  runStoryProcessing(this_thread);
-
-  // Stage 2: PageRank ranking workload (CPU-intensive, parallelized).
-  // This handler is for kPageRankRequestType only — DLRM workload is
-  // routed to DLRMRequestHandler in main(), so no DLRM branch here.
-  int ranking_result = 0;
-  auto per_thread_subset = args.graph_subset_arg / args.cpu_threads_arg;
-  std::vector<folly::Future<int>> futures;
-  for (int i = 0; i < args.cpu_threads_arg; i++) {
-    auto f = folly::via(
-        this_thread.cpuThreadPool.get(),
-        [i, &this_thread, per_thread_subset]() {
-          return this_thread.page_ranker->rank(
-              i,
-              args.graph_max_iters_arg,
-              kPageRankThreshold,
-              args.rank_trials_per_thread_arg,
-              per_thread_subset);
-        });
-    futures.push_back(std::move(f));
-  }
-  auto fs = folly::collectAll(std::move(futures)).get();
-  for (auto& f : fs) {
-    ranking_result += f.value();
-  }
-
-  // Capture data needed for async stages by value
-  auto srvCPUThreadPool = this_thread.srvCPUThreadPool;
-  auto ioThreadPool = this_thread.ioThreadPool;
-  auto timekeeperPool = this_thread.timekeeperPool;
-  search::PointerChase* pointer_chaser = this_thread.pointer_chaser.get();
-
-  // Get I/O latency for this request (configurable distribution)
-  int io_latency_ms = this_thread.getNextIOLatencyMs();
-
-  // For multi-stage I/O simulation
-  int num_io_stages = args.io_stages_arg;
-  int io_stage_latency_ms = args.io_stage_latency_ms_arg;
-
-  // Capture values for lambda captures
-  int srv_threads = args.srv_threads_arg;
-  int num_objects = args.num_objects_arg;
-  int chase_iterations = args.chase_iterations_arg;
-
-  // Stage 3: Async I/O simulation (NON-BLOCKING)
-  // This is the critical change - we use continuation-passing style
-  auto timekeeper = timekeeperPool->getTimekeeper();
-
-  // Calculate total I/O latency
-  int total_io_latency_ms = (num_io_stages > 1)
-      ? (num_io_stages * io_stage_latency_ms)
-      : io_latency_ms;
-
-  // Start async chain. Phase 5: when --rpc_dist_path is set, fan out
-  // real RPCs to mock_services in place of the synthetic sleep. When
-  // unset, this still degenerates to folly::futures::sleep so the
-  // legacy behavior is preserved verbatim.
-  simulateIoOrFanout(
-      this_thread, total_io_latency_ms, timekeeper.get(), ioThreadPool.get())
-      .thenValue([pointer_chaser, srvCPUThreadPool, srv_threads,
-                  chase_iterations, ranking_result](folly::Unit) {
-        // Stage 4: Pointer chase. The legacy throw-away
-        // generateResponse + serializePayload + compressThrift fanout
-        // on srvIOThreadPool that used to sit between Stage 3 and this
-        // stage was a placeholder for outbound RPC work; that work is
-        // now paid for by issueOutboundFanout (see Stage 3 /
-        // simulateIoOrFanout) on srEventBasePool.
-        auto per_thread_chase_iterations = chase_iterations / srv_threads;
-
-        std::vector<folly::Future<int>> chaseFutures;
-        for (int i = 0; i < srv_threads; i++) {
-          auto f = folly::via(srvCPUThreadPool.get(),
-              [pointer_chaser, per_thread_chase_iterations]() {
-                pointer_chaser->Chase(per_thread_chase_iterations);
-                return 1;
-              });
-          chaseFutures.push_back(std::move(f));
-        }
-        return folly::collectAll(std::move(chaseFutures))
-            .via(srvCPUThreadPool.get())
-            .thenValue([ranking_result](std::vector<folly::Try<int>> results) {
-              int total = ranking_result;
-              for (auto& r : results) {
-                if (r.hasValue()) total += r.value();
-              }
-              return total;
-            });
-      })
-      .thenValue([context_ptr](int /*final_result*/) {
-        // Stage 5: serialize a pre-built response template (see
-        // initResponseTemplatePool above). Replaces per-request response
-        // construction + destruction.
-        ranking::RankingResponse& resp = pickResponseTemplate();
-        auto payloadiobufq = serializePayload(resp);
-        auto buf = payloadiobufq.move();
-        context_ptr->sendResponse(buf->data(), buf->length());
-      })
-      .thenError(folly::tag_t<std::exception>{}, [context_ptr](const std::exception& e) {
-        // Error handling
-        std::cerr << "Async request handler error: " << e.what() << std::endl;
-        context_ptr->sendResponse(nullptr, 0);
-      });
-
-  // NO .get() here! Handler returns immediately, work continues asynchronously
-}
-
-#ifdef FEEDSIM_USE_DLRM
 /**
  * Phase 7: DLRM Request Handler with client-side features.
  *
@@ -1732,94 +1398,6 @@ void DLRMRequestHandler(
                    context_ptr->sendResponse(nullptr, 0);
                  });
 }
-#endif // FEEDSIM_USE_DLRM
-
-void PageRankRequestHandler(
-    int thread_id,
-    feedsim::RequestContext& context,
-    std::vector<ThreadData>& thread_data) {
-  auto& this_thread = thread_data[thread_id];
-  search::PointerChase& chaser = *this_thread.pointer_chaser;
-
-  // ICacheBuster stage (adds I-cache pressure) - PAGERANK only
-  if (this_thread.icache_buster) {
-    const int min_iterations = std::max(args.min_icache_iterations_arg, 0);
-    const int num_iterations =
-        static_cast<int>(this_thread.latency_distribution(this_thread.rng)) +
-        min_iterations;
-    ICacheBuster& buster = *this_thread.icache_buster;
-
-    for (int i = 0; i < num_iterations; i++) {
-      buster.RunNextMethod();
-    }
-  }
-
-  // Run feature extraction if enabled
-  runFeatureExtraction(this_thread);
-
-  // PageRank ranking stage. This handler is for kPageRankRequestType only —
-  // DLRM workload is routed to DLRMRequestHandler in main().
-  int result = 0;
-  auto per_thread_subset = args.graph_subset_arg / args.cpu_threads_arg;
-  std::vector<folly::Future<int>> futures;
-  for (int i = 0; i < args.cpu_threads_arg; i++) {
-    auto f = folly::via(
-        this_thread.cpuThreadPool.get(),
-        [i, &this_thread, per_thread_subset]() {
-          return this_thread.page_ranker->rank(
-              i,
-              args.graph_max_iters_arg,
-              kPageRankThreshold,
-              args.rank_trials_per_thread_arg,
-              per_thread_subset);
-        });
-    futures.push_back(std::move(f));
-  }
-  auto fs = folly::collect(futures).get();
-  result = std::accumulate(fs.begin(), fs.end(), 0);
-
-  // I/O simulation stage. Phase 5: when --rpc_dist_path is set, replaced
-  // with an outbound RPC fanout to mock_services. .get() blocks the
-  // request handler in this sync path (preserves existing behavior).
-  auto timekeeper = this_thread.timekeeperPool->getTimekeeper();
-  auto s = simulateIoOrFanout(
-               this_thread,
-               args.io_time_ms_arg,
-               timekeeper.get(),
-               this_thread.ioThreadPool.get())
-               .thenValue([&](folly::Unit) { return result + 1; });
-  result = std::move(s).get();
-
-  // The legacy throw-away generateResponse + serializePayload +
-  // compressThrift fanout on srvIOThreadPool that used to sit here was a
-  // placeholder for outbound RPC work; that work is now paid for by
-  // simulateIoOrFanout above (issueOutboundFanout on srEventBasePool
-  // when --rpc_dist_path is set).
-
-  auto per_thread_chase_iterations =
-      args.chase_iterations_arg / args.srv_threads_arg;
-  std::vector<folly::Future<int>> chaseFutures;
-  for (int i = 0; i < args.srv_threads_arg; i++) {
-    auto f = folly::via(this_thread.srvCPUThreadPool.get(), [&]() {
-      chaser.Chase(per_thread_chase_iterations);
-      return 1;
-    });
-    chaseFutures.push_back(std::move(f));
-  }
-  auto chaseFs = folly::collect(chaseFutures).get();
-  int chaseResult = std::accumulate(chaseFs.begin(), chaseFs.end(), 0);
-
-  // Use the pre-built template pool to avoid the RPC-DataGen cost.
-  ranking::RankingResponse& resp = pickResponseTemplate();
-
-  // Serialize into FBThrift
-  auto payloadiobufq = serializePayload(resp);
-  auto buf = payloadiobufq.move();
-
-  auto resp1 = deserializePayload(buf.get());
-
-  context.sendResponse(buf->data(), buf->length());
-}
 
 // ============================================================================
 // Phase 6: real per-method handlers, replacing the Phase 4 shims.
@@ -1837,10 +1415,6 @@ void PageRankRequestHandler(
 // into a shared_ptr and return immediately. Light handlers
 // (createAndPrimeSession, streamData) stay synchronous on the
 // dispatcher thread.
-//
-// The legacy DLRMRequestHandler / PageRankRequestHandler /
-// AsyncPageRankRequestHandler are kept for now and deleted by
-// Programmer-C in Phase 6-C cleanup.
 // ============================================================================
 
 namespace {
@@ -2197,13 +1771,11 @@ void GetStoriesUncompressedRequestHandler(
   // is server-side only at the moment, but we keep the dispatch shape
   // ready for Phase 7.
   folly::Future<int> inference_future = folly::makeFuture<int>(0);
-#ifdef FEEDSIM_USE_DLRM
   if (this_thread.dlrm_ranker) {
     int num_inferences = std::max(1, args.dlrm_inferences_per_request_arg);
     inference_future =
         dlrmInferenceServerSide(this_thread, num_inferences);
   }
-#endif
 
   // Hop onto RANKER for orchestration. From there fan out the three
   // CPU/IO stages and collectAll, then build+compress+send response.
@@ -2604,22 +2176,6 @@ int main(int argc, char** argv) {
   // Logging level is no longer used (oldisim log macros removed).
   // Verbose/quiet flags are parsed but have no effect.
 
-  // Determine workload type
-  std::string workload_type_str = args.workload_type_arg;
-  if (workload_type_str == "dlrm") {
-#ifdef FEEDSIM_USE_DLRM
-    g_workload_type = WorkloadType::DLRM;
-    std::cout << "Using DLRM workload type" << std::endl;
-#else
-    std::cerr << "DLRM workload requested but FEEDSIM_USE_DLRM is not defined. "
-                 "Rebuild with LibTorch support." << std::endl;
-    return 1;
-#endif
-  } else {
-    g_workload_type = WorkloadType::PAGERANK;
-    std::cout << "Using PageRank workload type" << std::endl;
-  }
-
   // Load Silesia corpus if --silesia_dir was given. Server-side response
   // generation will then pull bytes from the corpus instead of running
   // xor128() RNG (which has no production analog).
@@ -2808,153 +2364,57 @@ int main(int argc, char** argv) {
   std::cout << "Thread pool warmup complete" << std::endl;
 
   std::vector<ThreadData> thread_data(args.threads_arg);
-  ranking::dwarfs::PageRankParams params{
-      args.graph_scale_arg, args.graph_degree_arg};
 
-#ifdef FEEDSIM_USE_DLRM
-  // Initialize shared DLRM model if using DLRM workload
-  std::shared_ptr<ranking::dwarfs::DLRM> shared_dlrm_ranker;
-  if (g_workload_type == WorkloadType::DLRM) {
-    if (!args.dlrm_model_path_given) {
-      std::cerr << "DLRM workload requires --dlrm_model_path" << std::endl;
-      return 1;
-    }
-    ranking::dwarfs::DLRMParams dlrm_params;
-    dlrm_params.model_path = args.dlrm_model_path_arg;
-    dlrm_params.batch_size = args.dlrm_batch_size_arg;
-    dlrm_params.num_threads = args.dlrm_threads_arg;
-
-    unsigned dlrm_seed = 0;
-    if (args.dlrm_seed_given) {
-      dlrm_seed = static_cast<unsigned>(args.dlrm_seed_arg);
-    }
-
-    // Create shared DLRM model (thread-safe for inference)
-    shared_dlrm_ranker = std::make_shared<ranking::dwarfs::DLRM>(
-        dlrm_params, args.threads_arg, dlrm_seed);
-
-    // Warm up DLRM model to stabilize inference latency
-    // JIT compilation and memory allocation happen on first few inferences
-    std::cout << "Warming up DLRM model..." << std::endl;
-    const int warmup_iterations = 10;  // Run enough iterations to JIT compile all paths
-    for (int i = 0; i < warmup_iterations; i++) {
-      shared_dlrm_ranker->infer(1, args.dlrm_batch_size_arg);
-    }
-    std::cout << "DLRM warmup complete (" << warmup_iterations << " iterations)" << std::endl;
+  // Initialize the shared DLRM model.
+  if (!args.dlrm_model_path_given) {
+    std::cerr << "DLRM workload requires --dlrm_model_path" << std::endl;
+    return 1;
   }
-#endif
+  ranking::dwarfs::DLRMParams dlrm_params;
+  dlrm_params.model_path = args.dlrm_model_path_arg;
+  dlrm_params.batch_size = args.dlrm_batch_size_arg;
+  dlrm_params.num_threads = args.dlrm_threads_arg;
 
-  // create or load a graph (only for PageRank mode)
-  if (g_workload_type == WorkloadType::PAGERANK) {
-    if (args.load_graph_given) {
-      if (args.instrument_graph_given) {
-        auto start_load = std::chrono::steady_clock::now();
-        g_shared_graph = params.loadGraphFromFile(args.load_graph_arg);
-        auto end_load = std::chrono::steady_clock::now();
-        auto load_duration =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                end_load - start_load)
-                .count();
-        std::cout << "Graph loading time: " << load_duration << " ms"
-                  << std::endl;
-      } else {
-        g_shared_graph = params.loadGraphFromFile(args.load_graph_arg);
-      }
-    } else {
-      if (args.instrument_graph_given) {
-        auto start_build = std::chrono::steady_clock::now();
-        g_shared_graph = params.buildGraph();
-        auto end_build = std::chrono::steady_clock::now();
-        auto build_duration =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                end_build - start_build)
-                .count();
-        std::cout << "Graph building time: " << build_duration << " ms"
-                  << std::endl;
-
-        if (args.store_graph_given) {
-          auto start_store = std::chrono::steady_clock::now();
-          params.storeGraphToFile(g_shared_graph, args.store_graph_arg);
-          auto end_store = std::chrono::steady_clock::now();
-          auto store_duration =
-              std::chrono::duration_cast<std::chrono::milliseconds>(
-                  end_store - start_store)
-                  .count();
-          std::cout << "Graph storing time: " << store_duration << " ms"
-                    << std::endl;
-        }
-      } else {
-        g_shared_graph = params.buildGraph();
-        if (args.store_graph_given) {
-          params.storeGraphToFile(g_shared_graph, args.store_graph_arg);
-        }
-      }
-    }
+  unsigned dlrm_seed = 0;
+  if (args.dlrm_seed_given) {
+    dlrm_seed = static_cast<unsigned>(args.dlrm_seed_arg);
   }
+
+  // Create shared DLRM model (thread-safe for inference)
+  std::shared_ptr<ranking::dwarfs::DLRM> shared_dlrm_ranker =
+      std::make_shared<ranking::dwarfs::DLRM>(
+          dlrm_params, args.threads_arg, dlrm_seed);
+
+  // Warm up DLRM model to stabilize inference latency
+  // JIT compilation and memory allocation happen on first few inferences
+  std::cout << "Warming up DLRM model..." << std::endl;
+  const int warmup_iterations = 10;  // Run enough iterations to JIT compile all paths
+  for (int i = 0; i < warmup_iterations; i++) {
+    shared_dlrm_ranker->infer(1, args.dlrm_batch_size_arg);
+  }
+  std::cout << "DLRM warmup complete (" << warmup_iterations << " iterations)" << std::endl;
 
   feedsim::FeedSimServer server(args.port_arg);
   server.setThreadStartupCallback([&](int thread_id) {
-#ifdef FEEDSIM_USE_DLRM
     return ThreadStartup(
         thread_id,
         thread_data,
-        params,
         cpuThreadPool,
         srvCPUThreadPool,
         ioThreadPool,
         srEventBasePool,
         timekeeperPool,
         shared_dlrm_ranker);
-#else
-    return ThreadStartup(
-        thread_id,
-        thread_data,
-        params,
-        cpuThreadPool,
-        srvCPUThreadPool,
-        ioThreadPool,
-        srEventBasePool,
-        timekeeperPool);
-#endif
   });
 
-  // Choose request handler based on async_io flag
-  if (args.async_io_given) {
-    std::cout << "Using ASYNC (non-blocking) I/O mode - eliminates thread starvation" << std::endl;
-    std::cout << "  I/O latency distribution: " << args.io_latency_distribution_arg << std::endl;
-    std::cout << "  I/O latency mean: " << args.io_latency_mean_ms_arg << " ms" << std::endl;
-    if (std::string(args.io_latency_distribution_arg) == "lognormal") {
-      std::cout << "  I/O latency stddev: " << args.io_latency_stddev_ms_arg << " ms" << std::endl;
-    }
-    if (args.io_stages_arg > 1) {
-      std::cout << "  I/O stages: " << args.io_stages_arg << " x " << args.io_stage_latency_ms_arg << " ms" << std::endl;
-    }
-
-    server.registerQueryCallback(
-        ranking::kPageRankRequestType,
-        [&thread_data](int thread_id, feedsim::RequestContext& context) {
-          return AsyncPageRankRequestHandler(thread_id, context, thread_data);
-        });
-  } else {
-    std::cout << "Using BLOCKING I/O mode (original behavior)" << std::endl;
-    server.registerQueryCallback(
-        ranking::kPageRankRequestType,
-        [&thread_data](int thread_id, feedsim::RequestContext& context) {
-          return PageRankRequestHandler(thread_id, context, thread_data);
-        });
-  }
-
-#ifdef FEEDSIM_USE_DLRM
-  // Register DLRM request handler for client-side features and/or Silesia stories
-  // Always register when DLRM is compiled in — the handler handles both
-  // DLRM inference and story-only requests gracefully.
+  // Register DLRM request handler for client-side features and/or Silesia stories.
+  // The handler handles both DLRM inference and story-only requests gracefully.
   std::cout << "Registering DLRM request handler (client features / stories)" << std::endl;
   server.registerQueryCallback(
       ranking::kDLRMRequestType,
       [&thread_data](int thread_id, feedsim::RequestContext& context) {
         return DLRMRequestHandler(thread_id, context, thread_data);
       });
-#endif
 
   // Phase 6: register the 5 production-shaped inbound methods, each
   // wired to its real per-method handler (replaces the Phase 4 shims).
