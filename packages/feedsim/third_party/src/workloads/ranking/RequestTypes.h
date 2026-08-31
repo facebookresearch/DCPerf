@@ -19,11 +19,7 @@
 
 namespace ranking {
 
-// Legacy request types — Phase 6 deletes these.
-// Request type for PageRank/DLRM with server-side feature generation
-static const int kPageRankRequestType = 0;
-
-// Request type for DLRM with client-side feature generation (Phase 7)
+// Request type for DLRM ranking requests (non-session mode).
 static const int kDLRMRequestType = 1;
 
 // Phase 4: production-shaped multifeed aggregator inbound methods. Type
