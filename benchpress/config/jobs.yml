@@ -468,93 +468,32 @@
   benchmark: feedsim_autoscale
   description: >
     Single-instance aggregator workload with DLRM (Deep Learning Recommendation
-    Model) inference. Same calibration as feedsim_autoscale_dlrm but pinned
-    to ONE feedsim instance per host (overrides the autoscale "100 cores per
-    instance" rule). Single-instance runs give better gen-over-gen correlation
-    than multi-instance — there's no cross-instance mock_services queue contention
-    and no per-instance core-range fragmentation. Use this for cross-platform CPU
-    comparisons; use feedsim_autoscale_dlrm for max-throughput experiments on big
-    multi-instance boxes. Finds maximum QPS that the system can sustain while
-    keeping 95th percentile latency <= 700ms.
+    Model) inference. Pinned to ONE feedsim instance per host for cross-platform
+    CPU comparisons (better gen-over-gen correlation than multi-instance — no
+    cross-instance mock_services queue contention or core-range fragmentation).
+    The calibrated recipe is baked into run.sh / LeafNodeRank defaults; only the
+    single-instance override and driver depth are set here. Use
+    feedsim_autoscale_dlrm for max-throughput multi-instance runs, or
+    feedsim_dlrm_custom to override any parameter. Finds maximum QPS the system
+    sustains while keeping 95th percentile latency <= 700ms.
   args:
-    - '-n {num_instances}'
-    - '--async-io'
-    - '--io-dist={io_dist}'
-    - '--io-mean={io_mean}'
-    - '--dlrm-model={dlrm_model}'
-    - '--dlrm-batch-size={dlrm_batch_size}'
-    - '--dlrm-threads={dlrm_threads}'
-    - '--dlrm-inferences={dlrm_inferences}'
-    - '--client-side-features={client_side_features}'
-    - '--client-batch-size={client_batch_size}'
-    - '--client-inferences={client_inferences}'
-    - '--client-feature-seed={client_feature_seed}'
-    - '--client-num-dense={client_num_dense}'
-    - '--client-num-sparse={client_num_sparse}'
-    - '--feature-extractors'
-    - '--feature-complexity={feature_complexity}'
-    - '--num-stories={num_stories}'
-    - '--extractors-per-story={extractors_per_story}'
-    - '--story-processors-per-story={story_processors_per_story}'
-    - '--stories-per-processor-pass={stories_per_processor_pass}'
-    - '--silesia-dir={silesia_dir}'
-    - '--stories-per-request={stories_per_request}'
-    # Calibration knobs.
-    - '--mock-tls={mock_tls}'
-    - '--mock-zstd-frac={mock_zstd_frac}'
-    - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
-    - '--rpc-fanout-scale={rpc_fanout_scale}'
-    - '--server-zstd={server_zstd}'
-    - '--sla-p95-ms={sla_p95_ms}'
+    - '-n 1'
     - '--depth={depth}'
     - '{extra_args}'
   vars:
-    # Hardcode num_instances=1: this job exists specifically for single-instance
-    # cross-platform comparisons. If you want autoscale-by-cores, use
-    # feedsim_autoscale_dlrm instead.
-    - 'num_instances=1'
-    - 'io_dist=fixed'
-    - 'io_mean=200'
-    - 'dlrm_model=models/dlrm_small.pt'
-    # Calibrated recipe: minimizes all-metrics RMSE vs production (uArch +
-    # instruction mix + hot-function) while preserving gen-over-gen ranking
-    # across platforms. Pairs with the integer-domain feature-extractor helpers
-    # + memory-streaming stride-sweep (N=16, code default) earlier in this stack.
-    - 'dlrm_batch_size=32'
-    - 'dlrm_threads=1'
-    - 'dlrm_inferences=1'
-    - 'client_side_features=0'
-    - 'client_batch_size=256'
-    - 'client_inferences=64'
-    - 'client_feature_seed=42'
-    - 'client_num_dense=13'
-    - 'client_num_sparse=26'
-    - 'feature_complexity=8'
-    - 'num_stories=400'
-    - 'extractors_per_story=240'
-    - 'story_processors_per_story=2'
-    - 'stories_per_processor_pass=150'
-    - 'silesia_dir=silesia'
-    - 'stories_per_request=10'
-    - 'mock_tls=1'
-    - 'mock_zstd_frac=0.9'
-    - 'mock_keepalive_interval_ms=200'
-    - 'rpc_fanout_scale=0.10'
-    - 'server_zstd=1'
-    - 'sla_p95_ms=700'
     # Driver pipeline depth (max outstanding requests per driver connection).
-    # Default 1. Raise (e.g. 2) if the final phase saturates neither CPU nor SLA
-    # latency (final p95 well below sla_p95_ms while CPU util < ~90%) — often
-    # needed on high-perf ARM cores. With adaptive depth on (the default), this is
-    # the starting floor the peak search raises from; see README "Driver depth".
+    # Raise (e.g. 2) if the final phase saturates neither CPU nor the SLA latency
+    # (final p95 well below sla_p95_ms while CPU util < ~90%) — often needed on
+    # high-perf ARM cores. With adaptive depth on (the default), this is the
+    # starting floor the peak search raises from; see README "Driver depth".
     - 'depth=1'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
       options:
         args:
-          - '-u'   # utilization
-          - '1'    # second interval
+          - '-u'
+          - '1'
     - hook: copymove
       options:
         is_move: true
@@ -568,35 +507,14 @@
 - name: feedsim_dlrm_mini
   benchmark: feedsim_autoscale
   description: >
-    DCPerf Mini variant of feedsim_dlrm, for pre-silicon emulation,
-    regression testing and machine health checks. Same single-instance DLRM
-    aggregator workload as feedsim_dlrm; only the run control differs. Skips
-    warmup and the QPS search and instead drives a fixed load for a short
-    fixed window, reporting the QPS the server sustains. Override fixed_qps
-    to drive a specific rate instead of saturating the server.
+    DCPerf Mini variant of feedsim_dlrm, for pre-silicon emulation, regression
+    testing and machine health checks. Same single-instance DLRM aggregator
+    workload as feedsim_dlrm (calibrated recipe baked into defaults); only the
+    run control differs — it skips warmup and the QPS search and instead drives a
+    fixed load for a short fixed window, reporting the QPS the server sustains.
+    Override fixed_qps to drive a specific rate instead of saturating the server.
   args:
-    - '-n {num_instances}'
-    - '--async-io'
-    - '--io-dist={io_dist}'
-    - '--io-mean={io_mean}'
-    - '--dlrm-model={dlrm_model}'
-    - '--dlrm-batch-size={dlrm_batch_size}'
-    - '--dlrm-threads={dlrm_threads}'
-    - '--dlrm-inferences={dlrm_inferences}'
-    - '--client-side-features={client_side_features}'
-    - '--client-batch-size={client_batch_size}'
-    - '--client-inferences={client_inferences}'
-    - '--client-feature-seed={client_feature_seed}'
-    - '--client-num-dense={client_num_dense}'
-    - '--client-num-sparse={client_num_sparse}'
-    - '--feature-extractors'
-    - '--feature-complexity={feature_complexity}'
-    - '--num-stories={num_stories}'
-    - '--extractors-per-story={extractors_per_story}'
-    - '--story-processors-per-story={story_processors_per_story}'
-    - '--stories-per-processor-pass={stories_per_processor_pass}'
-    - '--silesia-dir={silesia_dir}'
-    - '--stories-per-request={stories_per_request}'
+    - '-n 1'
     - '-t {thrift_threads}'
     - '-q {fixed_qps}'
     - '-d {fixed_qps_duration}'
@@ -607,34 +525,8 @@
     - '-R {node_rank_seed}'
     - '-C {pointer_chase_seed}'
     - '-N'
-    - '--mock-tls={mock_tls}'
-    - '--mock-zstd-frac={mock_zstd_frac}'
-    - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
-    - '--rpc-fanout-scale={rpc_fanout_scale}'
-    - '--server-zstd={server_zstd}'
-    - '--sla-p95-ms={sla_p95_ms}'
     - '{extra_args}'
   vars:
-    - 'num_instances=1'
-    - 'io_dist=fixed'
-    - 'io_mean=200'
-    - 'dlrm_model=models/dlrm_small.pt'
-    - 'dlrm_batch_size=64'
-    - 'dlrm_threads=1'
-    - 'dlrm_inferences=1'
-    - 'client_side_features=0'
-    - 'client_batch_size=256'
-    - 'client_inferences=64'
-    - 'client_feature_seed=42'
-    - 'client_num_dense=13'
-    - 'client_num_sparse=26'
-    - 'feature_complexity=5'
-    - 'num_stories=400'
-    - 'extractors_per_story=280'
-    - 'story_processors_per_story=2'
-    - 'stories_per_processor_pass=100'
-    - 'silesia_dir=silesia'
-    - 'stories_per_request=10'
     - 'thrift_threads=0'
     - 'fixed_qps=100000'
     - 'fixed_qps_duration=20'
@@ -644,12 +536,6 @@
     - 'queue_drain_time=1'
     - 'node_rank_seed=54321'
     - 'pointer_chase_seed=98765'
-    - 'mock_tls=1'
-    - 'mock_zstd_frac=0.75'
-    - 'mock_keepalive_interval_ms=200'
-    - 'rpc_fanout_scale=0.05'
-    - 'server_zstd=0'
-    - 'sla_p95_ms=700'
     - 'extra_args='
   hooks:
     - hook: copymove
@@ -665,96 +551,25 @@
 - name: feedsim_autoscale_dlrm
   benchmark: feedsim_autoscale
   description: >
-    Multi-instance aggregator workload with DLRM (Deep Learning Recommendation Model)
-    inference. Defaults bake in the balanced calibration that minimizes both
-    the gen-over-gen correlation gap AND the bench-vs-prod hot-function gap.
-    Finds maximum QPS that the system can sustain while keeping 95th percentile
-    latency <= 700ms.
-    Automatically spawns one workload instance per ~100 cores.
+    Multi-instance aggregator workload with DLRM (Deep Learning Recommendation
+    Model) inference. Automatically spawns one workload instance per ~100 cores.
+    The calibrated recipe (minimizes both the gen-over-gen correlation gap and the
+    bench-vs-prod hot-function gap) is baked into run.sh / LeafNodeRank defaults;
+    only driver depth is set here. Finds maximum QPS the system sustains while
+    keeping 95th percentile latency <= 700ms.
   args:
-    - '-n {num_instances}'
-    - '--async-io'
-    - '--io-dist={io_dist}'
-    - '--io-mean={io_mean}'
-    - '--dlrm-model={dlrm_model}'
-    - '--dlrm-batch-size={dlrm_batch_size}'
-    - '--dlrm-threads={dlrm_threads}'
-    - '--dlrm-inferences={dlrm_inferences}'
-    - '--client-side-features={client_side_features}'
-    - '--client-batch-size={client_batch_size}'
-    - '--client-inferences={client_inferences}'
-    - '--client-feature-seed={client_feature_seed}'
-    - '--client-num-dense={client_num_dense}'
-    - '--client-num-sparse={client_num_sparse}'
-    - '--feature-extractors'
-    - '--feature-complexity={feature_complexity}'
-    - '--num-stories={num_stories}'
-    - '--extractors-per-story={extractors_per_story}'
-    - '--story-processors-per-story={story_processors_per_story}'
-    - '--stories-per-processor-pass={stories_per_processor_pass}'
-    - '--silesia-dir={silesia_dir}'
-    - '--stories-per-request={stories_per_request}'
-    # Calibration knobs
-    - '--mock-tls={mock_tls}'
-    - '--mock-zstd-frac={mock_zstd_frac}'
-    - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
-    - '--rpc-fanout-scale={rpc_fanout_scale}'
-    - '--server-zstd={server_zstd}'
-    - '--sla-p95-ms={sla_p95_ms}'
     - '--depth={depth}'
     - '{extra_args}'
   vars:
-    - 'num_instances=-1'
-    - 'io_dist=fixed'
-    - 'io_mean=200'
-    - 'dlrm_model=models/dlrm_small.pt'
-    # Calibrated recipe: minimizes all-metrics RMSE vs production (uArch +
-    # instruction mix + hot-function). bs=32 (with the integer-domain extractor
-    # helpers + stride-sweep earlier in this stack) raises SIMD toward prod and,
-    # at eps=240, preserves gen-over-gen ranking across platforms.
-    - 'dlrm_batch_size=32'
-    - 'dlrm_threads=1'
-    - 'dlrm_inferences=1'
-    - 'client_side_features=0'
-    - 'client_batch_size=256'
-    - 'client_inferences=64'
-    - 'client_feature_seed=42'
-    - 'client_num_dense=13'
-    - 'client_num_sparse=26'
-    - 'feature_complexity=8'
-    # 400 x 240 = 96K extractor calls/req. eps=240 holds Ranking-FeatureExtraction
-    # near the production share; the integer-domain helpers made each call cheaper.
-    - 'num_stories=400'
-    - 'extractors_per_story=240'
-    # Story-processor pipeline: 2 passes * 150 stories = 300 comparisons/story,
-    # target a production-like Ranking-Story share.
-    - 'story_processors_per_story=2'
-    - 'stories_per_processor_pass=150'
-    - 'silesia_dir=silesia'
-    - 'stories_per_request=10'
-    # TLS+keepalive on mock_services; mock_zstd_frac=0.9 + server_zstd=1 land
-    # Compression near the production share; rpc_fanout_scale=0.10 lands
-    # RPC-AsyncIO near production. DRIVER_TLS stays off (default): it overshoots
-    # Encryption without moving throughput.
-    - 'mock_tls=1'
-    - 'mock_zstd_frac=0.9'
-    - 'mock_keepalive_interval_ms=200'
-    - 'rpc_fanout_scale=0.10'
-    - 'server_zstd=1'
-    - 'sla_p95_ms=700'
-    # Driver pipeline depth (max outstanding requests per driver connection).
-    # Default 1. Raise (e.g. 2) if the final phase saturates neither CPU nor SLA
-    # latency (final p95 well below sla_p95_ms while CPU util < ~90%) — often
-    # needed on high-perf ARM cores. With adaptive depth on (the default), this is
-    # the starting floor the peak search raises from; see README "Driver depth".
+    # See feedsim_dlrm for depth guidance; often raised on high-perf ARM cores.
     - 'depth=1'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
       options:
         args:
-          - '-u'   # utilization
-          - '1'    # second interval
+          - '-u'
+          - '1'
     - hook: copymove
       options:
         is_move: true
@@ -765,40 +580,31 @@
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
 
-- name: feedsim_autoscale_dlrm_mini
+- name: feedsim_dlrm_custom
   benchmark: feedsim_autoscale
   description: >
-    DLRM aggregator workload mini version. Configured with a fixed QPS
-    for quick validation runs. Uses DLRM inference instead of PageRank
-    with async I/O mode.
+    Advanced/customizable single-instance DLRM aggregator run. Identical default
+    behavior to feedsim_dlrm, but every calibrated parameter is exposed here as an
+    explicit var so it can be overridden with -i without editing run.sh. Use this
+    for parameter sweeps and one-off experiments; use feedsim_dlrm or
+    feedsim_autoscale_dlrm for the standard calibrated runs.
   args:
     - '-n {num_instances}'
-    - '--async-io'
+    - '--async-io={async_io}'
     - '--io-dist={io_dist}'
     - '--io-mean={io_mean}'
     - '--dlrm-model={dlrm_model}'
     - '--dlrm-batch-size={dlrm_batch_size}'
     - '--dlrm-threads={dlrm_threads}'
     - '--dlrm-inferences={dlrm_inferences}'
-    - '--client-side-features={client_side_features}'
-    - '--client-batch-size={client_batch_size}'
-    - '--client-inferences={client_inferences}'
-    - '--client-feature-seed={client_feature_seed}'
-    - '--client-num-dense={client_num_dense}'
-    - '--client-num-sparse={client_num_sparse}'
-    - '--feature-extractors'
+    - '--feature-extractors={feature_extractors}'
     - '--feature-complexity={feature_complexity}'
     - '--num-stories={num_stories}'
     - '--extractors-per-story={extractors_per_story}'
-    - '-q {fixed_qps}'
-    - '-d {fixed_qps_duration}'
-    - '-w {warmup_time}'
-    - '-r {qps_percentage_threshold}'
-    - '-x {max_warmup_iterations}'
-    - '-D {queue_drain_time}'
-    - '-R {node_rank_seed}'
-    - '-C {pointer_chase_seed}'
-    - '-N'
+    - '--story-processors-per-story={story_processors_per_story}'
+    - '--stories-per-processor-pass={stories_per_processor_pass}'
+    - '--silesia-dir={silesia_dir}'
+    - '--stories-per-request={stories_per_request}'
     - '--mock-tls={mock_tls}'
     - '--mock-zstd-frac={mock_zstd_frac}'
     - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
@@ -808,45 +614,36 @@
     - '--depth={depth}'
     - '{extra_args}'
   vars:
-    - 'num_instances=-1'
+    - 'num_instances=1'
+    - 'async_io=1'
     - 'io_dist=fixed'
     - 'io_mean=200'
     - 'dlrm_model=models/dlrm_small.pt'
-    - 'dlrm_batch_size=64'
+    - 'dlrm_batch_size=32'
     - 'dlrm_threads=1'
-    - 'dlrm_inferences=8'
-    - 'client_side_features=0'
-    - 'client_batch_size=256'
-    - 'client_inferences=64'
-    - 'client_feature_seed=42'
-    - 'client_num_dense=13'
-    - 'client_num_sparse=26'
-    - 'feature_complexity=5'
-    - 'num_stories=1800'
-    - 'extractors_per_story=50'
-    - 'fixed_qps=100000'
-    - 'fixed_qps_duration=10'
-    - 'warmup_time=5'
-    - 'qps_percentage_threshold=-1'
-    - 'max_warmup_iterations=-1'
-    - 'queue_drain_time=1'
-    - 'node_rank_seed=54321'
-    - 'pointer_chase_seed=98765'
-    # mock_services + TLS knobs (same baseline as feedsim_autoscale_dlrm)
+    - 'dlrm_inferences=1'
+    - 'feature_extractors=1'
+    - 'feature_complexity=8'
+    - 'num_stories=400'
+    - 'extractors_per_story=240'
+    - 'story_processors_per_story=2'
+    - 'stories_per_processor_pass=150'
+    - 'silesia_dir=silesia'
+    - 'stories_per_request=10'
     - 'mock_tls=1'
-    - 'mock_zstd_frac=0.75'
+    - 'mock_zstd_frac=0.9'
     - 'mock_keepalive_interval_ms=200'
-    - 'rpc_fanout_scale=0.05'
-    - 'server_zstd=0'
+    - 'rpc_fanout_scale=0.10'
+    - 'server_zstd=1'
     - 'sla_p95_ms=700'
-    # Driver pipeline depth (max outstanding requests per driver connection).
-    # Default 1. Raise (e.g. 2) if the final phase saturates neither CPU nor SLA
-    # latency (final p95 well below sla_p95_ms while CPU util < ~90%) — often
-    # needed on high-perf ARM cores. With adaptive depth on (the default), this is
-    # the starting floor the peak search raises from; see README "Driver depth".
     - 'depth=1'
     - 'extra_args='
   hooks:
+    - hook: cpu-mpstat
+      options:
+        args:
+          - '-u'
+          - '1'
     - hook: copymove
       options:
         is_move: true

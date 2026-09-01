@@ -83,35 +83,29 @@ Usage: ${0##*/} [OPTION]...
     -R Seed for LeafNodeRank random number generator. If not provided, current time will be used.
     -C Seed for PointerChase random number generator. If not provided, current time will be used.
     --dlrm-model Path to DLRM TorchScript model file (.pt).
-    --dlrm-batch-size DLRM batch size for inference. Default: 256
-    --dlrm-inferences Number of DLRM inference calls per request. Default: 64
+    --dlrm-batch-size DLRM batch size for inference. Default: 32
+    --dlrm-inferences Number of DLRM inference calls per request. Default: 1
     --dlrm-threads Number of LibTorch threads for DLRM inference. Default: 1
-    --async-io Enable async (non-blocking) I/O mode. Eliminates thread starvation on high-core CPUs.
+    --async-io Async (non-blocking) I/O mode; eliminates thread starvation on high-core CPUs. On by default; pass --async-io=0 to disable.
     --io-dist I/O latency distribution: 'fixed' (default), 'exponential', or 'lognormal'.
     --io-mean Mean I/O latency in milliseconds. Default: 200
     --io-stddev I/O latency standard deviation in ms (for lognormal distribution). Default: 50
     --io-stages Number of I/O stages to simulate (models multi-hop data fetching). Default: 1
     --io-stage-latency Latency per I/O stage in ms (when --io-stages > 1). Default: 50
-    --feature-extractors Enable feature extraction pipeline before ranking inference.
-    --feature-complexity Complexity level for feature extractors (1-10). Default: 5
-    --num-stories Number of stories to process per request. Default: 100
-    --extractors-per-story Number of extractors per story. Default: 50
-    --silesia-dir Path to Silesia corpus directory for story-based requests. Default: auto-detect in benchmarks/feedsim/silesia/
+    --feature-extractors Feature extraction pipeline before ranking inference. On by default; pass --feature-extractors=0 to disable.
+    --feature-complexity Complexity level for feature extractors (1-10). Default: 8
+    --num-stories Number of stories to process per request. Default: 400
+    --extractors-per-story Number of extractors per story. Default: 240
+    --silesia-dir Path to Silesia corpus directory for story-based requests. Default: silesia (resolved under the feedsim root).
     --stories-per-request Number of story snippets per request. Default: 10
     --story-size-min Minimum story snippet size in bytes. Default: 1024
     --story-size-max Maximum story snippet size in bytes. Default: 4096
     --req-size-dist Path to JSON file with request size percentile distribution. Auto-detect: feed_aggregator_req_sizes.json next to run.sh.
-    --client-side-features Enable client-side DLRM feature generation (0=disabled, non-zero=enabled). Default: 0
-    --client-batch-size Batch size for client-side feature generation. Default: 256
-    --client-inferences Number of DLRM inferences per request (client-side). Default: 1
-    --client-feature-seed Seed for client feature generation. Default: 42. Use -1 for random.
-    --client-num-dense Number of dense features per sample (client-side). Default: 13
-    --client-num-sparse Number of sparse features per sample (client-side). Default: 26
     --mock-tls Enable TLS on outbound MockServicesClient channels (0=off, 1=on). Default: 1.
-    --mock-zstd-frac Fraction in [0.0, 1.0] of MockServicesClient channels with ZSTD enabled. Default: 0.75.
+    --mock-zstd-frac Fraction in [0.0, 1.0] of MockServicesClient channels with ZSTD enabled. Default: 0.9.
     --mock-keepalive-interval-ms Per-MockServicesClient keepalive ping interval (ms). 0=disabled. Default: 200.
-    --rpc-fanout-scale Scale factor applied to per-session fanout counts. Default: 0.05.
-    --server-zstd Enable ZSTD compression on server-side response payloads (0=off, 1=on). Default: 0.
+    --rpc-fanout-scale Scale factor applied to per-session fanout counts. Default: 0.10.
+    --server-zstd Enable ZSTD compression on server-side response payloads (0=off, 1=on). Default: 1.
     --sla-p95-ms search_qps SLA target (95th percentile latency in ms). Default: 700.
     --depth Driver pipeline depth: max outstanding requests per driver connection (max in-flight = driver_threads * connections * depth). Default: 1 (or \$FEEDSIM_DRIVER_DEPTH). Raise (e.g. 2) when the final phase saturates neither CPU nor SLA latency; with adaptive depth on, this is the starting floor the peak search raises from.
 EOF
@@ -185,20 +179,20 @@ main() {
 
     # DLRM options
     local dlrm_model_path
-    dlrm_model_path=""
+    dlrm_model_path="models/dlrm_small.pt"
 
     local dlrm_batch_size
-    dlrm_batch_size="256"
+    dlrm_batch_size="32"
 
     local dlrm_inferences_per_request
-    dlrm_inferences_per_request="64"
+    dlrm_inferences_per_request="1"
 
     local dlrm_threads
     dlrm_threads="1"
 
     # Phase 3: Async I/O options
     local async_io
-    async_io=""
+    async_io="1"
 
     local io_latency_distribution
     io_latency_distribution="fixed"
@@ -215,28 +209,9 @@ main() {
     local io_stage_latency_ms
     io_stage_latency_ms="50"
 
-    # Client-side DLRM feature options (Phase 7)
-    local client_side_features
-    client_side_features="0"
-
-    local client_batch_size
-    client_batch_size="256"
-
-    local client_inferences
-    client_inferences="1"
-
-    local client_feature_seed
-    client_feature_seed="42"
-
-    local client_num_dense
-    client_num_dense="13"
-
-    local client_num_sparse
-    client_num_sparse="26"
-
     # Silesia corpus options
     local silesia_dir
-    silesia_dir=""
+    silesia_dir="silesia"
 
     local stories_per_request
     stories_per_request="10"
@@ -253,22 +228,22 @@ main() {
 
     # Feature extraction options
     local feature_extractors
-    feature_extractors=""
+    feature_extractors="1"
 
     local feature_complexity
-    feature_complexity="5"
+    feature_complexity="8"
 
     local num_stories
-    num_stories="100"
+    num_stories="400"
 
     local extractors_per_story
-    extractors_per_story="50"
+    extractors_per_story="240"
 
     local story_processors_per_story
-    story_processors_per_story="0"
+    story_processors_per_story="2"
 
     local stories_per_processor_pass
-    stories_per_processor_pass="50"
+    stories_per_processor_pass="150"
 
     # Calibration knobs — promoted from env vars to CLI flags so they
     # are visible in --help and surfaced in jobs.yml.
@@ -276,16 +251,16 @@ main() {
     mock_tls="1"
 
     local mock_zstd_frac
-    mock_zstd_frac="0.75"
+    mock_zstd_frac="0.9"
 
     local mock_keepalive_interval_ms
     mock_keepalive_interval_ms="200"
 
     local rpc_fanout_scale
-    rpc_fanout_scale="0.05"
+    rpc_fanout_scale="0.10"
 
     local server_zstd
-    server_zstd="0"
+    server_zstd="1"
 
     local sla_p95_ms
     sla_p95_ms="700"
@@ -400,6 +375,14 @@ main() {
             --async-io)
                 async_io="1"
                 ;;
+            --async-io=*)
+                local val="${1#*=}"
+                if [ "$val" != "0" ] && [ -n "$val" ]; then
+                    async_io="1"
+                else
+                    async_io=""
+                fi
+                ;;
             --io-dist)
                 io_latency_distribution="$2"
                 shift
@@ -434,48 +417,6 @@ main() {
                 ;;
             --io-stage-latency=*)
                 io_stage_latency_ms="${1#*=}"
-                ;;
-            --client-side-features)
-                client_side_features="$2"
-                shift
-                ;;
-            --client-side-features=*)
-                client_side_features="${1#*=}"
-                ;;
-            --client-batch-size)
-                client_batch_size="$2"
-                shift
-                ;;
-            --client-batch-size=*)
-                client_batch_size="${1#*=}"
-                ;;
-            --client-inferences)
-                client_inferences="$2"
-                shift
-                ;;
-            --client-inferences=*)
-                client_inferences="${1#*=}"
-                ;;
-            --client-feature-seed)
-                client_feature_seed="$2"
-                shift
-                ;;
-            --client-feature-seed=*)
-                client_feature_seed="${1#*=}"
-                ;;
-            --client-num-dense)
-                client_num_dense="$2"
-                shift
-                ;;
-            --client-num-dense=*)
-                client_num_dense="${1#*=}"
-                ;;
-            --client-num-sparse)
-                client_num_sparse="$2"
-                shift
-                ;;
-            --client-num-sparse=*)
-                client_num_sparse="${1#*=}"
                 ;;
             --silesia-dir)
                 silesia_dir="$2"
@@ -519,6 +460,8 @@ main() {
                 local val="${1#*=}"
                 if [ "$val" != "0" ] && [ -n "$val" ]; then
                     feature_extractors="1"
+                else
+                    feature_extractors=""
                 fi
                 ;;
             --feature-complexity)
@@ -653,14 +596,6 @@ main() {
 
     dlrm_opts="--dlrm_model_path=$dlrm_model_path --dlrm_batch_size=$dlrm_batch_size --dlrm_inferences_per_request=$dlrm_inferences_per_request --dlrm_threads=$dlrm_threads"
     echo "Using DLRM workload with model: $dlrm_model_path"
-    if [ "$client_side_features" != "0" ]; then
-        echo "  Client-side feature generation: ENABLED"
-        echo "    Batch size: $client_batch_size"
-        echo "    Inferences: $client_inferences"
-        echo "    Seed: $client_feature_seed"
-        echo "    Dense features: $client_num_dense"
-        echo "    Sparse features: $client_num_sparse"
-    fi
 
     # Set LD_LIBRARY_PATH for LibTorch if needed
     if [ -d "${FEEDSIM_ROOT}/third_party/libtorch/lib" ]; then
@@ -896,11 +831,6 @@ main() {
         qps_threshold_args="-r $qps_threshold -x $max_warmup_iterations"
     fi
 
-    # Build client-side feature options for DriverNodeRank
-    local client_feature_opts=""
-    if [ "$client_side_features" != "0" ]; then
-        client_feature_opts="--client_side_features --client_dlrm_batch_size=$client_batch_size --client_dlrm_inferences=$client_inferences --client_feature_seed=$client_feature_seed --client_num_dense_features=$client_num_dense --client_num_sparse_features=$client_num_sparse"
-    fi
 
     # Build Silesia story options for DriverNodeRank (silesia_dir already
     # resolved earlier).
@@ -967,7 +897,6 @@ main() {
                 --threads="${driver_threads}" \
                 --connections=4 \
                 --depth="${driver_depth}" \
-                $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
         benchreps_tell_state "after search_qps"
@@ -980,7 +909,6 @@ main() {
                 --monitor_port "$client_monitor_port" \
                 --server "0.0.0.0:$port" \
                 --depth="${driver_depth}" \
-                $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
         benchreps_tell_state "after search_qps"
@@ -1009,7 +937,6 @@ main() {
                 --threads="${num_workers}" \
                 --connections="${num_connections}" \
                 --depth="${driver_depth}" \
-                $client_feature_opts \
                 $silesia_opts \
                 $req_size_opts
         benchreps_tell_state "after fixed_qps_exp"

@@ -66,6 +66,18 @@ to be around 30 minutes.
 Please make sure to turn CPU turbo-boost on before starting, or FeedSim may
 fail to converge and report a low QPS.
 
+On **high-performance ARM cores** the default driver depth (`depth=1`) often
+caps the offered load below what the server can sustain — the run can finish
+with CPU at only 80–90% and p95 latency well under the SLA, understating the
+hardware's true capacity. In that case, rerun with `depth=2`:
+
+```
+./benchpress_cli.py run feedsim_dlrm -i '{"depth": 2}'
+```
+
+See [Driver depth](#driver-depth-fixing-cpulatency-under-utilization) for
+details on when and how to tune this.
+
 ### Result report
 
 After the run finishes, benchpress prints a JSON result. Example from a
@@ -75,34 +87,7 @@ After the run finishes, benchpress prints a JSON result. Example from a
 {
   "benchmark_args": [
     "-n 1",
-    "--async-io",
-    "--io-dist=fixed",
-    "--io-mean=200",
-    "--workload=dlrm",
-    "--dlrm-model=models/dlrm_small.pt",
-    "--dlrm-batch-size=64",
-    "--dlrm-threads=1",
-    "--dlrm-inferences=1",
-    "--client-side-features=0",
-    "--client-batch-size=256",
-    "--client-inferences=64",
-    "--client-feature-seed=42",
-    "--client-num-dense=13",
-    "--client-num-sparse=26",
-    "--feature-extractors",
-    "--feature-complexity=5",
-    "--num-stories=400",
-    "--extractors-per-story=280",
-    "--story-processors-per-story=2",
-    "--stories-per-processor-pass=100",
-    "--silesia-dir=silesia",
-    "--stories-per-request=10",
-    "--mock-tls=1",
-    "--mock-zstd-frac=0.75",
-    "--mock-keepalive-interval-ms=200",
-    "--rpc-fanout-scale=0.05",
-    "--server-zstd=0",
-    "--sla-p95-ms=700"
+    "--depth=1"
   ],
   "benchmark_name": "feedsim_dlrm",
   "machines": [
@@ -149,6 +134,15 @@ After the run finishes, benchpress prints a JSON result. Example from a
   "timestamp": 1782368295
 }
 ```
+
+`benchmark_args` lists only the arguments the job sets explicitly (`-n 1`
+for single-instance, plus the driver `--depth`). The full calibrated recipe —
+DLRM batch size, feature-extractor/story-processor settings, mock_services
+RPC fanout, ZSTD fractions, etc. — is baked into the defaults of `run.sh`
+and the `LeafNodeRank` command line, so it no longer appears here. To inspect
+those defaults run `./benchmarks/feedsim/run.sh -h`, and to override any of
+them use the [`feedsim_dlrm_custom`](#customized-runs--feedsim_dlrm_custom)
+job.
 
 Key fields are in `metrics.overall`:
 
@@ -276,49 +270,69 @@ adaptive depth is on, a manually-set `depth` acts as the starting floor the
 adaptive search raises from; to pin an exact fixed depth, also set the
 `FEEDSIM_ADAPTIVE_DEPTH_MAX=0` environment variable to disable adaptive search.
 
+### Customized runs — `feedsim_dlrm_custom`
+
+`feedsim_dlrm` and `feedsim_autoscale_dlrm` intentionally expose only a couple
+of knobs (`num_instances`, `depth`); the rest of the calibrated recipe is baked
+into the `run.sh` / `LeafNodeRank` defaults so that standard runs are directly
+comparable across platforms. For parameter sweeps and one-off experiments,
+`feedsim_dlrm_custom` runs the *same* workload with identical defaults but
+surfaces every calibrated parameter as an explicit var you can override with
+`-i` — no need to edit `run.sh`:
+
+```
+./benchpress_cli.py run feedsim_dlrm_custom -i '{"dlrm_batch_size": "64", "server_zstd": "0"}'
+```
+
+The overridable vars and their (calibrated) defaults are listed in
+[Other parameters](#other-parameters) below. Use `feedsim_dlrm` or
+`feedsim_autoscale_dlrm` for the standard calibrated runs.
+
 ### Other parameters
 
-This section lists additional parameters in `feedsim_dlrm` benchmark. These parameters
-are carefully tuned to make the benchmark's performance characteristics closely match
-the ranking & aggregation systems in production, so we **do not** recommend you change
-them just for better performance, you should change them only for research purpose.
+This section lists the calibrated parameters of the DLRM workload. They are
+carefully tuned to make the benchmark's performance characteristics closely
+match the ranking & aggregation systems in production, so we **do not**
+recommend you change them just for better performance — change them only for
+research purposes.
 
-Job-level parameters (can be passed via `-i` flag in Benchpress CLI):
+These parameters are **baked into the `run.sh` / `LeafNodeRank` defaults**, so
+`feedsim_dlrm` and `feedsim_autoscale_dlrm` no longer accept them via `-i`
+(those jobs expose only `num_instances`, `depth`, and `extra_args`). To
+override any of them, use the [`feedsim_dlrm_custom`](#customized-runs--feedsim_dlrm_custom)
+job, where each is exposed as a var:
 
-| Var | Purpose | Default (`feedsim_dlrm`) |
+| Var | Purpose | Default |
 |---|---|---|
-| `num_instances` | Number of FeedSim instances to run in parallel. Defaults to 1 in `feedsim_dlrm`; set to -1 to autoscale for `feedsim_autoscale_dlrm`. | `1` |
+| `num_instances` | Number of FeedSim instances to run in parallel. `1` for `feedsim_dlrm`; `feedsim_autoscale_dlrm` autoscales to `ceil(nproc / 100)`. | `1` |
 | `sla_p95_ms` | SLA target in ms. The runner searches for the highest QPS keeping p95 ≤ this. | `700` |
 | `depth` | Driver pipeline depth (max outstanding requests per connection; total in-flight = `driver_threads × connections × depth`). Raise (e.g. `2`) when the final phase saturates neither CPU nor latency — often needed on high-perf ARM. See [Driver depth](#driver-depth-fixing-cpulatency-under-utilization). | `1` |
+| `async_io` | Async (non-blocking) I/O mode; eliminates thread starvation on high-core CPUs. Set `0` to disable. | `1` |
 | `io_dist` | I/O latency distribution: `fixed`, `exponential`, or `lognormal`. | `fixed` |
 | `io_mean` | Mean I/O latency in ms. | `200` |
-| `workload` | Ranking workload: `pagerank` or `dlrm`. `dlrm` is v2. | `dlrm` |
 | `dlrm_model` | Path to the TorchScript DLRM model (`.pt`). | `models/dlrm_small.pt` |
-| `dlrm_batch_size` | Batch size for DLRM inference. | `64` |
+| `dlrm_batch_size` | Batch size for DLRM inference. | `32` |
 | `dlrm_threads` | LibTorch intra-op thread count. | `1` |
 | `dlrm_inferences` | DLRM inference calls per request. | `1` |
-| `feature_complexity` | Complexity level (1–10) of the feature-extractor pipeline. Higher = more work per story. | `5` |
+| `feature_extractors` | Enable the feature-extraction pipeline before ranking inference. Set `0` to disable. | `1` |
+| `feature_complexity` | Complexity level (1–10) of the feature-extractor pipeline. Higher = more work per story. | `8` |
 | `num_stories` | Stories per request (server-side feature extraction). | `400` |
-| `extractors_per_story` | Feature extractors randomly selected per story. | `280` |
+| `extractors_per_story` | Feature extractors randomly selected per story. | `240` |
 | `story_processors_per_story` | Story-processor pipeline passes per story (0 disables). Mirrors prod scoring + filter + blend + serdes + topK. | `2` |
-| `stories_per_processor_pass` | MockStories per story-processor pass. | `100` |
+| `stories_per_processor_pass` | MockStories per story-processor pass. | `150` |
 | `stories_per_request` | Silesia snippet count per request. | `10` |
 | `mock_tls` | Enable TLS on outbound `MockServicesClient` channels. | `1` |
-| `mock_zstd_frac` | Fraction of `MockServicesClient` channels with ZSTD enabled. | `0.75` |
+| `mock_zstd_frac` | Fraction of `MockServicesClient` channels with ZSTD enabled. | `0.9` |
 | `mock_keepalive_interval_ms` | Keepalive ping interval per channel (0 disables). Defeats the cold-channel p95 cliff at low QPS. | `200` |
-| `rpc_fanout_scale` | Scale factor applied to per-session fanout counts. | `0.05` |
-| `server_zstd` | Enable ZSTD compression on server-side response payloads. | `0` |
-| `client_side_features` | Enable client-side DLRM feature generation. | `0` |
-| `silesia_dir` | Silesia corpus directory (auto-detected in benchmarks/feedsim/silesia/). | `silesia` |
+| `rpc_fanout_scale` | Scale factor applied to per-session fanout counts. | `0.10` |
+| `server_zstd` | Enable ZSTD compression on server-side response payloads. | `1` |
+| `silesia_dir` | Silesia corpus directory (resolved under the feedsim root). | `silesia` |
 | `extra_args` | Escape hatch — appended to the runner CLI verbatim. | `""` |
 
 Note:
 1. `io_dist` and `io_mean` will not actually be used in Feedsim V2, the actual
 RPC latency distribution is controlled by `rpc_dist.json`.
-2. Changing `workload` will not only change the type of ranking workload, but
-also change the entire request workflow. `dlrm` will use the new FeedSim v2
-path, whereas `pagerank` will use the legacy Feedsim V1 path.
-3. Meaning of `rpc_fanout_scale`: when it's 1, each request will fan out over 2000
+2. Meaning of `rpc_fanout_scale`: when it's 1, each request will fan out over 2000
 RPC requests to the mock_services (which is the average number of outbound RPC calls
 the ranking server will do for each incoming request). That will be too heavy for this
 benchmark, so we need to set this to a lower number.
@@ -332,7 +346,7 @@ Runner-level parameters (can be passed via `extra_args` parameter):
 | `-p <port>` | `LeafNodeRank` listen port. | `11222` |
 | `-N` | No-retry mode. Skip sleep and PID checking in load test startup. | off |
 | `-D <sec>` | Drain time after each experiment. | `5` |
-| `-R / -P / -C` | Seeds for LeafNodeRank / PageRank / PointerChase RNGs. | time-based |
+| `-R / -C` | Seeds for the LeafNodeRank / PointerChase RNGs. | time-based |
 | `-o <file>` | Result output filename. | `feedsim_results.txt` |
 
 For the full list of runner flags, see
