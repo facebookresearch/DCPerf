@@ -102,11 +102,11 @@ def _align(grouped_df, ev_a, ev_b):
 
 
 def _sum_cmn_event(grouped_df, event_suffix):
-    """Sum a CMN HN-S event across all chiplets (arm_cmn_0, arm_cmn_1, ...).
+    """Sum a CMN HN-S event across all mesh instances (arm_cmn_0, arm_cmn_1, ...).
 
-    CMN-Cypress exposes one arm_cmn_N PMU per chiplet. This helper aggregates
-    a given event across all discovered chiplets so metrics reflect the full
-    system-level cache.
+    Arm CMN exposes one arm_cmn_N PMU per mesh instance (one per die on
+    multi-die parts). This helper aggregates a given event across all
+    discovered mesh instances so metrics reflect the full system-level cache.
     """
     total = None
     for name, group in grouped_df:
@@ -119,4 +119,30 @@ def _sum_cmn_event(grouped_df, event_suffix):
                 total = total + vals
     if total is None:
         raise KeyError(event_suffix)
+    return total.reset_index(drop=True)
+
+
+def _sum_cspmu_config0(grouped_df):
+    """Sum the DMC memory-controller PMU data-beat counter (config=0) across all
+    active arm_cspmu_mc_<N> channels.
+
+    Each arm_cspmu_mc_<N> instance is one DDR data (sub)channel; config=0 counts
+    DDR data beats (32 B each). Summing the active channels gives the physical
+    DRAM bandwidth (Arm "DMC Bandwidth Measurement", Phoenix SoC spec Table 15-6).
+    """
+    total = None
+    for name, group in grouped_df:
+        if (
+            isinstance(name, str)
+            and name.startswith("arm_cspmu_mc_")
+            and "config=0" in name
+        ):
+            if total is None:
+                total = group.counter_value.copy()
+            else:
+                vals = group.counter_value
+                vals.index = total.index
+                total = total + vals
+    if total is None:
+        raise KeyError("arm_cspmu_mc/config=0")
     return total.reset_index(drop=True)

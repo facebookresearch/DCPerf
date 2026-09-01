@@ -16,6 +16,7 @@ try:
     from cea.chips.benchpress.perfutils.arm_perf.core import (
         _align,
         _sum_cmn_event,
+        _sum_cspmu_config0,
         get_duration_series,
         register_arch,
         skip_if_missing,
@@ -24,6 +25,7 @@ except ModuleNotFoundError:  # standalone / OSS: run from perfutils/ dir
     from arm_perf.core import (  # pyre-ignore[21]
         _align,
         _sum_cmn_event,
+        _sum_cspmu_config0,
         get_duration_series,
         register_arch,
         skip_if_missing,
@@ -628,26 +630,207 @@ def v3_dispatch_stall_mcq(grouped_df):
 
 
 # ===========================================================================
-# SVE predication effectiveness (V3-specific)
+# CMN mesh (uncore) + DMC memory-controller metrics
+#
+# Doc basis (Arm):
+#   * Phoenix SoC Architecture Spec (110009_0100), "System Telemetry":
+#       - Table 15-6 (DMS): true memory bandwidth is the DDR memory-controller
+#         "DMC Bandwidth Measurement". On this platform the DMC PMU is exposed as
+#         arm_cspmu_mc_<N> (one per DDR data sub-channel); config=0 counts DDR
+#         data beats of 32 B each.
+#       - Table 15-4 (CMN): HN-S "effectiveness" group (slc/sf hit, pocq
+#         occupancy, mc_requests, mc_retry).
+#   * CMN-S3 "Cyprus" mesh (arm_cmn identifier 0x43e = PART_CMN_S3; the Phoenix
+#     SoC spec names it "CMN-Cyprus Coherent Mesh Network"). HN-S PMU event
+#     0x0D = PMU_HN_MC_REQS_EVENT ("requests sent to MC"); filter pmu_sn_home_sel
+#     [40:39]: 00=All, 01=SN-bound, 10=Home-bound. (Event encoding is shared with
+#     the CMN-700 TRM, doc 102308, cmn_hns_pmu_event_sel.)
+#
+# PRIMARY memory bandwidth is taken from the DMC PMU (arm_cspmu_mc, config=0
+# x 32 B) -- Arm's documented true-DRAM-bandwidth path, bounded by the physical
+# DDR ceiling and validated to ~2% of mm-mem.
+#
+# The CMN HN-S mc_reqs counters are used ONLY as a bounded mesh MC-request
+# estimate + local/remote locality split, via the SN filter
+# (hns_mc_reqs_{local,remote}_sn) x 64 B. Per the CMN-700/S3 TRM, event 0x0D
+# ("requests sent to MC") is a REQUEST count, partitioned by the pmu_sn_home_sel
+# filter into _all / _sn (SN-bound) / _home (Home-bound) -- the TRM assigns it no
+# byte value, so "x 64 B" is only a proxy. We deliberately do NOT use
+# hns_mc_reqs_*_all x 64 B for bandwidth: summing the routing-partitioned _all
+# events across both mesh instances tallies the same DRAM accesses under multiple
+# filter/mesh combinations, so it over-reads the physical DRAM ceiling under load
+# (measured well above the 12ch x 8B x 7.2GT/s theoretical peak). Even _sn x 64 B
+# undercounts writes (~24% low vs the DMC PMU on a pure-write load), because a
+# request count is not a byte count. The DMC PMU metric above is authoritative.
 # ===========================================================================
 
 
 @skip_if_missing
-def v3_cmn_mem_read_bw_MBps(grouped_df):
-    """Memory read bandwidth from CMN MC request counters.
+def v3_dmc_mem_bw_MBps(grouped_df):
+    """PRIMARY memory bandwidth (read+write) from the DMC memory-controller PMU.
 
-    Each hns_mc_reqs_local_all is a cache-line (64B) request to the memory
-    controller, analogous to Grace's SCF cmem_rd_data.
+    Arm's documented "DMC Bandwidth Measurement" (Phoenix SoC spec Table 15-6).
+    Sums arm_cspmu_mc/config=0 (DDR data beats, 32 B each) over the active data
+    channels. Bounded by the physical DDR ceiling; the ground-truth bandwidth.
     """
-    mc_reqs = _sum_cmn_event(grouped_df, "hns_mc_reqs_local_all")
+    beats = _sum_cspmu_config0(grouped_df)
+    dur = get_duration_series(grouped_df.get_group("instructions"))
+    beats.index = dur.index
+    bw_series = (beats * 32).div(dur)
+    return {
+        "name": "DMC Memory Bandwidth (MBps)",
+        "series": bw_series,
+        "prefix": 10**-6,
+    }
+
+
+@skip_if_missing
+def v3_cmn_mem_bw_MBps(grouped_df):
+    """Mesh MC-request bandwidth ESTIMATE (read+write) from CMN HN-S counters.
+
+    Sums local + remote HN-S -> memory-controller requests (SN filter) across
+    all mesh instances; each is a 64 B cache-line request dispatched to a memory
+    controller. This is a bounded ESTIMATE (it undercounts pure-write ~24% due to
+    write-combining at the MC and is not a physical data-beat count) -- the DMC
+    PMU metric above is the authoritative bandwidth. Reported for cross-check and
+    because it provides the local/remote locality split the DMC PMU cannot.
+    """
+    mc_reqs = _sum_cmn_event(grouped_df, "hns_mc_reqs_local_sn")
+    try:
+        mc_reqs = mc_reqs + _sum_cmn_event(grouped_df, "hns_mc_reqs_remote_sn")
+    except KeyError:
+        pass
     dur = get_duration_series(grouped_df.get_group("instructions"))
     mc_reqs.index = dur.index
     bw_series = (mc_reqs * 64).div(dur)
     return {
-        "name": "CMN Memory Read Bandwidth (MBps)",
+        "name": "CMN MC-Req Bandwidth (MBps, est)",
         "series": bw_series,
         "prefix": 10**-6,
     }
+
+
+@skip_if_missing
+def v3_cmn_mem_local_bw_MBps(grouped_df):
+    """Local mesh MC-request bandwidth (est) — SN-filter requests homed on the
+    local mesh instance's memory controllers."""
+    mc_reqs = _sum_cmn_event(grouped_df, "hns_mc_reqs_local_sn")
+    dur = get_duration_series(grouped_df.get_group("instructions"))
+    mc_reqs.index = dur.index
+    bw_series = (mc_reqs * 64).div(dur)
+    return {
+        "name": "CMN Local MC-Req Bandwidth (MBps, est)",
+        "series": bw_series,
+        "prefix": 10**-6,
+    }
+
+
+@skip_if_missing
+def v3_cmn_mem_remote_bw_MBps(grouped_df):
+    """Remote mesh MC-request bandwidth (est) — SN-filter requests routed to
+    another mesh instance's memory controllers (cross-mesh / cross-node)."""
+    mc_reqs = _sum_cmn_event(grouped_df, "hns_mc_reqs_remote_sn")
+    dur = get_duration_series(grouped_df.get_group("instructions"))
+    mc_reqs.index = dur.index
+    bw_series = (mc_reqs * 64).div(dur)
+    return {
+        "name": "CMN Remote MC-Req Bandwidth (MBps, est)",
+        "series": bw_series,
+        "prefix": 10**-6,
+    }
+
+
+@skip_if_missing
+def v3_cmn_mem_read_pct(grouped_df):
+    """Approximate read share of memory traffic from HN-S PoCQ occupancy.
+
+    The HN-S has no read/write split on MC requests, but the QoS PoCQ
+    occupancy counters (read vs write) track how long read- vs write-class
+    requests sit in the point-of-coherency queue, giving a usable read/write
+    mix proxy. Reported as the read fraction of (read + write) occupancy.
+    """
+    read_occ = _sum_cmn_event(grouped_df, "hns_qos_pocq_occupancy_read")
+    write_occ = _sum_cmn_event(grouped_df, "hns_qos_pocq_occupancy_write")
+    write_occ.index = read_occ.index
+    total = read_occ + write_occ
+    return {
+        "name": "CMN Memory Read Mix %",
+        "series": read_occ.div(total),
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def v3_cmn_mc_retry_pct(grouped_df):
+    """Memory-controller retry rate — retried MC requests / total MC requests.
+
+    Maps to the HN-S "mc_retry" metric. A high retry rate indicates
+    the memory controller is backpressuring the mesh (DRAM-bound).
+    """
+    retries = _sum_cmn_event(grouped_df, "hns_mc_retries_local_all")
+    try:
+        retries = retries + _sum_cmn_event(grouped_df, "hns_mc_retries_remote_all")
+    except KeyError:
+        pass
+    reqs = _sum_cmn_event(grouped_df, "hns_mc_reqs_local_all")
+    try:
+        reqs = reqs + _sum_cmn_event(grouped_df, "hns_mc_reqs_remote_all")
+    except KeyError:
+        pass
+    retries.index = reqs.index
+    return {
+        "name": "CMN MC Retry %",
+        "series": retries.div(reqs),
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def v3_cmn_sf_hit_rate(grouped_df):
+    """Snoop-filter hit rate — hns_sf_hit_all / hns_slc_sf_cache_access_all.
+
+    Maps to the HN-S "sf_hit_ratio". Complements the existing SLC
+    (L3) hit-rate metric with coherence-directory effectiveness.
+    """
+    hit_s = _sum_cmn_event(grouped_df, "hns_sf_hit_all")
+    access_s = _sum_cmn_event(grouped_df, "hns_slc_sf_cache_access_all")
+    hit_s.index = access_s.index
+    return {
+        "name": "CMN Snoop Filter Hit Rate %",
+        "series": hit_s.div(access_s),
+        "prefix": 100,
+    }
+
+
+@skip_if_missing
+def v3_cmn_mesh_freq_ghz(grouped_df):
+    """Mesh clock frequency (GHz) derived from the DTC cycle counter.
+
+    dtc_cycles increments at the mesh clock; dividing by the wall-clock
+    sample duration recovers the effective mesh frequency. Useful for
+    detecting mesh DVFS throttling under load.
+    """
+    cyc = _sum_cmn_event(grouped_df, "dtc_cycles")
+    # dtc_cycles is summed across mesh instances; use the per-instance average.
+    n_cmn = 0
+    for name, _ in grouped_df:
+        if isinstance(name, str) and name.endswith("/dtc_cycles/"):
+            n_cmn += 1
+    dur = get_duration_series(grouped_df.get_group("instructions"))
+    cyc.index = dur.index
+    if n_cmn > 1:
+        cyc = cyc / n_cmn
+    freq = cyc.div(dur)  # cycles per second
+    return {
+        "name": "CMN Mesh Frequency (GHz)",
+        "series": freq,
+        "prefix": 10**-9,
+    }
+
+
+# ===========================================================================
+# SVE predication effectiveness (V3-specific)
+# ===========================================================================
 
 
 @skip_if_missing
@@ -751,7 +934,15 @@ def metrics(grouped_df):
         v3_sve_pred_empty_pct(grouped_df),
         v3_sve_pred_full_pct(grouped_df),
         v3_sve_pred_partial_pct(grouped_df),
-        v3_cmn_mem_read_bw_MBps(grouped_df),
+        # --- CMN mesh (uncore) + DMC memory-controller metrics ---
+        v3_dmc_mem_bw_MBps(grouped_df),
+        v3_cmn_mem_bw_MBps(grouped_df),
+        v3_cmn_mem_local_bw_MBps(grouped_df),
+        v3_cmn_mem_remote_bw_MBps(grouped_df),
+        v3_cmn_mem_read_pct(grouped_df),
+        v3_cmn_mc_retry_pct(grouped_df),
+        v3_cmn_sf_hit_rate(grouped_df),
+        v3_cmn_mesh_freq_ghz(grouped_df),
     ]
 
 
