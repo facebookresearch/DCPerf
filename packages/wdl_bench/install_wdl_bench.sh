@@ -504,6 +504,40 @@ index 379e541..7e8895d 100644
               -DBENCHMARK_ENABLE_GTEST_TESTS=OFF
  )
  include_directories(${CMAKE_BINARY_DIR}/googlebench/include)
+diff --git a/src/libm-benchmarks/benchmark_templates.hpp b/src/libm-benchmarks/benchmark_templates.hpp
+index 7a5fd24..075ad4c 100644
+--- a/src/libm-benchmarks/benchmark_templates.hpp
++++ b/src/libm-benchmarks/benchmark_templates.hpp
+@@ -25,7 +25,8 @@ static void BM_Sleef_templated_function(benchmark::State &state, Ret (*fun)(T),
+   for (auto _ : state) {
+     call_fun(fun, x);
+   }
+-  int num_els_processed = state.iterations() * vector_len<T>;
++  double num_els_processed = static_cast<double>(state.iterations()) *
++      static_cast<double>(vector_len<T>);
+   state.counters["NSperEl"] =
+       benchmark::Counter(num_els_processed, benchmark::Counter::kIsRate |
+                                                 benchmark::Counter::kInvert);
+@@ -40,7 +41,8 @@ static void BM_Sleef_templated_function(benchmark::State &state,
+   for (auto _ : state) {
+     call_fun(fun, x0, x1);
+   }
+-  int num_els_processed = state.iterations() * vector_len<T>;
++  double num_els_processed = static_cast<double>(state.iterations()) *
++      static_cast<double>(vector_len<T>);
+   state.counters["NSperEl"] =
+       benchmark::Counter(num_els_processed, benchmark::Counter::kIsRate |
+                                                 benchmark::Counter::kInvert);
+@@ -56,7 +58,8 @@ static void BM_Sleef_templated_function(benchmark::State &state,
+   for (auto _ : state) {
+     call_fun(fun, x, &p0, &p1);
+   }
+-  int num_els_processed = state.iterations() * vector_len<T>;
++  double num_els_processed = static_cast<double>(state.iterations()) *
++      static_cast<double>(vector_len<T>);
+   state.counters["NSperEl"] =
+       benchmark::Counter(num_els_processed, benchmark::Counter::kIsRate |
+                                                 benchmark::Counter::kInvert);
 EOF
     # @lint-ignore-section TXT2 off
     mkdir build && cd build
