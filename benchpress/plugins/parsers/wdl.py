@@ -6,7 +6,6 @@
 
 # pyre-unsafe
 
-import json
 import re
 
 from benchpress.lib.parser import Parser
@@ -18,7 +17,11 @@ class WDLParser(Parser):
         for line in stdout:
             if re.search("score:", line):
                 benchmark = line.split()[0]
-                metrics[benchmark] = float(line.split(":")[-1])
+                score = line.partition("score:")[2].strip()
+                try:
+                    metrics[benchmark] = float(score)
+                except ValueError:
+                    continue
 
         metrics["detailed results in each out_benchmark_name.json file"] = " "
 
