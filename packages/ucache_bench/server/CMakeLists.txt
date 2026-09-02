@@ -11,6 +11,7 @@ set(SERVER_SOURCES
     UcacheBenchRpcServer.cpp
     UcacheBenchOnRequest.cpp
     UcacheBenchIOThreadContext.cpp
+    UcacheBenchServiceInterceptor.cpp
     CpuManager.cpp
     UcacheBenchAdminServer.cpp
 )
@@ -20,6 +21,7 @@ set(SERVER_HEADERS
     UcacheBenchRpcServer.h
     UcacheBenchOnRequest.h
     UcacheBenchIOThreadContext.h
+    UcacheBenchServiceInterceptor.h
     UcacheBenchRequestCommon.h
     UcacheBenchThreadLoopCallback.h
     CpuManager.h
