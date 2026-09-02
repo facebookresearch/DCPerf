@@ -237,8 +237,20 @@ void UcacheBenchRpcServer::start(
         : threadInit_(std::move(init)), threadCleanup_(std::move(cleanup)) {}
 
     void registerEventBase(folly::EventBase& evb) noexcept override {
-      // Initialize fiber context for this thread
-      UcacheBenchIOThreadContext::init(evb);
+      // folly delivers this callback from whichever thread constructed the
+      // pool (ThreadPoolExecutor::afterConstructThreads), not from the IO
+      // thread. UcacheBenchIOThreadContext holds its instance in a
+      // thread_local, so initializing it inline here binds it to the
+      // constructing thread and leaves every IO thread uninitialized — which
+      // makes ucacheBenchOnRequestCommon silently take the inline branch and
+      // never run requests on fibers.
+      //
+      // AndWait so no request can be served before the context exists;
+      // IOThreadPoolExecutor::threadRun polls readyBaton off the event loop
+      // specifically so observer registration can block here without
+      // deadlocking.
+      evb.runInEventBaseThreadAndWait(
+          [&evb] { UcacheBenchIOThreadContext::init(evb); });
 
       if (threadInit_) {
         threadInit_(evb);
