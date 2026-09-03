@@ -17,6 +17,7 @@
 #include "UcacheBenchOnRequest.h"
 #include "UcacheBenchRpcServer.h"
 #include "UcacheBenchServer.h"
+#include "UcacheBenchServiceInterceptor.h"
 #ifdef OSS_BUILD
 #include "UcacheBenchServerOnRequestThrift.h"
 #else
@@ -348,6 +349,16 @@ std::unique_ptr<UcacheBenchRpcServer> makeAndStartUcacheBenchRpcServer(
 
   auto& thriftServer = ucacheBenchRpcServer->addThriftServer();
   thriftServer.setPort(FLAGS_port);
+
+#if FOLLY_HAS_COROUTINES
+  // Production installs SAP's authorization handlers as ServiceInterceptors
+  // through a ServerModule. Mirror that so the per-request authorization work
+  // runs on the real interceptor lifecycle rather than inline in the handler.
+  if (FLAGS_production_features) {
+    thriftServer.addModule(
+        std::make_unique<UcacheBenchServerModule>(server.get()));
+  }
+#endif
 
   // Create a map of EventBase to OnRequest handlers (similar to production
   // ucache)

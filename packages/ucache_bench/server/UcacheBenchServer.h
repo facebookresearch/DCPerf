@@ -189,6 +189,20 @@ class UcacheBenchServer {
   explicit UcacheBenchServer(const UcacheBenchConfig& config);
   ~UcacheBenchServer();
 
+  // Connection-identity authorization, driven from UcacheBenchAuthInterceptor.
+  // Only the identity-attribute serialization moved off the handler; the
+  // key-prefix ACL lookup still runs there, because the cache key does not
+  // exist yet at interceptor time.
+  struct AuthCheckResult {
+    uint64_t identityHash;
+    uint32_t aclCategory;
+  };
+  // Connection-identity work only. Production's SAP handlers run on the
+  // interceptor path, where the request payload has not been deserialized yet,
+  // so they see connection identity and method name rather than the cache key.
+  AuthCheckResult runRequestAuthorization(std::string_view methodName);
+  void runResponseAudit(uint64_t identityHash);
+
   // Request handlers using Carbon protocol
   folly::SemiFuture<UcbGetReply> processUcbGet(const UcbGetRequest& req);
   folly::SemiFuture<UcbSetReply> processUcbSet(const UcbSetRequest& req);
@@ -293,6 +307,12 @@ class UcacheBenchServer {
     std::atomic<uint64_t> aclAllowed{0};
     std::atomic<uint64_t> ticketChecks{0};
     std::atomic<uint64_t> overloadChecks{0};
+    // Interceptor-path authorization and audit. Kept separate from
+    // aclChecks/overloadChecks, which count the handler's key-scoped
+    // check and overload probe, so neither is double-counted.
+    std::atomic<uint64_t> identityChecks{0};
+    std::atomic<uint64_t> identityAllowed{0};
+    std::atomic<uint64_t> auditEvents{0};
     std::atomic<uint64_t> prefixCounterHits{0};
     std::atomic<uint64_t> zstdBytesIn{0};
     std::atomic<uint64_t> zstdBytesOut{0};
@@ -312,7 +332,7 @@ class UcacheBenchServer {
   };
   std::vector<IdentityAttribute> mockIdentityAttributes_;
   void initMockIdentityAttributes();
-  std::string serializeIdentityAttributes(const std::string& requestKey);
+  std::string serializeIdentityAttributes(std::string_view requestKey);
 
   // Hot key detection (matches production TLHotKeyTracker)
   // Production maintains two thread-local HotHashDetectors per IO thread:

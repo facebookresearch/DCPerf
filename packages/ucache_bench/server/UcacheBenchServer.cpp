@@ -375,8 +375,43 @@ void UcacheBenchServer::initMockIdentityAttributes() {
 // security::authn::attributes::serializer::serialize().
 // Production URI-escapes each attribute key+value and joins with '&'.
 // This showed up as ~1% CPU per thread in perf profiles.
+// Connection-identity authorization, invoked from
+// UcacheBenchAuthInterceptor::onRequest. This is the identity-attribute
+// serialization that used to run inline in runProductionGetOverhead and
+// runProductionSetOverhead; production performs it inside SAP's interceptors,
+// so it is driven from the interceptor lifecycle here and removed from both
+// handler paths. The key-prefix ACL lookup is not part of this and stays in
+// the handler.
+UcacheBenchServer::AuthCheckResult UcacheBenchServer::runRequestAuthorization(
+    std::string_view methodName) {
+  // Identity attributes are connection-scoped, so the method name is the
+  // request context available at interceptor time. The key-prefix ACL lookup
+  // stays in the handler, where the cache key actually exists.
+  uint64_t identityHash =
+      folly::hash::fnv64_buf(methodName.data(), methodName.size());
+  auto aclIt = aclPrefixTable_.find(identityHash & 0xFF);
+  prodStats_.identityChecks.fetch_add(1, std::memory_order_relaxed);
+  uint32_t category = 0;
+  if (aclIt != aclPrefixTable_.end()) {
+    prodStats_.identityAllowed.fetch_add(1, std::memory_order_relaxed);
+    category = aclIt->second;
+  }
+
+  auto serializedAttrs = serializeIdentityAttributes(methodName);
+  folly::doNotOptimizeAway(serializedAttrs.data());
+
+  return AuthCheckResult{identityHash, category};
+}
+
+// Response-side audit, matching production auditing and metrics handlers that
+// run on the interceptor exit path after the handler completes.
+void UcacheBenchServer::runResponseAudit(uint64_t identityHash) {
+  prodStats_.auditEvents.fetch_add(1, std::memory_order_relaxed);
+  folly::doNotOptimizeAway(identityHash);
+}
+
 std::string UcacheBenchServer::serializeIdentityAttributes(
-    const std::string& requestKey) {
+    std::string_view requestKey) {
   std::string serialized;
   serialized.reserve(512);
 
@@ -765,8 +800,11 @@ void UcacheBenchServer::runProductionGetOverhead(
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
 
-  // 4. ACL prefix check (matches prefixAclsHandler_->checkAcl)
-  // Production: extracts key prefix, looks up ACL category, checks identity
+  // 4. ACL prefix check (matches prefixAclsHandler_->checkAcl). This stays in
+  // the handler because it is keyed on the cache key, which does not exist yet
+  // at interceptor time. Step 5, identity-attribute serialization, moved to
+  // UcacheBenchAuthInterceptor: it is connection-scoped, and production runs it
+  // inside SAP's interceptors.
   uint64_t prefixHash =
       folly::hash::fnv64_buf(key.data(), std::min(key.size(), size_t(8)));
   auto aclIt = aclPrefixTable_.find(prefixHash & 0xFF);
@@ -775,15 +813,6 @@ void UcacheBenchServer::runProductionGetOverhead(
     prodStats_.aclAllowed.fetch_add(1, std::memory_order_relaxed);
   }
   folly::doNotOptimizeAway(aclIt);
-
-  // 5. Auth attribute serialization (matches
-  // ThriftConnectionAttributesHandler::preReadImpl ->
-  // ContextBasedPolicyChecker::isAccessPermitted ->
-  // security::authn::attributes::serializer::serialize)
-  // Production serializes connection identity attributes with URI escaping
-  // for every request. This is ~1% of CPU per thread in production perf.
-  auto serializedAttrs = serializeIdentityAttributes(key);
-  folly::doNotOptimizeAway(serializedAttrs.data());
 
   // 6. Overload protection check (matches OverloadProtector::onRequest)
   // Production reads atomic counters to check CPU and network overload
@@ -884,9 +913,9 @@ void UcacheBenchServer::runProductionSetOverhead(
     prodStats_.aclAllowed.fetch_add(1, std::memory_order_relaxed);
   }
 
-  // Auth attribute serialization (same as GET path)
-  auto serializedAttrs = serializeIdentityAttributes(key);
-  folly::doNotOptimizeAway(serializedAttrs.data());
+  // Auth attribute serialization now runs once per request in
+  // UcacheBenchAuthInterceptor, on both the GET and SET paths, so it is not
+  // repeated here.
 
   // CRC32C checksum on incoming value (production verifies value integrity)
   if (valueData && valueLen > 0) {
