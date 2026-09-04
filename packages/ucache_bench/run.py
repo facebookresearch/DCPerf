@@ -486,6 +486,10 @@ def run_client(args: argparse.Namespace) -> None:
         f"--additional_fanout={args.additional_fanout}",
     ]
 
+    lane_stagger = getattr(args, "lane_phase_stagger_us", 0)
+    if lane_stagger > 0:
+        client_cmd.append(f"--lane_phase_stagger_us={lane_stagger}")
+
     warmup_max_inflight = getattr(args, "warmup_max_inflight", 0)
     if warmup_max_inflight > 0:
         client_cmd.append(f"--warmup_max_inflight={warmup_max_inflight}")
@@ -1015,6 +1019,14 @@ def init_parser() -> argparse.ArgumentParser:
         default=0,
         help="Number of client worker threads for request generation (0 = auto-detect)",
     )
+    client_parser.add_argument(
+        "--lane-phase-stagger-us",
+        type=int,
+        default=0,
+        help="Spread each measurement lane's first request over this many us "
+        "(0 = off), to stop completion-driven lanes staying phase-locked.",
+    )
+
     client_parser.add_argument(
         "--max-inflight",
         type=int,
