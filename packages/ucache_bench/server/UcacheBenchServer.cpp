@@ -563,6 +563,7 @@ void UcacheBenchServer::compressReplyValue(
     prodStats_.zstdErrors.fetch_add(1, std::memory_order_relaxed);
     return;
   }
+  prodStats_.zstdOps.fetch_add(1, std::memory_order_relaxed);
   prodStats_.zstdBytesIn.fetch_add(valueLen, std::memory_order_relaxed);
   prodStats_.zstdBytesOut.fetch_add(written, std::memory_order_relaxed);
   folly::doNotOptimizeAway(ctx.out.data());
@@ -1201,6 +1202,26 @@ void UcacheBenchServer::printFinalResults(double benchmarkDurationSec) const {
   printf("Performance:\n");
   printf("  QPS:        %.1f\n", qps);
   printf("  Hit Ratio:  %.2f%%\n", hitRatio);
+  {
+    // Reply-compression accounting. Without this there is no way to tell a
+    // codec that is running cheaply from one that is not running at all.
+    uint64_t zIn = prodStats_.zstdBytesIn.load();
+    uint64_t zOut = prodStats_.zstdBytesOut.load();
+    uint64_t zErr = prodStats_.zstdErrors.load();
+    uint64_t zstdOps = prodStats_.zstdOps.load();
+    uint64_t zOps = zstdOps > 0 ? zstdOps : 1;
+    printf(
+        "  ZSTD:       pct=%u ops=%lu in_bytes=%lu out_bytes=%lu errors=%lu "
+        "ratio=%.2fx in_per_op=%.1fB out_per_op=%.1fB\n",
+        config_.zstd_compress_pct,
+        zstdOps,
+        zIn,
+        zOut,
+        zErr,
+        zOut > 0 ? static_cast<double>(zIn) / zOut : 0.0,
+        static_cast<double>(zIn) / zOps,
+        static_cast<double>(zOut) / zOps);
+  }
   printf("========================================\n");
   printf("\n");
 

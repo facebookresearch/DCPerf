@@ -446,6 +446,63 @@ DEFINE_double(
     "Fraction of keys that are 'hot' (0.0 = disabled, use pure Zipfian). "
     "When set, hot_key_ratio of keys receive hot_key_frequency more accesses");
 
+DEFINE_uint64(
+    lane_phase_stagger_us,
+    0,
+    "Spread each measurement lane's first request over this many microseconds "
+    "(0 = off). Lanes are completion-driven, so if they all start together they "
+    "can remain phase-locked for the whole run and deliver load as synchronized "
+    "bursts. Set to roughly one response time to decorrelate them.");
+namespace {
+// Latency-stage accumulators. The benchmark reports only aggregate QPS, so a
+// multi-millisecond average RPC latency against a server measured idle in
+// epoll_wait had no attribution at all. These split it into synchronous send,
+// transport plus server, and the time a completion waits for its EventBase to
+// run the continuation.
+constexpr uint64_t kLatSampleEvery = 10000;
+
+// Per-thread, not a shared atomic: a process-wide read-modify-write once per
+// request would put every lane on the same cache line, which is exactly the
+// kind of overhead this instrumentation exists to avoid adding.
+thread_local uint64_t tLatSampleCounter = 0;
+
+std::atomic<uint64_t> gLatSamples{0}; // samples that reached accumulation
+std::atomic<uint64_t> gLatCbSamples{0}; // subset that also got a callback stamp
+std::atomic<uint64_t> gLatLostSamples{0}; // claimed a slot then timed out
+std::atomic<int64_t> gLatSendNs{0};
+std::atomic<int64_t> gLatTransportNs{0};
+std::atomic<int64_t> gLatResumeNs{0};
+std::atomic<int64_t> gLatTotalNs{0};
+
+void reportLatencyBreakdown() {
+  uint64_t n = gLatSamples.load();
+  uint64_t cbN = gLatCbSamples.load();
+  uint64_t lost = gLatLostSamples.load();
+  if (n == 0) {
+    printf("LATENCY_BREAKDOWN: no samples (lost=%lu)\n", lost);
+    fflush(stdout);
+    return;
+  }
+  auto us = [](std::atomic<int64_t>& a, uint64_t d) {
+    return d == 0 ? 0.0 : static_cast<double>(a.load()) / d / 1000.0;
+  };
+  // transport and resume are only accumulated for samples that carried a
+  // callback timestamp, so they divide by cbN, not n.
+  printf(
+      "LATENCY_BREAKDOWN samples=%lu cb_samples=%lu lost=%lu total_us=%.1f "
+      "send_us=%.1f transport_us=%.1f resume_lag_us=%.1f\n",
+      n,
+      cbN,
+      lost,
+      us(gLatTotalNs, n),
+      us(gLatSendNs, n),
+      us(gLatTransportNs, cbN),
+      us(gLatResumeNs, cbN));
+  fflush(stdout);
+}
+
+} // namespace
+
 namespace facebook {
 namespace ucachebench {
 
@@ -1668,12 +1725,37 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       // Same pattern as production McrouterAdapter::coro()
       auto [promise, future] = folly::makePromiseContract<UcbGetReply>();
 
+      // Latency stage sampling. Average RPC latency measured ~27ms against a
+      // server that is idle in epoll with no queue anywhere, so the time has to
+      // be attributed to a stage rather than guessed at. Three timestamps split
+      // it: send() duration is synchronous mcrouter routing, t1-t0 is transport
+      // plus server plus response arrival, and t2-t1 is how long the completion
+      // waited for this EventBase to run it. Sampled 1/10000 so the timestamps
+      // themselves do not perturb the measurement.
+      const bool sampleLat = (tLatSampleCounter++ % kLatSampleEvery) == 0;
+      std::chrono::steady_clock::time_point t0, tSent;
+      // Only allocated on sampled requests. Allocating unconditionally would
+      // add a heap allocation and refcount traffic to every request.
+      std::shared_ptr<std::atomic<int64_t>> cbEntry;
+      if (sampleLat) {
+        cbEntry = std::make_shared<std::atomic<int64_t>>(0);
+        t0 = std::chrono::steady_clock::now();
+      }
+
       clientPtr->send(
           request,
-          [p = std::move(promise)](
+          [p = std::move(promise), sampleLat, cbEntry](
               const UcbGetRequest&, UcbGetReply&& reply) mutable {
+            if (sampleLat) {
+              cbEntry->store(
+                  std::chrono::steady_clock::now().time_since_epoch().count(),
+                  std::memory_order_relaxed);
+            }
             p.setValue(std::move(reply));
           });
+      if (sampleLat) {
+        tSent = std::chrono::steady_clock::now();
+      }
 
       UcbGetReply result;
       try {
@@ -1681,6 +1763,12 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       } catch (const std::exception&) {
         // Request never completed; count as a GET error and return so the
         // measurement worker's scope.joinAsync() can't hang.
+        if (sampleLat) {
+          // Timed-out requests are precisely the interesting ones, so record
+          // that this sample was lost rather than letting it vanish and skew
+          // the effective sampling rate.
+          gLatLostSamples.fetch_add(1, std::memory_order_relaxed);
+        }
         workerTotalOps[workerId]->fetch_add(1);
         workerGetOps[workerId]->fetch_add(1);
         workerGetErrors[workerId]->fetch_add(1);
@@ -1688,6 +1776,24 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
 
       auto opEndTime = std::chrono::steady_clock::now();
+
+      if (sampleLat) {
+        auto ns = [](auto d) {
+          return std::chrono::duration_cast<std::chrono::nanoseconds>(d)
+              .count();
+        };
+        int64_t cb = cbEntry->load(std::memory_order_relaxed);
+        gLatSendNs.fetch_add(ns(tSent - t0), std::memory_order_relaxed);
+        if (cb != 0) {
+          auto cbTp = std::chrono::steady_clock::time_point(
+              std::chrono::steady_clock::duration(cb));
+          gLatTransportNs.fetch_add(ns(cbTp - t0), std::memory_order_relaxed);
+          gLatResumeNs.fetch_add(
+              ns(opEndTime - cbTp), std::memory_order_relaxed);
+        }
+        gLatTotalNs.fetch_add(ns(opEndTime - t0), std::memory_order_relaxed);
+        gLatSamples.fetch_add(1, std::memory_order_relaxed);
+      }
       auto latencyMs =
           std::chrono::duration<double, std::milli>(opEndTime - opStartTime)
               .count();
@@ -1859,6 +1965,20 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           folly::coro::co_withExecutor(
               exe,
               folly::coro::co_invoke([&, lane]() -> folly::coro::Task<void> {
+                // Stagger each lane's first request. Every lane otherwise
+                // starts together and then reissues on completion, so the
+                // whole cohort can stay phase-locked: the server sees bursts
+                // separated by idle gaps rather than a smooth arrival process,
+                // which caps throughput while leaving IO threads in epoll_wait.
+                // The offset is deterministic per lane, spread over roughly one
+                // observed response time, and only shifts the first request --
+                // concurrency and the steady-state loop are unchanged.
+                if (FLAGS_lane_phase_stagger_us > 0) {
+                  co_await folly::futures::sleep(
+                      std::chrono::microseconds(
+                          (static_cast<uint64_t>(lane) * 2654435761ULL) %
+                          FLAGS_lane_phase_stagger_us));
+                }
                 while (std::chrono::steady_clock::now() < endTime) {
                   // auto_concurrency shrinks the active window by parking
                   // the highest-numbered lanes.
@@ -2062,6 +2182,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   }
 
   // Notify admin server that benchmark is done (if connected)
+  reportLatencyBreakdown();
   if (hasAdminConnection()) {
     printf("[Client %d] Sending BENCHMARK_DONE to admin server\n", clientId_);
     if (!adminConnection_->sendBenchmarkDone(clientId_)) {
@@ -2162,6 +2283,7 @@ std::string UcacheBenchClient::generateKey() {
 }
 
 namespace {
+
 // Values are built from a small token vocabulary rather than random bytes.
 // Real cache payloads are serialized records and compress several-fold;
 // uniformly random bytes are incompressible, which would understate the cost
