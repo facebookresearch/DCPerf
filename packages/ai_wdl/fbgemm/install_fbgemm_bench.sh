@@ -365,30 +365,33 @@ __conda_install_clang () {
     llvm-openmp=${llvm_version} \
     compiler-rt=${llvm_version}) || return 1
 
-  # Create symlinks for standard compiler names (cc, c++, etc.)
+  # Resolve the installed Clang drivers explicitly.
+  local conda_prefix
+  # shellcheck disable=SC2086
+  conda_prefix=$(conda run ${env_prefix} printenv CONDA_PREFIX)
+  local cc_path="${conda_prefix}/bin/clang"
+  local cxx_path="${conda_prefix}/bin/clang++"
+
+  if [[ ! -x "${cc_path}" || ! -x "${cxx_path}" ]]; then
+    echo "[ERROR] Clang compiler drivers were not found in ${conda_prefix}/bin"
+    return 1
+  fi
+
+  # Point only the generic aliases at Clang. Keep gcc/g++ as GNU drivers for
+  # tools which explicitly require the GNU compiler.
   echo "[INSTALL] Setting the C/C++ compiler symlinks for Clang ..."
-  set_clang_symlinks "${env_name}"
+  ln -sf "${cc_path}" "${conda_prefix}/bin/cc"
+  ln -sf "${cxx_path}" "${conda_prefix}/bin/c++"
 
-  # Remove the Conda activation scripts for GCC to prevent conflicts with Clang
-  __remove_gcc_activation_scripts
+  export CC="${cc_path}"
+  export CXX="${cxx_path}"
+  export CPATH="${conda_prefix}/include${CPATH:+:${CPATH}}"
+  export LD_LIBRARY_PATH="${conda_prefix}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
-  # Set environment variables to use Clang as the default compiler
+  # Persist the compiler selection for Conda commands used by the installer.
   # shellcheck disable=SC2086
-  print_exec conda env config vars set ${env_prefix} CC="${cc_path}"
-  # shellcheck disable=SC2086
-  print_exec conda env config vars set ${env_prefix} CXX="${cxx_path}"
-
-  # Verify that the compiler environment variables are set correctly
-  # shellcheck disable=SC2086
-  print_exec conda run ${env_prefix} printenv CC
-  # shellcheck disable=SC2086
-  print_exec conda run ${env_prefix} printenv CXX
-
-  # Add the Conda environment's lib directory to the library path
-  # This ensures that libraries installed in the Conda environment are found
-  # shellcheck disable=SC2155,SC2086
-  local conda_prefix=$(conda run ${env_prefix} printenv CONDA_PREFIX)
-  append_to_library_path "${env_name}" "${conda_prefix}/lib"
+  conda env config vars set ${env_prefix} \
+    CC="${cc_path}" CXX="${cxx_path}"
 }
 
 # Function to perform post-installation checks for the compiler
@@ -774,10 +777,19 @@ generate_standalone_executable () {
   # Find all shared libraries (.so files) that need to be included in the executable
   echo "[SETUP] Finding shared libraries to include in the executable..."
   # shellcheck disable=SC2086
-  SHARED_LIBS=$(find ./_skbuild/linux-${MACHINE_NAME_LC}-3.13 -name "*.so" -printf "%p:fbgemm_gpu\n")
+  local install_lib_dir="./_skbuild/linux-${MACHINE_NAME_LC}-3.13/cmake-install/fbgemm_gpu"
+  SHARED_LIBS=$(find "${install_lib_dir}" -maxdepth 1 -name "*.so" -printf "%p:fbgemm_gpu\n")
 
   if [ -z "$SHARED_LIBS" ]; then
     echo "[ERROR] No shared libraries found in _skbuild directory! Build may have failed."
+    return 1
+  fi
+
+  # Clang-linked extensions require the LLVM OpenMP runtime after the temporary
+  # build environment is removed, so include it in the standalone bundle.
+  local libomp_path="${MINICONDA_PREFIX}/envs/${BUILD_ENV}/lib/libomp.so"
+  if [ ! -f "${libomp_path}" ]; then
+    echo "[ERROR] LLVM OpenMP runtime not found at ${libomp_path}"
     return 1
   fi
 
@@ -787,7 +799,9 @@ generate_standalone_executable () {
   # --add-binary: Include binary files (shared libraries) in the executable
   echo "[BUILD] Building standalone executable with PyInstaller..."
   # shellcheck disable=SC2046,SC2086
-  ${CONDA_ENV_BIN}/pyinstaller --onefile --distpath $DIST_DIR $SCRIPT_PATH $(echo $SHARED_LIBS | xargs -n 1 echo --add-binary)
+  ${CONDA_ENV_BIN}/pyinstaller --onefile --distpath "$DIST_DIR" "$SCRIPT_PATH" \
+    --add-binary "${libomp_path}:." \
+    $(echo $SHARED_LIBS | xargs -n 1 echo --add-binary)
 
   # Notify the user that the build is complete
   echo "[SUCCESS] Build complete. Executable is located in the $DIST_DIR directory."
@@ -1093,8 +1107,13 @@ install_fbgemm() {
   # Build and install the FBGEMM library into the Conda environment
   # We specify the CPU variant to build without CUDA support
   echo "[BUILD] Building and installing FBGEMM..."
+  local fbgemm_ldflags="-fopenmp=libomp${LDFLAGS:+ ${LDFLAGS}}"
+  local fbgemm_install_rpath='$ORIGIN;$ORIGIN/torch/lib;$ORIGIN/../torch/lib'
+  echo "+ env LDFLAGS=${fbgemm_ldflags} ${CONDA_PYTHON} setup.py ${run_multicore} install --build-variant=cpu -DCMAKE_INSTALL_RPATH=${fbgemm_install_rpath}"
   # shellcheck disable=SC2086
-  print_exec ${CONDA_PYTHON} setup.py ${run_multicore} install --build-variant=cpu || {
+  env LDFLAGS="${fbgemm_ldflags}" \
+    "${CONDA_PYTHON}" setup.py ${run_multicore} install --build-variant=cpu \
+    "-DCMAKE_INSTALL_RPATH=${fbgemm_install_rpath}" || {
     echo "[ERROR] FBGEMM build failed!"
     return 1
   }
