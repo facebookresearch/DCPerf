@@ -6,7 +6,8 @@
 
 # pyre-unsafe
 
-from typing import List, Mapping, Optional
+from collections.abc import Mapping
+from typing import Optional
 
 import tabulate
 
@@ -17,7 +18,7 @@ TABLE_HEADERS = ["Job", "Description"]
 TABLE_HEADERS_TAG = ["Job", "Tags", "Description"]
 
 
-def formalize_tags(configs) -> Mapping[str, List[str]]:
+def formalize_tags(configs) -> Mapping[str, list[str]]:
     tags = {k: [] for k in JOB_TAG_GROUP}
     for config in configs:
         for k in tags:
@@ -25,7 +26,7 @@ def formalize_tags(configs) -> Mapping[str, List[str]]:
     return tags
 
 
-def get_tag_str(tags: Mapping[str, List[str]]) -> str:
+def get_tag_str(tags: Mapping[str, list[str]]) -> str:
     all_tags = []
     for k in tags:
         all_tags += sorted(tags[k])
@@ -33,7 +34,7 @@ def get_tag_str(tags: Mapping[str, List[str]]) -> str:
 
 
 def create_job_listing(
-    jobs: List[Mapping],
+    jobs: list[Mapping],
     table_format: str,
     group_key: Optional[str] = None,
 ) -> str:
