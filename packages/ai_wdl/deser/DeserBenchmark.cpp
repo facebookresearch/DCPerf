@@ -126,10 +126,7 @@ std::string formatDuration(std::chrono::nanoseconds duration) {
 
 folly::IOBuf
 loadTensor(const folly::IOBuf& input, size_t headroom, size_t tailroom) {
-  folly::IOBuf data = input;
-  data.coalesceWithHeadroomTailroom(headroom, tailroom);
-
-  return data;
+  return input.cloneCoalescedAsValueWithHeadroomTailroom(headroom, tailroom);
 }
 
 /**
