@@ -167,13 +167,14 @@ setup_miniconda() {
   export PATH="${miniconda_prefix}/bin:${PATH}"
   export CONDA="${miniconda_prefix}"
 
-  # Update conda to the latest version from conda-forge
-  echo "Updating conda to the latest version..."
-  conda update -n base -c conda-forge -y conda
-
+  # Accept the default Anaconda channel terms before the first Conda operation.
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
   conda tos accept --override-channels --channel https://conda.anaconda.org/conda-forge || true
+
+  # Update conda to the latest version from conda-forge
+  echo "Updating conda to the latest version..."
+  conda update -n base -c conda-forge -y conda
 
   echo "Miniconda setup complete and ready for use!"
 }
