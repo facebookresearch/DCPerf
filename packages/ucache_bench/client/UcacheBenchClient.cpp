@@ -12,21 +12,27 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <thread>
 
 #include <folly/Random.h>
+#include <folly/ScopeGuard.h>
 #include <folly/coro/AsyncScope.h>
 #include <folly/coro/BlockingWait.h>
+#include <folly/coro/CurrentExecutor.h>
 #include <folly/coro/Promise.h>
+#include <folly/coro/Sleep.h>
 #include <folly/coro/Timeout.h>
 #include <folly/fibers/FiberManagerMap.h>
 #include <folly/futures/Future.h>
+#include <folly/futures/HeapTimekeeper.h>
 #include <folly/futures/Promise.h>
 #include <folly/io/async/ScopedEventBaseThread.h>
 #include <folly/portability/GFlags.h>
@@ -453,7 +459,107 @@ DEFINE_uint64(
     "(0 = off). Lanes are completion-driven, so if they all start together they "
     "can remain phase-locked for the whole run and deliver load as synchronized "
     "bursts. Set to roughly one response time to decorrelate them.");
+DEFINE_uint64(
+    open_loop_qps,
+    0,
+    "Target wire-RPC QPS for this client process (0 = completion-driven "
+    "mode). FOUND, NOTFOUND, and STORED replies count as completed replies. "
+    "Open-loop mode paces requests from absolute deadlines, independently of "
+    "completions.");
+DEFINE_bool(
+    open_loop_refill_on_miss,
+    false,
+    "Issue an unpaced refill SET after an open-loop GET miss. Disabled by "
+    "default so each scheduled arrival corresponds to exactly one wire RPC.");
+DEFINE_uint32(
+    open_loop_max_outstanding,
+    256,
+    "Maximum outstanding requests per proxy in open-loop mode. Arrivals at the "
+    "cap are dropped and counted rather than deferred.");
+DEFINE_uint64(
+    open_loop_max_lateness_us,
+    1000,
+    "Maximum scheduler lateness before an open-loop arrival is dropped. The "
+    "absolute schedule still advances, preventing catch-up bursts.");
 namespace {
+
+enum class RequestOutcome {
+  Success,
+  Error,
+  Timeout,
+  LocalRejection,
+  CancelledAtEnd,
+};
+
+constexpr std::array<uint64_t, 15> kSchedulerLagUpperBoundsUs = {
+    0,
+    1,
+    2,
+    5,
+    10,
+    20,
+    50,
+    100,
+    200,
+    500,
+    1000,
+    2000,
+    5000,
+    10000,
+    std::numeric_limits<uint64_t>::max()};
+
+constexpr size_t kCarbonResultCount =
+    static_cast<size_t>(carbon::Result::NUM_RESULTS);
+
+struct alignas(64) OpenLoopWorkerStats {
+  uint64_t scheduled{0};
+  uint64_t dispatched{0};
+  uint64_t completedSuccess{0};
+  uint64_t completedError{0};
+  uint64_t timeouts{0};
+  uint64_t localRejections{0};
+  uint64_t cancelledAtEnd{0};
+  uint64_t droppedLate{0};
+  uint64_t droppedAtCap{0};
+  uint64_t droppedAtWindowEnd{0};
+  uint64_t wireGetDispatched{0};
+  uint64_t wireSetDispatched{0};
+  uint64_t wireRefillSetDispatched{0};
+  uint64_t outstandingAtWindowEnd{0};
+  uint64_t outstandingHighWater{0};
+  uint64_t schedulerLagNsTotal{0};
+  uint64_t schedulerLagNsMax{0};
+  uint64_t schedulerLagSamples{0};
+  std::array<uint64_t, kSchedulerLagUpperBoundsUs.size()> schedulerLagBuckets{};
+  std::array<uint64_t, kCarbonResultCount> getResultCounts{};
+  std::array<uint64_t, kCarbonResultCount> setResultCounts{};
+  std::array<uint64_t, kCarbonResultCount> refillResultCounts{};
+
+  void recordResult(
+      std::array<uint64_t, kCarbonResultCount>& counts,
+      carbon::Result result) {
+    const auto index = static_cast<size_t>(result);
+    if (index < counts.size()) {
+      ++counts.at(index);
+    }
+  }
+
+  void recordSchedulerLag(std::chrono::nanoseconds lag) {
+    const uint64_t lagNs =
+        static_cast<uint64_t>(std::max<int64_t>(0, lag.count()));
+    const uint64_t lagUs = (lagNs + 999) / 1000;
+    schedulerLagNsTotal += lagNs;
+    schedulerLagNsMax = std::max(schedulerLagNsMax, lagNs);
+    ++schedulerLagSamples;
+    for (size_t i = 0; i < kSchedulerLagUpperBoundsUs.size(); ++i) {
+      if (lagUs <= kSchedulerLagUpperBoundsUs.at(i)) {
+        ++schedulerLagBuckets.at(i);
+        break;
+      }
+    }
+  }
+};
+
 // Latency-stage accumulators. The benchmark reports only aggregate QPS, so a
 // multi-millisecond average RPC latency against a server measured idle in
 // epoll_wait had no attribution at all. These split it into synchronous send,
@@ -499,6 +605,39 @@ void reportLatencyBreakdown() {
       us(gLatTransportNs, cbN),
       us(gLatResumeNs, cbN));
   fflush(stdout);
+}
+
+void validateOpenLoopFlags() {
+  if (FLAGS_open_loop_qps == 0) {
+    return;
+  }
+  if (!FLAGS_use_same_thread_client) {
+    throw std::runtime_error(
+        "--open_loop_qps requires --use_same_thread_client=true");
+  }
+  if (FLAGS_auto_concurrency) {
+    throw std::runtime_error(
+        "--open_loop_qps and --auto_concurrency are mutually exclusive");
+  }
+  if (FLAGS_lane_phase_stagger_us > 0) {
+    throw std::runtime_error(
+        "--lane_phase_stagger_us applies only to completion-driven mode");
+  }
+  if (FLAGS_open_loop_max_outstanding == 0) {
+    throw std::runtime_error("--open_loop_max_outstanding must be positive");
+  }
+  if (FLAGS_open_loop_max_outstanding >
+      std::numeric_limits<uint32_t>::max() / 4) {
+    throw std::runtime_error(
+        "--open_loop_max_outstanding is too large for mcrouter accounting");
+  }
+  if (FLAGS_open_loop_max_lateness_us == 0) {
+    throw std::runtime_error("--open_loop_max_lateness_us must be positive");
+  }
+  if (FLAGS_duration_seconds == 0) {
+    throw std::runtime_error(
+        "--duration_seconds must be positive in open-loop mode");
+  }
 }
 
 } // namespace
@@ -596,6 +735,8 @@ bool UcacheBenchClient::connectToAdmin(const std::string& host, uint16_t port) {
 }
 
 UcacheBenchClient::UcacheBenchClient() {
+  validateOpenLoopFlags();
+
   // Load traffic distribution if configured
   if (FLAGS_use_distribution) {
     if (FLAGS_distribution_config.empty()) {
@@ -1396,14 +1537,18 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     maxInflight = 1;
   }
 
+  const bool openLoopEnabled = FLAGS_open_loop_qps > 0;
+
   // Auto-concurrency: use large maxInflight for mcrouter (we control
   // concurrency via our own atomic counter), and split duration into ramp +
-  // steady phases
-  // Keep mcrouter's outstanding semaphore well clear of our own concurrency
-  // limit. createSameThreadClient sets maximumOutstandingError, so a send that
-  // races the semaphore is completed immediately with LOCAL_ERROR instead of
-  // being queued — sizing both limits identically sheds load as errors.
-  uint32_t mcrouterMaxOutstanding = std::max(4u * maxInflight, 500u);
+  // steady phases. Open-loop mode similarly keeps mcrouter's own semaphore well
+  // above the explicit per-proxy safety cap.
+  // createSameThreadClient sets maximumOutstandingError, so a send that races
+  // the semaphore is completed immediately with LOCAL_ERROR instead of being
+  // queued — sizing both limits identically sheds load as errors.
+  uint32_t mcrouterMaxOutstanding = openLoopEnabled
+      ? std::max(4u * FLAGS_open_loop_max_outstanding, 1024u)
+      : std::max(4u * maxInflight, 500u);
   std::atomic<uint32_t> dynamicMaxInflight{maxInflight};
   std::atomic<bool> inSteadyPhase{false};
   std::atomic<uint32_t> discoveredOptimalInflight{maxInflight};
@@ -1543,6 +1688,24 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     workerSetErrors.push_back(std::make_unique<std::atomic<uint64_t>>(0));
   }
 
+  // Open-loop accounting is per proxy. Each entry is touched only from that
+  // proxy's EventBase, then merged after all workers join.
+  std::vector<OpenLoopWorkerStats> openLoopStats(clients.size());
+  std::unique_ptr<folly::HeapTimekeeper> openLoopTimekeeper;
+  if (openLoopEnabled) {
+    openLoopTimekeeper = std::make_unique<folly::HeapTimekeeper>();
+    startTime = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    endTime = startTime + std::chrono::seconds(FLAGS_duration_seconds);
+    printf(
+        "[open_loop] target_qps=%lu per client process, proxies=%zu, "
+        "max_outstanding=%u per proxy, max_lateness_us=%lu\n",
+        FLAGS_open_loop_qps,
+        clients.size(),
+        FLAGS_open_loop_max_outstanding,
+        FLAGS_open_loop_max_lateness_us);
+    fflush(stdout);
+  }
+
   // Progress monitoring thread (must be created after clients and counters)
   std::thread progressThread;
   if (FLAGS_verbose && FLAGS_progress_interval_seconds > 0) {
@@ -1555,6 +1718,9 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         }
 
         auto now = std::chrono::steady_clock::now();
+        if (now < startTime) {
+          continue;
+        }
         auto elapsed = std::chrono::duration<double>(now - startTime).count();
 
         // Sum per-worker counters for progress display
@@ -1703,12 +1869,31 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     folly::coro::CancellableAsyncScope scope;
     auto exe = co_await folly::coro::co_current_executor;
 
+    auto requestTimeout = [&]() {
+      constexpr auto kMaxRequestTimeout = std::chrono::seconds(10);
+      if (!openLoopEnabled) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(
+            kMaxRequestTimeout);
+      }
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= endTime) {
+        return std::chrono::microseconds(0);
+      }
+      return std::min(
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              kMaxRequestTimeout),
+          std::chrono::ceil<std::chrono::microseconds>(endTime - now));
+    };
+
     // Send one GET request - matches production McrouterAdapter::coro() pattern
-    auto sendGetRequest = [&]() -> folly::coro::Task<void> {
-      auto opStartTime = std::chrono::steady_clock::now();
+    auto sendGetRequest =
+        [&](std::chrono::steady_clock::time_point scheduledTime)
+        -> folly::coro::Task<RequestOutcome> {
+      auto opStartTime = scheduledTime;
       std::string key = generateKey();
 
-      UcbGetRequest request;
+      auto requestOwner = std::make_shared<UcbGetRequest>();
+      UcbGetRequest& request = *requestOwner;
       request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
 
@@ -1742,10 +1927,17 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         t0 = std::chrono::steady_clock::now();
       }
 
+      if (openLoopEnabled && std::chrono::steady_clock::now() >= endTime) {
+        co_return RequestOutcome::CancelledAtEnd;
+      }
+      if (openLoopEnabled) {
+        ++openLoopStats[workerId].wireGetDispatched;
+      }
       clientPtr->send(
           request,
-          [p = std::move(promise), sampleLat, cbEntry](
+          [p = std::move(promise), sampleLat, cbEntry, requestOwner](
               const UcbGetRequest&, UcbGetReply&& reply) mutable {
+            (void)requestOwner;
             if (sampleLat) {
               cbEntry->store(
                   std::chrono::steady_clock::now().time_since_epoch().count(),
@@ -1759,7 +1951,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
       UcbGetReply result;
       try {
-        result = co_await std::move(future).within(std::chrono::seconds(10));
+        result = co_await std::move(future).within(requestTimeout());
       } catch (const std::exception&) {
         // Request never completed; count as a GET error and return so the
         // measurement worker's scope.joinAsync() can't hang.
@@ -1769,13 +1961,21 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           // the effective sampling rate.
           gLatLostSamples.fetch_add(1, std::memory_order_relaxed);
         }
-        workerTotalOps[workerId]->fetch_add(1);
-        workerGetOps[workerId]->fetch_add(1);
-        workerGetErrors[workerId]->fetch_add(1);
-        co_return;
+        const bool cancelledAtEnd =
+            openLoopEnabled && std::chrono::steady_clock::now() >= endTime;
+        if (!cancelledAtEnd) {
+          workerTotalOps[workerId]->fetch_add(1);
+          workerGetOps[workerId]->fetch_add(1);
+          workerGetErrors[workerId]->fetch_add(1);
+        }
+        co_return cancelledAtEnd ? RequestOutcome::CancelledAtEnd
+                                 : RequestOutcome::Timeout;
       }
 
       auto opEndTime = std::chrono::steady_clock::now();
+      if (openLoopEnabled && opEndTime >= endTime) {
+        co_return RequestOutcome::CancelledAtEnd;
+      }
 
       if (sampleLat) {
         auto ns = [](auto d) {
@@ -1799,24 +1999,37 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           std::chrono::duration<double, std::milli>(opEndTime - opStartTime)
               .count();
 
-      {
+      const bool deferLatencyForRefill = openLoopEnabled &&
+          *result.result() == carbon::Result::NOTFOUND &&
+          FLAGS_open_loop_refill_on_miss;
+      if (!deferLatencyForRefill) {
         std::lock_guard<std::mutex> lock(workerLatencyMutexes[workerId]);
         workerLatencies[workerId].push_back(latencyMs);
       }
 
       workerTotalOps[workerId]->fetch_add(1);
       workerGetOps[workerId]->fetch_add(1);
+      if (openLoopEnabled) {
+        openLoopStats[workerId].recordResult(
+            openLoopStats[workerId].getResultCounts, *result.result());
+      }
 
       if (*result.result() == carbon::Result::FOUND) {
         workerGetHits[workerId]->fetch_add(1);
-      } else if (*result.result() == carbon::Result::NOTFOUND) {
+        co_return RequestOutcome::Success;
+      }
+      if (*result.result() == carbon::Result::NOTFOUND) {
         workerGetMisses[workerId]->fetch_add(1);
+        if (openLoopEnabled && !FLAGS_open_loop_refill_on_miss) {
+          co_return RequestOutcome::Success;
+        }
 
         // SET on GET miss to simulate real cache warming behavior
         // This matches the behavior from the old synchronous version
         std::string value = generateValue();
 
-        UcbSetRequest setRequest;
+        auto setRequestOwner = std::make_shared<UcbSetRequest>();
+        UcbSetRequest& setRequest = *setRequestOwner;
         setRequest.key() = carbon::Keys<folly::IOBuf>(
             std::move(*folly::IOBuf::copyBuffer(key)));
         setRequest.value() = *folly::IOBuf::copyBuffer(value);
@@ -1835,53 +2048,90 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         auto [setPromise, setFuture] =
             folly::makePromiseContract<UcbSetReply>();
 
+        if (openLoopEnabled && std::chrono::steady_clock::now() >= endTime) {
+          co_return RequestOutcome::CancelledAtEnd;
+        }
+        if (openLoopEnabled) {
+          ++openLoopStats[workerId].wireSetDispatched;
+          ++openLoopStats[workerId].wireRefillSetDispatched;
+        }
         clientPtr->send(
             setRequest,
-            [p = std::move(setPromise)](
+            [p = std::move(setPromise), setRequestOwner](
                 const UcbSetRequest&, UcbSetReply&& reply) mutable {
+              (void)setRequestOwner;
               p.setValue(std::move(reply));
             });
 
         UcbSetReply setResult;
         try {
-          setResult =
-              co_await std::move(setFuture).within(std::chrono::seconds(10));
+          setResult = co_await std::move(setFuture).within(requestTimeout());
         } catch (const std::exception&) {
-          workerSetOps[workerId]->fetch_add(1);
-          workerSetErrors[workerId]->fetch_add(1);
-          co_return;
+          const bool cancelledAtEnd =
+              openLoopEnabled && std::chrono::steady_clock::now() >= endTime;
+          if (!cancelledAtEnd) {
+            workerSetOps[workerId]->fetch_add(1);
+            workerSetErrors[workerId]->fetch_add(1);
+          }
+          co_return cancelledAtEnd ? RequestOutcome::CancelledAtEnd
+                                   : RequestOutcome::Timeout;
+        }
+
+        const auto logicalEndTime = std::chrono::steady_clock::now();
+        if (openLoopEnabled && logicalEndTime >= endTime) {
+          co_return RequestOutcome::CancelledAtEnd;
+        }
+        if (openLoopEnabled) {
+          const double logicalLatencyMs =
+              std::chrono::duration<double, std::milli>(
+                  logicalEndTime - opStartTime)
+                  .count();
+          std::lock_guard<std::mutex> lock(workerLatencyMutexes[workerId]);
+          workerLatencies[workerId].push_back(logicalLatencyMs);
         }
 
         workerSetOps[workerId]->fetch_add(1);
+        if (openLoopEnabled) {
+          openLoopStats[workerId].recordResult(
+              openLoopStats[workerId].refillResultCounts, *setResult.result());
+        }
         if (*setResult.result() == carbon::Result::STORED) {
           workerSetSuccesses[workerId]->fetch_add(1);
-        } else {
-          workerSetErrors[workerId]->fetch_add(1);
-          if (FLAGS_verbose && workerSetErrors[workerId]->load() == 1) {
-            printf(
-                "Benchmark SET error (on GET miss, first sample): %s\n",
-                carbon::resultToString(*setResult.result_ref()));
-          }
+          co_return RequestOutcome::Success;
         }
-      } else {
-        workerGetErrors[workerId]->fetch_add(1);
-        if (FLAGS_verbose && workerGetErrors[workerId]->load() == 1) {
+
+        workerSetErrors[workerId]->fetch_add(1);
+        if (FLAGS_verbose && workerSetErrors[workerId]->load() == 1) {
           printf(
-              "Benchmark GET error (first sample): %s\n",
-              carbon::resultToString(*result.result_ref()));
+              "Benchmark SET error (on GET miss, first sample): %s\n",
+              carbon::resultToString(*setResult.result_ref()));
         }
+        co_return *setResult.result() == carbon::Result::LOCAL_ERROR
+            ? RequestOutcome::LocalRejection
+            : RequestOutcome::Error;
       }
 
-      co_return;
+      workerGetErrors[workerId]->fetch_add(1);
+      if (FLAGS_verbose && workerGetErrors[workerId]->load() == 1) {
+        printf(
+            "Benchmark GET error (first sample): %s\n",
+            carbon::resultToString(*result.result_ref()));
+      }
+      co_return *result.result() == carbon::Result::LOCAL_ERROR
+          ? RequestOutcome::LocalRejection
+          : RequestOutcome::Error;
     };
 
     // Send one SET request - matches production McrouterAdapter::coro() pattern
-    auto sendSetRequest = [&]() -> folly::coro::Task<void> {
-      auto opStartTime = std::chrono::steady_clock::now();
+    auto sendSetRequest =
+        [&](std::chrono::steady_clock::time_point scheduledTime)
+        -> folly::coro::Task<RequestOutcome> {
+      auto opStartTime = scheduledTime;
       std::string key = generateKey();
       std::string value = generateValue();
 
-      UcbSetRequest request;
+      auto requestOwner = std::make_shared<UcbSetRequest>();
+      UcbSetRequest& request = *requestOwner;
       request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
       request.value() = *folly::IOBuf::copyBuffer(value);
@@ -1900,24 +2150,39 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       // Same pattern as production McrouterAdapter::coro()
       auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
 
+      if (openLoopEnabled && std::chrono::steady_clock::now() >= endTime) {
+        co_return RequestOutcome::CancelledAtEnd;
+      }
+      if (openLoopEnabled) {
+        ++openLoopStats[workerId].wireSetDispatched;
+      }
       clientPtr->send(
           request,
-          [p = std::move(promise)](
+          [p = std::move(promise), requestOwner](
               const UcbSetRequest&, UcbSetReply&& reply) mutable {
+            (void)requestOwner;
             p.setValue(std::move(reply));
           });
 
       UcbSetReply result;
       try {
-        result = co_await std::move(future).within(std::chrono::seconds(10));
+        result = co_await std::move(future).within(requestTimeout());
       } catch (const std::exception&) {
-        workerTotalOps[workerId]->fetch_add(1);
-        workerSetOps[workerId]->fetch_add(1);
-        workerSetErrors[workerId]->fetch_add(1);
-        co_return;
+        const bool cancelledAtEnd =
+            openLoopEnabled && std::chrono::steady_clock::now() >= endTime;
+        if (!cancelledAtEnd) {
+          workerTotalOps[workerId]->fetch_add(1);
+          workerSetOps[workerId]->fetch_add(1);
+          workerSetErrors[workerId]->fetch_add(1);
+        }
+        co_return cancelledAtEnd ? RequestOutcome::CancelledAtEnd
+                                 : RequestOutcome::Timeout;
       }
 
       auto opEndTime = std::chrono::steady_clock::now();
+      if (openLoopEnabled && opEndTime >= endTime) {
+        co_return RequestOutcome::CancelledAtEnd;
+      }
       auto latencyMs =
           std::chrono::duration<double, std::milli>(opEndTime - opStartTime)
               .count();
@@ -1929,76 +2194,233 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
       workerTotalOps[workerId]->fetch_add(1);
       workerSetOps[workerId]->fetch_add(1);
+      if (openLoopEnabled) {
+        openLoopStats[workerId].recordResult(
+            openLoopStats[workerId].setResultCounts, *result.result());
+      }
 
       if (*result.result() == carbon::Result::STORED) {
         workerSetSuccesses[workerId]->fetch_add(1);
-      } else {
-        workerSetErrors[workerId]->fetch_add(1);
-        if (FLAGS_verbose && workerSetErrors[workerId]->load() == 1) {
-          printf(
-              "Benchmark SET error (first sample): %s\n",
-              carbon::resultToString(*result.result_ref()));
-        }
+        co_return RequestOutcome::Success;
       }
 
-      co_return;
+      workerSetErrors[workerId]->fetch_add(1);
+      if (FLAGS_verbose && workerSetErrors[workerId]->load() == 1) {
+        printf(
+            "Benchmark SET error (first sample): %s\n",
+            carbon::resultToString(*result.result_ref()));
+      }
+      co_return *result.result() == carbon::Result::LOCAL_ERROR
+          ? RequestOutcome::LocalRejection
+          : RequestOutcome::Error;
     };
 
-    // Persistent completion-driven lanes: each lane holds exactly one request
-    // in flight and issues its next one the instant the previous completes.
-    //
-    // The previous design topped every worker back up to maxInflight and then
-    // slept 1ms. That sleep is a timer on the proxy EventBase, which is also
-    // serving this proxy's connections, so the wakeup slips under load: offered
-    // load arrives as millisecond bursts and queues inflate rather than
-    // pipelining. Measured residence was ~60ms at maxInflight=150 and ~258ms at
-    // 600 — which is why raising the window lowered throughput.
-    //
-    // Lanes cannot burst, so mcrouter's outstanding semaphore is never raced
-    // (see mcrouterMaxOutstanding, which is now decoupled from maxInflight;
-    // createSameThreadClient sets maximumOutstandingError, so a raced send is
-    // failed with LOCAL_ERROR rather than queued, silently shedding load).
     auto& myInflight = *workerInflight[workerId];
-    const uint32_t laneCount = maxInflight;
 
-    for (uint32_t lane = 0; lane < laneCount; ++lane) {
-      scope.add(
-          folly::coro::co_withExecutor(
-              exe,
-              folly::coro::co_invoke([&, lane]() -> folly::coro::Task<void> {
-                // Stagger each lane's first request. Every lane otherwise
-                // starts together and then reissues on completion, so the
-                // whole cohort can stay phase-locked: the server sees bursts
-                // separated by idle gaps rather than a smooth arrival process,
-                // which caps throughput while leaving IO threads in epoll_wait.
-                // The offset is deterministic per lane, spread over roughly one
-                // observed response time, and only shifts the first request --
-                // concurrency and the steady-state loop are unchanged.
-                if (FLAGS_lane_phase_stagger_us > 0) {
-                  co_await folly::futures::sleep(
-                      std::chrono::microseconds(
-                          (static_cast<uint64_t>(lane) * 2654435761ULL) %
-                          FLAGS_lane_phase_stagger_us));
-                }
-                while (std::chrono::steady_clock::now() < endTime) {
-                  // auto_concurrency shrinks the active window by parking
-                  // the highest-numbered lanes.
-                  if (FLAGS_auto_concurrency &&
-                      lane >= dynamicMaxInflight.load()) {
+    if (openLoopEnabled) {
+      auto& stats = openLoopStats[workerId];
+      const uint64_t proxyCount = clients.size();
+      const uint64_t processSeed = clientId_ >= 0
+          ? static_cast<uint64_t>(clientId_)
+          : static_cast<uint64_t>(getpid());
+      const uint64_t remainderOffset =
+          folly::hash::twang_mix64(processSeed) % proxyCount;
+      const uint64_t rotatedWorker =
+          (workerId + proxyCount - remainderOffset) % proxyCount;
+      const uint64_t workerRate = FLAGS_open_loop_qps / proxyCount +
+          (rotatedWorker < FLAGS_open_loop_qps % proxyCount ? 1 : 0);
+
+      if (workerRate > 0) {
+        const uint64_t periodNs =
+            std::max<uint64_t>(1, 1000000000ULL / workerRate);
+        const uint64_t phaseNs =
+            folly::hash::twang_mix64((processSeed << 32) ^ workerId) % periodNs;
+        const auto phase = std::chrono::nanoseconds(phaseNs);
+        uint64_t sequence = 0;
+
+        auto deadlineFor = [&](uint64_t seq) {
+          const uint64_t wholeSeconds = seq / workerRate;
+          const uint64_t remainder = seq % workerRate;
+          const uint64_t fractionalNs = remainder * 1000000000ULL / workerRate;
+          return startTime + phase + std::chrono::seconds(wholeSeconds) +
+              std::chrono::nanoseconds(fractionalNs);
+        };
+        auto sequenceAtOrAfter =
+            [&](std::chrono::steady_clock::time_point time) -> uint64_t {
+          const auto origin = startTime + phase;
+          if (time <= origin) {
+            return uint64_t{0};
+          }
+          const uint64_t elapsedNs = static_cast<uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  time - origin)
+                  .count());
+          const uint64_t wholeSeconds = elapsedNs / 1000000000ULL;
+          const uint64_t remainderNs = elapsedNs % 1000000000ULL;
+          return wholeSeconds * workerRate +
+              (remainderNs * workerRate + 999999999ULL) / 1000000000ULL;
+        };
+
+        const auto maxLateness =
+            std::chrono::microseconds(FLAGS_open_loop_max_lateness_us);
+        const uint64_t endSequence = sequenceAtOrAfter(endTime);
+        uint32_t slotsThisTurn = 0;
+        while (true) {
+          if (++slotsThisTurn >= 64) {
+            slotsThisTurn = 0;
+            co_await folly::coro::co_reschedule_on_current_executor;
+          }
+
+          const auto deadline = deadlineFor(sequence);
+          if (deadline >= endTime) {
+            break;
+          }
+
+          auto now = std::chrono::steady_clock::now();
+          while (now < deadline) {
+            co_await folly::coro::sleep(
+                std::chrono::ceil<std::chrono::microseconds>(deadline - now),
+                openLoopTimekeeper.get());
+            now = std::chrono::steady_clock::now();
+          }
+
+          if (now >= endTime) {
+            const uint64_t skipped =
+                endSequence > sequence ? endSequence - sequence : 0;
+            stats.scheduled += skipped;
+            stats.droppedAtWindowEnd += skipped;
+            sequence = endSequence;
+            break;
+          }
+
+          if (now > deadline + maxLateness) {
+            stats.recordSchedulerLag(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    now - deadline));
+            const uint64_t firstRetained =
+                std::min(sequenceAtOrAfter(now - maxLateness), endSequence);
+            const uint64_t skipped =
+                firstRetained > sequence ? firstRetained - sequence : 1;
+            stats.scheduled += skipped;
+            stats.droppedLate += skipped;
+            sequence += skipped;
+            continue;
+          }
+
+          ++sequence;
+          ++stats.scheduled;
+          const auto lag = std::chrono::duration_cast<std::chrono::nanoseconds>(
+              now - deadline);
+          stats.recordSchedulerLag(lag);
+
+          if (myInflight.load(std::memory_order_relaxed) >=
+              FLAGS_open_loop_max_outstanding) {
+            ++stats.droppedAtCap;
+            continue;
+          }
+
+          ++stats.dispatched;
+          const uint32_t outstanding =
+              myInflight.fetch_add(1, std::memory_order_relaxed) + 1;
+          stats.outstandingHighWater =
+              std::max<uint64_t>(stats.outstandingHighWater, outstanding);
+
+          scope.add(
+              folly::coro::co_withExecutor(
+                  exe,
+                  folly::coro::co_invoke(
+                      [&, deadline]() -> folly::coro::Task<void> {
+                        auto inflightGuard = folly::makeGuard([&]() {
+                          myInflight.fetch_sub(1, std::memory_order_relaxed);
+                        });
+
+                        RequestOutcome outcome = RequestOutcome::Error;
+                        try {
+                          if (std::chrono::steady_clock::now() >= endTime) {
+                            outcome = RequestOutcome::CancelledAtEnd;
+                          } else if (folly::Random::randDouble01() < getRatio) {
+                            outcome = co_await sendGetRequest(deadline);
+                          } else {
+                            outcome = co_await sendSetRequest(deadline);
+                          }
+                        } catch (const std::exception&) {
+                          outcome = std::chrono::steady_clock::now() >= endTime
+                              ? RequestOutcome::CancelledAtEnd
+                              : RequestOutcome::Error;
+                        }
+
+                        switch (outcome) {
+                          case RequestOutcome::Success:
+                            ++stats.completedSuccess;
+                            break;
+                          case RequestOutcome::Error:
+                            ++stats.completedError;
+                            break;
+                          case RequestOutcome::Timeout:
+                            ++stats.timeouts;
+                            break;
+                          case RequestOutcome::LocalRejection:
+                            ++stats.localRejections;
+                            break;
+                          case RequestOutcome::CancelledAtEnd:
+                            ++stats.cancelledAtEnd;
+                            break;
+                        }
+                        co_return;
+                      })));
+        }
+      }
+    } else {
+      // Persistent completion-driven lanes: each lane holds exactly one request
+      // in flight and issues its next one the instant the previous completes.
+      const uint32_t laneCount = maxInflight;
+      for (uint32_t lane = 0; lane < laneCount; ++lane) {
+        scope.add(
+            folly::coro::co_withExecutor(
+                exe,
+                folly::coro::co_invoke([&, lane]() -> folly::coro::Task<void> {
+                  if (FLAGS_lane_phase_stagger_us > 0) {
                     co_await folly::futures::sleep(
-                        std::chrono::milliseconds(1));
-                    continue;
+                        std::chrono::microseconds(
+                            (static_cast<uint64_t>(lane) * 2654435761ULL) %
+                            FLAGS_lane_phase_stagger_us));
                   }
-                  myInflight.fetch_add(1);
-                  if (folly::Random::randDouble01() < getRatio) {
-                    co_await sendGetRequest();
-                  } else {
-                    co_await sendSetRequest();
+                  while (std::chrono::steady_clock::now() < endTime) {
+                    if (FLAGS_auto_concurrency &&
+                        lane >= dynamicMaxInflight.load()) {
+                      co_await folly::futures::sleep(
+                          std::chrono::milliseconds(1));
+                      continue;
+                    }
+                    myInflight.fetch_add(1);
+                    const auto scheduledTime = std::chrono::steady_clock::now();
+                    if (folly::Random::randDouble01() < getRatio) {
+                      co_await sendGetRequest(scheduledTime);
+                    } else {
+                      co_await sendSetRequest(scheduledTime);
+                    }
+                    myInflight.fetch_sub(1);
                   }
-                  myInflight.fetch_sub(1);
-                }
-                co_return;
-              })));
+                  co_return;
+                })));
+      }
+    }
+
+    if (openLoopEnabled) {
+      auto now = std::chrono::steady_clock::now();
+      while (now < endTime) {
+        co_await folly::coro::sleep(
+            std::chrono::ceil<std::chrono::microseconds>(endTime - now),
+            openLoopTimekeeper.get());
+        now = std::chrono::steady_clock::now();
+      }
+    }
+
+    // Snapshot pressure at the measurement boundary before cancellation drains
+    // each request and decrements the live counter.
+    if (openLoopEnabled) {
+      openLoopStats[workerId].outstandingAtWindowEnd =
+          myInflight.load(std::memory_order_relaxed);
     }
 
     // Measurement window is over: cancel any still-outstanding requests and
@@ -2030,6 +2452,140 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     autoConcurrencyThread.join();
   }
 
+  if (openLoopEnabled) {
+    OpenLoopWorkerStats totals;
+    for (size_t i = 0; i < openLoopStats.size(); ++i) {
+      const auto& stats = openLoopStats.at(i);
+      totals.scheduled += stats.scheduled;
+      totals.dispatched += stats.dispatched;
+      totals.completedSuccess += stats.completedSuccess;
+      totals.completedError += stats.completedError;
+      totals.timeouts += stats.timeouts;
+      totals.localRejections += stats.localRejections;
+      totals.cancelledAtEnd += stats.cancelledAtEnd;
+      totals.droppedLate += stats.droppedLate;
+      totals.droppedAtCap += stats.droppedAtCap;
+      totals.droppedAtWindowEnd += stats.droppedAtWindowEnd;
+      totals.wireGetDispatched += stats.wireGetDispatched;
+      totals.wireSetDispatched += stats.wireSetDispatched;
+      totals.wireRefillSetDispatched += stats.wireRefillSetDispatched;
+      totals.outstandingAtWindowEnd += stats.outstandingAtWindowEnd;
+      totals.outstandingHighWater =
+          std::max(totals.outstandingHighWater, stats.outstandingHighWater);
+      totals.schedulerLagNsTotal += stats.schedulerLagNsTotal;
+      totals.schedulerLagNsMax =
+          std::max(totals.schedulerLagNsMax, stats.schedulerLagNsMax);
+      totals.schedulerLagSamples += stats.schedulerLagSamples;
+      for (size_t bucket = 0; bucket < totals.schedulerLagBuckets.size();
+           ++bucket) {
+        totals.schedulerLagBuckets.at(bucket) +=
+            stats.schedulerLagBuckets.at(bucket);
+      }
+      for (size_t result = 0; result < kCarbonResultCount; ++result) {
+        totals.getResultCounts.at(result) += stats.getResultCounts.at(result);
+        totals.setResultCounts.at(result) += stats.setResultCounts.at(result);
+        totals.refillResultCounts.at(result) +=
+            stats.refillResultCounts.at(result);
+      }
+    }
+
+    uint64_t schedulerLagP99Us = 0;
+    const uint64_t p99Rank = (totals.schedulerLagSamples * 99 + 99) / 100;
+    uint64_t cumulative = 0;
+    for (size_t i = 0; i < totals.schedulerLagBuckets.size(); ++i) {
+      cumulative += totals.schedulerLagBuckets.at(i);
+      if (cumulative >= p99Rank) {
+        schedulerLagP99Us = i + 1 == kSchedulerLagUpperBoundsUs.size()
+            ? (totals.schedulerLagNsMax + 999) / 1000
+            : kSchedulerLagUpperBoundsUs.at(i);
+        break;
+      }
+    }
+
+    const uint64_t terminal = totals.completedSuccess + totals.completedError +
+        totals.timeouts + totals.localRejections + totals.cancelledAtEnd;
+    const bool scheduledConserved = totals.scheduled ==
+        totals.dispatched + totals.droppedLate + totals.droppedAtCap +
+            totals.droppedAtWindowEnd;
+    const bool dispatchedConserved = totals.dispatched == terminal;
+    const uint64_t generatorDrops = totals.droppedLate + totals.droppedAtCap;
+    const bool generatorLimited = generatorDrops > totals.scheduled / 1000 ||
+        totals.localRejections > 0 || !scheduledConserved ||
+        !dispatchedConserved;
+    const double generatorDropPct =
+        totals.scheduled == 0 ? 0.0 : 100.0 * generatorDrops / totals.scheduled;
+    const double duration = static_cast<double>(FLAGS_duration_seconds);
+    const double meanLagUs = totals.schedulerLagSamples == 0
+        ? 0.0
+        : static_cast<double>(totals.schedulerLagNsTotal) /
+            totals.schedulerLagSamples / 1000.0;
+
+    printf(
+        "OPEN_LOOP_ACCOUNTING target_qps=%lu scheduled=%lu dispatched=%lu "
+        "completed_success=%lu completed_error=%lu timeouts=%lu "
+        "local_rejections=%lu cancelled_at_end=%lu dropped_late=%lu "
+        "dropped_at_cap=%lu dropped_at_window_end=%lu "
+        "logical_outstanding_at_window_end=%lu scheduled_conserved=%s "
+        "dispatched_conserved=%s\n",
+        FLAGS_open_loop_qps,
+        totals.scheduled,
+        totals.dispatched,
+        totals.completedSuccess,
+        totals.completedError,
+        totals.timeouts,
+        totals.localRejections,
+        totals.cancelledAtEnd,
+        totals.droppedLate,
+        totals.droppedAtCap,
+        totals.droppedAtWindowEnd,
+        totals.outstandingAtWindowEnd,
+        scheduledConserved ? "true" : "false",
+        dispatchedConserved ? "true" : "false");
+    printf(
+        "OPEN_LOOP_RATES wire_offered_qps=%.1f wire_dispatched_qps=%.1f "
+        "wire_completed_reply_qps=%.1f generator_limited=%s "
+        "generator_drop_pct=%.4f latency_population=completed_replies_only "
+        "latency_omitted=%lu "
+        "scheduler_lag_mean_us=%.1f scheduler_lag_p99_us=%lu "
+        "scheduler_lag_max_us=%.1f "
+        "logical_outstanding_high_water_per_proxy=%lu\n",
+        totals.scheduled / duration,
+        totals.dispatched / duration,
+        totals.completedSuccess / duration,
+        generatorLimited ? "true" : "false",
+        generatorDropPct,
+        totals.droppedLate + totals.droppedAtCap + totals.droppedAtWindowEnd +
+            totals.timeouts + totals.cancelledAtEnd,
+        meanLagUs,
+        schedulerLagP99Us,
+        totals.schedulerLagNsMax / 1000.0,
+        totals.outstandingHighWater);
+    printf(
+        "OPEN_LOOP_WIRE_DISPATCHES get=%lu direct_set=%lu refill_set=%lu "
+        "set_total=%lu total=%lu\n",
+        totals.wireGetDispatched,
+        totals.wireSetDispatched - totals.wireRefillSetDispatched,
+        totals.wireRefillSetDispatched,
+        totals.wireSetDispatched,
+        totals.wireGetDispatched + totals.wireSetDispatched);
+    for (size_t result = 0; result < kCarbonResultCount; ++result) {
+      const auto carbonResult = static_cast<carbon::Result>(result);
+      const uint64_t getCount = totals.getResultCounts.at(result);
+      const uint64_t setCount = totals.setResultCounts.at(result);
+      const uint64_t refillCount = totals.refillResultCounts.at(result);
+      if (getCount + setCount + refillCount > 0) {
+        printf(
+            "OPEN_LOOP_RESULT result=%s get=%lu direct_set=%lu "
+            "refill_set=%lu\n",
+            carbon::resultToString(carbonResult),
+            getCount,
+            setCount,
+            refillCount);
+      }
+    }
+    fflush(stdout);
+  }
+
   // Merge all worker latencies
   for (size_t i = 0; i < clients.size(); ++i) {
     std::lock_guard<std::mutex> lock(latenciesMutex);
@@ -2041,7 +2597,8 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
   BenchmarkResults results;
   results.startTime = startTime;
-  results.endTime = std::chrono::steady_clock::now();
+  results.endTime =
+      openLoopEnabled ? endTime : std::chrono::steady_clock::now();
 
   // Sum per-worker counters to get final totals
   results.totalOps = 0;

@@ -24,6 +24,7 @@ Usage:
 import argparse
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import threading
@@ -287,13 +288,22 @@ def run_server(args: argparse.Namespace) -> None:
     )
 
     server_binary = os.path.join(UCACHE_BENCH_DIR, "server", "ucachebench_server")
-    server_cmd = [
-        server_binary,
-        f"--port={args.port}",
-        f"--memory_mb={args.memory_mb}",
-        f"--hash_power={hash_power}",
-        f"--pool_name={args.pool_name}",
-    ]
+    server_cmd = [server_binary]
+    if getattr(args, "server_numa_interleave", 0):
+        numactl = shutil.which("numactl")
+        if numactl is None:
+            raise RuntimeError(
+                "--server-numa-interleave requires numactl on the server host"
+            )
+        server_cmd = [numactl, "--interleave=all", server_binary]
+    server_cmd.extend(
+        [
+            f"--port={args.port}",
+            f"--memory_mb={args.memory_mb}",
+            f"--hash_power={hash_power}",
+            f"--pool_name={args.pool_name}",
+        ]
+    )
 
     # Add DRAM tuning parameters if provided
     if args.lru_rebalance_interval_sec is not None:
@@ -487,8 +497,35 @@ def run_client(args: argparse.Namespace) -> None:
     ]
 
     lane_stagger = getattr(args, "lane_phase_stagger_us", 0)
+    open_loop_qps = getattr(args, "open_loop_qps", 0)
+    if open_loop_qps < 0:
+        raise ValueError("--open-loop-qps must be non-negative")
+    if getattr(args, "open_loop_max_outstanding", 256) <= 0:
+        raise ValueError("--open-loop-max-outstanding must be positive")
+    if getattr(args, "open_loop_max_lateness_us", 1000) <= 0:
+        raise ValueError("--open-loop-max-lateness-us must be positive")
+    if open_loop_qps > 0 and lane_stagger > 0:
+        raise ValueError(
+            "--open-loop-qps and --lane-phase-stagger-us are mutually exclusive"
+        )
+    if open_loop_qps > 0 and args.auto_concurrency:
+        raise ValueError(
+            "--open-loop-qps and --auto-concurrency are mutually exclusive"
+        )
+    if open_loop_qps > 0 and getattr(args, "open_loop_max_lateness_us", 1000) == 0:
+        raise ValueError("--open-loop-max-lateness-us must be positive")
     if lane_stagger > 0:
         client_cmd.append(f"--lane_phase_stagger_us={lane_stagger}")
+
+    if open_loop_qps > 0:
+        client_cmd.extend(
+            [
+                f"--open_loop_qps={open_loop_qps}",
+                f"--open_loop_max_outstanding={getattr(args, 'open_loop_max_outstanding', 256)}",
+                f"--open_loop_max_lateness_us={getattr(args, 'open_loop_max_lateness_us', 1000)}",
+                f"--open_loop_refill_on_miss={'true' if getattr(args, 'open_loop_refill_on_miss', 0) else 'false'}",
+            ]
+        )
 
     warmup_max_inflight = getattr(args, "warmup_max_inflight", 0)
     if warmup_max_inflight > 0:
@@ -542,7 +579,9 @@ def run_client(args: argparse.Namespace) -> None:
     if args.failures_until_tko > 0:
         client_cmd.append(f"--failures_until_tko={args.failures_until_tko}")
 
-    if not args.use_same_thread_client:
+    if open_loop_qps > 0:
+        client_cmd.append("--use_same_thread_client=true")
+    elif not args.use_same_thread_client:
         client_cmd.append("--use_same_thread_client=false")
 
     # Simplified connection control
@@ -612,6 +651,12 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=1024,
         help="Memory size in MB for DRAM cache",
+    )
+    server_parser.add_argument(
+        "--server-numa-interleave",
+        type=int,
+        default=0,
+        help="Run the server with numactl --interleave=all (1=enabled)",
     )
     server_parser.add_argument(
         "--hash-power",
@@ -1025,6 +1070,30 @@ def init_parser() -> argparse.ArgumentParser:
         default=0,
         help="Spread each measurement lane's first request over this many us "
         "(0 = off), to stop completion-driven lanes staying phase-locked.",
+    )
+    client_parser.add_argument(
+        "--open-loop-qps",
+        type=int,
+        default=0,
+        help="Target wire-RPC QPS for this client process (0 = completion-driven)",
+    )
+    client_parser.add_argument(
+        "--open-loop-refill-on-miss",
+        type=int,
+        default=0,
+        help="Issue unpaced refill SETs after open-loop GET misses (1=enabled)",
+    )
+    client_parser.add_argument(
+        "--open-loop-max-outstanding",
+        type=int,
+        default=256,
+        help="Per-proxy outstanding safety cap for open-loop mode",
+    )
+    client_parser.add_argument(
+        "--open-loop-max-lateness-us",
+        type=int,
+        default=1000,
+        help="Drop open-loop arrivals later than this threshold",
     )
 
     client_parser.add_argument(
