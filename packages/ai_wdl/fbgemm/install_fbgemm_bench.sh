@@ -981,8 +981,13 @@ clone_fbgemm_repo() {
     echo "[ERROR] ASAN-disable patch not found: ${FBGEMM_DISABLE_ASAN_PATCH}"
     return 1
   fi
-  git -C fbgemm_${FBGEMM_VERSION} apply --check "${FBGEMM_DISABLE_ASAN_PATCH}" || return 1
-  git -C fbgemm_${FBGEMM_VERSION} apply "${FBGEMM_DISABLE_ASAN_PATCH}" || return 1
+  if git -C fbgemm_${FBGEMM_VERSION} apply --reverse --check \
+      "${FBGEMM_DISABLE_ASAN_PATCH}" 2>/dev/null; then
+    echo "[SETUP] ASAN-disable patch already applied."
+  else
+    git -C fbgemm_${FBGEMM_VERSION} apply \
+      "${FBGEMM_DISABLE_ASAN_PATCH}" || return 1
+  fi
 
   # Disable the postbuild script to prevent race conditions during linking
   # This is a workaround for a known issue in the build process
