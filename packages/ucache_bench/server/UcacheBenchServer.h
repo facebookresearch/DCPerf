@@ -314,6 +314,9 @@ class UcacheBenchServer {
     std::atomic<uint64_t> identityAllowed{0};
     std::atomic<uint64_t> auditEvents{0};
     std::atomic<uint64_t> prefixCounterHits{0};
+    // Counts hits that actually invoked the codec. Dividing bytes by total
+    // get hits would dilute the per-op figures by zstd_compress_pct.
+    std::atomic<uint64_t> zstdOps{0};
     std::atomic<uint64_t> zstdBytesIn{0};
     std::atomic<uint64_t> zstdBytesOut{0};
     std::atomic<uint64_t> zstdErrors{0};
