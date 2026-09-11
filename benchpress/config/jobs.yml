@@ -1929,3 +1929,87 @@
     solver: 1
     cost: 1
   hooks: []
+
+- benchmark: halcyon_standalone_prepare
+  name: halcyon_standalone_prepare
+  description: Create marker-owned Halcyon filesets on local data mounts.
+  args:
+    - prepare
+    - '--mounts={mounts}'
+    - '--threads-per-disk={threads_per_disk}'
+    - '--metadata-backend={metadata_backend}'
+  vars:
+    - 'mounts='
+    - 'threads_per_disk=5'
+    - 'metadata_backend=manifest'
+
+- benchmark: halcyon_standalone
+  name: halcyon_standalone
+  description: Run Halcyon storage I/O locally against prepared filesets.
+  args:
+    - standalone
+    - '--mounts={mounts}'
+    - '--warmup={warmup}'
+    - '--runtime={runtime}'
+    - '--threads-per-disk={threads_per_disk}'
+    - '--metadata-backend={metadata_backend}'
+  vars:
+    - 'mounts='
+    - 'warmup=60'
+    - 'runtime=600'
+    - 'threads_per_disk=5'
+    - 'metadata_backend=manifest'
+
+- benchmark: halcyon_paired_prepare
+  name: halcyon_paired_prepare
+  description: Create marker-owned Halcyon filesets on a sender/partner pair.
+  args:
+    - prepare
+    - '--partner={partner}'
+    - '--sender-host={sender}'
+    - '--mounts={sender_mounts}'
+    - '--partner-mounts={partner_mounts}'
+    - '--ssh-command={ssh_command}'
+    - '--config=./packages/halcyon/genai.json'
+    - '--threads-per-disk={threads_per_disk}'
+    - '--metadata-backend={metadata_backend}'
+  vars:
+    - 'sender='
+    - 'partner='
+    - 'sender_mounts='
+    - 'partner_mounts='
+    - 'ssh_command=ssh'
+    - 'threads_per_disk=5'
+    - 'metadata_backend=manifest'
+
+- benchmark: halcyon_paired_genai
+  name: halcyon_paired_genai
+  description: Run the validated GenAI sender/partner Halcyon workload.
+  args:
+    - paired
+    - '--partner={partner}'
+    - '--sender-host={sender}'
+    - '--mounts={sender_mounts}'
+    - '--partner-mounts={partner_mounts}'
+    - '--ssh-command={ssh_command}'
+    - '--config=./packages/halcyon/genai.json'
+    - '--warmup={warmup}'
+    - '--runtime={runtime}'
+    - '--threads-per-disk={threads_per_disk}'
+    - '--qnet-threads={qnet_threads}'
+    - '--qmeta-threads={qmeta_threads}'
+    - '--qflush-threads={qflush_threads}'
+    - '--metadata-backend={metadata_backend}'
+  vars:
+    - 'sender='
+    - 'partner='
+    - 'sender_mounts='
+    - 'partner_mounts='
+    - 'ssh_command=ssh'
+    - 'warmup=60'
+    - 'runtime=600'
+    - 'threads_per_disk=5'
+    - 'qnet_threads=16'
+    - 'qmeta_threads=0'
+    - 'qflush_threads=0'
+    - 'metadata_backend=manifest'

@@ -40,8 +40,8 @@ centos10() {
 centos9() {
     echo "Installing dependencies for CentOS 9"
 
-    $SUDO dnf install -y git python3-click python3-pyyaml python3-tabulate python3-pip xz-devel lshw sysstat dmidecode
-    pip-3.9 install pandas packaging
+    $SUDO dnf install -y git python3-pyyaml python3-pip xz-devel lshw sysstat dmidecode
+    $SUDO /usr/bin/python3 -m pip install click tabulate pandas packaging
 
     # These are not necessary if it's run under internal test env
     if ! [ "${IS_INTERNAL_TEST:-}" = "1" ]; then
