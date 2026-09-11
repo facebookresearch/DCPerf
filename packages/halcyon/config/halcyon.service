@@ -1,0 +1,13 @@
+[Unit]
+Description=HalcyonService
+After=network.target network-online.target remote-fs.target
+
+[Service]
+ExecStart=/usr/local/bin/HalcyonServiceMain --port 23459
+Restart=always
+StandardOutput=journal
+StandardError=inherit
+SyslogIdentifier=halcyon
+
+[Install]
+WantedBy=multi-user.target
