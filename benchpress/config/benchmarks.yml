@@ -222,3 +222,80 @@ sleep:
   path: /usr/bin/sleep
   parser: returncode
   metrics: []
+
+halcyon_standalone_prepare:
+  parser: returncode
+  install_script: ./packages/halcyon/install_halcyon.sh
+  cleanup_script: ./packages/halcyon/cleanup_halcyon.sh
+  install_markers:
+    - ./benchmarks/halcyon/bin/halcyon
+  path: ./packages/halcyon/run.py
+  tags:
+    scope: [storage]
+    component: [cpu, storage]
+  metrics: []
+
+halcyon_standalone:
+  parser: halcyon
+  install_script: ./packages/halcyon/install_halcyon.sh
+  cleanup_script: ./packages/halcyon/cleanup_halcyon.sh
+  install_markers:
+    - ./benchmarks/halcyon/bin/halcyon
+  path: ./packages/halcyon/run.py
+  tags:
+    scope: [storage]
+    component: [cpu, storage]
+  metrics:
+    - qps
+    - read_qps
+    - write_qps
+    - throughput_mb_s
+    - read_throughput_mb_s
+    - write_throughput_mb_s
+    - latency_ms
+    - read_latency_ms
+    - write_latency_ms
+    - cpu_util_pct
+    - disk_util_pct
+    - network_util_pct
+    - reactor_accounted_cpu_ms
+    - reactor_useful_cpu_ratio
+
+halcyon_paired_prepare:
+  parser: returncode
+  install_script: ./packages/halcyon/install_halcyon.sh
+  cleanup_script: ./packages/halcyon/cleanup_halcyon.sh
+  install_markers:
+    - ./benchmarks/halcyon/bin/HalcyonServiceMain
+  path: ./packages/halcyon/run.py
+  tags:
+    scope: [storage]
+    component: [cpu, storage, network]
+  metrics: []
+
+halcyon_paired_genai:
+  parser: halcyon
+  install_script: ./packages/halcyon/install_halcyon.sh
+  cleanup_script: ./packages/halcyon/cleanup_halcyon.sh
+  install_markers:
+    - ./benchmarks/halcyon/bin/HalcyonServiceMain
+    - ./benchmarks/halcyon/bin/halcyon_client.py
+  path: ./packages/halcyon/run.py
+  tags:
+    scope: [storage]
+    component: [cpu, storage, network]
+  metrics:
+    - qps
+    - read_qps
+    - write_qps
+    - throughput_mb_s
+    - read_throughput_mb_s
+    - write_throughput_mb_s
+    - latency_ms
+    - read_latency_ms
+    - write_latency_ms
+    - cpu_util_pct
+    - disk_util_pct
+    - network_util_pct
+    - reactor_accounted_cpu_ms
+    - reactor_useful_cpu_ratio

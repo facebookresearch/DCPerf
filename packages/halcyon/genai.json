@@ -1,0 +1,32 @@
+{
+  "sender": {
+    "read_ratio": 0.5,
+    "write_ratio": 0.5,
+    "read_sizes": {"1m": 1.0},
+    "write_sizes": {"1m": 1.0},
+    "mount_points": [],
+    "file_layout": {
+      "max_file_size": 8462336,
+      "dirs": 100,
+      "subdirs": 1,
+      "files_per_dir": 100
+    },
+    "target_host": "partner",
+    "pair_role": "SendDiskReads"
+  },
+  "partner": {
+    "read_ratio": 0.5,
+    "write_ratio": 0.5,
+    "read_sizes": {"1m": 1.0},
+    "write_sizes": {"1m": 1.0},
+    "mount_points": [],
+    "file_layout": {
+      "max_file_size": 8462336,
+      "dirs": 100,
+      "subdirs": 1,
+      "files_per_dir": 100
+    },
+    "target_host": "sender",
+    "pair_role": "SendDiskReads"
+  }
+}
