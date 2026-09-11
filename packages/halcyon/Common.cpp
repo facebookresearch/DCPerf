@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cctype>
+
 #include <folly/Random.h>
 #include <folly/String.h>
 #include <folly/hash/Checksum.h>
@@ -30,8 +32,12 @@ uint64_t current_nano() {
 }
 
 int humanToInt(string str) {
+  if (str.empty()) {
+    return 0;
+  }
   int multiplier = 1;
-  string b{str.back()};
+  string b{
+      static_cast<char>(std::toupper(static_cast<unsigned char>(str.back())))};
   for (const pair<string, int>& p : kBinarySuffix) {
     if (b.compare(p.first) == 0) {
       multiplier = p.second;

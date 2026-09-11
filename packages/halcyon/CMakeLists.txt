@@ -19,6 +19,7 @@ endif()
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing)
 
@@ -51,7 +52,24 @@ find_package(folly CONFIG REQUIRED)
 # find_dependency list does not cover it.
 find_package(wangle CONFIG REQUIRED)
 find_package(FBThrift CONFIG REQUIRED)
-find_package(RocksDB CONFIG REQUIRED)
+find_package(RocksDB CONFIG QUIET)
+if(TARGET RocksDB::rocksdb)
+  set(HALCYON_ROCKSDB_TARGET RocksDB::rocksdb)
+elseif(TARGET RocksDB::rocksdb-shared)
+  set(HALCYON_ROCKSDB_TARGET RocksDB::rocksdb-shared)
+elseif(TARGET rocksdb)
+  set(HALCYON_ROCKSDB_TARGET rocksdb)
+elseif(TARGET rocksdb-shared)
+  set(HALCYON_ROCKSDB_TARGET rocksdb-shared)
+else()
+  find_path(ROCKSDB_INCLUDE_DIR rocksdb/db.h REQUIRED)
+  find_library(ROCKSDB_LIBRARY NAMES rocksdb REQUIRED)
+  add_library(halcyon_rocksdb UNKNOWN IMPORTED)
+  set_target_properties(halcyon_rocksdb PROPERTIES
+    IMPORTED_LOCATION "${ROCKSDB_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ROCKSDB_INCLUDE_DIR}")
+  set(HALCYON_ROCKSDB_TARGET halcyon_rocksdb)
+endif()
 find_package(gflags CONFIG REQUIRED)
 find_package(glog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
@@ -74,6 +92,8 @@ set(THRIFT_INCLUDE_ROOT ${FBTHRIFT_INCLUDE_DIR})
 set(THRIFT_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 set(THRIFT_GEN_ROOT ${THRIFT_INCLUDE_DIR}/if)
 set(THRIFT_GEN_DIR ${THRIFT_GEN_ROOT}/gen-cpp2)
+set(THRIFT_PY_GEN_ROOT ${CMAKE_CURRENT_BINARY_DIR}/thrift-python)
+set(THRIFT_PY3_GEN_ROOT ${CMAKE_CURRENT_BINARY_DIR}/thrift-py3)
 set(HALCYON_THRIFT_SRC ${CMAKE_CURRENT_SOURCE_DIR}/if/halcyon.thrift)
 
 set(THRIFT_GEN_COMMAND
@@ -102,6 +122,27 @@ endif()
 add_custom_target(halcyon_thrift_regen COMMAND ${THRIFT_GEN_COMMAND}
   COMMENT "Regenerating thrift sources from halcyon.thrift")
 
+add_custom_command(
+  OUTPUT ${THRIFT_PY_GEN_ROOT}/.generated
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${THRIFT_PY_GEN_ROOT}
+  COMMAND ${THRIFT1_FOR_CONFIGURE} --gen mstch_python
+          -I ${THRIFT_INCLUDE_ROOT} -I ${CMAKE_CURRENT_SOURCE_DIR}
+          -o ${THRIFT_PY_GEN_ROOT} ${HALCYON_THRIFT_SRC}
+  COMMAND ${CMAKE_COMMAND} -E touch ${THRIFT_PY_GEN_ROOT}/.generated
+  DEPENDS ${HALCYON_THRIFT_SRC})
+add_custom_target(halcyon_thrift_python ALL
+  DEPENDS ${THRIFT_PY_GEN_ROOT}/.generated)
+
+add_custom_command(
+  OUTPUT ${THRIFT_PY3_GEN_ROOT}/.generated
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${THRIFT_PY3_GEN_ROOT}
+  COMMAND ${THRIFT1_FOR_CONFIGURE} --gen mstch_py3
+          -I ${THRIFT_INCLUDE_ROOT} -I ${CMAKE_CURRENT_SOURCE_DIR}
+          -o ${THRIFT_PY3_GEN_ROOT} ${HALCYON_THRIFT_SRC}
+  COMMAND ${CMAKE_COMMAND} -E touch ${THRIFT_PY3_GEN_ROOT}/.generated
+  DEPENDS ${HALCYON_THRIFT_SRC})
+add_custom_target(halcyon_thrift_py3 ALL
+  DEPENDS ${THRIFT_PY3_GEN_ROOT}/.generated)
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
@@ -133,7 +174,7 @@ target_link_libraries(halcyon_lib
     halcyon_thrift
     Folly::folly
     FBThrift::thriftcpp2
-    RocksDB::rocksdb
+    ${HALCYON_ROCKSDB_TARGET}
     fmt::fmt
     gflags
     glog::glog
@@ -143,7 +184,10 @@ target_link_libraries(halcyon_lib
 
 # CRC32 intrinsics in Common.cpp / the checksum path.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-  target_compile_options(halcyon_lib PUBLIC -msse4.2)
+  set_source_files_properties(Common.cpp PROPERTIES COMPILE_OPTIONS -msse4.2)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
+  set_source_files_properties(Common.cpp PROPERTIES
+    COMPILE_OPTIONS -march=armv8-a+crc)
 endif()
 
 add_executable(halcyon main.cpp BenchmarkConfiguration.cpp PerfStats.cpp)
@@ -158,6 +202,8 @@ target_link_libraries(HalcyonServiceMain PRIVATE halcyon_lib)
 add_executable(checkmark CheckMark.cpp)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   target_compile_options(checkmark PRIVATE -msse4.2)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
+  target_compile_options(checkmark PRIVATE -march=armv8-a+crc)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -184,3 +230,8 @@ if(HALCYON_BUILD_TESTS)
 endif()
 
 install(TARGETS halcyon HalcyonServiceMain checkmark RUNTIME DESTINATION bin)
+install(DIRECTORY ${THRIFT_PY_GEN_ROOT}/gen-python/
+  DESTINATION lib/halcyon/python OPTIONAL)
+install(FILES client_lib.py halcyon_common.py
+  DESTINATION lib/python)
+install(PROGRAMS halcyon_client.py DESTINATION bin)
