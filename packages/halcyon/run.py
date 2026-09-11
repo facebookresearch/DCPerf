@@ -11,11 +11,13 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -33,9 +35,11 @@ def _natural_mount_key(path: str) -> tuple[str, int]:
 
 
 def _run(
-    command: list[str], timeout: int | None = None
+    command: list[str], timeout: int | None = None, *, capture: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=True, text=True, timeout=timeout)
+    return subprocess.run(
+        command, check=True, capture_output=capture, text=True, timeout=timeout
+    )
 
 
 def _remote(
@@ -143,7 +147,12 @@ def prepare_directories(mounts: list[str], host: str | None, ssh_command: str) -
             f"mkdir -p {shlex.quote(directory)}; touch {shlex.quote(marker)}"
         )
         if host is None:
-            _run(["bash", "-c", script])
+            owned = Path(directory)
+            marker_path = Path(marker)
+            if owned.exists() and not marker_path.is_file():
+                raise RuntimeError(f"refusing unowned directory: {owned}")
+            owned.mkdir(parents=True, exist_ok=True)
+            marker_path.touch()
         else:
             _remote(ssh_command, host, script)
 
@@ -157,7 +166,10 @@ def cleanup_directories(mounts: list[str], host: str | None, ssh_command: str) -
             f"rm -rf -- {shlex.quote(directory)}"
         )
         if host is None:
-            _run(["bash", "-c", script])
+            marker_path = Path(marker)
+            if not marker_path.is_file():
+                raise RuntimeError(f"refusing to remove unowned directory: {directory}")
+            shutil.rmtree(directory)
         else:
             _remote(ssh_command, host, script)
 
@@ -175,6 +187,114 @@ def write_standalone_config(path: Path, mounts: list[str]) -> None:
             indent=2,
         )
         + "\n"
+    )
+
+
+def parse_standalone_output(path: Path) -> dict[str, float]:
+    lines = path.read_text().splitlines()
+    total = next(
+        (fields for line in lines if (fields := line.split()) and fields[0] == "Total"),
+        None,
+    )
+    if total is None or len(total) != 13:
+        raise ValueError("standalone output is missing its complete Total row")
+    values = [float(value) for value in total[1:]]
+    read_qps, write_qps, read_mb, write_mb, read_lat, write_lat = values[:6]
+    qps = read_qps + write_qps
+    latency = (read_lat * read_qps + write_lat * write_qps) / qps if qps else 0.0
+    pool_line = next(
+        (line for line in lines if line.startswith("Per-pool CPU (total):")), ""
+    )
+    pool_values = {
+        key: float(value)
+        for key, value in re.findall(r"([a-z_]+)=([0-9.]+)", pool_line)
+    }
+    return {
+        "qps": qps,
+        "read_qps": read_qps,
+        "write_qps": write_qps,
+        "throughput_mb_s": read_mb + write_mb,
+        "read_throughput_mb_s": read_mb,
+        "write_throughput_mb_s": write_mb,
+        "latency_ms": latency,
+        "read_latency_ms": read_lat,
+        "write_latency_ms": write_lat,
+        "cpu_util_pct": values[10],
+        "disk_util_pct": values[11],
+        "network_util_pct": 0.0,
+        "reactor_accounted_cpu_ms": pool_values.get("qio_total_cpu_ms", 0.0),
+        "reactor_useful_cpu_ratio": 0.0,
+    }
+
+
+def paired_metrics(summary: Mapping[str, object]) -> dict[str, float]:
+    def number(key: str) -> float:
+        value = summary.get(key)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ValueError(f"paired result has invalid or missing metric: {key}")
+        return float(value)
+
+    return {
+        "qps": number("file_qps"),
+        "read_qps": number("file_read_qps"),
+        "write_qps": number("file_write_qps"),
+        "throughput_mb_s": number("file_xput") / 1e6,
+        "read_throughput_mb_s": number("file_read_xput") / 1e6,
+        "write_throughput_mb_s": number("file_write_xput") / 1e6,
+        "latency_ms": number("file_latency") / 1000.0,
+        "read_latency_ms": number("file_read_latency") / 1000.0,
+        "write_latency_ms": number("file_write_latency") / 1000.0,
+        "cpu_util_pct": number("cpu_util"),
+        "disk_util_pct": number("disk_util"),
+        "network_util_pct": number("net_util"),
+        "reactor_accounted_cpu_ms": (
+            number("reactor_useful_busy_ns") + number("reactor_useful_idle_ns")
+        )
+        / 1e6,
+        "reactor_useful_cpu_ratio": number("reactor_useful_cpu_ratio"),
+    }
+
+
+def emit_result(
+    mode: str,
+    metrics: dict[str, float],
+    partial: bool = False,
+    returncode: int = 0,
+) -> None:
+    envelope = {
+        "halcyon_result": {
+            "schema_version": 1,
+            "mode": mode,
+            "partial": partial,
+            "returncode": returncode,
+            "metrics": metrics,
+        }
+    }
+    print(f"HALCYON_RESULT={json.dumps(envelope, sort_keys=True)}")
+
+
+def emit_paired_result(path: Path, returncode: int) -> None:
+    if not path.is_file():
+        sys.stderr.write(f"paired result file is missing: {path}\n")
+        emit_result("paired_genai", {}, partial=True, returncode=returncode)
+        return
+    try:
+        document = json.loads(path.read_text())
+        if not isinstance(document, Mapping):
+            raise ValueError("paired result must be a mapping")
+        summary = document.get("summary")
+        if not isinstance(summary, Mapping):
+            raise ValueError("paired result summary must be a mapping")
+        metrics = paired_metrics(summary)
+    except (json.JSONDecodeError, OSError, ValueError) as error:
+        sys.stderr.write(f"invalid paired result file {path}: {error}\n")
+        emit_result("paired_genai", {}, partial=True, returncode=returncode)
+        return
+    emit_result(
+        "paired_genai",
+        metrics,
+        bool(document.get("partial", False)) or returncode != 0,
+        returncode,
     )
 
 
@@ -400,7 +520,12 @@ def paired(args: argparse.Namespace, prepare: bool) -> int:
                     ]
                 )
                 timeout = args.warmup + args.runtime + 120
-            return run_with_term_timeout(command, timeout, python_environment(root))
+            returncode = run_with_term_timeout(
+                command, timeout, python_environment(root)
+            )
+            if not prepare:
+                emit_paired_result(Path(args.output), returncode)
+            return returncode
         finally:
             stop_daemons(local, remote_pid, args.partner, args.ssh_command, root)
 
@@ -428,7 +553,11 @@ def standalone(args: argparse.Namespace, prepare: bool) -> int:
                     f"--output_file={args.output}",
                 ]
             )
-        return _run(command).returncode
+        if prepare:
+            return _run(command).returncode
+        completed = _run(command)
+        emit_result("standalone", parse_standalone_output(Path(args.output)))
+        return completed.returncode
 
 
 def parser() -> argparse.ArgumentParser:

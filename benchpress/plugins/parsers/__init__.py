@@ -34,6 +34,7 @@ from .fio import FioParser
 from .gapbs import GAPBSParser
 from .generic import JSONParser
 from .graph500 import Graph500Parser
+from .halcyon import HalcyonParser
 from .health_check import HealthCheckParser
 from .iperf import IperfParser
 from .liblinear import LibLinearParser
@@ -91,6 +92,7 @@ def register_parsers(factory):
     factory.register("fio", FioParser)
     factory.register("gapbs", GAPBSParser)
     factory.register("graph500", Graph500Parser)
+    factory.register("halcyon", HalcyonParser)
     factory.register("json", JSONParser)
     factory.register("ltp", LtpParser)
     factory.register("nginx_wrk_bench", NginxWrkParser)
