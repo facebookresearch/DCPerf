@@ -298,25 +298,35 @@ build_fbthrift()
     sed -i '/^patchfile\s*=/d' ./build/fbcode_builder/manifests/*
     rm -f ./build/fbcode_builder/patches/*
 
-    ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
-    echo "Building fbthrift with $(get_march_for_host)"
-    MARCH="$(get_march_for_host)"
-    # On aarch64 with GCC, CompactProtocol.cpp uses NEON/SVE intrinsics that rely on
-    # clang-specific extensions (vector subscript, implicit pointer casts) which GCC
-    # cannot compile. Disable the NEON/SVE code path for this one file.
-    if [ "$ARCH" = "aarch64" ]; then
-        MARCH="$MARCH -Wno-error=return-type -flax-vector-conversions"
-        sed -i '1i #undef FOLLY_ARM_FEATURE_NEON_SVE_BRIDGE\n#define FOLLY_ARM_FEATURE_NEON_SVE_BRIDGE 0' \
-            "${WDL_SOURCE}/fbthrift/thrift/lib/cpp2/protocol/CompactProtocol.cpp"
-    fi
-    # Find the getdeps-built boost root (folly was compiled against it, not the system boost)
-    GETDEPS_BOOST_ROOT=$(find "${WDL_BUILD}/installed" -maxdepth 1 -type d -name "boost-*" | head -1)
-    if [ -n "$GETDEPS_BOOST_ROOT" ]; then
-        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE","CMAKE_EXE_LINKER_FLAGS":"-Wl,--start-group","BOOST_ROOT":"%s","Boost_NO_SYSTEM_PATHS":"ON"}' "$MARCH" "$MARCH" "$GETDEPS_BOOST_ROOT")
-    else
-        EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE","CMAKE_EXE_LINKER_FLAGS":"-Wl,--start-group"}' "$MARCH" "$MARCH")
-    fi
-    python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES"
+    # execute the build in a subshell with a new conda build environment
+    (
+        FBTHRIFT_BUILD_ENV="fbthrift_build_env"
+        source_conda
+        # shellcheck disable=SC2046,SC2086
+        env $(get_conda_proxy_args) conda create --override-channels -y -c conda-forge --force -n "$FBTHRIFT_BUILD_ENV" "python=3.12" "numpy<2"
+        conda activate "$FBTHRIFT_BUILD_ENV"
+        ./build/fbcode_builder/getdeps.py install-system-deps --recursive fbthrift
+        echo "Building fbthrift with $(get_march_for_host)"
+        MARCH="$(get_march_for_host)"
+        # On aarch64 with GCC, CompactProtocol.cpp uses NEON/SVE intrinsics that rely on
+        # clang-specific extensions (vector subscript, implicit pointer casts) which GCC
+        # cannot compile. Disable the NEON/SVE code path for this one file.
+        if [ "$ARCH" = "aarch64" ]; then
+            MARCH="$MARCH -Wno-error=return-type -flax-vector-conversions"
+            sed -i '1i #undef FOLLY_ARM_FEATURE_NEON_SVE_BRIDGE\n#define FOLLY_ARM_FEATURE_NEON_SVE_BRIDGE 0' \
+                "${WDL_SOURCE}/fbthrift/thrift/lib/cpp2/protocol/CompactProtocol.cpp"
+        fi
+        # Find the getdeps-built boost root (folly was compiled against it, not the system boost)
+        GETDEPS_BOOST_ROOT=$(find "${WDL_BUILD}/installed" -maxdepth 1 -type d -name "boost-*" | head -1)
+        if [ -n "$GETDEPS_BOOST_ROOT" ]; then
+            EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE","CMAKE_EXE_LINKER_FLAGS":"-Wl,--start-group","BOOST_ROOT":"%s","Boost_NO_SYSTEM_PATHS":"ON"}' "$MARCH" "$MARCH" "$GETDEPS_BOOST_ROOT")
+        else
+            EXTRA_DEFINES=$(printf '{"CMAKE_C_FLAGS":"%s","CMAKE_CXX_FLAGS":"%s","CMAKE_DISABLE_FIND_PACKAGE_aegis":"TRUE","CMAKE_EXE_LINKER_FLAGS":"-Wl,--start-group"}' "$MARCH" "$MARCH")
+        fi
+        python3 ./build/fbcode_builder/getdeps.py --allow-system-packages build fbthrift --src-dir "." --scratch-path "${WDL_BUILD}" --extra-cmake-defines="$EXTRA_DEFINES"
+        conda deactivate
+        conda env remove -n "$FBTHRIFT_BUILD_ENV" -y
+    )
     for benchmark in $fbthrift_benchmark_list; do
       cp "$WDL_BUILD/build/fbthrift/bin/$benchmark" "$WDL_ROOT/$benchmark"
     done
