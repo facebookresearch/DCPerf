@@ -2281,6 +2281,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             co_await folly::coro::sleep(
                 std::chrono::ceil<std::chrono::microseconds>(deadline - now),
                 openLoopTimekeeper.get());
+            co_await folly::coro::co_reschedule_on_current_executor;
             now = std::chrono::steady_clock::now();
           }
 
@@ -2412,6 +2413,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         co_await folly::coro::sleep(
             std::chrono::ceil<std::chrono::microseconds>(endTime - now),
             openLoopTimekeeper.get());
+        co_await folly::coro::co_reschedule_on_current_executor;
         now = std::chrono::steady_clock::now();
       }
     }
