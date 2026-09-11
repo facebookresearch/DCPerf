@@ -255,7 +255,7 @@ void doCreate(
     int n,
     BenchmarkConfiguration config,
     MetadataBackend backend) {
-  uint64_t total_files = threadsPerDisk * dirs * files * n;
+  uint64_t total_files = dirs * files * n;
   uint64_t total_bytes = total_files * kMaxFileSize;
   vector<std::future<int>> cfuts;
   LOG(INFO) << sformat(
@@ -330,7 +330,8 @@ void doCreate(
     totalErrors += e.get();
   }
   if (totalErrors > 0) {
-    LOG(INFO) << sformat("{} errors during fileset creation", totalErrors);
+    LOG(ERROR) << sformat("{} errors during fileset creation", totalErrors);
+    exit(1);
   } else {
     // write manifest file
     string manifestData = sformat("{} {}\n", dirs, files);
@@ -341,7 +342,6 @@ void doCreate(
       manifest.close();
     }
   }
-  exit(1);
   LOG(INFO) << "File creation complete\n";
 }
 
@@ -529,8 +529,8 @@ void doBenchmark(
         ? mountCStats.writeNanos / 1e3 / mountCStats.writeCount
         : 0;
     out << sformat(
-        "{0:16s} {1:8.1f} {2:8.1f} {3:10.2f}{4:10.2f} {5:10.2f}{6:10.2f}"
-        " {7:10.2f}{8:10.2f} {9:10.2f}{10:10.2f}\n",
+        "{0:16s} {1:8.1f} {2:8.1f} {3:10.2f} {4:10.2f} {5:10.2f}"
+        " {6:10.2f} {7:10.2f} {8:10.2f} {9:10.2f} {10:10.2f}\n",
         config.mountPoints.at(i),
         mountIStats.readIos / elapsed,
         mountIStats.writeIos / elapsed,
@@ -570,8 +570,9 @@ void doBenchmark(
   double diskUtil = diskMon.getUtilizationFromBeginning();
   double cpuUtil = cpuMon.getUtilizationFromBeginning();
   out << sformat(
-      "{0:16s} {1:8.1f} {2:8.1f} {3:10.2f}{4:10.2f} {5:10.2f}{6:10.2f}"
-      " {7:10.2f}{8:10.2f} {9:10.2f}{10:10.2f} {11:12.2f} {12:13.2f}\n",
+      "{0:16s} {1:8.1f} {2:8.1f} {3:10.2f} {4:10.2f} {5:10.2f}"
+      " {6:10.2f} {7:10.2f} {8:10.2f} {9:10.2f} {10:10.2f}"
+      " {11:12.2f} {12:13.2f}\n",
       "Total",
       totalIStats.readIos / elapsed,
       totalIStats.writeIos / elapsed,

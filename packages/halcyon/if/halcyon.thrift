@@ -6,6 +6,7 @@ include "thrift/annotation/thrift.thrift"
 package;
 
 namespace cpp2 cea.halcyon
+namespace py cea.halcyon.py3
 namespace py3 cea.halcyon.py3
 
 @cpp.Type{name = "folly::IOBuf"}

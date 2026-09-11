@@ -70,8 +70,7 @@ int createFileset(
   close(fd);
   createStats->inProgress = true;
   createStats->stats.at(operatorID).at(threadID).start = current_nano();
-  for (int i = 0; i < dirs; i++) {
-    int d = i * threadsPerDir + threadID;
+  for (int d = threadID; d < dirs; d += threadsPerDir) {
     string subDir = sformat("{}/d{}", baseDir, d);
     if (!directoryExists(subDir)) {
       if (mkdir(subDir.c_str(), 0755) == -1) {
