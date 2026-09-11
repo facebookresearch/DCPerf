@@ -105,6 +105,12 @@ major production workloads listed as follows:
    <td>GAP Benchmark Suite, OpenMP, systemd cgroups</td>
    <td>Graph Analytics, Large / Tiered Memory (CXL) </td>
   </tr>
+  <tr>
+   <td><a href="packages/halcyon/README.md">Halcyon</a></td>
+   <td>C++, Python</td>
+   <td>io_uring, Folly, FBThrift, RocksDB</td>
+   <td>Local and paired distributed storage</td>
+  </tr>
 </table>
 
 ### AI/ML Benchmarks
@@ -517,6 +523,7 @@ running the benchmarks. What's discussed in this section is an overview of Bench
 * [DjangoWorkload](packages/django_workload//README.md).
 * [SparkBench](packages/spark_standalone/README.md).
 * [VideoTranscodeBench](packages/video_transcode_bench/README.md).
+* [Halcyon](packages/halcyon/README.md).
 
 #### Installation
 
