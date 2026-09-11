@@ -1,0 +1,77 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: DCPerf Halcyon CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/halcyon/**'
+      - '.github/scripts/dcperf_install_halcyon.bash'
+      - '.github/scripts/test_dcperf_verify_halcyon.bash'
+      - '.github/scripts/dcperf_verify_halcyon.bash'
+      - '.github/scripts/utils_system.bash'
+      - '.github/workflows/dcperf_ci_halcyon.yml'
+      - 'scripts/install-deps.sh'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/halcyon/**'
+      - '.github/scripts/dcperf_install_halcyon.bash'
+      - '.github/scripts/test_dcperf_verify_halcyon.bash'
+      - '.github/scripts/dcperf_verify_halcyon.bash'
+      - '.github/scripts/utils_system.bash'
+      - '.github/workflows/dcperf_ci_halcyon.yml'
+      - 'scripts/install-deps.sh'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_test:
+    runs-on: ${{ matrix.host.instance }}
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ${{ matrix.host.container }}
+      options: --user root --privileged --pid=host
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - {arch: x86_64, instance: ubuntu-latest, container: 'ubuntu:22.04'}
+          - {arch: aarch64, instance: ubuntu-24.04-arm, container: 'ubuntu:22.04'}
+          - {arch: x86_64, instance: ubuntu-latest, container: 'ubuntu:24.04'}
+          - {arch: aarch64, instance: ubuntu-24.04-arm, container: 'ubuntu:24.04'}
+          - {arch: x86_64, instance: ubuntu-latest, container: 'quay.io/centos/centos:stream9'}
+          - {arch: aarch64, instance: ubuntu-24.04-arm, container: 'quay.io/centos/centos:stream9'}
+          - {arch: x86_64, instance: ubuntu-latest, container: 'quay.io/centos/centos:stream10'}
+          - {arch: aarch64, instance: ubuntu-24.04-arm, container: 'quay.io/centos/centos:stream10'}
+    steps:
+      - name: Install checkout tools
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            apt-get install -y git sudo
+          else
+            dnf install -y git sudo
+          fi
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Free disk space on host
+        run: |
+          source .github/scripts/utils_system.bash
+          free_disk_space_on_host
+      - name: Test verification helper
+        run: bash .github/scripts/test_dcperf_verify_halcyon.bash
+      - name: Install and build Halcyon
+        run: bash .github/scripts/dcperf_install_halcyon.bash
+      - name: Verify installed commands
+        run: bash .github/scripts/dcperf_verify_halcyon.bash all
