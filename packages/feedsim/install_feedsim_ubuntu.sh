@@ -115,7 +115,7 @@ if ! [ -d "fast_float" ]; then
     cd fast_float
     mkdir build && cd build
     cmake ..
-    make
+    make -j"$(nproc)"
     make install
     cd ../../
 fi
@@ -155,7 +155,7 @@ if ! [ -d "gflags-2.2.2" ]; then
     cd "gflags-2.2.2"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
-    make -j8
+    make -j"$(nproc)"
     make install
     cd ../../
 else
@@ -169,7 +169,7 @@ if ! [ -d "glog-0.4.0" ]; then
     cd "glog-0.4.0"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
-    make -j8
+    make -j"$(nproc)"
     make install
     cd ../../
 else
@@ -325,7 +325,15 @@ cmake -G Ninja \
     -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/libtorch" \
     ../
 
-ninja -v -j1
+# Third-party deps (fmt, folly, fizz, wangle, mvfst, fbthrift) are built by this
+# ninja step via ExternalProject_Add. Their build order is declared in
+# third_party/src/CMake/build-*.cmake via add_dependencies() and
+# ExternalProject_Add_StepDependencies(), so ninja respects the DAG under -jN.
+# Use nproc/2 to avoid OOM during heavy template-instantiation steps.
+NINJA_JOBS="${BP_NINJA_JOBS:-$(( $(nproc) / 2 ))}"
+[ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
+msg "Building FeedSim with ninja -j${NINJA_JOBS} (set BP_NINJA_JOBS to override)"
+ninja -j"${NINJA_JOBS}"
 
 msg ""
 msg "=== FeedSim Installation Complete ==="
