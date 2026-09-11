@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -36,6 +37,41 @@ IoSizeRange fixedSize(uint64_t bytes) {
 }
 
 } // namespace
+
+TEST(CommonTest, ParseIoSizeAcceptsLowercaseBinarySuffixes) {
+  EXPECT_EQ(parseIoSize("1k", 100).upperBound, 1024);
+  EXPECT_EQ(parseIoSize("1m", 100).upperBound, 1024 * 1024);
+  EXPECT_EQ(parseIoSize("1g", 100).upperBound, 1024 * 1024 * 1024);
+}
+
+TEST(CommonTest, HumanToIntAcceptsEmptyInput) {
+  EXPECT_EQ(humanToInt(""), 0);
+}
+
+TEST(FilesetTest, Create_DistributesConfiguredDirectoriesAcrossWorkers) {
+  const std::string dir = uniqueDir("create");
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+
+  CreateStats stats(/*operators=*/1, /*workers=*/2);
+  Fileset fileset(
+      /*operatorID=*/0,
+      dir,
+      /*dirs=*/2,
+      /*files=*/1,
+      /*threadsPerDir=*/2);
+  EXPECT_EQ(fileset.create(&stats), 0);
+
+  std::ifstream manifest(dir + "/manifest");
+  std::string manifestData;
+  std::getline(manifest, manifestData);
+  EXPECT_EQ(manifestData, "2 1");
+  EXPECT_EQ(fs::file_size(dir + "/d0/f0"), kMaxFileSize);
+  EXPECT_EQ(fs::file_size(dir + "/d1/f0"), kMaxFileSize);
+  EXPECT_FALSE(fs::exists(dir + "/d2"));
+
+  fs::remove_all(dir);
+}
 
 // populateChunkMap lays out fixed-size chunks contiguously in each data file
 // and records a valid, non-overlapping location for every chunk over a
