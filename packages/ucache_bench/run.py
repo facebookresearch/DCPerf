@@ -22,17 +22,22 @@ Usage:
 """
 
 import argparse
+import math
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
 import threading
-from typing import List, Optional
+from dataclasses import dataclass
 
 
 BENCHPRESS_ROOT: pathlib.Path = pathlib.Path(os.path.abspath(__file__)).parents[2]
-UCACHE_BENCH_DIR: str = os.path.join(BENCHPRESS_ROOT, "benchmarks", "ucache_bench")
+UCACHE_BENCH_DIR: str = os.environ.get(
+    "UCACHE_BENCH_DIR",
+    os.path.join(BENCHPRESS_ROOT, "benchmarks", "ucache_bench"),
+)
 AFFINITIZE_NIC_SYSTEM_PATH: str = "/usr/local/bin/affinitize_nic"
 
 # Constants
@@ -124,26 +129,207 @@ def calculate_num_proxies(memory_mb: int, provided_proxies: int, n_cores: int) -
         return min(64, n_cores)
 
 
+@dataclass(frozen=True)
+class CommandResult:
+    command: list[str]
+    stdout: str
+    returncode: int
+    timed_out: bool
+    timeout: float | None
+
+    def check(self) -> None:
+        if self.timed_out:
+            if self.timeout is None:
+                raise RuntimeError("timed-out command is missing its timeout")
+            raise subprocess.TimeoutExpired(
+                self.command,
+                self.timeout,
+                output=self.stdout,
+            )
+        if self.returncode != 0:
+            raise subprocess.CalledProcessError(
+                self.returncode,
+                self.command,
+                output=self.stdout,
+            )
+
+
+@dataclass(frozen=True)
+class ClientSummary:
+    warmup_operations: int
+    warmup_set_successes: int
+    warmup_set_errors: int
+    total_operations: int
+    qps: float
+    get_operations: int
+    get_hits: int
+    get_misses: int
+    get_errors: int
+    set_operations: int
+    set_successes: int
+    set_errors: int
+    latencies_ms: tuple[float, float, float, float]
+
+
 def run_cmd(
-    cmd: List[str], timeout: Optional[int] = None, for_real: bool = True
-) -> str:
+    cmd: list[str], timeout: float | None = None, for_real: bool = True
+) -> CommandResult:
     print(" ".join(cmd))
-    if for_real:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
+    if not for_real:
+        return CommandResult(cmd, "", 0, False, timeout)
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    timed_out = False
+    try:
+        stdout, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.terminate()
         try:
-            # Use communicate() instead of wait() to actively read stdout
-            # and avoid pipe deadlock when the child produces verbose output
-            stdout, _ = proc.communicate(timeout=timeout)
+            stdout, _ = proc.communicate(timeout=5)
         except subprocess.TimeoutExpired:
-            proc.terminate()
+            proc.kill()
             stdout, _ = proc.communicate()
-        return stdout.decode("utf-8")
+    return CommandResult(
+        cmd,
+        stdout,
+        proc.returncode if proc.returncode is not None else -1,
+        timed_out,
+        timeout,
+    )
+
+
+def _required_match(pattern: str, text: str, name: str) -> re.Match[str]:
+    match = re.search(pattern, text, flags=re.MULTILINE | re.DOTALL)
+    if match is None:
+        raise ValueError(f"client output is missing {name}")
+    return match
+
+
+def parse_client_summary(stdout: str) -> ClientSummary:
+    marker = "=== UcacheBench Results ==="
+    if marker not in stdout:
+        raise ValueError("client output is missing the final results summary")
+    summary = stdout.rsplit(marker, 1)[1]
+    if "BENCHMARK PHASE:" not in summary:
+        raise ValueError("client output is missing the benchmark phase")
+    warmup, benchmark = summary.split("BENCHMARK PHASE:", 1)
+
+    if "Status: Disabled" in warmup:
+        warmup_values = (0, 0, 0)
     else:
-        return ""
+        warmup_match = _required_match(
+            r"Operations:\s+(\d+)\s+\([^\n]+\).*?"
+            r"SET Successes:\s+(\d+).*?SET Errors:\s+(\d+)",
+            warmup,
+            "warmup accounting",
+        )
+        warmup_values = tuple(int(value) for value in warmup_match.groups())
+
+    total_operations = int(
+        _required_match(
+            r"Total Operations:\s+(\d+)", benchmark, "total operations"
+        ).group(1)
+    )
+    qps = float(_required_match(r"QPS:\s+([0-9.]+)", benchmark, "QPS").group(1))
+    get_match = _required_match(
+        r"GET Operations:\s+(\d+).*?Hits:\s+(\d+).*?"
+        r"Misses:\s+(\d+).*?Errors:\s+(\d+)",
+        benchmark,
+        "GET accounting",
+    )
+    set_match = _required_match(
+        r"SET Operations:\s+(\d+).*?Successes:\s+(\d+).*?Errors:\s+(\d+)",
+        benchmark,
+        "SET accounting",
+    )
+    latencies = tuple(
+        float(
+            _required_match(
+                rf"{label}:\s+([0-9.]+)", benchmark, f"{label} latency"
+            ).group(1)
+        )
+        for label in ("P50", "P95", "P99", "P99.9")
+    )
+    return ClientSummary(
+        warmup_operations=warmup_values[0],
+        warmup_set_successes=warmup_values[1],
+        warmup_set_errors=warmup_values[2],
+        total_operations=total_operations,
+        qps=qps,
+        get_operations=int(get_match.group(1)),
+        get_hits=int(get_match.group(2)),
+        get_misses=int(get_match.group(3)),
+        get_errors=int(get_match.group(4)),
+        set_operations=int(set_match.group(1)),
+        set_successes=int(set_match.group(2)),
+        set_errors=int(set_match.group(3)),
+        latencies_ms=(latencies[0], latencies[1], latencies[2], latencies[3]),
+    )
+
+
+def validate_client_summary(
+    summary: ClientSummary,
+    *,
+    require_zero_errors: bool = False,
+    require_warmup: bool = False,
+) -> None:
+    if summary.total_operations <= 0:
+        raise ValueError("client reported no operations")
+    if not math.isfinite(summary.qps) or summary.qps <= 0:
+        raise ValueError("client reported an invalid QPS")
+    if summary.get_operations + summary.set_operations != summary.total_operations:
+        raise ValueError("GET and SET totals do not match total operations")
+    if (
+        summary.get_hits + summary.get_misses + summary.get_errors
+        != summary.get_operations
+    ):
+        raise ValueError("GET accounting is inconsistent")
+    if summary.set_successes + summary.set_errors != summary.set_operations:
+        raise ValueError("SET accounting is inconsistent")
+    if summary.get_hits + summary.get_misses + summary.set_successes <= 0:
+        raise ValueError("client reported no successful protocol responses")
+    if require_zero_errors and (summary.get_errors != 0 or summary.set_errors != 0):
+        raise ValueError("client reported protocol errors")
+    if require_warmup and (
+        summary.warmup_operations <= 0
+        or summary.warmup_set_successes <= 0
+        or summary.warmup_set_errors != 0
+    ):
+        raise ValueError(
+            "warmup did not complete with positive, error-free SET traffic"
+        )
+    if any(not math.isfinite(value) or value < 0 for value in summary.latencies_ms):
+        raise ValueError("client reported invalid latency percentiles")
+    if list(summary.latencies_ms) != sorted(summary.latencies_ms):
+        raise ValueError("client latency percentiles are not monotonic")
+
+
+def validate_executable(path: pathlib.Path) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(f"benchmark binary not found: {path}")
+    if not os.access(path, os.X_OK):
+        raise PermissionError(f"benchmark binary is not executable: {path}")
+
+
+def _write_and_print_output(role: str, stdout: str) -> None:
+    log_path = os.path.join(UCACHE_BENCH_DIR, f"{role}_output.log")
+    try:
+        with open(log_path, "w") as log_file:
+            log_file.write(stdout)
+        print(f"Full {role} output written to {log_path}", file=sys.stderr)
+    except OSError as error:
+        print(f"Warning: could not write {role} log: {error}", file=sys.stderr)
+
+    lines = stdout.splitlines()
+    if len(lines) > 200:
+        print(f"[...truncated {len(lines) - 200} lines of verbose output...]")
+    print("\n".join(lines[-200:]))
 
 
 def profile_server() -> None:
@@ -260,7 +446,7 @@ def affinitize_nic(args: argparse.Namespace) -> None:
         print(f"Failed to set NIC IRQ affinity: {e}")
 
 
-def run_server(args: argparse.Namespace) -> None:
+def run_server(args: argparse.Namespace) -> None:  # noqa: C901
     """Run the UcacheBench server.
 
     Server binary flags are defined in:
@@ -443,34 +629,17 @@ def run_server(args: argparse.Namespace) -> None:
         t_prof = threading.Timer(delay, profile_server)
         t_prof.start()
 
-    stdout = run_cmd(server_cmd, timeout=None, for_real=args.real)
-
-    # Write full output to a log file for debugging, then only print
-    # the tail to stdout. This prevents pipe deadlock with the parent
-    # process (benchpress) which may use proc.wait() before reading
-    # stdout — if output exceeds the 64KB pipe buffer, both processes
-    # deadlock. The results JSON is always at the end of the output.
-    log_path = os.path.join(UCACHE_BENCH_DIR, "server_output.log")
-    try:
-        with open(log_path, "w") as f:
-            f.write(stdout)
-        print(f"Full server output written to {log_path}", file=sys.stderr)
-    except OSError as e:
-        print(f"Warning: could not write server log: {e}", file=sys.stderr)
-
-    # Print only the last 200 lines to stdout (results JSON + summary)
-    lines = stdout.split("\n")
-    if len(lines) > 200:
-        print(f"[...truncated {len(lines) - 200} lines of verbose output...]")
-    tail = lines[-200:] if len(lines) > 200 else lines
-    print("\n".join(tail))
+    result = run_cmd(server_cmd, timeout=None, for_real=args.real)
+    _write_and_print_output("server", result.stdout)
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         # pyrefly: ignore [unbound-name]
         t_prof.cancel()
 
+    result.check()
 
-def run_client(args: argparse.Namespace) -> None:
+
+def run_client(args: argparse.Namespace) -> None:  # noqa: C901
     """Run the UcacheBench client.
 
     Client binary flags are defined in UcacheBenchClient.cpp.
@@ -528,12 +697,13 @@ def run_client(args: argparse.Namespace) -> None:
         )
 
     warmup_max_inflight = getattr(args, "warmup_max_inflight", 0)
+    disable_warmup_adaptive = not bool(getattr(args, "warmup_adaptive_load", 1))
     if warmup_max_inflight > 0:
         client_cmd.append(f"--warmup_max_inflight={warmup_max_inflight}")
-        client_cmd.append("--warmup_adaptive_load=false")
+        disable_warmup_adaptive = True
     elif args.max_inflight <= 5:
         client_cmd.append("--warmup_max_inflight=50")
-        client_cmd.append("--warmup_adaptive_load=false")
+        disable_warmup_adaptive = True
 
     # Admin server coordination (uses server_host since admin runs on same machine)
     if args.admin_port > 0:
@@ -542,8 +712,7 @@ def run_client(args: argparse.Namespace) -> None:
     # Connection ramp-up configuration
     if args.connection_ramp_seconds != 10:
         client_cmd.append(f"--connection_ramp_seconds={args.connection_ramp_seconds}")
-    warmup_adaptive = getattr(args, "warmup_adaptive_load", 1)
-    if not warmup_adaptive:
+    if disable_warmup_adaptive:
         client_cmd.append("--warmup_adaptive_load=false")
     if args.warmup_initial_inflight != 2:
         client_cmd.append(f"--warmup_initial_inflight={args.warmup_initial_inflight}")
@@ -599,24 +768,11 @@ def run_client(args: argparse.Namespace) -> None:
     if args.verbose:
         client_cmd.append("--verbose=true")
 
-    stdout = run_cmd(client_cmd, timeout=None, for_real=args.real)
-
-    # Write full output to a log file for debugging, then only print
-    # the tail to stdout to prevent pipe deadlock with parent process.
-    log_path = os.path.join(UCACHE_BENCH_DIR, "client_output.log")
-    try:
-        with open(log_path, "w") as f:
-            f.write(stdout)
-        print(f"Full client output written to {log_path}", file=sys.stderr)
-    except OSError as e:
-        print(f"Warning: could not write client log: {e}", file=sys.stderr)
-
-    # Print only the last 200 lines to stdout (results JSON + summary)
-    lines = stdout.split("\n")
-    if len(lines) > 200:
-        print(f"[...truncated {len(lines) - 200} lines of verbose output...]")
-    tail = lines[-200:] if len(lines) > 200 else lines
-    print("\n".join(tail))
+    result = run_cmd(client_cmd, timeout=None, for_real=args.real)
+    _write_and_print_output("client", result.stdout)
+    result.check()
+    if args.real:
+        validate_client_summary(parse_client_summary(result.stdout))
 
 
 def init_parser() -> argparse.ArgumentParser:
@@ -626,7 +782,7 @@ def init_parser() -> argparse.ArgumentParser:
     )
 
     # Sub-command parsers
-    sub_parsers = parser.add_subparsers(help="Commands")
+    sub_parsers = parser.add_subparsers(dest="command", required=True, help="Commands")
     server_parser = sub_parsers.add_parser(
         "server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -1146,6 +1302,8 @@ def init_parser() -> argparse.ArgumentParser:
     )
     client_parser.add_argument(
         "--warmup-adaptive-load",
+        "--warmup_adaptive_load",
+        dest="warmup_adaptive_load",
         type=int,
         default=1,
         help="Enable adaptive load control during warmup (1=enabled, 0=disabled)",
@@ -1250,16 +1408,12 @@ def init_parser() -> argparse.ArgumentParser:
         "--real", action="store_true", help="Actually run the command"
     )
     client_parser.add_argument(
+        "--warmup-max-inflight",
         "--warmup_max_inflight",
+        dest="warmup_max_inflight",
         type=int,
         default=0,
         help="Max inflight during warmup (0 = use max_inflight)",
-    )
-    client_parser.add_argument(
-        "--warmup_adaptive_load",
-        type=int,
-        default=1,
-        help="Enable adaptive load control during warmup (0 = disabled)",
     )
 
     # Set default functions
@@ -1273,20 +1427,14 @@ def main() -> None:
     parser = init_parser()
     args = parser.parse_args()
 
-    # Ensure the benchmark binaries exist
-    server_binary = os.path.join(UCACHE_BENCH_DIR, "server", "ucachebench_server")
-    client_binary = os.path.join(UCACHE_BENCH_DIR, "client", "ucachebench_client")
-
-    if not os.path.exists(server_binary):
-        print(f"Warning: Server binary not found at {server_binary}")
-
-    if not os.path.exists(client_binary):
-        print(f"Warning: Client binary not found at {client_binary}")
-
-    if hasattr(args, "func"):
-        args.func(args)
-    else:
-        parser.print_help()
+    if args.real:
+        binary = (
+            pathlib.Path(UCACHE_BENCH_DIR)
+            / args.command
+            / f"ucachebench_{args.command}"
+        )
+        validate_executable(binary)
+    args.func(args)
 
 
 if __name__ == "__main__":
