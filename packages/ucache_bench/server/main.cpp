@@ -508,9 +508,10 @@ int main(int argc, char** argv) {
 
     // If admin server is enabled, wait for it to complete
     // Otherwise, wait for shutdown signal
+    bool benchmarkCompleted = true;
     if (adminServer) {
-      bool completed = adminServer->waitForCompletion();
-      if (!completed) {
+      benchmarkCompleted = adminServer->waitForCompletion();
+      if (!benchmarkCompleted) {
         printf("Admin server timed out or failed\n");
       }
       // Stop periodic stats before printing final results
@@ -543,7 +544,7 @@ int main(int argc, char** argv) {
       printf("UcacheBenchRpcServer stopped\n");
     }
 
-    return 0;
+    return benchmarkCompleted ? 0 : 1;
   } catch (const std::exception& ex) {
     printf("Server error: %s\n", ex.what());
     return 1;

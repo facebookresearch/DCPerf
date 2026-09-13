@@ -15,11 +15,12 @@ set(CLIENT_HEADERS
 )
 
 add_executable(ucachebench_client ${CLIENT_SOURCES} ${CLIENT_HEADERS})
+set_target_properties(ucachebench_client PROPERTIES
+    INSTALL_RPATH "${STAGING_DIR}/lib;${STAGING_DIR}/lib64"
+)
 
 target_include_directories(ucachebench_client PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
-    ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/gen
-    ${CMAKE_CURRENT_SOURCE_DIR}/../protocol/gen/gen-cpp2
     ${STAGING_DIR}/include
 )
 
