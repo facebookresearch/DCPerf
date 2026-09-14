@@ -28,6 +28,7 @@ wdl_bench:
     - ./benchmarks/wdl_bench/synchronization_small_locks_benchmark
     - ./benchmarks/wdl_bench/vdso_bench
     - ./benchmarks/wdl_bench/xxhash_benchmark
+    - ./benchmarks/wdl_bench/datasets/silesia.tar
     - ./benchmarks/wdl_bench/run.sh
   path: ./benchmarks/wdl_bench/run.sh
   tags:
