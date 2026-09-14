@@ -224,9 +224,11 @@ multiple instances:
 `./benchpress_cli.py run feedsim_dlrm -i '{"num_instances": 2}'` will launch 2 sets of
 feedsim server, driver and mock_services instances.
 
-2. Use the `feedsim_autoscale_dlrm` job. This autoscale job will spawn `ceil(nproc / 100)`
-FeedSim instances, each pinned to its own CPU range via `taskset`, plus one driver
-and one `mock_services` process per instance (also `taskset`-isolated). For example:
+2. Use the `feedsim_autoscale_dlrm` job. This autoscale job will spawn
+`ceil(physical_cores / 50)` FeedSim instances. The physical-core count is derived
+from `nproc` and halved when SMT is active. Each instance is pinned to its own CPU
+range via `taskset`, with one driver and one `mock_services` process per instance
+(also `taskset`-isolated). For example:
 ```
 ./benchpress_cli.py run feedsim_autoscale_dlrm
 ```
@@ -304,7 +306,7 @@ job, where each is exposed as a var:
 
 | Var | Purpose | Default |
 |---|---|---|
-| `num_instances` | Number of FeedSim instances to run in parallel. `1` for `feedsim_dlrm`; `feedsim_autoscale_dlrm` autoscales to `ceil(nproc / 100)`. | `1` |
+| `num_instances` | Number of FeedSim instances to run in parallel. `1` for `feedsim_dlrm`; `feedsim_autoscale_dlrm` autoscales to `ceil(physical_cores / 50)`. | `1` |
 | `sla_p95_ms` | SLA target in ms. The runner searches for the highest QPS keeping p95 ≤ this. | `700` |
 | `depth` | Driver pipeline depth (max outstanding requests per connection; total in-flight = `driver_threads × connections × depth`). Raise (e.g. `2`) when the final phase saturates neither CPU nor latency — often needed on high-perf ARM. See [Driver depth](#driver-depth-fixing-cpulatency-under-utilization). | `1` |
 | `async_io` | Async (non-blocking) I/O mode; eliminates thread starvation on high-core CPUs. Set `0` to disable. | `1` |
