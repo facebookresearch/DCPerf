@@ -139,7 +139,11 @@ calibration formulas, see [SIZING.md](SIZING.md).
 
 The generated workload keeps one open-loop arrival per wire RPC, disables miss
 refill, enables fiber request handling, and uses the packaged traffic
-distribution.
+distribution. When autosizing has a resolved open-loop QPS, multi-client runs
+also stagger process traffic starts before a full 240-second measurement window;
+ramp traffic is excluded, while total connection count and steady-state offered
+QPS are unchanged. Calibration-only output with no resolved QPS omits the process
+ramp as well as the open-loop rate.
 
 ## Run on multiple client hosts
 

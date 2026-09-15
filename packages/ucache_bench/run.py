@@ -455,6 +455,9 @@ def run_server(args: argparse.Namespace) -> None:  # noqa: C901
     - UcacheBenchRpcServer.cpp: rpc_io_threads, rpc_io_threads_multiplier,
       rpc_num_acceptor_threads, rpc_num_cpu_worker_threads, cpu_pinning_* options
     """
+    if args.process_ramp_seconds < 0:
+        raise ValueError("--process-ramp-seconds must be non-negative")
+
     # Calculate memory size
     memory_mb = int(args.memory_mb * MEM_USAGE_FACTOR)
 
@@ -522,6 +525,10 @@ def run_server(args: argparse.Namespace) -> None:  # noqa: C901
         server_cmd.append(f"--num_clients={args.num_clients}")
     if args.timeout_seconds != 600:
         server_cmd.append(f"--timeout_seconds={args.timeout_seconds}")
+    if args.process_ramp_seconds > 0:
+        if args.num_clients <= 0:
+            raise ValueError("--process-ramp-seconds requires --num-clients")
+        server_cmd.append(f"--process_ramp_seconds={args.process_ramp_seconds}")
 
     # RPC configuration
     if args.rpc_io_threads > 0:
@@ -667,6 +674,17 @@ def run_client(args: argparse.Namespace) -> None:  # noqa: C901
 
     lane_stagger = getattr(args, "lane_phase_stagger_us", 0)
     open_loop_qps = getattr(args, "open_loop_qps", 0)
+    process_ramp_seconds = getattr(args, "process_ramp_seconds", 0)
+    if process_ramp_seconds < 0:
+        raise ValueError("--process-ramp-seconds must be non-negative")
+    if process_ramp_seconds > 0 and args.admin_port <= 0:
+        raise ValueError("--process-ramp-seconds requires --admin-port")
+    if process_ramp_seconds > 0 and open_loop_qps <= 0:
+        raise ValueError("--process-ramp-seconds requires --open-loop-qps")
+    if process_ramp_seconds > 0 and args.auto_concurrency:
+        raise ValueError(
+            "--process-ramp-seconds and --auto-concurrency are mutually exclusive"
+        )
     if open_loop_qps < 0:
         raise ValueError("--open-loop-qps must be non-negative")
     if getattr(args, "open_loop_max_outstanding", 256) <= 0:
@@ -708,6 +726,8 @@ def run_client(args: argparse.Namespace) -> None:  # noqa: C901
     # Admin server coordination (uses server_host since admin runs on same machine)
     if args.admin_port > 0:
         client_cmd.append(f"--admin_port={args.admin_port}")
+    if process_ramp_seconds > 0:
+        client_cmd.append(f"--process_ramp_seconds={process_ramp_seconds}")
 
     # Connection ramp-up configuration
     if args.connection_ramp_seconds != 10:
@@ -1023,6 +1043,12 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=600,
         help="Timeout in seconds for waiting for clients (0 = no timeout)",
+    )
+    server_parser.add_argument(
+        "--process-ramp-seconds",
+        type=int,
+        default=0,
+        help="Spread coordinated client-process starts over this many seconds",
     )
 
     # Fiber configuration
@@ -1390,6 +1416,13 @@ def init_parser() -> argparse.ArgumentParser:
         default=0,
         help="Admin server port for multi-client coordination (0 = disabled). "
         "Uses server_host since admin server runs on same machine as cache server.",
+    )
+
+    client_parser.add_argument(
+        "--process-ramp-seconds",
+        type=int,
+        default=0,
+        help="Spread coordinated client-process starts over this many seconds",
     )
 
     client_parser.add_argument(

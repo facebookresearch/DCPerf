@@ -5,13 +5,17 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <folly/ScopeGuard.h>
 #include <folly/init/Init.h>
 #include <folly/io/async/EventBase.h>
 #include <folly/io/async/EventBaseManager.h>
 #include <folly/logging/Init.h>
 #include <folly/portability/GFlags.h>
 #include <signal.h>
+#include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 #include "UcacheBenchAdminServer.h"
 #include "UcacheBenchOnRequest.h"
@@ -41,6 +45,11 @@ DEFINE_uint32(
     timeout_seconds,
     600,
     "Timeout in seconds for waiting for clients (0 = no timeout)");
+DEFINE_uint32(
+    process_ramp_seconds,
+    0,
+    "Spread coordinated client-process traffic starts over this many seconds. "
+    "Requires multi-client admin protocol v2; 0 preserves the legacy protocol.");
 DEFINE_bool(verbose, false, "Enable verbose logging");
 DEFINE_uint32(
     stats_interval_seconds,
@@ -233,17 +242,11 @@ DEFINE_uint32(
 using namespace facebook::ucachebench;
 
 namespace {
-bool shutdown_requested = false;
-UcacheBenchAdminServer* g_adminServer = nullptr;
+std::atomic<bool> shutdownRequested{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
 
-void signal_handler(int sig) {
-  fprintf(stderr, "Received signal %d, shutting down\n", sig);
-  shutdown_requested = true;
-
-  // If admin server is running, request it to shutdown
-  if (g_adminServer) {
-    g_adminServer->requestShutdown();
-  }
+void signal_handler(int) {
+  shutdownRequested.store(true, std::memory_order_relaxed);
 }
 
 void setup_signal_handlers() {
@@ -435,6 +438,12 @@ int main(int argc, char** argv) {
         effectiveAdminPort);
     return 1;
   }
+  if (FLAGS_process_ramp_seconds > 0 && effectiveAdminPort <= 0) {
+    fprintf(
+        stderr,
+        "Error: --process_ramp_seconds requires multi-client admin coordination\n");
+    return 1;
+  }
   if (effectiveAdminPort > 0 && FLAGS_num_clients == 0) {
     fprintf(
         stderr,
@@ -457,14 +466,20 @@ int main(int argc, char** argv) {
 
     // Set up admin server for multi-client coordination if enabled
     std::unique_ptr<UcacheBenchAdminServer> adminServer;
+    std::atomic<bool> stopSignalWatcher{false};
+    std::thread signalWatcher;
+    auto signalWatcherGuard = folly::makeGuard([&]() {
+      stopSignalWatcher = true;
+      if (signalWatcher.joinable()) {
+        signalWatcher.join();
+      }
+    });
     if (effectiveAdminPort > 0) {
       adminServer = std::make_unique<UcacheBenchAdminServer>(
           static_cast<uint16_t>(effectiveAdminPort),
           FLAGS_num_clients,
-          FLAGS_timeout_seconds);
-
-      // Set global pointer for signal handler
-      g_adminServer = adminServer.get();
+          FLAGS_timeout_seconds,
+          FLAGS_process_ramp_seconds);
 
       // Set up phase change callback for metric tracking
       adminServer->setPhaseChangeCallback([server](
@@ -477,10 +492,18 @@ int main(int argc, char** argv) {
             server->setTrackingPhase(UcacheBenchServer::TrackingPhase::WARMUP);
             break;
           case UcacheBenchAdminServer::Phase::BENCHMARK:
-            printf(
-                "[Main] Phase changed to BENCHMARK - starting benchmark stats tracking\n");
             server->setTrackingPhase(
                 UcacheBenchServer::TrackingPhase::BENCHMARK);
+            printf(
+                "[Main] Phase changed to BENCHMARK - benchmark stats tracking started\n");
+            break;
+          case UcacheBenchAdminServer::Phase::PREPARING_MEASUREMENT:
+            server->prepareBenchmarkMetrics();
+            break;
+          case UcacheBenchAdminServer::Phase::MEASUREMENT_COMPLETE:
+          case UcacheBenchAdminServer::Phase::PREPARING_RAMP:
+          case UcacheBenchAdminServer::Phase::RAMP:
+            server->setTrackingPhase(UcacheBenchServer::TrackingPhase::NONE);
             break;
           default:
             break;
@@ -500,6 +523,14 @@ int main(int argc, char** argv) {
         server->printFinalResults(durationSec);
       });
 
+      signalWatcher = std::thread([&]() {
+        while (!stopSignalWatcher.load() && !shutdownRequested.load()) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (shutdownRequested.load()) {
+          adminServer->requestShutdown();
+        }
+      });
       adminServer->start();
 
       // Start periodic server-side stats reporting
@@ -521,7 +552,7 @@ int main(int argc, char** argv) {
     } else {
       // Wait for shutdown signal
       folly::EventBase* evb = folly::EventBaseManager::get()->getEventBase();
-      while (!shutdown_requested) {
+      while (!shutdownRequested.load()) {
         evb->loopOnce();
       }
     }

@@ -199,7 +199,12 @@ extreme:    open_loop_max_outstanding = 4096
 ```
 
 One open-loop arrival remains one wire RPC, fiber request handling remains
-enabled, and the packaged workload distribution is used.
+enabled, and the packaged workload distribution is used. When sizing has a
+resolved open-loop QPS, it also emits a 64-second process ramp: multi-client
+traffic starts are spread before the full 240-second measurement window. Ramp
+traffic is excluded from reported counters; total connections and steady-state
+offered-QPS semantics are unchanged. Calibration-only output with no resolved
+QPS omits both `open_loop_qps` and `process_ramp_seconds`.
 
 ## Offered-load calibration
 

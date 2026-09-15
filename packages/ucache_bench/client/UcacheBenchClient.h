@@ -7,9 +7,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,6 +33,79 @@
 
 namespace facebook {
 namespace ucachebench {
+
+struct MeasurementWindowNs {
+  int64_t start;
+  int64_t end;
+};
+
+constexpr MeasurementWindowNs immediateFailureWindow(int64_t nowNs) {
+  return {.start = nowNs, .end = nowNs};
+}
+
+constexpr bool countWindowEndCancellation(bool measuredRequest) {
+  return measuredRequest;
+}
+
+constexpr uint32_t firstDispatchTimeoutSeconds(uint32_t rampSeconds) {
+  return rampSeconds + 30;
+}
+
+constexpr uint64_t processRampDelayNs(
+    int32_t clientId,
+    uint32_t clientCount,
+    uint32_t rampSeconds) {
+  return static_cast<uint64_t>(clientId - 1) * rampSeconds * 1000000000ULL /
+      clientCount;
+}
+
+constexpr uint64_t countSequenceIntersection(
+    uint64_t begin,
+    uint64_t end,
+    uint64_t measurementBegin,
+    uint64_t measurementEnd) {
+  const uint64_t intersectionBegin = std::max(begin, measurementBegin);
+  const uint64_t intersectionEnd = std::min(end, measurementEnd);
+  return intersectionEnd > intersectionBegin
+      ? intersectionEnd - intersectionBegin
+      : 0;
+}
+
+constexpr std::optional<int64_t> alignWallTimeToSteadyClock(
+    int64_t targetWallNs,
+    int64_t wallNowNs,
+    int64_t steadyNowNs) {
+  const __int128 delta =
+      static_cast<__int128>(targetWallNs) - static_cast<__int128>(wallNowNs);
+  const __int128 aligned = static_cast<__int128>(steadyNowNs) + delta;
+  if (delta <= 0 || aligned < std::numeric_limits<int64_t>::min() ||
+      aligned > std::numeric_limits<int64_t>::max()) {
+    return std::nullopt;
+  }
+  return static_cast<int64_t>(aligned);
+}
+
+constexpr bool shouldRefillGetMiss(
+    bool openLoopEnabled,
+    bool refillOnMissEnabled) {
+  return !openLoopEnabled || refillOnMissEnabled;
+}
+
+constexpr std::optional<int64_t> checkedMeasurementEndNs(
+    int64_t startNs,
+    uint32_t durationSeconds) {
+  const __int128 end = static_cast<__int128>(startNs) +
+      static_cast<__int128>(durationSeconds) * 1000000000;
+  if (end > std::numeric_limits<int64_t>::max()) {
+    return std::nullopt;
+  }
+  return static_cast<int64_t>(end);
+}
+
+constexpr bool
+isInMeasurementWindow(int64_t valueNs, int64_t startNs, int64_t endNs) {
+  return valueNs >= startNs && valueNs < endNs;
+}
 
 // Zipfian distribution generator for realistic hot-key access patterns
 // Based on YCSB's ScrambledZipfianGenerator algorithm
@@ -67,7 +144,14 @@ class AdminConnection {
   ~AdminConnection();
 
   // Connect to the admin server
-  bool connect(const std::string& host, uint16_t port);
+  bool connect(
+      const std::string& host,
+      uint16_t port,
+      uint32_t receiveTimeoutSeconds);
+
+  // Interrupt a blocking notification read. The caller must join the reader
+  // before disconnecting and clearing its buffers.
+  void requestCancellation();
 
   // Disconnect from the admin server
   void disconnect();
@@ -79,7 +163,11 @@ class AdminConnection {
 
   // Send REGISTER command and get assigned client ID
   // Returns the assigned client ID, or -1 on error
-  int32_t sendRegister();
+  int32_t sendRegister(uint32_t protocolVersion = 1);
+
+  // Coordinate protocol-v2 process ramp and measurement start.
+  bool sendRampReady(int32_t clientId, uint32_t durationSeconds);
+  bool sendRampStarted(int32_t clientId);
 
   // Send WARMUP_DONE command
   bool sendWarmupDone(int32_t clientId);
@@ -102,7 +190,8 @@ class AdminConnection {
   // Check if a message is a broadcast notification (vs a command response)
   static bool isBroadcastNotification(const std::string& message);
 
-  int socket_{-1};
+  std::atomic<int> socket_{-1};
+  uint32_t receiveTimeoutSeconds_{600};
   std::string readBuffer_;
   // Buffer for broadcast notifications received while waiting for command
   // response

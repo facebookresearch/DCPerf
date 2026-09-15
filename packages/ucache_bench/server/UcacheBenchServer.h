@@ -224,6 +224,10 @@ class UcacheBenchServer {
     BENCHMARK // Tracking benchmark phase
   };
 
+  // Reset benchmark metrics while tracking remains disabled. This lets the
+  // admin protocol prepare counters before announcing a future start boundary.
+  void prepareBenchmarkMetrics();
+
   // Set the current tracking phase and reset corresponding metrics
   void setTrackingPhase(TrackingPhase phase);
 
@@ -416,6 +420,7 @@ class UcacheBenchServer {
 
   // Phase-based metric tracking
   std::atomic<TrackingPhase> currentPhase_{TrackingPhase::NONE};
+  std::atomic<bool> benchmarkMetricsPrepared_{false};
   PhaseMetrics warmupMetrics_;
   PhaseMetrics benchmarkMetrics_;
 

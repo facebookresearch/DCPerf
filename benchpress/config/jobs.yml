@@ -2067,6 +2067,7 @@
         - '--admin-port={admin_port}'
         - '--num-clients={num_clients}'
         - '--timeout-seconds={timeout_seconds}'
+        - '--process-ramp-seconds={process_ramp_seconds}'
         - '--perf-record-delay={perf_record_delay}'
         - '--verbose={verbose}'
         - '--real'
@@ -2117,6 +2118,7 @@
         - 'admin_port=0'
         - 'num_clients=0'
         - 'timeout_seconds=600'
+        - 'process_ramp_seconds=0'
         - 'perf_record_delay=120'
         - 'verbose=0'
     client:
@@ -2158,6 +2160,7 @@
         - '--hot-key-ratio={hot_key_ratio}'
         - '--enable-random-source-ip={enable_random_source_ip}'
         - '--admin-port={admin_port}'
+        - '--process-ramp-seconds={process_ramp_seconds}'
         - '--failures-until-tko={failures_until_tko}'
         - '--verbose={verbose}'
         - '--real'
@@ -2198,6 +2201,7 @@
         - 'hot_key_ratio=0.0'
         - 'enable_random_source_ip=0'
         - 'admin_port=0'
+        - 'process_ramp_seconds=0'
         - 'failures_until_tko=0'
         - 'verbose=0'
   hooks:

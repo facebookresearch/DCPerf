@@ -11,13 +11,16 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from cea.chips.benchpress.packages.ucache_bench.run import (
     ClientSummary,
     CommandResult,
     init_parser,
     parse_client_summary,
+    run_client,
     run_cmd,
+    run_server,
     validate_client_summary,
     validate_executable,
 )
@@ -142,6 +145,57 @@ class ParserTest(unittest.TestCase):
             init_parser().parse_args([])
 
         self.assertEqual(context.exception.code, 2)
+
+    def test_server_rejects_negative_process_ramp(self) -> None:
+        args = init_parser().parse_args(["server", "--process-ramp-seconds=-1"])
+
+        with self.assertRaisesRegex(ValueError, "must be non-negative"):
+            run_server(args)
+
+    def test_process_ramp_requires_admin_coordination(self) -> None:
+        args = init_parser().parse_args(
+            [
+                "client",
+                "--server-host=cache.example.com",
+                "--process-ramp-seconds=16",
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires --admin-port"):
+            run_client(args)
+
+    def test_process_ramp_requires_open_loop(self) -> None:
+        args = init_parser().parse_args(
+            [
+                "client",
+                "--server-host=cache.example.com",
+                "--admin-port=11213",
+                "--process-ramp-seconds=16",
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires --open-loop-qps"):
+            run_client(args)
+
+    def test_process_ramp_is_forwarded_to_client_binary(self) -> None:
+        args = init_parser().parse_args(
+            [
+                "client",
+                "--server-host=cache.example.com",
+                "--admin-port=11213",
+                "--process-ramp-seconds=16",
+                "--open-loop-qps=1000",
+            ]
+        )
+        result = CommandResult([], "", 0, False, None)
+        target = "cea.chips.benchpress.packages.ucache_bench.run.run_cmd"
+
+        with patch(target, return_value=result) as run:
+            run_client(args)
+
+        command = run.call_args.args[0]
+        self.assertIn("--admin_port=11213", command)
+        self.assertIn("--process_ramp_seconds=16", command)
 
     def test_missing_or_non_executable_binary_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

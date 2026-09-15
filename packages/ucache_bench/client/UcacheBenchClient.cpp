@@ -15,11 +15,13 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <random>
+#include <sstream>
 #include <thread>
 
 #include <folly/Random.h>
@@ -59,11 +61,6 @@ DECLARE_double(zipfian_skew);
 DECLARE_uint32(max_inflight);
 DECLARE_string(traffic_distribution);
 
-// Declare admin port flag (will be defined in main.cpp)
-// Note: We use server_host for admin connection since admin server
-// runs on the same machine as the cache server
-DECLARE_uint32(admin_port);
-
 // Declare server connection flags (will be defined in main.cpp)
 DECLARE_string(server_host);
 DECLARE_uint32(server_port);
@@ -76,6 +73,7 @@ namespace ucachebench {
 // 600 seconds (10 minutes) is long enough for normal multi-client
 // coordination but prevents the client from hanging forever.
 constexpr uint32_t kDefaultTimeoutSeconds = 600;
+constexpr uint32_t kMeasurementStartTimeoutSeconds = 30;
 
 // ============================================================================
 // AdminConnection implementation
@@ -85,7 +83,11 @@ AdminConnection::~AdminConnection() {
   disconnect();
 }
 
-bool AdminConnection::connect(const std::string& host, uint16_t port) {
+bool AdminConnection::connect(
+    const std::string& host,
+    uint16_t port,
+    uint32_t receiveTimeoutSeconds) {
+  receiveTimeoutSeconds_ = receiveTimeoutSeconds;
   if (socket_ >= 0) {
     disconnect();
   }
@@ -121,7 +123,7 @@ bool AdminConnection::connect(const std::string& host, uint16_t port) {
       // needs to shut down. 600 seconds (10 minutes) is long enough for
       // normal multi-client coordination but prevents hanging forever.
       struct timeval tv;
-      tv.tv_sec = kDefaultTimeoutSeconds;
+      tv.tv_sec = receiveTimeoutSeconds_;
       tv.tv_usec = 0;
       if (setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
         printf(
@@ -149,12 +151,20 @@ bool AdminConnection::connect(const std::string& host, uint16_t port) {
   return false;
 }
 
+void AdminConnection::requestCancellation() {
+  const int socket = socket_.load();
+  if (socket >= 0) {
+    ::shutdown(socket, SHUT_RDWR);
+  }
+}
+
 void AdminConnection::disconnect() {
-  if (socket_ >= 0) {
-    ::close(socket_);
-    socket_ = -1;
+  const int socket = socket_.exchange(-1);
+  if (socket >= 0) {
+    ::close(socket);
   }
   readBuffer_.clear();
+  pendingNotifications_.clear();
 }
 
 std::string AdminConnection::sendCommand(const std::string& command) {
@@ -196,7 +206,8 @@ bool AdminConnection::isBroadcastNotification(const std::string& message) {
   // - ALL_DONE
   // Command responses start with "OK" or "ERROR" or "STATUS"
   return message == "ALL_REGISTERED" || message == "ALL_WARMUP_DONE" ||
-      message == "ALL_DONE";
+      message == "PREPARING_RAMP" || message.starts_with("RAMP_START ") ||
+      message.starts_with("MEASUREMENT_START ") || message == "ALL_DONE";
 }
 
 std::string AdminConnection::readLine() {
@@ -240,8 +251,11 @@ std::string AdminConnection::readLine() {
   }
 }
 
-int32_t AdminConnection::sendRegister() {
-  std::string response = sendCommand("REGISTER");
+int32_t AdminConnection::sendRegister(uint32_t protocolVersion) {
+  const std::string command = protocolVersion == 1
+      ? "REGISTER"
+      : "REGISTER " + std::to_string(protocolVersion);
+  std::string response = sendCommand(command);
   if (response.empty()) {
     return -1;
   }
@@ -260,6 +274,21 @@ int32_t AdminConnection::sendRegister() {
 
   printf("[AdminConnection] REGISTER failed: %s\n", response.c_str());
   return -1;
+}
+
+bool AdminConnection::sendRampReady(
+    int32_t clientId,
+    uint32_t durationSeconds) {
+  std::string response = sendCommand(
+      "RAMP_READY " + std::to_string(clientId) + " " +
+      std::to_string(durationSeconds));
+  return response == "OK";
+}
+
+bool AdminConnection::sendRampStarted(int32_t clientId) {
+  std::string response =
+      sendCommand("RAMP_STARTED " + std::to_string(clientId));
+  return response == "OK";
 }
 
 bool AdminConnection::sendWarmupDone(int32_t clientId) {
@@ -459,6 +488,11 @@ DEFINE_uint64(
     "(0 = off). Lanes are completion-driven, so if they all start together they "
     "can remain phase-locked for the whole run and deliver load as synchronized "
     "bursts. Set to roughly one response time to decorrelate them.");
+DEFINE_uint32(
+    process_ramp_seconds,
+    0,
+    "Spread coordinated client-process traffic starts over this many seconds. "
+    "Requires --admin_port and protocol v2; 0 preserves legacy behavior.");
 DEFINE_uint64(
     open_loop_qps,
     0,
@@ -484,6 +518,7 @@ DEFINE_uint64(
 namespace {
 
 enum class RequestOutcome {
+  Unmeasured,
   Success,
   Error,
   Timeout,
@@ -608,6 +643,13 @@ void reportLatencyBreakdown() {
 }
 
 void validateOpenLoopFlags() {
+  if (FLAGS_process_ramp_seconds > 0 && FLAGS_open_loop_qps == 0) {
+    throw std::runtime_error("--process_ramp_seconds requires --open_loop_qps");
+  }
+  if (FLAGS_process_ramp_seconds > 0 && FLAGS_auto_concurrency) {
+    throw std::runtime_error(
+        "--process_ramp_seconds and --auto_concurrency are mutually exclusive");
+  }
   if (FLAGS_open_loop_qps == 0) {
     return;
   }
@@ -704,13 +746,20 @@ uint64_t ZipfianGenerator::next() {
 
 bool UcacheBenchClient::connectToAdmin(const std::string& host, uint16_t port) {
   adminConnection_ = std::make_unique<AdminConnection>();
-  if (!adminConnection_->connect(host, port)) {
+  const uint64_t requestedTimeout =
+      static_cast<uint64_t>(FLAGS_warmup_seconds) + FLAGS_process_ramp_seconds +
+      FLAGS_duration_seconds + 60;
+  const uint32_t receiveTimeout = static_cast<uint32_t>(std::min<uint64_t>(
+      std::numeric_limits<uint32_t>::max(),
+      std::max<uint64_t>(kDefaultTimeoutSeconds, requestedTimeout)));
+  if (!adminConnection_->connect(host, port, receiveTimeout)) {
     adminConnection_.reset();
     return false;
   }
 
   // Register with the admin server to get our client ID
-  clientId_ = adminConnection_->sendRegister();
+  clientId_ =
+      adminConnection_->sendRegister(FLAGS_process_ramp_seconds > 0 ? 2 : 1);
   if (clientId_ < 0) {
     printf("[Client] Failed to register with admin server\n");
     adminConnection_->disconnect();
@@ -943,6 +992,18 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     warmupResults.startTime = std::chrono::steady_clock::now();
     warmupResults.endTime = warmupResults.startTime;
     warmupResults.success = true;
+    if (hasAdminConnection()) {
+      if (!adminConnection_->sendWarmupDone(clientId_)) {
+        throw std::runtime_error("Failed to report disabled warmup completion");
+      }
+      const std::string expectedNotification =
+          FLAGS_process_ramp_seconds > 0 ? "PREPARING_RAMP" : "ALL_WARMUP_DONE";
+      const std::string notification = adminConnection_->waitForNotification(0);
+      if (notification != expectedNotification) {
+        throw std::runtime_error(
+            "Unexpected post-warmup notification: " + notification);
+      }
+    }
     return warmupResults;
   }
 
@@ -1004,8 +1065,9 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
           break;
         }
 
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration<double>(now - startTime).count();
+        const auto progressNow = std::chrono::steady_clock::now();
+        auto elapsed =
+            std::chrono::duration<double>(progressNow - startTime).count();
         uint64_t ops = totalOps.load();
         uint64_t successes = setSuccesses.load();
         uint64_t errors = setErrors.load();
@@ -1505,8 +1567,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       printf(
           "[Client %d] Waiting for all clients to complete warmup...\n",
           clientId_);
+      const std::string expectedNotification =
+          FLAGS_process_ramp_seconds > 0 ? "PREPARING_RAMP" : "ALL_WARMUP_DONE";
       std::string notification = adminConnection_->waitForNotification(0);
-      if (notification == "ALL_WARMUP_DONE") {
+      if (notification == expectedNotification) {
         printf(
             "[Client %d] All clients completed warmup, ready for benchmark\n",
             clientId_);
@@ -1582,6 +1646,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
   auto startTime = std::chrono::steady_clock::now();
   auto endTime = startTime + std::chrono::seconds(FLAGS_duration_seconds);
+  const bool coordinatedRamp = FLAGS_process_ramp_seconds > 0;
 
   std::atomic<bool> shouldStop{false};
 
@@ -1694,8 +1759,179 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   std::unique_ptr<folly::HeapTimekeeper> openLoopTimekeeper;
   if (openLoopEnabled) {
     openLoopTimekeeper = std::make_unique<folly::HeapTimekeeper>();
+  }
+
+  if (coordinatedRamp) {
+    if (!hasAdminConnection() ||
+        !adminConnection_->sendRampReady(clientId_, FLAGS_duration_seconds)) {
+      throw std::runtime_error("Failed to enter coordinated process ramp");
+    }
+    const std::string notification = adminConnection_->waitForNotification(0);
+    std::istringstream rampMessage(notification);
+    std::string command;
+    uint32_t rampSeconds = 0;
+    uint32_t clientCount = 0;
+    if (!(rampMessage >> command >> rampSeconds >> clientCount) ||
+        command != "RAMP_START" || rampSeconds != FLAGS_process_ramp_seconds ||
+        clientCount == 0) {
+      throw std::runtime_error(
+          "Invalid RAMP_START notification: " + notification);
+    }
+    const uint64_t delayNs =
+        processRampDelayNs(clientId_, clientCount, rampSeconds);
+    startTime =
+        std::chrono::steady_clock::now() + std::chrono::nanoseconds(delayNs);
+    endTime = std::chrono::steady_clock::time_point::max();
+  } else if (openLoopEnabled) {
     startTime = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     endTime = startTime + std::chrono::seconds(FLAGS_duration_seconds);
+  }
+
+  const auto timePointToNs = [](std::chrono::steady_clock::time_point time) {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               time.time_since_epoch())
+        .count();
+  };
+  const auto nsToTimePoint = [](int64_t ns) {
+    return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(ns));
+  };
+  constexpr int64_t kMeasurementNotStarted =
+      std::numeric_limits<int64_t>::max();
+  std::atomic<int64_t> measurementStartNs{
+      coordinatedRamp ? kMeasurementNotStarted : timePointToNs(startTime)};
+  std::atomic<int64_t> measurementEndNs{
+      coordinatedRamp ? kMeasurementNotStarted : timePointToNs(endTime)};
+  const auto measurementStartTime = [&]() {
+    return nsToTimePoint(measurementStartNs.load(std::memory_order_acquire));
+  };
+  const auto measurementEndTime = [&]() {
+    return nsToTimePoint(measurementEndNs.load(std::memory_order_acquire));
+  };
+  const auto isMeasuredRequest =
+      [&](std::chrono::steady_clock::time_point time) {
+        const int64_t start =
+            measurementStartNs.load(std::memory_order_acquire);
+        const int64_t end = measurementEndNs.load(std::memory_order_acquire);
+        const int64_t value = timePointToNs(time);
+        return start != kMeasurementNotStarted &&
+            isInMeasurementWindow(value, start, end);
+      };
+
+  std::mutex firstDispatchMutex;
+  std::condition_variable firstDispatchCv;
+  bool firstDispatch{false};
+  std::atomic<bool> firstDispatchPublished{false};
+  std::atomic<bool> coordinatorStop{false};
+  const auto markFirstDispatch = [&]() {
+    if (!coordinatedRamp ||
+        firstDispatchPublished.load(std::memory_order_relaxed)) {
+      return;
+    }
+    std::lock_guard<std::mutex> lock(firstDispatchMutex);
+    if (firstDispatch) {
+      return;
+    }
+    firstDispatch = true;
+    firstDispatchPublished.store(true, std::memory_order_relaxed);
+    firstDispatchCv.notify_one();
+  };
+
+  std::thread measurementCoordinator;
+  std::atomic<bool> measurementCoordinatorFailed{false};
+  if (coordinatedRamp) {
+    measurementCoordinator = std::thread([&]() {
+      std::string error;
+      {
+        std::unique_lock<std::mutex> lock(firstDispatchMutex);
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds(firstDispatchTimeoutSeconds(
+                FLAGS_process_ramp_seconds));
+        if (!firstDispatchCv.wait_until(lock, deadline, [&]() {
+              return firstDispatch ||
+                  coordinatorStop.load(std::memory_order_acquire);
+            })) {
+          error = "Timed out waiting for the first ramp dispatch";
+        }
+        if (coordinatorStop.load(std::memory_order_acquire)) {
+          return;
+        }
+      }
+      if (error.empty() && !adminConnection_->sendRampStarted(clientId_)) {
+        error = "Failed to report RAMP_STARTED";
+      }
+      const std::string notification = error.empty()
+          ? adminConnection_->waitForNotification(
+                kMeasurementStartTimeoutSeconds)
+          : std::string{};
+      std::istringstream measurementMessage(notification);
+      std::string command;
+      int64_t measurementWallStartNs = 0;
+      uint32_t durationSeconds = 0;
+      if (error.empty() &&
+          (!(measurementMessage >> command >> measurementWallStartNs >>
+             durationSeconds) ||
+           command != "MEASUREMENT_START" ||
+           durationSeconds != FLAGS_duration_seconds)) {
+        error = "Invalid MEASUREMENT_START notification: " + notification;
+      }
+      const auto steadyNow = std::chrono::steady_clock::now();
+      const auto wallNow = std::chrono::system_clock::now();
+      auto measurementStart = steadyNow;
+      std::optional<int64_t> alignedStartNs;
+      std::optional<int64_t> alignedEndNs;
+      if (error.empty()) {
+        const int64_t steadyNowNs = timePointToNs(steadyNow);
+        const int64_t wallNowNs =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                wallNow.time_since_epoch())
+                .count();
+        alignedStartNs = alignWallTimeToSteadyClock(
+            measurementWallStartNs, wallNowNs, steadyNowNs);
+        if (alignedStartNs.has_value()) {
+          alignedEndNs =
+              checkedMeasurementEndNs(*alignedStartNs, durationSeconds);
+        }
+        if (!alignedStartNs.has_value() || !alignedEndNs.has_value()) {
+          error = "MEASUREMENT_START is invalid, not future, or overflows";
+        } else {
+          measurementStart = nsToTimePoint(*alignedStartNs);
+        }
+      }
+      const int64_t failureNowNs = timePointToNs(measurementStart);
+      const auto failureWindow = immediateFailureWindow(failureNowNs);
+      measurementEndNs.store(
+          error.empty() ? *alignedEndNs : failureWindow.end,
+          std::memory_order_relaxed);
+      // Publish start last: an acquire load that observes it also observes end.
+      measurementStartNs.store(
+          error.empty() ? timePointToNs(measurementStart) : failureWindow.start,
+          std::memory_order_release);
+      if (!error.empty()) {
+        fprintf(stderr, "[Client %d] %s\n", clientId_, error.c_str());
+        measurementCoordinatorFailed.store(true);
+      }
+    });
+  }
+
+  auto measurementCoordinatorGuard = folly::makeGuard([&]() {
+    if (!measurementCoordinator.joinable()) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(firstDispatchMutex);
+      coordinatorStop.store(true, std::memory_order_release);
+    }
+    firstDispatchCv.notify_one();
+    if (hasAdminConnection()) {
+      adminConnection_->requestCancellation();
+    }
+    measurementCoordinator.join();
+    if (adminConnection_) {
+      adminConnection_->disconnect();
+    }
+  });
+
+  if (openLoopEnabled) {
     printf(
         "[open_loop] target_qps=%lu per client process, proxies=%zu, "
         "max_outstanding=%u per proxy, max_lateness_us=%lu\n",
@@ -1708,20 +1944,29 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
   // Progress monitoring thread (must be created after clients and counters)
   std::thread progressThread;
+  auto progressThreadGuard = folly::makeGuard([&]() {
+    shouldStop = true;
+    if (progressThread.joinable()) {
+      progressThread.join();
+    }
+  });
   if (FLAGS_verbose && FLAGS_progress_interval_seconds > 0) {
     progressThread = std::thread([&]() {
-      while (!shouldStop.load() && std::chrono::steady_clock::now() < endTime) {
+      while (!shouldStop.load() &&
+             std::chrono::steady_clock::now() < measurementEndTime()) {
         std::this_thread::sleep_for(
             std::chrono::seconds(FLAGS_progress_interval_seconds));
         if (shouldStop.load()) {
           break;
         }
 
-        auto now = std::chrono::steady_clock::now();
-        if (now < startTime) {
+        const auto progressNow = std::chrono::steady_clock::now();
+        const auto measuredStart = measurementStartTime();
+        if (progressNow < measuredStart) {
           continue;
         }
-        auto elapsed = std::chrono::duration<double>(now - startTime).count();
+        auto elapsed =
+            std::chrono::duration<double>(progressNow - measuredStart).count();
 
         // Sum per-worker counters for progress display
         uint64_t ops = 0;
@@ -1771,6 +2016,12 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
   // AIMD auto-concurrency controller thread
   std::thread autoConcurrencyThread;
+  auto autoConcurrencyThreadGuard = folly::makeGuard([&]() {
+    shouldStop = true;
+    if (autoConcurrencyThread.joinable()) {
+      autoConcurrencyThread.join();
+    }
+  });
   if (FLAGS_auto_concurrency) {
     autoConcurrencyThread = std::thread([&]() {
       constexpr auto kCheckInterval = std::chrono::seconds(2);
@@ -1781,14 +2032,15 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       uint32_t bestInflight = dynamicMaxInflight.load();
       uint32_t peakInflight = dynamicMaxInflight.load();
 
-      while (!shouldStop.load() && std::chrono::steady_clock::now() < endTime) {
+      while (!shouldStop.load() &&
+             std::chrono::steady_clock::now() < measurementEndTime()) {
         std::this_thread::sleep_for(kCheckInterval);
         if (shouldStop.load()) {
           break;
         }
 
-        auto now = std::chrono::steady_clock::now();
-        bool ramping = now < rampEnd;
+        const auto controllerNow = std::chrono::steady_clock::now();
+        bool ramping = controllerNow < rampEnd;
 
         // Calculate current window QPS
         uint64_t curOps = 0;
@@ -1861,13 +2113,20 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
               clientPtr) -> folly::coro::Task<void> {
     // CancellableAsyncScope (not AsyncScope) so that when the measurement
     // window ends we CANCEL any still-outstanding requests instead of waiting
-    // for them indefinitely. A small number of in-flight requests at endTime
-    // can have responses that never arrive (and the per-request timeout's timer
-    // may sit on a momentarily-saturated proxy event base), which otherwise
-    // hangs joinAsync forever -> the client never sends BENCHMARK_DONE -> the
-    // whole run stalls. Cancelling at window-end is the correct semantics.
+    // for them indefinitely. A small number of in-flight requests at
+    // measurementEndTime() can have responses that never arrive (and the
+    // per-request timeout's timer may sit on a momentarily-saturated proxy
+    // event base), which otherwise hangs joinAsync forever -> the client never
+    // sends BENCHMARK_DONE -> the whole run stalls. Cancelling at window-end is
+    // the correct semantics.
     folly::coro::CancellableAsyncScope scope;
     auto exe = co_await folly::coro::co_current_executor;
+    const auto workerStartNow = std::chrono::steady_clock::now();
+    if (coordinatedRamp && workerStartNow < startTime) {
+      co_await folly::futures::sleep(
+          std::chrono::ceil<std::chrono::microseconds>(
+              startTime - workerStartNow));
+    }
 
     auto requestTimeout = [&]() {
       constexpr auto kMaxRequestTimeout = std::chrono::seconds(10);
@@ -1875,20 +2134,21 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         return std::chrono::duration_cast<std::chrono::microseconds>(
             kMaxRequestTimeout);
       }
-      const auto now = std::chrono::steady_clock::now();
-      if (now >= endTime) {
+      const auto timeoutNow = std::chrono::steady_clock::now();
+      if (timeoutNow >= measurementEndTime()) {
         return std::chrono::microseconds(0);
       }
       return std::min(
           std::chrono::duration_cast<std::chrono::microseconds>(
               kMaxRequestTimeout),
-          std::chrono::ceil<std::chrono::microseconds>(endTime - now));
+          std::chrono::ceil<std::chrono::microseconds>(
+              measurementEndTime() - timeoutNow));
     };
 
     // Send one GET request - matches production McrouterAdapter::coro() pattern
     auto sendGetRequest =
-        [&](std::chrono::steady_clock::time_point scheduledTime)
-        -> folly::coro::Task<RequestOutcome> {
+        [&](std::chrono::steady_clock::time_point scheduledTime,
+            bool measuredRequest) -> folly::coro::Task<RequestOutcome> {
       auto opStartTime = scheduledTime;
       std::string key = generateKey();
 
@@ -1917,7 +2177,8 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       // plus server plus response arrival, and t2-t1 is how long the completion
       // waited for this EventBase to run it. Sampled 1/10000 so the timestamps
       // themselves do not perturb the measurement.
-      const bool sampleLat = (tLatSampleCounter++ % kLatSampleEvery) == 0;
+      const bool sampleLat =
+          measuredRequest && (tLatSampleCounter++ % kLatSampleEvery) == 0;
       std::chrono::steady_clock::time_point t0, tSent;
       // Only allocated on sampled requests. Allocating unconditionally would
       // add a heap allocation and refcount traffic to every request.
@@ -1927,13 +2188,16 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         t0 = std::chrono::steady_clock::now();
       }
 
-      if (openLoopEnabled && std::chrono::steady_clock::now() >= endTime) {
-        co_return RequestOutcome::CancelledAtEnd;
+      if (openLoopEnabled &&
+          std::chrono::steady_clock::now() >= measurementEndTime()) {
+        co_return countWindowEndCancellation(measuredRequest)
+            ? RequestOutcome::CancelledAtEnd
+            : RequestOutcome::Unmeasured;
       }
-      if (openLoopEnabled) {
+      if (openLoopEnabled && measuredRequest) {
         ++openLoopStats[workerId].wireGetDispatched;
       }
-      clientPtr->send(
+      const bool dispatched = clientPtr->send(
           request,
           [p = std::move(promise), sampleLat, cbEntry, requestOwner](
               const UcbGetRequest&, UcbGetReply&& reply) mutable {
@@ -1945,6 +2209,9 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             }
             p.setValue(std::move(reply));
           });
+      if (dispatched) {
+        markFirstDispatch();
+      }
       if (sampleLat) {
         tSent = std::chrono::steady_clock::now();
       }
@@ -1961,8 +2228,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           // the effective sampling rate.
           gLatLostSamples.fetch_add(1, std::memory_order_relaxed);
         }
-        const bool cancelledAtEnd =
-            openLoopEnabled && std::chrono::steady_clock::now() >= endTime;
+        if (!measuredRequest) {
+          co_return RequestOutcome::Unmeasured;
+        }
+        const bool cancelledAtEnd = (openLoopEnabled || coordinatedRamp) &&
+            std::chrono::steady_clock::now() >= measurementEndTime();
         if (!cancelledAtEnd) {
           workerTotalOps[workerId]->fetch_add(1);
           workerGetOps[workerId]->fetch_add(1);
@@ -1973,8 +2243,16 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
 
       auto opEndTime = std::chrono::steady_clock::now();
-      if (openLoopEnabled && opEndTime >= endTime) {
-        co_return RequestOutcome::CancelledAtEnd;
+      if ((openLoopEnabled || coordinatedRamp) &&
+          opEndTime >= measurementEndTime()) {
+        co_return measuredRequest ? RequestOutcome::CancelledAtEnd
+                                  : RequestOutcome::Unmeasured;
+      }
+      const bool unmeasuredRefill = !measuredRequest &&
+          *result.result() == carbon::Result::NOTFOUND &&
+          shouldRefillGetMiss(openLoopEnabled, FLAGS_open_loop_refill_on_miss);
+      if (!measuredRequest && !unmeasuredRefill) {
+        co_return RequestOutcome::Unmeasured;
       }
 
       if (sampleLat) {
@@ -2002,26 +2280,35 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       const bool deferLatencyForRefill = openLoopEnabled &&
           *result.result() == carbon::Result::NOTFOUND &&
           FLAGS_open_loop_refill_on_miss;
-      if (!deferLatencyForRefill) {
+      if (measuredRequest && !deferLatencyForRefill) {
         std::lock_guard<std::mutex> lock(workerLatencyMutexes[workerId]);
         workerLatencies[workerId].push_back(latencyMs);
       }
 
-      workerTotalOps[workerId]->fetch_add(1);
-      workerGetOps[workerId]->fetch_add(1);
-      if (openLoopEnabled) {
-        openLoopStats[workerId].recordResult(
-            openLoopStats[workerId].getResultCounts, *result.result());
+      if (measuredRequest) {
+        workerTotalOps[workerId]->fetch_add(1);
+        workerGetOps[workerId]->fetch_add(1);
+        if (openLoopEnabled) {
+          openLoopStats[workerId].recordResult(
+              openLoopStats[workerId].getResultCounts, *result.result());
+        }
       }
 
       if (*result.result() == carbon::Result::FOUND) {
-        workerGetHits[workerId]->fetch_add(1);
-        co_return RequestOutcome::Success;
+        if (measuredRequest) {
+          workerGetHits[workerId]->fetch_add(1);
+        }
+        co_return measuredRequest ? RequestOutcome::Success
+                                  : RequestOutcome::Unmeasured;
       }
       if (*result.result() == carbon::Result::NOTFOUND) {
-        workerGetMisses[workerId]->fetch_add(1);
-        if (openLoopEnabled && !FLAGS_open_loop_refill_on_miss) {
-          co_return RequestOutcome::Success;
+        if (measuredRequest) {
+          workerGetMisses[workerId]->fetch_add(1);
+        }
+        if (!shouldRefillGetMiss(
+                openLoopEnabled, FLAGS_open_loop_refill_on_miss)) {
+          co_return measuredRequest ? RequestOutcome::Success
+                                    : RequestOutcome::Unmeasured;
         }
 
         // SET on GET miss to simulate real cache warming behavior
@@ -2048,10 +2335,12 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         auto [setPromise, setFuture] =
             folly::makePromiseContract<UcbSetReply>();
 
-        if (openLoopEnabled && std::chrono::steady_clock::now() >= endTime) {
-          co_return RequestOutcome::CancelledAtEnd;
+        if (openLoopEnabled &&
+            std::chrono::steady_clock::now() >= measurementEndTime()) {
+          co_return measuredRequest ? RequestOutcome::CancelledAtEnd
+                                    : RequestOutcome::Unmeasured;
         }
-        if (openLoopEnabled) {
+        if (openLoopEnabled && measuredRequest) {
           ++openLoopStats[workerId].wireSetDispatched;
           ++openLoopStats[workerId].wireRefillSetDispatched;
         }
@@ -2067,8 +2356,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         try {
           setResult = co_await std::move(setFuture).within(requestTimeout());
         } catch (const std::exception&) {
-          const bool cancelledAtEnd =
-              openLoopEnabled && std::chrono::steady_clock::now() >= endTime;
+          if (!measuredRequest) {
+            co_return RequestOutcome::Unmeasured;
+          }
+          const bool cancelledAtEnd = (openLoopEnabled || coordinatedRamp) &&
+              std::chrono::steady_clock::now() >= measurementEndTime();
           if (!cancelledAtEnd) {
             workerSetOps[workerId]->fetch_add(1);
             workerSetErrors[workerId]->fetch_add(1);
@@ -2078,7 +2370,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         }
 
         const auto logicalEndTime = std::chrono::steady_clock::now();
-        if (openLoopEnabled && logicalEndTime >= endTime) {
+        if (!measuredRequest) {
+          co_return RequestOutcome::Unmeasured;
+        }
+        if ((openLoopEnabled || coordinatedRamp) &&
+            logicalEndTime >= measurementEndTime()) {
           co_return RequestOutcome::CancelledAtEnd;
         }
         if (openLoopEnabled) {
@@ -2124,8 +2420,8 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
     // Send one SET request - matches production McrouterAdapter::coro() pattern
     auto sendSetRequest =
-        [&](std::chrono::steady_clock::time_point scheduledTime)
-        -> folly::coro::Task<RequestOutcome> {
+        [&](std::chrono::steady_clock::time_point scheduledTime,
+            bool measuredRequest) -> folly::coro::Task<RequestOutcome> {
       auto opStartTime = scheduledTime;
       std::string key = generateKey();
       std::string value = generateValue();
@@ -2150,26 +2446,35 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       // Same pattern as production McrouterAdapter::coro()
       auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
 
-      if (openLoopEnabled && std::chrono::steady_clock::now() >= endTime) {
-        co_return RequestOutcome::CancelledAtEnd;
+      if (openLoopEnabled &&
+          std::chrono::steady_clock::now() >= measurementEndTime()) {
+        co_return countWindowEndCancellation(measuredRequest)
+            ? RequestOutcome::CancelledAtEnd
+            : RequestOutcome::Unmeasured;
       }
-      if (openLoopEnabled) {
+      if (openLoopEnabled && measuredRequest) {
         ++openLoopStats[workerId].wireSetDispatched;
       }
-      clientPtr->send(
+      const bool dispatched = clientPtr->send(
           request,
           [p = std::move(promise), requestOwner](
               const UcbSetRequest&, UcbSetReply&& reply) mutable {
             (void)requestOwner;
             p.setValue(std::move(reply));
           });
+      if (dispatched) {
+        markFirstDispatch();
+      }
 
       UcbSetReply result;
       try {
         result = co_await std::move(future).within(requestTimeout());
       } catch (const std::exception&) {
-        const bool cancelledAtEnd =
-            openLoopEnabled && std::chrono::steady_clock::now() >= endTime;
+        if (!measuredRequest) {
+          co_return RequestOutcome::Unmeasured;
+        }
+        const bool cancelledAtEnd = (openLoopEnabled || coordinatedRamp) &&
+            std::chrono::steady_clock::now() >= measurementEndTime();
         if (!cancelledAtEnd) {
           workerTotalOps[workerId]->fetch_add(1);
           workerSetOps[workerId]->fetch_add(1);
@@ -2180,7 +2485,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
 
       auto opEndTime = std::chrono::steady_clock::now();
-      if (openLoopEnabled && opEndTime >= endTime) {
+      if (!measuredRequest) {
+        co_return RequestOutcome::Unmeasured;
+      }
+      if ((openLoopEnabled || coordinatedRamp) &&
+          opEndTime >= measurementEndTime()) {
         co_return RequestOutcome::CancelledAtEnd;
       }
       auto latencyMs =
@@ -2263,7 +2572,27 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
         const auto maxLateness =
             std::chrono::microseconds(FLAGS_open_loop_max_lateness_us);
-        const uint64_t endSequence = sequenceAtOrAfter(endTime);
+        const auto endSequence = [&]() {
+          const int64_t end = measurementEndNs.load(std::memory_order_acquire);
+          return end == kMeasurementNotStarted
+              ? std::numeric_limits<uint64_t>::max()
+              : sequenceAtOrAfter(nsToTimePoint(end));
+        };
+        const auto measuredSequenceCount = [&](uint64_t begin, uint64_t end) {
+          const int64_t measurementStart =
+              measurementStartNs.load(std::memory_order_acquire);
+          const int64_t measurementEnd =
+              measurementEndNs.load(std::memory_order_acquire);
+          if (measurementStart == kMeasurementNotStarted ||
+              measurementEnd == kMeasurementNotStarted) {
+            return uint64_t{0};
+          }
+          return countSequenceIntersection(
+              begin,
+              end,
+              sequenceAtOrAfter(nsToTimePoint(measurementStart)),
+              sequenceAtOrAfter(nsToTimePoint(measurementEnd)));
+        };
         uint32_t slotsThisTurn = 0;
         while (true) {
           if (++slotsThisTurn >= 64) {
@@ -2272,85 +2601,112 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           }
 
           const auto deadline = deadlineFor(sequence);
-          if (deadline >= endTime) {
+          if (deadline >= measurementEndTime()) {
             break;
           }
 
-          auto now = std::chrono::steady_clock::now();
-          while (now < deadline) {
+          auto pacerNow = std::chrono::steady_clock::now();
+          while (pacerNow < deadline) {
             co_await folly::coro::sleep(
-                std::chrono::ceil<std::chrono::microseconds>(deadline - now),
+                std::chrono::ceil<std::chrono::microseconds>(
+                    deadline - pacerNow),
                 openLoopTimekeeper.get());
             co_await folly::coro::co_reschedule_on_current_executor;
-            now = std::chrono::steady_clock::now();
+            pacerNow = std::chrono::steady_clock::now();
           }
 
-          if (now >= endTime) {
-            const uint64_t skipped =
-                endSequence > sequence ? endSequence - sequence : 0;
-            stats.scheduled += skipped;
-            stats.droppedAtWindowEnd += skipped;
-            sequence = endSequence;
+          if (pacerNow >= measurementEndTime()) {
+            const uint64_t measurementEndSequence = endSequence();
+            const uint64_t measuredSkipped =
+                measuredSequenceCount(sequence, measurementEndSequence);
+            stats.scheduled += measuredSkipped;
+            stats.droppedAtWindowEnd += measuredSkipped;
+            sequence = measurementEndSequence;
             break;
           }
 
-          if (now > deadline + maxLateness) {
-            stats.recordSchedulerLag(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    now - deadline));
-            const uint64_t firstRetained =
-                std::min(sequenceAtOrAfter(now - maxLateness), endSequence);
+          const bool measuredRequest = isMeasuredRequest(deadline);
+          if (pacerNow > deadline + maxLateness) {
+            const uint64_t firstRetained = std::min(
+                sequenceAtOrAfter(pacerNow - maxLateness), endSequence());
             const uint64_t skipped =
                 firstRetained > sequence ? firstRetained - sequence : 1;
-            stats.scheduled += skipped;
-            stats.droppedLate += skipped;
+            const uint64_t measuredSkipped =
+                measuredSequenceCount(sequence, sequence + skipped);
+            if (measuredSkipped > 0) {
+              stats.recordSchedulerLag(
+                  std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      pacerNow - deadline));
+            }
+            stats.scheduled += measuredSkipped;
+            stats.droppedLate += measuredSkipped;
             sequence += skipped;
             continue;
           }
 
           ++sequence;
-          ++stats.scheduled;
           const auto lag = std::chrono::duration_cast<std::chrono::nanoseconds>(
-              now - deadline);
-          stats.recordSchedulerLag(lag);
+              pacerNow - deadline);
+          if (measuredRequest) {
+            ++stats.scheduled;
+            stats.recordSchedulerLag(lag);
+          }
 
           if (myInflight.load(std::memory_order_relaxed) >=
               FLAGS_open_loop_max_outstanding) {
-            ++stats.droppedAtCap;
+            if (measuredRequest) {
+              ++stats.droppedAtCap;
+            }
             continue;
           }
 
-          ++stats.dispatched;
+          if (measuredRequest) {
+            ++stats.dispatched;
+          }
           const uint32_t outstanding =
               myInflight.fetch_add(1, std::memory_order_relaxed) + 1;
-          stats.outstandingHighWater =
-              std::max<uint64_t>(stats.outstandingHighWater, outstanding);
+          if (measuredRequest) {
+            stats.outstandingHighWater =
+                std::max<uint64_t>(stats.outstandingHighWater, outstanding);
+          }
 
           scope.add(
               folly::coro::co_withExecutor(
                   exe,
                   folly::coro::co_invoke(
-                      [&, deadline]() -> folly::coro::Task<void> {
+                      [&, deadline, measuredRequest]()
+                          -> folly::coro::Task<void> {
                         auto inflightGuard = folly::makeGuard([&]() {
                           myInflight.fetch_sub(1, std::memory_order_relaxed);
                         });
 
                         RequestOutcome outcome = RequestOutcome::Error;
                         try {
-                          if (std::chrono::steady_clock::now() >= endTime) {
-                            outcome = RequestOutcome::CancelledAtEnd;
+                          if (std::chrono::steady_clock::now() >=
+                              measurementEndTime()) {
+                            outcome =
+                                countWindowEndCancellation(measuredRequest)
+                                ? RequestOutcome::CancelledAtEnd
+                                : RequestOutcome::Unmeasured;
                           } else if (folly::Random::randDouble01() < getRatio) {
-                            outcome = co_await sendGetRequest(deadline);
+                            outcome = co_await sendGetRequest(
+                                deadline, measuredRequest);
                           } else {
-                            outcome = co_await sendSetRequest(deadline);
+                            outcome = co_await sendSetRequest(
+                                deadline, measuredRequest);
                           }
                         } catch (const std::exception&) {
-                          outcome = std::chrono::steady_clock::now() >= endTime
+                          outcome = !measuredRequest
+                              ? RequestOutcome::Unmeasured
+                              : std::chrono::steady_clock::now() >=
+                                  measurementEndTime()
                               ? RequestOutcome::CancelledAtEnd
                               : RequestOutcome::Error;
                         }
 
                         switch (outcome) {
+                          case RequestOutcome::Unmeasured:
+                            break;
                           case RequestOutcome::Success:
                             ++stats.completedSuccess;
                             break;
@@ -2386,7 +2742,8 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
                             (static_cast<uint64_t>(lane) * 2654435761ULL) %
                             FLAGS_lane_phase_stagger_us));
                   }
-                  while (std::chrono::steady_clock::now() < endTime) {
+                  while (std::chrono::steady_clock::now() <
+                         measurementEndTime()) {
                     if (FLAGS_auto_concurrency &&
                         lane >= dynamicMaxInflight.load()) {
                       co_await folly::futures::sleep(
@@ -2395,10 +2752,12 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
                     }
                     myInflight.fetch_add(1);
                     const auto scheduledTime = std::chrono::steady_clock::now();
+                    const bool measuredRequest =
+                        isMeasuredRequest(scheduledTime);
                     if (folly::Random::randDouble01() < getRatio) {
-                      co_await sendGetRequest(scheduledTime);
+                      co_await sendGetRequest(scheduledTime, measuredRequest);
                     } else {
-                      co_await sendSetRequest(scheduledTime);
+                      co_await sendSetRequest(scheduledTime, measuredRequest);
                     }
                     myInflight.fetch_sub(1);
                   }
@@ -2408,13 +2767,20 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     }
 
     if (openLoopEnabled) {
-      auto now = std::chrono::steady_clock::now();
-      while (now < endTime) {
+      while (measurementEndNs.load(std::memory_order_acquire) ==
+             kMeasurementNotStarted) {
         co_await folly::coro::sleep(
-            std::chrono::ceil<std::chrono::microseconds>(endTime - now),
+            std::chrono::milliseconds(10), openLoopTimekeeper.get());
+        co_await folly::coro::co_reschedule_on_current_executor;
+      }
+      auto windowWaitNow = std::chrono::steady_clock::now();
+      while (windowWaitNow < measurementEndTime()) {
+        co_await folly::coro::sleep(
+            std::chrono::ceil<std::chrono::microseconds>(
+                measurementEndTime() - windowWaitNow),
             openLoopTimekeeper.get());
         co_await folly::coro::co_reschedule_on_current_executor;
-        now = std::chrono::steady_clock::now();
+        windowWaitNow = std::chrono::steady_clock::now();
       }
     }
 
@@ -2446,12 +2812,22 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   folly::coro::blockingWait(
       mainScope.joinAsync().scheduleOn(workerEvbs.front()));
 
+  if (measurementCoordinator.joinable()) {
+    measurementCoordinator.join();
+  }
+  measurementCoordinatorGuard.dismiss();
+
   shouldStop = true;
   if (progressThread.joinable()) {
     progressThread.join();
   }
   if (autoConcurrencyThread.joinable()) {
     autoConcurrencyThread.join();
+  }
+  autoConcurrencyThreadGuard.dismiss();
+  progressThreadGuard.dismiss();
+  if (measurementCoordinatorFailed.load()) {
+    throw std::runtime_error("Coordinated measurement setup failed");
   }
 
   if (openLoopEnabled) {
@@ -2598,9 +2974,10 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
   }
 
   BenchmarkResults results;
-  results.startTime = startTime;
-  results.endTime =
-      openLoopEnabled ? endTime : std::chrono::steady_clock::now();
+  results.startTime = measurementStartTime();
+  results.endTime = openLoopEnabled || coordinatedRamp
+      ? measurementEndTime()
+      : std::chrono::steady_clock::now();
 
   // Sum per-worker counters to get final totals
   results.totalOps = 0;
