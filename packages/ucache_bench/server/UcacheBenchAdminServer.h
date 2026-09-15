@@ -5,11 +5,13 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace facebook::ucachebench {
 
@@ -21,26 +23,24 @@ namespace facebook::ucachebench {
  * production ucache pattern of separating admin/control traffic from data
  * traffic.
  *
- * Protocol:
- *   Client -> Server:
- *     REGISTER                    -> OK <client_id> | ERROR <msg>
- *     WARMUP_DONE <client_id>     -> OK | ERROR <msg>
- *     BENCHMARK_DONE <client_id>  -> OK | ERROR <msg>
+ * Protocol v1 (process ramp disabled):
+ *   REGISTER, WARMUP_DONE <id>, BENCHMARK_DONE <id>
+ *   Notifications: ALL_REGISTERED, ALL_WARMUP_DONE, ALL_DONE
  *
- *   Server -> Client (async notifications, sent to all connected clients):
- *     ALL_REGISTERED              (after all N clients register)
- *     ALL_WARMUP_DONE             (after all N clients finish warmup)
- *     ALL_DONE                    (after results printed, server exiting)
+ * Protocol v2 (process ramp enabled):
+ *   REGISTER 2
+ *   WARMUP_DONE <id>
+ *   RAMP_READY <id> <duration_seconds>
+ *   RAMP_STARTED <id>
+ *   BENCHMARK_DONE <id>
+ *   Notifications: ALL_REGISTERED, PREPARING_RAMP,
+ *     RAMP_START <ramp_seconds> <client_count>,
+ *     MEASUREMENT_START <unix_time_ns> <duration_seconds>, ALL_DONE
  *
- * Lifecycle:
- *   1. Server starts, waits for all expected clients to register
- *   2. When all clients register, server broadcasts ALL_REGISTERED
- *   3. Clients run warmup, then send WARMUP_DONE
- *   4. When all clients finish warmup, server broadcasts ALL_WARMUP_DONE
- *      and starts tracking benchmark metrics
- *   5. Clients run benchmark, then send BENCHMARK_DONE
- *   6. When all clients finish benchmark, server prints results,
- *      broadcasts ALL_DONE, and exits
+ * V2 keeps traffic running between RAMP_START and MEASUREMENT_START. The
+ * notification carries a guarded future timestamp; clients prepare their local
+ * steady-clock boundary, and the server resets/enables counters at that exact
+ * timestamp. Tracking ends exactly duration_seconds later.
  */
 class UcacheBenchAdminServer {
  public:
@@ -48,10 +48,14 @@ class UcacheBenchAdminServer {
    * Benchmark phase state machine.
    */
   enum class Phase {
-    WAITING_FOR_CLIENTS, // Waiting for all clients to register
-    WARMUP, // All clients registered, warmup in progress
-    BENCHMARK, // Warmup complete, benchmark in progress
-    FINISHED // All clients done, results printed
+    WAITING_FOR_CLIENTS = 0,
+    WARMUP = 1,
+    BENCHMARK = 2,
+    FINISHED = 3,
+    PREPARING_RAMP = 4,
+    RAMP = 5,
+    MEASUREMENT_COMPLETE = 6,
+    PREPARING_MEASUREMENT = 7,
   };
 
   /**
@@ -76,7 +80,8 @@ class UcacheBenchAdminServer {
   UcacheBenchAdminServer(
       uint16_t port,
       uint32_t numExpectedClients,
-      uint32_t timeoutSeconds);
+      uint32_t timeoutSeconds,
+      uint32_t processRampSeconds = 0);
 
   ~UcacheBenchAdminServer();
 
@@ -151,17 +156,23 @@ class UcacheBenchAdminServer {
     return warmupStartTime_;
   }
   std::chrono::steady_clock::time_point getBenchmarkStartTime() const {
-    return benchmarkStartTime_;
+    return std::chrono::steady_clock::time_point(
+        std::chrono::nanoseconds(benchmarkStartNs_.load()));
   }
   std::chrono::steady_clock::time_point getBenchmarkEndTime() const {
-    return benchmarkEndTime_;
+    return std::chrono::steady_clock::time_point(
+        std::chrono::nanoseconds(benchmarkEndNs_.load()));
   }
 
  private:
+  friend class UcacheBenchAdminServerTestPeer;
+
   // Server configuration
   uint16_t port_;
   uint32_t numExpectedClients_;
   uint32_t timeoutSeconds_;
+  uint32_t processRampSeconds_;
+  std::atomic<uint32_t> measurementDurationSeconds_{0};
 
   // Phase tracking
   std::atomic<Phase> currentPhase_{Phase::WAITING_FOR_CLIENTS};
@@ -170,7 +181,17 @@ class UcacheBenchAdminServer {
   mutable std::mutex clientMutex_;
   std::set<int32_t> registeredClients_;
   std::set<int32_t> warmupCompleteClients_;
+  std::set<int32_t> rampReadyClients_;
+  std::set<int32_t> rampStartedClients_;
   std::set<int32_t> benchmarkCompleteClients_;
+  bool warmupTransitionStarted_{false};
+  bool warmupCompletionTransitionStarted_{false};
+  bool rampTransitionStarted_{false};
+  bool benchmarkTransitionStarted_{false};
+  bool finishedTransitionStarted_{false};
+  std::atomic<bool> measurementSchedulePublished_{false};
+  std::atomic<bool> measurementCompletionStarted_{false};
+  std::atomic<bool> measurementComplete_{false};
   int32_t nextClientId_{1};
 
   // Connected client sockets for broadcasting
@@ -180,8 +201,9 @@ class UcacheBenchAdminServer {
   // Timing
   std::chrono::steady_clock::time_point startTime_;
   std::chrono::steady_clock::time_point warmupStartTime_;
-  std::chrono::steady_clock::time_point benchmarkStartTime_;
-  std::chrono::steady_clock::time_point benchmarkEndTime_;
+  std::atomic<int64_t> benchmarkStartNs_{0};
+  std::atomic<int64_t> benchmarkEndNs_{0};
+  std::atomic<int64_t> benchmarkWallStartNs_{0};
 
   // Callbacks
   mutable std::mutex callbackMutex_;
@@ -190,8 +212,11 @@ class UcacheBenchAdminServer {
 
   // Server thread
   std::atomic<bool> running_{false};
+  std::atomic<bool> shutdownRequested_{false};
   std::thread serverThread_;
-  int serverSocket_{-1};
+  std::thread measurementThread_;
+  std::atomic<bool> measurementScheduled_{false};
+  std::atomic<int> serverSocket_{-1};
 
   // Completion signaling
   std::mutex completionMutex_;
@@ -211,14 +236,21 @@ class UcacheBenchAdminServer {
   void broadcast(const std::string& message);
 
   // Command handlers
-  std::string handleRegister(int clientSocket);
+  std::string handleRegister(int clientSocket, uint32_t protocolVersion);
   std::string handleWarmupDone(int32_t clientId);
+  std::string handleRampReady(int32_t clientId, uint32_t durationSeconds);
+  std::string handleRampStarted(int32_t clientId);
   std::string handleBenchmarkDone(int32_t clientId);
 
   // Phase transitions
   void transitionToWarmup();
+  void transitionToPreparingRamp();
+  void transitionToRamp();
   void transitionToBenchmark();
+  void transitionToMeasurementComplete();
   void transitionToFinished();
+  void measurementLoop();
+  void notifyPhaseChange(Phase phase);
 };
 
 } // namespace facebook::ucachebench

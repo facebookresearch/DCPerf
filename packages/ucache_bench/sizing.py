@@ -556,6 +556,7 @@ def recommend(
     }
     if resolved_qps is not None:
         params["open_loop_qps"] = max(1, resolved_qps // shape.total_processes)
+        params["process_ramp_seconds"] = 64
 
     return Recommendation(
         topology=topology,

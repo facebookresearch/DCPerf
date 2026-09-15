@@ -1118,23 +1118,36 @@ void UcacheBenchServer::printStats() {
   }
 }
 
-void UcacheBenchServer::setTrackingPhase(TrackingPhase phase) {
-  auto oldPhase = currentPhase_.exchange(phase);
+void UcacheBenchServer::prepareBenchmarkMetrics() {
+  currentPhase_.store(TrackingPhase::NONE);
+  benchmarkMetrics_.reset();
+  benchmarkMetricsPrepared_.store(true);
+}
 
-  // Reset metrics when transitioning to a new tracking phase
+void UcacheBenchServer::setTrackingPhase(TrackingPhase phase) {
+  const auto oldPhase = currentPhase_.load();
+
+  // Reset before publishing the phase so live request increments cannot be
+  // erased after measurement starts.
   if (phase == TrackingPhase::WARMUP && oldPhase != TrackingPhase::WARMUP) {
     warmupMetrics_.reset();
+    currentPhase_.store(phase);
     printf("[Server] Starting warmup phase metrics tracking\n");
   } else if (
       phase == TrackingPhase::BENCHMARK &&
       oldPhase != TrackingPhase::BENCHMARK) {
-    benchmarkMetrics_.reset();
+    if (!benchmarkMetricsPrepared_.exchange(false)) {
+      benchmarkMetrics_.reset();
+    }
+    currentPhase_.store(phase);
     printf("[Server] Starting benchmark phase metrics tracking\n");
+  } else {
+    currentPhase_.store(phase);
   }
 }
 
 void UcacheBenchServer::recordGet(bool hit) {
-  auto phase = currentPhase_.load();
+  const auto phase = currentPhase_.load();
   if (phase == TrackingPhase::WARMUP) {
     warmupMetrics_.getRequests.fetch_add(1, std::memory_order_relaxed);
     if (hit) {
@@ -1153,7 +1166,7 @@ void UcacheBenchServer::recordGet(bool hit) {
 }
 
 void UcacheBenchServer::recordSet() {
-  auto phase = currentPhase_.load();
+  const auto phase = currentPhase_.load();
   if (phase == TrackingPhase::WARMUP) {
     warmupMetrics_.setRequests.fetch_add(1, std::memory_order_relaxed);
   } else if (phase == TrackingPhase::BENCHMARK) {
@@ -1162,7 +1175,7 @@ void UcacheBenchServer::recordSet() {
 }
 
 void UcacheBenchServer::recordDelete() {
-  auto phase = currentPhase_.load();
+  const auto phase = currentPhase_.load();
   if (phase == TrackingPhase::WARMUP) {
     warmupMetrics_.deleteRequests.fetch_add(1, std::memory_order_relaxed);
   } else if (phase == TrackingPhase::BENCHMARK) {
@@ -1307,11 +1320,11 @@ void UcacheBenchServer::periodicStatsLoop(uint32_t intervalSec) {
         metrics.deleteRequests.load(std::memory_order_relaxed);
     uint64_t totalOps = getReqs + setReqs + deleteReqs;
 
-    auto now = std::chrono::steady_clock::now();
+    auto periodicNow = std::chrono::steady_clock::now();
     double intervalElapsed =
-        std::chrono::duration<double>(now - prevTime).count();
+        std::chrono::duration<double>(periodicNow - prevTime).count();
     double phaseElapsed =
-        std::chrono::duration<double>(now - phaseStartTime).count();
+        std::chrono::duration<double>(periodicNow - phaseStartTime).count();
 
     double intervalQps = (intervalElapsed > 0)
         ? (totalOps - prevTotalOps) / intervalElapsed
@@ -1337,7 +1350,7 @@ void UcacheBenchServer::periodicStatsLoop(uint32_t intervalSec) {
     fflush(stdout);
 
     prevTotalOps = totalOps;
-    prevTime = now;
+    prevTime = periodicNow;
   }
 }
 

@@ -377,6 +377,7 @@ class SizingTest(unittest.TestCase):
         )
 
         self.assertNotIn("open_loop_qps", without_qps.params)
+        self.assertNotIn("process_ramp_seconds", without_qps.params)
         self.assertEqual(
             without_qps.to_dict()["calibration"],
             {
@@ -387,6 +388,7 @@ class SizingTest(unittest.TestCase):
         )
         self.assertEqual(supplied.aggregate_qps, 24_000)
         self.assertEqual(supplied.params["open_loop_qps"], 1500)
+        self.assertEqual(supplied.params["process_ramp_seconds"], 64)
 
     def test_latency_seed_and_next_qps_remain_bounded(self) -> None:
         self.assertEqual(seed_qps(90, 1000), 9000)

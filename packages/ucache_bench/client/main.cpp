@@ -8,6 +8,7 @@
 #include <folly/Format.h>
 #include <folly/init/Init.h>
 #include <folly/portability/GFlags.h>
+#include <stdexcept>
 
 #include "UcacheBenchClient.h"
 
@@ -16,6 +17,7 @@ DECLARE_uint32(server_port);
 DECLARE_uint32(duration_seconds);
 DECLARE_uint32(warmup_seconds);
 DECLARE_bool(verbose);
+DECLARE_uint32(process_ramp_seconds);
 
 static bool ValidateServerPort(const char* flagname, uint32_t value) {
   if (value > 0 && value < 65536) {
@@ -55,6 +57,10 @@ int main(int argc, char** argv) {
   }
 
   try {
+    if (FLAGS_process_ramp_seconds > 0 && FLAGS_admin_port == 0) {
+      throw std::runtime_error(
+          "--process_ramp_seconds requires --admin_port for protocol v2 coordination");
+    }
     UcacheBenchClient client;
 
     // Connect to admin server if configured (uses server_host since admin runs
