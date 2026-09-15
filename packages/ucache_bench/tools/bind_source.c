@@ -47,6 +47,7 @@
 static struct sockaddr_in6 g_bind_addrs[MAX_BIND_ADDRS];
 static int g_num_addrs = 0;
 static int g_initialized = 0;
+static int g_configuration_error = 0;
 static atomic_uint g_next_addr = 0;
 static int (*real_connect)(int, const struct sockaddr*, socklen_t) = NULL;
 
@@ -89,7 +90,8 @@ static void init_once(void) {
       if (parse_addr(tok, &g_bind_addrs[g_num_addrs]) == 0) {
         g_num_addrs++;
       } else {
-        fprintf(stderr, "bind_source: invalid address '%s', skipping\n", tok);
+        fprintf(stderr, "bind_source: invalid address '%s'\n", tok);
+        g_configuration_error = 1;
       }
       tok = strtok_r(NULL, ",", &saveptr);
     }
@@ -111,12 +113,22 @@ static void init_once(void) {
       fprintf(stderr, "bind_source: will bind to %s\n", addr);
     } else {
       fprintf(stderr, "bind_source: invalid BIND_ADDRESS '%s'\n", addr);
+      g_configuration_error = 1;
     }
   }
 }
 
 int connect(int sockfd, const struct sockaddr* addr, socklen_t addrlen) {
   init_once();
+
+  if (!real_connect) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (g_configuration_error) {
+    errno = EINVAL;
+    return -1;
+  }
 
   if (g_num_addrs > 0 && addr->sa_family == AF_INET6) {
     /* Check if socket is already bound */
@@ -128,10 +140,12 @@ int connect(int sockfd, const struct sockaddr* addr, socklen_t addrlen) {
           memcmp(&current.sin6_addr, &in6addr_any, sizeof(in6addr_any)) == 0) {
         /* Round-robin across source addresses */
         unsigned int idx = atomic_fetch_add(&g_next_addr, 1) % g_num_addrs;
-        bind(
-            sockfd,
-            (struct sockaddr*)&g_bind_addrs[idx],
-            sizeof(g_bind_addrs[idx]));
+        if (bind(
+                sockfd,
+                (struct sockaddr*)&g_bind_addrs[idx],
+                sizeof(g_bind_addrs[idx])) != 0) {
+          return -1;
+        }
       }
     }
   }
