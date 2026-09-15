@@ -1151,7 +1151,9 @@ def init_parser() -> argparse.ArgumentParser:
         "--real", action="store_true", help="Actually run the command"
     )
     server_parser.add_argument(
+        "--io-latency-us",
         "--io_latency_us",
+        dest="io_latency_us",
         type=int,
         default=0,
         help="Simulate I/O by yielding fiber per request (0 = disabled)",
