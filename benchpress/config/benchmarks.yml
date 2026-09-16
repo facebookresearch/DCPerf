@@ -163,6 +163,10 @@ video_transcode_bench:
   parser: video_transcode_bench
   install_script: ./packages/video_transcode_bench/install_video_transcode_bench.sh
   cleanup_script: ./packages/video_transcode_bench/cleanup_video_transcode_bench.sh
+  install_markers:
+    - ./benchmarks/video_transcode_bench/run.sh
+    - ./benchmarks/video_transcode_bench/tools/ffmpeg
+    - ./benchmarks/video_transcode_bench/generate_commands_all.py
   path: ./benchmarks/video_transcode_bench/run.sh
   tags:
     scope:
