@@ -1515,7 +1515,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
 
   // Block until all workers complete
   folly::coro::blockingWait(
-      mainScope.joinAsync().scheduleOn(workerEvbs.front()));
+      folly::coro::co_withExecutor(workerEvbs.front(), mainScope.joinAsync()));
 
   shouldStop = true;
   if (adaptiveThread.joinable()) {
