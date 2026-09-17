@@ -552,7 +552,8 @@
   benchmark: feedsim_autoscale
   description: >
     Multi-instance aggregator workload with DLRM (Deep Learning Recommendation
-    Model) inference. Automatically spawns one workload instance per ~100 cores.
+    Model) inference. Automatically spawns one workload instance for every 50
+    physical cores, rounded up.
     The calibrated recipe (minimizes both the gen-over-gen correlation gap and the
     bench-vs-prod hot-function gap) is baked into run.sh / LeafNodeRank defaults;
     only driver depth is set here. Finds maximum QPS the system sustains while
