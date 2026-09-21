@@ -20,11 +20,12 @@ _SYSFS_ROOT: Path = Path("/sys")
 _MEMINFO_PATH: Path = Path("/proc/meminfo")
 _CGROUP_ROOT: Path = Path("/sys/fs/cgroup")
 _PROC_SELF_CGROUP: Path = Path("/proc/self/cgroup")
+_CPUINFO_PATH: Path = Path("/proc/cpuinfo")
 _MIB_BYTES: int = 1024 * 1024
 _CACHE_CAP_MIB: int = 1024 * 1024
 _MEMORY_RICH_MIB: int = 512 * 1024
 _DESTINATIONS_PER_PROCESS: int = 32_768
-_TARGET_TOTAL_CONNECTIONS: int = 300_000
+_GENERIC_TOTAL_CONNECTIONS: int = 212_160
 _MAX_TOTAL_PROCESSES: int = 64
 _MAX_PROXIES: int = 80
 
@@ -47,11 +48,11 @@ class LoadVariant(str, Enum):
 
     @property
     def max_outstanding(self) -> int:
-        return 1024 if self == LoadVariant.PRODUCTION else 4096
+        return 4096
 
     @property
     def max_lateness_us(self) -> int:
-        return 1000 if self == LoadVariant.PRODUCTION else 200_000
+        return 200_000
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class HardwareTopology:
     logical_cpus: int
     physical_cores: int
     memory_mib: int
+    cpu_model: str = ""
 
     def __post_init__(self) -> None:
         _validate_cpu_topology(self.logical_cpus, self.physical_cores)
@@ -72,6 +74,44 @@ class HardwareTopology:
     @property
     def substantial_smt(self) -> bool:
         return has_substantial_smt(self.logical_cpus, self.physical_cores)
+
+
+@dataclass(frozen=True)
+class ClientTopology:
+    client_hosts: int
+    processes_per_host: int
+    num_proxies: int
+
+
+@dataclass(frozen=True)
+class ValidatedProfile:
+    name: str
+    logical_cpus: int
+    physical_cores: int
+    cpu_model_markers: tuple[str, ...]
+    min_memory_mib: int
+    max_memory_mib: int
+    cache_mib: int
+    key_count: int
+    total_connections: int
+    production_client: ClientTopology
+    extreme_client: ClientTopology
+
+    def matches(self, topology: HardwareTopology) -> bool:
+        cpu_model = topology.cpu_model.casefold()
+        return (
+            topology.logical_cpus == self.logical_cpus
+            and topology.physical_cores == self.physical_cores
+            and any(marker.casefold() in cpu_model for marker in self.cpu_model_markers)
+            and self.min_memory_mib <= topology.memory_mib <= self.max_memory_mib
+            and self.cache_mib + calculate_reserve_mib(topology.memory_mib)
+            <= topology.memory_mib
+        )
+
+    def client_topology(self, variant: LoadVariant) -> ClientTopology:
+        if variant == LoadVariant.PRODUCTION:
+            return self.production_client
+        return self.extreme_client
 
 
 @dataclass(frozen=True)
@@ -134,6 +174,7 @@ class Recommendation:
     params: dict[str, int | float | str]
 
     def to_dict(self) -> dict[str, object]:
+        profile = validated_profile(self.topology)
         derived: dict[str, int | float] = {
             "target_cpu": self.variant.target_cpu,
             "reserve_mib": self.resources.reserve_mib,
@@ -158,6 +199,8 @@ class Recommendation:
                 "effective_cores": self.topology.effective_cores,
                 "substantial_smt": self.topology.substantial_smt,
                 "usable_memory_mib": self.topology.memory_mib,
+                "cpu_model": self.topology.cpu_model,
+                "sizing_profile": profile.name if profile is not None else "generic",
             },
             "derived": derived,
             "calibration": {
@@ -203,6 +246,83 @@ def effective_cores(logical_cpus: int, physical_cores: int) -> float:
 def has_substantial_smt(logical_cpus: int, physical_cores: int) -> bool:
     _validate_cpu_topology(logical_cpus, physical_cores)
     return logical_cpus - physical_cores >= 0.5 * physical_cores
+
+
+def _validated_profiles() -> tuple[ValidatedProfile, ...]:
+    return (
+        ValidatedProfile(
+            name="T1_CPL",
+            logical_cpus=52,
+            physical_cores=26,
+            cpu_model_markers=("8321HC",),
+            min_memory_mib=60 * 1024,
+            max_memory_mib=68 * 1024,
+            cache_mib=24_000,
+            key_count=24_000_000,
+            total_connections=200_960,
+            production_client=ClientTopology(2, 8, 20),
+            extreme_client=ClientTopology(2, 8, 20),
+        ),
+        ValidatedProfile(
+            name="T1_MLN",
+            logical_cpus=72,
+            physical_cores=36,
+            cpu_model_markers=("7D13",),
+            min_memory_mib=60 * 1024,
+            max_memory_mib=68 * 1024,
+            cache_mib=24_000,
+            key_count=24_000_000,
+            total_connections=212_352,
+            production_client=ClientTopology(2, 8, 28),
+            extreme_client=ClientTopology(2, 8, 28),
+        ),
+        ValidatedProfile(
+            name="T11_GRC_ARM",
+            logical_cpus=72,
+            physical_cores=72,
+            cpu_model_markers=("Neoverse-V2", "0x41:0xd4f"),
+            min_memory_mib=240 * 1024,
+            max_memory_mib=272 * 1024,
+            cache_mib=160_000,
+            key_count=160_000_000,
+            total_connections=212_160,
+            production_client=ClientTopology(2, 8, 20),
+            extreme_client=ClientTopology(2, 8, 20),
+        ),
+        ValidatedProfile(
+            name="T1_BGM",
+            logical_cpus=176,
+            physical_cores=88,
+            cpu_model_markers=("9D64",),
+            min_memory_mib=240 * 1024,
+            max_memory_mib=272 * 1024,
+            cache_mib=170_000,
+            key_count=170_000_000,
+            total_connections=212_160,
+            production_client=ClientTopology(2, 8, 60),
+            extreme_client=ClientTopology(2, 8, 60),
+        ),
+        ValidatedProfile(
+            name="T2_TRN",
+            logical_cpus=316,
+            physical_cores=158,
+            cpu_model_markers=("9D25",),
+            min_memory_mib=1_025_000,
+            max_memory_mib=1088 * 1024,
+            cache_mib=820_000,
+            key_count=820_000_000,
+            total_connections=222_720,
+            production_client=ClientTopology(2, 10, 32),
+            extreme_client=ClientTopology(4, 8, 80),
+        ),
+    )
+
+
+def validated_profile(topology: HardwareTopology) -> ValidatedProfile | None:
+    for profile in _validated_profiles():
+        if profile.matches(topology):
+            return profile
+    return None
 
 
 def _parse_cpu_list(value: str) -> set[int]:
@@ -253,6 +373,22 @@ def _memory_mib_from_meminfo(meminfo_path: Path) -> int:
     raise ValueError(f"MemTotal is missing from {meminfo_path}")
 
 
+def _cpu_model_from_cpuinfo(cpuinfo_path: Path) -> str:
+    fields: dict[str, str] = {}
+    for line in cpuinfo_path.read_text().splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            fields.setdefault(key.strip().casefold(), value.strip())
+    for key in ("model name", "hardware"):
+        if fields.get(key):
+            return fields[key]
+    implementer = fields.get("cpu implementer")
+    part = fields.get("cpu part")
+    if implementer and part:
+        return f"{implementer}:{part}"
+    return fields.get("processor", "")
+
+
 def _current_cgroup_directory(cgroup_root: Path, cgroup_file: Path) -> Path:
     try:
         lines = cgroup_file.read_text().splitlines()
@@ -301,10 +437,11 @@ def _detect_hardware_values(
     *,
     sysfs_root: Path = _SYSFS_ROOT,
     meminfo_path: Path = _MEMINFO_PATH,
+    cpuinfo_path: Path = _CPUINFO_PATH,
     cgroup_root: Path = _CGROUP_ROOT,
     cgroup_file: Path = _PROC_SELF_CGROUP,
     affinity: Iterable[int] | None = None,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, str]:
     visible_cpus = set(os.sched_getaffinity(0) if affinity is None else affinity)
     if not visible_cpus:
         raise ValueError("CPU affinity is empty")
@@ -317,6 +454,7 @@ def _detect_hardware_values(
         len(visible_cpus),
         _physical_cores_from_sysfs(visible_cpus, sysfs_root),
         min(memory_limits),
+        _cpu_model_from_cpuinfo(cpuinfo_path),
     )
 
 
@@ -324,13 +462,15 @@ def detect_hardware(
     *,
     sysfs_root: Path = _SYSFS_ROOT,
     meminfo_path: Path = _MEMINFO_PATH,
+    cpuinfo_path: Path = _CPUINFO_PATH,
     cgroup_root: Path = _CGROUP_ROOT,
     cgroup_file: Path = _PROC_SELF_CGROUP,
     affinity: Iterable[int] | None = None,
 ) -> HardwareTopology:
-    logical_cpus, physical_cores, memory_mib = _detect_hardware_values(
+    logical_cpus, physical_cores, memory_mib, cpu_model = _detect_hardware_values(
         sysfs_root=sysfs_root,
         meminfo_path=meminfo_path,
+        cpuinfo_path=cpuinfo_path,
         cgroup_root=cgroup_root,
         cgroup_file=cgroup_file,
         affinity=affinity,
@@ -339,6 +479,7 @@ def detect_hardware(
         logical_cpus=logical_cpus,
         physical_cores=physical_cores,
         memory_mib=memory_mib,
+        cpu_model=cpu_model,
     )
 
 
@@ -385,11 +526,22 @@ def calculate_resources(
         raise ValueError("average_item_bytes must be positive")
 
     reserve_mib = calculate_reserve_mib(topology.memory_mib)
-    cache_mib = calculate_cache_mib(topology.memory_mib)
+    profile = validated_profile(topology)
+    if profile is not None:
+        if average_item_bytes != 1024:
+            raise ValueError(
+                "validated profiles require average_item_bytes=1024; "
+                "use generic sizing for a different item size"
+            )
+        cache_mib = profile.cache_mib
+        key_count = profile.key_count
+    else:
+        cache_mib = calculate_cache_mib(topology.memory_mib)
+        key_count = cache_mib * _MIB_BYTES // average_item_bytes
     return ServerResources(
         reserve_mib=reserve_mib,
         cache_mib=cache_mib,
-        key_count=cache_mib * _MIB_BYTES // average_item_bytes,
+        key_count=key_count,
         hash_power=calculate_hash_power(cache_mib),
         io_threads=topology.logical_cpus,
         acceptor_threads=4,
@@ -409,6 +561,9 @@ def calculate_total_processes(physical_cores: int, variant: LoadVariant) -> int:
 
 
 def calculate_proxy_count(topology: HardwareTopology, variant: LoadVariant) -> int:
+    profile = validated_profile(topology)
+    if profile is not None:
+        return profile.client_topology(variant).num_proxies
     if not topology.substantial_smt:
         requested = max(20, topology.physical_cores / 4)
     elif topology.memory_mib >= _MEMORY_RICH_MIB:
@@ -426,6 +581,11 @@ def _calculate_client_topology(
     topology: HardwareTopology,
     variant: LoadVariant,
 ) -> tuple[int, int, int]:
+    profile = validated_profile(topology)
+    if profile is not None:
+        client = profile.client_topology(variant)
+        return client.client_hosts, client.processes_per_host, client.num_proxies
+
     total_processes = calculate_total_processes(topology.physical_cores, variant)
     if variant == LoadVariant.PRODUCTION:
         client_hosts = 1
@@ -437,6 +597,10 @@ def _calculate_client_topology(
 
 
 def calculate_total_connections(topology: HardwareTopology) -> int:
+    profile = validated_profile(topology)
+    if profile is not None:
+        return profile.total_connections
+
     quantums: list[int] = []
     maxima: list[int] = []
     for variant in LoadVariant:
@@ -450,10 +614,10 @@ def calculate_total_connections(topology: HardwareTopology) -> int:
 
     common_quantum = math.lcm(*quantums)
     max_connections = _floor_to_multiple(min(maxima), common_quantum)
-    aligned_connections = _round_up(_TARGET_TOTAL_CONNECTIONS, common_quantum)
+    aligned_connections = _round_up(_GENERIC_TOTAL_CONNECTIONS, common_quantum)
     if aligned_connections > max_connections:
         raise ValueError(
-            f"client topologies cannot reach {_TARGET_TOTAL_CONNECTIONS} total "
+            f"client topologies cannot reach {_GENERIC_TOTAL_CONNECTIONS} total "
             f"connections without exceeding {_DESTINATIONS_PER_PROCESS} "
             "destinations per process"
         )
@@ -551,6 +715,7 @@ def recommend(
         "open_loop_refill_on_miss": 0,
         "open_loop_max_outstanding": variant.max_outstanding,
         "open_loop_max_lateness_us": variant.max_lateness_us,
+        "failures_until_tko": 12,
         "connection_ramp_seconds": 25,
         "use_same_thread_client": 1,
     }
@@ -581,6 +746,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--logical-cpus", type=int)
     parser.add_argument("--physical-cores", type=int)
+    parser.add_argument("--cpu-model")
     parser.add_argument(
         "--memory-mib", help="usable memory after container limits", type=int
     )
@@ -602,8 +768,11 @@ def _resolve_topology(args: argparse.Namespace) -> HardwareTopology:
             logical_cpus=args.logical_cpus,
             physical_cores=args.physical_cores,
             memory_mib=args.memory_mib,
+            cpu_model=args.cpu_model or "",
         )
-    detected_logical, detected_physical, detected_memory = _detect_hardware_values()
+    detected_logical, detected_physical, detected_memory, detected_model = (
+        _detect_hardware_values()
+    )
     return HardwareTopology(
         logical_cpus=(
             args.logical_cpus if args.logical_cpus is not None else detected_logical
@@ -616,6 +785,7 @@ def _resolve_topology(args: argparse.Namespace) -> HardwareTopology:
         memory_mib=(
             args.memory_mib if args.memory_mib is not None else detected_memory
         ),
+        cpu_model=args.cpu_model if args.cpu_model is not None else detected_model,
     )
 
 

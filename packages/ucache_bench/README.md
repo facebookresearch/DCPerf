@@ -88,7 +88,10 @@ protocol response.
 ## Generate a starting configuration
 
 The autosizer accepts affinity-visible logical CPUs, distinct physical cores,
-usable memory, and a load variant. It uses generic topology classes and never
+CPU model, usable memory, and a load variant. It first matches the five
+hardware profiles used for the published correlation study; those profiles emit
+the exact accepted cache, keyspace, physical-client, process, proxy, and
+connection topology. Unmatched hardware uses a generic fallback. Neither path
 infers server QPS from hardware.
 
 ```bash
@@ -107,7 +110,8 @@ Without `--aggregate-qps`, the full output omits `open_loop_qps` and sets
 `--baseline-latency-us` value can generate a conservative first point, but that
 point still requires calibration.
 
-The model uses only symbolic topology and memory relationships:
+When no validated profile matches, the fallback uses symbolic topology and
+memory relationships:
 
 ```text
 substantial_smt = (logical_cpus - physical_cores) >= 0.5 * physical_cores
@@ -124,15 +128,14 @@ production_processes = min(64, round_up_4(max(16, physical_cores / 8)))
 extreme_processes = min(64, round_up_8(max(16, physical_cores / 6)))
 ```
 
-Hash power follows cache-capacity boundaries. Proxy fanout uses generic SMT,
-memory-rich, and high-core branches. The server connection target is independent
-of load variant and is aligned to a common multiple of both variants' process
-and proxy counts, so production and extreme emit exactly the same total
-connections while keeping integral fanout and at most 32,768 destinations per
-process. The variants differ through offered load and client host/process
-placement. Client thread count, in-flight depth, warmup, duration, timeout, and
-open-loop safety limits are workload defaults rather than fitted hardware
-equations.
+For validated profiles, hash power, proxy fanout, physical-client placement, and
+connections reproduce the measured matrix. In the generic fallback, hash power
+follows cache-capacity boundaries, proxy fanout uses SMT/memory/core branches,
+and the 212,160 central validated connection anchor is aligned to a common
+multiple of both variants' process and proxy counts. Both paths preserve integral
+fanout and at most 32,768 destinations per process. Client thread count,
+in-flight depth, warmup, duration, timeout, and open-loop safety limits are
+workload defaults rather than capacity predictions.
 
 For the complete server-resource, process, proxy, connection, workload, and
 calibration formulas, see [SIZING.md](SIZING.md).

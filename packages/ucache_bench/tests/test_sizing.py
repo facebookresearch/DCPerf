@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cea.chips.benchpress.packages.ucache_bench.sizing import (
+    _cpu_model_from_cpuinfo,
     _parse_cpu_list,
     _physical_cores_from_sysfs,
     _resolve_topology,
@@ -35,12 +36,22 @@ from cea.chips.benchpress.packages.ucache_bench.sizing import (
     next_qps,
     recommend,
     seed_qps,
+    validated_profile,
 )
 
 
 class SizingTest(unittest.TestCase):
     def test_parse_cpu_list(self) -> None:
         self.assertEqual(_parse_cpu_list("0-3,8,10-11"), {0, 1, 2, 3, 8, 10, 11})
+
+    def test_cpu_model_detection_supports_arm_midr_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cpuinfo = Path(tmp) / "cpuinfo"
+            cpuinfo.write_text("processor: 0\nCPU implementer: 0x41\nCPU part: 0xd4f\n")
+
+            model = _cpu_model_from_cpuinfo(cpuinfo)
+
+        self.assertEqual(model, "0x41:0xd4f")
 
     def test_physical_core_detection_merges_partial_sibling_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -74,6 +85,8 @@ class SizingTest(unittest.TestCase):
 
             meminfo = root / "meminfo"
             meminfo.write_text("MemTotal:       134217728 kB\n")
+            cpuinfo = root / "cpuinfo"
+            cpuinfo.write_text("model name: Example Processor\n")
             cgroup_root = root / "cgroup"
             cgroup = cgroup_root / "workload"
             cgroup.mkdir(parents=True)
@@ -87,6 +100,7 @@ class SizingTest(unittest.TestCase):
             topology = detect_hardware(
                 sysfs_root=root / "sys",
                 meminfo_path=meminfo,
+                cpuinfo_path=cpuinfo,
                 cgroup_root=cgroup_root,
                 cgroup_file=cgroup_file,
                 affinity={0, 2, 3},
@@ -95,20 +109,24 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(topology.logical_cpus, 3)
         self.assertEqual(topology.physical_cores, 2)
         self.assertEqual(topology.memory_mib, 64 * 1024)
+        self.assertEqual(topology.cpu_model, "Example Processor")
 
     def test_partial_override_is_applied_before_validation(self) -> None:
         args = Namespace(
             logical_cpus=None,
             physical_cores=None,
             memory_mib=160 * 1024,
+            cpu_model=None,
         )
         with patch(
             "cea.chips.benchpress.packages.ucache_bench.sizing._detect_hardware_values",
-            return_value=(90, 54, 1),
+            return_value=(90, 54, 1, "Detected Processor"),
         ):
             topology = _resolve_topology(args)
 
-        self.assertEqual(topology, HardwareTopology(90, 54, 160 * 1024))
+        self.assertEqual(
+            topology, HardwareTopology(90, 54, 160 * 1024, "Detected Processor")
+        )
 
     def test_cache_fraction_has_logarithmic_bounds(self) -> None:
         self.assertEqual(calculate_cache_fraction(16 * 1024), 0.40)
@@ -197,6 +215,116 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(extreme.client_hosts, 5)
         self.assertEqual(extreme.processes_per_host, 8)
 
+    def test_validated_profiles_reproduce_correlation_matrix(self) -> None:
+        cases = (
+            (
+                "T1_CPL",
+                (52, 26, 64 * 1024, "Intel Xeon Platinum 8321HC"),
+                24_000,
+                24_000_000,
+                200_960,
+                {
+                    LoadVariant.PRODUCTION: (510_000, 2, 8, 20, 627, 31_875),
+                    LoadVariant.EXTREME: (620_000, 2, 8, 20, 627, 38_750),
+                },
+            ),
+            (
+                "T1_MLN",
+                (72, 36, 64 * 1024, "AMD EPYC 7D13"),
+                24_000,
+                24_000_000,
+                212_352,
+                {
+                    LoadVariant.PRODUCTION: (608_000, 2, 8, 28, 473, 38_000),
+                    LoadVariant.EXTREME: (820_000, 2, 8, 28, 473, 51_250),
+                },
+            ),
+            (
+                "T11_GRC_ARM",
+                (72, 72, 256 * 1024, "NVIDIA Grace Neoverse-V2"),
+                160_000,
+                160_000_000,
+                212_160,
+                {
+                    LoadVariant.PRODUCTION: (1_248_000, 2, 8, 20, 662, 78_000),
+                    LoadVariant.EXTREME: (1_744_000, 2, 8, 20, 662, 109_000),
+                },
+            ),
+            (
+                "T1_BGM",
+                (176, 88, 256 * 1024, "AMD EPYC 9D64"),
+                170_000,
+                170_000_000,
+                212_160,
+                {
+                    LoadVariant.PRODUCTION: (2_112_000, 2, 8, 60, 220, 132_000),
+                    LoadVariant.EXTREME: (2_896_000, 2, 8, 60, 220, 181_000),
+                },
+            ),
+            (
+                "T2_TRN",
+                (316, 158, 1024 * 1024, "AMD EPYC 9D25"),
+                820_000,
+                820_000_000,
+                222_720,
+                {
+                    LoadVariant.PRODUCTION: (3_850_000, 2, 10, 32, 347, 192_500),
+                    LoadVariant.EXTREME: (4_800_000, 4, 8, 80, 86, 150_000),
+                },
+            ),
+        )
+        for name, hardware, cache_mib, key_count, connections, variants in cases:
+            topology = HardwareTopology(*hardware)
+            for variant, expected in variants.items():
+                aggregate_qps, hosts, processes, proxies, fanout, process_qps = expected
+                with self.subTest(profile=name, variant=variant):
+                    recommendation = recommend(
+                        topology,
+                        variant,
+                        aggregate_qps=aggregate_qps,
+                    )
+                    params = recommendation.params
+                    profile = validated_profile(topology)
+                    self.assertIsNotNone(profile)
+                    if profile is None:
+                        self.fail("validated topology did not resolve a profile")
+                    self.assertEqual(profile.name, name)
+                    self.assertEqual(params["memory_mb"], cache_mib)
+                    self.assertEqual(params["key_count"], key_count)
+                    self.assertEqual(
+                        params["hash_power"], calculate_hash_power(cache_mib)
+                    )
+                    self.assertEqual(params["rpc_io_threads"], hardware[0])
+                    self.assertEqual(
+                        recommendation.client_shape.total_connections, connections
+                    )
+                    self.assertEqual(params["num_client_hosts"], hosts)
+                    self.assertEqual(params["num_source_ips"], processes - 1)
+                    self.assertEqual(params["num_proxies"], proxies)
+                    self.assertEqual(params["additional_fanout"], fanout)
+                    self.assertEqual(params["open_loop_qps"], process_qps)
+                    self.assertEqual(params["open_loop_max_outstanding"], 4096)
+                    self.assertEqual(params["open_loop_max_lateness_us"], 200_000)
+                    self.assertEqual(params["failures_until_tko"], 12)
+                    self.assertEqual(params["process_ramp_seconds"], 64)
+
+    def test_validated_profile_requires_exact_safe_hardware(self) -> None:
+        wrong_model = HardwareTopology(52, 26, 64 * 1024, "Unrelated CPU")
+        restricted = HardwareTopology(52, 26, 55 * 1024, "Intel Xeon Platinum 8321HC")
+        undersized_t2 = HardwareTopology(316, 158, 1_024_000, "AMD EPYC 9D25")
+        cpl = HardwareTopology(52, 26, 64 * 1024, "Intel Xeon Platinum 8321HC")
+
+        self.assertIsNone(validated_profile(wrong_model))
+        self.assertIsNone(validated_profile(restricted))
+        self.assertIsNone(validated_profile(undersized_t2))
+        resources = calculate_resources(restricted)
+        self.assertLessEqual(
+            resources.cache_mib + resources.reserve_mib,
+            restricted.memory_mib,
+        )
+        with self.assertRaisesRegex(ValueError, "require average_item_bytes=1024"):
+            calculate_resources(cpl, average_item_bytes=2048)
+
     def test_proxy_count_without_substantial_smt(self) -> None:
         topology = HardwareTopology(119, 80, 192 * 1024)
 
@@ -264,7 +392,7 @@ class SizingTest(unittest.TestCase):
                             extreme.total_connections,
                         )
                         for shape in (production, extreme):
-                            self.assertGreaterEqual(shape.total_connections, 300_000)
+                            self.assertGreaterEqual(shape.total_connections, 212_160)
                             self.assertEqual(
                                 shape.total_connections % shape.connection_quantum,
                                 0,
@@ -281,8 +409,8 @@ class SizingTest(unittest.TestCase):
 
         self.assertEqual(production.num_proxies, 28)
         self.assertEqual(extreme.num_proxies, 72)
-        self.assertEqual(production.total_connections, 302_400)
-        self.assertEqual(extreme.total_connections, 302_400)
+        self.assertEqual(production.total_connections, 241_920)
+        self.assertEqual(extreme.total_connections, 241_920)
         self.assertEqual(
             production.total_connections % production.connection_quantum, 0
         )
@@ -292,7 +420,7 @@ class SizingTest(unittest.TestCase):
         topology = HardwareTopology(20_000, 10_000, 640 * 1024)
         connections = calculate_total_connections(topology)
 
-        self.assertEqual(connections, 302_080)
+        self.assertEqual(connections, 215_040)
         for variant in LoadVariant:
             with self.subTest(variant=variant):
                 shape = calculate_client_shape(topology, variant)
@@ -313,7 +441,7 @@ class SizingTest(unittest.TestCase):
             ),
             self.assertRaisesRegex(
                 ValueError,
-                "cannot reach 300000 total connections without exceeding 1024",
+                "cannot reach 212160 total connections without exceeding 1024",
             ),
         ):
             calculate_total_connections(topology)
@@ -337,10 +465,12 @@ class SizingTest(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertEqual(production.params[key], value)
                 self.assertEqual(extreme.params[key], value)
-        self.assertEqual(production.params["open_loop_max_outstanding"], 1024)
-        self.assertEqual(production.params["open_loop_max_lateness_us"], 1000)
+        self.assertEqual(production.params["open_loop_max_outstanding"], 4096)
+        self.assertEqual(production.params["open_loop_max_lateness_us"], 200_000)
         self.assertEqual(extreme.params["open_loop_max_outstanding"], 4096)
         self.assertEqual(extreme.params["open_loop_max_lateness_us"], 200_000)
+        self.assertEqual(production.params["failures_until_tko"], 12)
+        self.assertEqual(extreme.params["failures_until_tko"], 12)
 
     def test_missing_qps_params_only_fails_clearly(self) -> None:
         stderr = StringIO()
