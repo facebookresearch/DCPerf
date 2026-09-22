@@ -30,8 +30,9 @@ DEFINE_string(host, "::1", "AdSimServer host");
 DEFINE_int32(port, 10086, "AdSimServer port");
 DEFINE_string(req, "echo hello", "Config sent to server");
 
+using apache::thrift::Client;
 using apache::thrift::RocketClientChannel;
-using facebook::cea::chips::adsim::AdSimAsyncClient;
+using facebook::cea::chips::adsim::AdSim;
 using facebook::cea::chips::adsim::AdSimCoWorker;
 using facebook::cea::chips::adsim::AdSimCoWorkerTask;
 using facebook::cea::chips::adsim::AdSimRequest;
@@ -48,8 +49,7 @@ int main(int argc, char* argv[]) {
 
   FizzStopTLSConnector connector;
   auto async_sock = connector.connect(addr, &evb);
-  AdSimAsyncClient client(
-      RocketClientChannel::newChannel(std::move(async_sock)));
+  Client<AdSim> client(RocketClientChannel::newChannel(std::move(async_sock)));
 
   // Prepare thrift request
   AdSimRequest req;
