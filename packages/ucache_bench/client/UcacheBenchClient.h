@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <folly/fibers/Semaphore.h>
@@ -43,12 +44,54 @@ constexpr MeasurementWindowNs immediateFailureWindow(int64_t nowNs) {
   return {.start = nowNs, .end = nowNs};
 }
 
-constexpr bool countWindowEndCancellation(bool measuredRequest) {
-  return measuredRequest;
+constexpr uint32_t kRampCoordinationSlackSeconds = 180;
+constexpr size_t kMaxLatencySamples = 16'384;
+
+constexpr uint64_t latencySamplePriority(
+    uint64_t candidateIndex,
+    size_t workerId,
+    int32_t clientId) {
+  uint64_t value = candidateIndex ^
+      ((static_cast<uint64_t>(workerId) + 1) * 0x9e3779b97f4a7c15ULL) ^
+      ((static_cast<uint64_t>(clientId + 2)) * 0xd1b54a32d192ed03ULL);
+  value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+  return value ^ (value >> 31);
 }
 
-constexpr uint32_t firstDispatchTimeoutSeconds(uint32_t rampSeconds) {
-  return rampSeconds + 30;
+using PrioritizedLatencySample = std::pair<uint64_t, double>;
+
+struct alignas(64) WorkerLatencySampler {
+  uint64_t candidates{0};
+  std::vector<PrioritizedLatencySample> samples;
+};
+
+inline void recordPrioritizedLatencySample(
+    std::vector<PrioritizedLatencySample>& samples,
+    uint64_t priority,
+    double latencyMs,
+    size_t maxSamples = kMaxLatencySamples) {
+  const auto priorityLess = [](const auto& lhs, const auto& rhs) {
+    return lhs.first < rhs.first;
+  };
+  if (samples.size() < maxSamples) {
+    samples.emplace_back(priority, latencyMs);
+    if (samples.size() == maxSamples) {
+      std::make_heap(samples.begin(), samples.end(), priorityLess);
+    }
+    return;
+  }
+  if (priority >= samples.front().first) {
+    return;
+  }
+
+  std::pop_heap(samples.begin(), samples.end(), priorityLess);
+  samples.back() = {priority, latencyMs};
+  std::push_heap(samples.begin(), samples.end(), priorityLess);
+}
+
+constexpr uint32_t rampCoordinationTimeoutSeconds(uint32_t rampSeconds) {
+  return rampSeconds + kRampCoordinationSlackSeconds;
 }
 
 constexpr uint64_t processRampDelayNs(
@@ -84,6 +127,105 @@ constexpr std::optional<int64_t> alignWallTimeToSteadyClock(
   }
   return static_cast<int64_t>(aligned);
 }
+
+constexpr bool shouldUsePerRequestTimeout(bool openLoopEnabled) {
+  return !openLoopEnabled;
+}
+
+namespace detail {
+
+class PhysicalOutstandingTracker;
+
+class PhysicalOutstandingLease final {
+ public:
+  PhysicalOutstandingLease() = default;
+  explicit PhysicalOutstandingLease(
+      std::shared_ptr<PhysicalOutstandingTracker> tracker)
+      : tracker_(std::move(tracker)), released_(false) {}
+  PhysicalOutstandingLease(const PhysicalOutstandingLease&) = delete;
+  PhysicalOutstandingLease& operator=(const PhysicalOutstandingLease&) = delete;
+  PhysicalOutstandingLease(PhysicalOutstandingLease&& other) noexcept
+      : tracker_(std::move(other.tracker_)),
+        released_(other.released_.exchange(true, std::memory_order_relaxed)) {}
+  PhysicalOutstandingLease& operator=(
+      PhysicalOutstandingLease&& other) noexcept {
+    if (this != &other) {
+      release();
+      tracker_ = std::move(other.tracker_);
+      released_.store(
+          other.released_.exchange(true, std::memory_order_relaxed),
+          std::memory_order_relaxed);
+    }
+    return *this;
+  }
+  ~PhysicalOutstandingLease() noexcept;
+
+  explicit operator bool() const noexcept {
+    return tracker_ != nullptr && !released_.load(std::memory_order_relaxed);
+  }
+  void release() noexcept;
+
+ private:
+  std::shared_ptr<PhysicalOutstandingTracker> tracker_;
+  std::atomic<bool> released_{true};
+};
+
+class PhysicalOutstandingTracker final
+    : public std::enable_shared_from_this<PhysicalOutstandingTracker> {
+ public:
+  PhysicalOutstandingLease acquire() {
+    outstanding_.fetch_add(1, std::memory_order_relaxed);
+    return PhysicalOutstandingLease(shared_from_this());
+  }
+
+  std::optional<PhysicalOutstandingLease> tryAcquire(uint32_t limit) {
+    uint32_t outstanding = outstanding_.load(std::memory_order_relaxed);
+    while (outstanding < limit) {
+      if (outstanding_.compare_exchange_weak(
+              outstanding,
+              outstanding + 1,
+              std::memory_order_relaxed,
+              std::memory_order_relaxed)) {
+        return PhysicalOutstandingLease(shared_from_this());
+      }
+    }
+    return std::nullopt;
+  }
+
+  uint32_t outstanding() const {
+    return outstanding_.load(std::memory_order_relaxed);
+  }
+
+ private:
+  friend class PhysicalOutstandingLease;
+
+  void release() {
+    outstanding_.fetch_sub(1, std::memory_order_relaxed);
+  }
+
+  std::atomic<uint32_t> outstanding_{0};
+};
+
+inline void PhysicalOutstandingLease::release() noexcept {
+  if (tracker_ && !released_.exchange(true, std::memory_order_relaxed)) {
+    tracker_->release();
+  }
+}
+
+inline PhysicalOutstandingLease::~PhysicalOutstandingLease() noexcept {
+  release();
+}
+
+template <typename Request>
+struct PhysicalRequestOwner final {
+  explicit PhysicalRequestOwner(PhysicalOutstandingLease lease)
+      : physicalLease(std::move(lease)) {}
+
+  Request request;
+  PhysicalOutstandingLease physicalLease;
+};
+
+} // namespace detail
 
 constexpr bool shouldRefillGetMiss(
     bool openLoopEnabled,
@@ -226,6 +368,7 @@ class UcacheBenchClient {
     uint64_t totalOps{0};
     uint64_t setSuccesses{0};
     uint64_t setErrors{0};
+    uint64_t tailSetErrors{0};
     bool success{false};
   };
 

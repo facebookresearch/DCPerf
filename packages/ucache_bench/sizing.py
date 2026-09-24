@@ -22,9 +22,14 @@ _CGROUP_ROOT: Path = Path("/sys/fs/cgroup")
 _PROC_SELF_CGROUP: Path = Path("/proc/self/cgroup")
 _MIB_BYTES: int = 1024 * 1024
 _CACHE_CAP_MIB: int = 1024 * 1024
+_CACHE_BASE_RESERVE_MIB: int = 32 * 1024
+_CACHE_USAGE_FACTOR: float = 0.75
 _MEMORY_RICH_MIB: int = 512 * 1024
 _DESTINATIONS_PER_PROCESS: int = 32_768
-_TARGET_TOTAL_CONNECTIONS: int = 300_000
+_BASE_TARGET_DESTINATIONS_PER_PROCESS: int = 11_000
+_TARGET_DESTINATIONS_PER_CORE: int = 64
+_MAX_TARGET_DESTINATIONS_PER_PROCESS: int = 13_250
+_MAX_TARGET_TOTAL_CONNECTIONS: int = 220_000
 _MAX_TOTAL_PROCESSES: int = 64
 _MAX_PROXIES: int = 80
 
@@ -47,11 +52,11 @@ class LoadVariant(str, Enum):
 
     @property
     def max_outstanding(self) -> int:
-        return 1024 if self == LoadVariant.PRODUCTION else 4096
+        return 8192
 
     @property
     def max_lateness_us(self) -> int:
-        return 1000 if self == LoadVariant.PRODUCTION else 200_000
+        return 500_000
 
 
 @dataclass(frozen=True)
@@ -59,11 +64,14 @@ class HardwareTopology:
     logical_cpus: int
     physical_cores: int
     memory_mib: int
+    numa_memory_nodes: int = 1
 
     def __post_init__(self) -> None:
         _validate_cpu_topology(self.logical_cpus, self.physical_cores)
         if self.memory_mib < 4096:
             raise ValueError("usable memory must be at least 4096 MiB")
+        if self.numa_memory_nodes < 1:
+            raise ValueError("numa_memory_nodes must be positive")
 
     @property
     def effective_cores(self) -> float:
@@ -158,6 +166,7 @@ class Recommendation:
                 "effective_cores": self.topology.effective_cores,
                 "substantial_smt": self.topology.substantial_smt,
                 "usable_memory_mib": self.topology.memory_mib,
+                "numa_memory_nodes": self.topology.numa_memory_nodes,
             },
             "derived": derived,
             "calibration": {
@@ -246,6 +255,26 @@ def _physical_cores_from_sysfs(logical_cpus: Iterable[int], sysfs_root: Path) ->
     return len(sibling_groups)
 
 
+def _numa_memory_node_count(sysfs_root: Path) -> int:
+    node_root = sysfs_root / "devices" / "system" / "node"
+    nodes = 0
+    for node in node_root.glob("node[0-9]*"):
+        try:
+            for line in (node / "meminfo").read_text().splitlines():
+                fields = line.split()
+                if (
+                    len(fields) >= 4
+                    and fields[0] == "Node"
+                    and fields[2] == "MemTotal:"
+                    and int(fields[3]) > 0
+                ):
+                    nodes += 1
+                    break
+        except (OSError, ValueError):
+            continue
+    return max(1, nodes)
+
+
 def _memory_mib_from_meminfo(meminfo_path: Path) -> int:
     for line in meminfo_path.read_text().splitlines():
         if line.startswith("MemTotal:"):
@@ -304,7 +333,7 @@ def _detect_hardware_values(
     cgroup_root: Path = _CGROUP_ROOT,
     cgroup_file: Path = _PROC_SELF_CGROUP,
     affinity: Iterable[int] | None = None,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     visible_cpus = set(os.sched_getaffinity(0) if affinity is None else affinity)
     if not visible_cpus:
         raise ValueError("CPU affinity is empty")
@@ -317,6 +346,7 @@ def _detect_hardware_values(
         len(visible_cpus),
         _physical_cores_from_sysfs(visible_cpus, sysfs_root),
         min(memory_limits),
+        _numa_memory_node_count(sysfs_root),
     )
 
 
@@ -328,36 +358,33 @@ def detect_hardware(
     cgroup_file: Path = _PROC_SELF_CGROUP,
     affinity: Iterable[int] | None = None,
 ) -> HardwareTopology:
-    logical_cpus, physical_cores, memory_mib = _detect_hardware_values(
-        sysfs_root=sysfs_root,
-        meminfo_path=meminfo_path,
-        cgroup_root=cgroup_root,
-        cgroup_file=cgroup_file,
-        affinity=affinity,
+    logical_cpus, physical_cores, memory_mib, numa_memory_nodes = (
+        _detect_hardware_values(
+            sysfs_root=sysfs_root,
+            meminfo_path=meminfo_path,
+            cgroup_root=cgroup_root,
+            cgroup_file=cgroup_file,
+            affinity=affinity,
+        )
     )
     return HardwareTopology(
         logical_cpus=logical_cpus,
         physical_cores=physical_cores,
         memory_mib=memory_mib,
+        numa_memory_nodes=numa_memory_nodes,
     )
 
 
 def calculate_reserve_mib(usable_memory_mib: int) -> int:
-    return max(2048, math.ceil(0.20 * usable_memory_mib))
-
-
-def calculate_cache_fraction(usable_memory_mib: int) -> float:
-    if usable_memory_mib < 1:
-        raise ValueError("usable_memory_mib must be positive")
-    fraction = 0.40 + 0.125 * math.log2(usable_memory_mib / 65_536)
-    return min(0.80, max(0.40, fraction))
+    return min(_CACHE_BASE_RESERVE_MIB, usable_memory_mib // 2)
 
 
 def calculate_cache_mib(usable_memory_mib: int) -> int:
+    if usable_memory_mib < 1:
+        raise ValueError("usable_memory_mib must be positive")
     reserve_mib = calculate_reserve_mib(usable_memory_mib)
     capacity_mib = min(
-        usable_memory_mib * calculate_cache_fraction(usable_memory_mib),
-        usable_memory_mib - reserve_mib,
+        _CACHE_USAGE_FACTOR * (usable_memory_mib - reserve_mib),
         _CACHE_CAP_MIB,
     )
     cache_mib = _floor_to_multiple(capacity_mib, 64)
@@ -401,6 +428,9 @@ def calculate_resources(
 def calculate_total_processes(physical_cores: int, variant: LoadVariant) -> int:
     if physical_cores < 1:
         raise ValueError("physical_cores must be positive")
+    if variant == LoadVariant.PRODUCTION:
+        requested = _round_up(physical_cores / 8, 4)
+        return min(_MAX_TOTAL_PROCESSES, max(16, requested))
     requested = max(16, physical_cores / variant.process_divisor)
     return min(
         _MAX_TOTAL_PROCESSES,
@@ -436,24 +466,36 @@ def _calculate_client_topology(
     return client_hosts, processes_per_host, calculate_proxy_count(topology, variant)
 
 
-def calculate_total_connections(topology: HardwareTopology) -> int:
-    quantums: list[int] = []
-    maxima: list[int] = []
-    for variant in LoadVariant:
-        client_hosts, processes_per_host, num_proxies = _calculate_client_topology(
-            topology, variant
-        )
-        total_processes = client_hosts * processes_per_host
-        quantum = total_processes * num_proxies
-        quantums.append(quantum)
-        maxima.append(quantum * (_DESTINATIONS_PER_PROCESS // num_proxies))
+def calculate_target_connections(topology: HardwareTopology) -> int:
+    total_processes = max(
+        calculate_total_processes(topology.physical_cores, variant)
+        for variant in LoadVariant
+    )
+    destinations_per_process = min(
+        _MAX_TARGET_DESTINATIONS_PER_PROCESS,
+        _BASE_TARGET_DESTINATIONS_PER_PROCESS
+        + _TARGET_DESTINATIONS_PER_CORE * topology.physical_cores,
+    )
+    return min(
+        _MAX_TARGET_TOTAL_CONNECTIONS,
+        total_processes * destinations_per_process,
+    )
 
-    common_quantum = math.lcm(*quantums)
-    max_connections = _floor_to_multiple(min(maxima), common_quantum)
-    aligned_connections = _round_up(_TARGET_TOTAL_CONNECTIONS, common_quantum)
+
+def calculate_total_connections(
+    topology: HardwareTopology, variant: LoadVariant
+) -> int:
+    client_hosts, processes_per_host, num_proxies = _calculate_client_topology(
+        topology, variant
+    )
+    total_processes = client_hosts * processes_per_host
+    quantum = total_processes * num_proxies
+    max_connections = quantum * (_DESTINATIONS_PER_PROCESS // num_proxies)
+    target_connections = calculate_target_connections(topology)
+    aligned_connections = _round_up(target_connections, quantum)
     if aligned_connections > max_connections:
         raise ValueError(
-            f"client topologies cannot reach {_TARGET_TOTAL_CONNECTIONS} total "
+            f"client topology cannot reach {target_connections} total "
             f"connections without exceeding {_DESTINATIONS_PER_PROCESS} "
             "destinations per process"
         )
@@ -471,7 +513,7 @@ def calculate_client_shape(
         client_hosts=client_hosts,
         processes_per_host=processes_per_host,
         num_proxies=num_proxies,
-        total_connections=calculate_total_connections(topology),
+        total_connections=calculate_total_connections(topology, variant),
     )
 
 
@@ -532,6 +574,7 @@ def recommend(
         "rpc_io_threads": resources.io_threads,
         "rpc_num_acceptor_threads": resources.acceptor_threads,
         "rpc_num_cpu_worker_threads": 1,
+        "server_numa_interleave": int(topology.numa_memory_nodes > 1),
         "hashtable_lock_power": resources.lock_power,
         "cachelib_num_shards": resources.cache_shards,
         "min_alloc_size": 64,
@@ -548,15 +591,18 @@ def recommend(
         "additional_fanout": shape.additional_fanout,
         "num_threads": 8,
         "max_inflight": 150,
+        "warmup_max_inflight": 32,
         "open_loop_refill_on_miss": 0,
         "open_loop_max_outstanding": variant.max_outstanding,
         "open_loop_max_lateness_us": variant.max_lateness_us,
-        "connection_ramp_seconds": 25,
+        "connection_ramp_seconds": 60,
+        "failures_until_tko": 12,
         "use_same_thread_client": 1,
     }
     if resolved_qps is not None:
         params["open_loop_qps"] = max(1, resolved_qps // shape.total_processes)
         params["process_ramp_seconds"] = 64
+        params["full_load_stabilization_seconds"] = 60
 
     return Recommendation(
         topology=topology,
@@ -584,6 +630,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--memory-mib", help="usable memory after container limits", type=int
     )
+    parser.add_argument(
+        "--numa-memory-nodes",
+        type=int,
+        help="NUMA nodes with memory (auto-detected unless topology is overridden)",
+    )
     parser.add_argument("--average-item-bytes", default=1024, type=int)
     parser.add_argument("--aggregate-qps", type=int)
     parser.add_argument("--baseline-latency-us", type=float)
@@ -602,8 +653,16 @@ def _resolve_topology(args: argparse.Namespace) -> HardwareTopology:
             logical_cpus=args.logical_cpus,
             physical_cores=args.physical_cores,
             memory_mib=args.memory_mib,
+            numa_memory_nodes=(
+                args.numa_memory_nodes if args.numa_memory_nodes is not None else 1
+            ),
         )
-    detected_logical, detected_physical, detected_memory = _detect_hardware_values()
+    (
+        detected_logical,
+        detected_physical,
+        detected_memory,
+        detected_numa_memory_nodes,
+    ) = _detect_hardware_values()
     return HardwareTopology(
         logical_cpus=(
             args.logical_cpus if args.logical_cpus is not None else detected_logical
@@ -615,6 +674,11 @@ def _resolve_topology(args: argparse.Namespace) -> HardwareTopology:
         ),
         memory_mib=(
             args.memory_mib if args.memory_mib is not None else detected_memory
+        ),
+        numa_memory_nodes=(
+            args.numa_memory_nodes
+            if args.numa_memory_nodes is not None
+            else detected_numa_memory_nodes
         ),
     )
 

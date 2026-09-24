@@ -148,7 +148,7 @@ if distro_is_like "ubuntu" || distro_is_like "debian"; then
         libiberty-dev liblz4-dev liblzma-dev libsnappy-dev zlib1g-dev \
         libjemalloc-dev libsodium-dev autoconf automake libtool pkg-config \
         git flex bison libfmt-dev libunwind-dev python3-dev libzstd-dev \
-        ragel libatomic1 libbz2-dev libnuma-dev libdwarf-dev libelf-dev \
+        ragel libatomic1 libbz2-dev libnuma-dev numactl libdwarf-dev libelf-dev \
         libaio-dev liburing-dev
 elif distro_is_like "centos" || distro_is_like "rhel" || distro_is_like "fedora"; then
     echo "Detected CentOS/RHEL/Fedora-based system, using dnf..."
@@ -158,7 +158,7 @@ elif distro_is_like "centos" || distro_is_like "rhel" || distro_is_like "fedora"
         lz4-devel xz-devel snappy-devel zlib-devel \
         jemalloc-devel libsodium-devel autoconf automake libtool pkgconfig \
         git flex bison fmt-devel libunwind-devel python3-devel libzstd-devel \
-        ragel libatomic bzip2-devel numactl-libs numactl-devel libdwarf-devel \
+        ragel libatomic bzip2-devel numactl numactl-libs numactl-devel libdwarf-devel \
         elfutils-libelf-devel libaio-devel liburing-devel binutils-devel
 else
     echo "ERROR: Unsupported OS distribution: $(get_os_distro_id)" >&2

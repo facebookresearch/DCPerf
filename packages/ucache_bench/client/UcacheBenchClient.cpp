@@ -29,6 +29,7 @@
 #include <folly/coro/AsyncScope.h>
 #include <folly/coro/BlockingWait.h>
 #include <folly/coro/CurrentExecutor.h>
+#include <folly/coro/DetachOnCancel.h>
 #include <folly/coro/Promise.h>
 #include <folly/coro/Sleep.h>
 #include <folly/coro/Timeout.h>
@@ -73,7 +74,6 @@ namespace ucachebench {
 // 600 seconds (10 minutes) is long enough for normal multi-client
 // coordination but prevents the client from hanging forever.
 constexpr uint32_t kDefaultTimeoutSeconds = 600;
-constexpr uint32_t kMeasurementStartTimeoutSeconds = 30;
 
 // ============================================================================
 // AdminConnection implementation
@@ -99,6 +99,7 @@ bool AdminConnection::connect(
   hints.ai_socktype = SOCK_STREAM;
 
   std::string portStr = std::to_string(port);
+  // patternlint-disable-next-line cpp-dns-deps
   int ret = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
   if (ret != 0) {
     printf(
@@ -510,6 +511,11 @@ DEFINE_uint32(
     256,
     "Maximum outstanding requests per proxy in open-loop mode. Arrivals at the "
     "cap are dropped and counted rather than deferred.");
+DEFINE_uint32(
+    physical_drain_timeout_seconds,
+    30,
+    "Maximum time to wait for accepted Carbon callbacks after warmup or "
+    "measurement stops admitting work.");
 DEFINE_uint64(
     open_loop_max_lateness_us,
     1000,
@@ -524,6 +530,8 @@ enum class RequestOutcome {
   Timeout,
   LocalRejection,
   CancelledAtEnd,
+  DroppedAtCap,
+  DroppedAtWindowEnd,
 };
 
 constexpr std::array<uint64_t, 15> kSchedulerLagUpperBoundsUs = {
@@ -594,6 +602,28 @@ struct alignas(64) OpenLoopWorkerStats {
     }
   }
 };
+
+folly::coro::Task<void> drainPhysicalOutstanding(
+    std::shared_ptr<facebook::ucachebench::detail::PhysicalOutstandingTracker>
+        tracker,
+    const char* phase,
+    size_t workerId) {
+  const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(FLAGS_physical_drain_timeout_seconds);
+  while (tracker->outstanding() != 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    co_await folly::futures::sleep(std::chrono::milliseconds(1));
+  }
+  if (tracker->outstanding() != 0) {
+    throw std::runtime_error(
+        fmt::format(
+            "{} worker {} failed to drain {} accepted Carbon callbacks within {}s",
+            phase,
+            workerId,
+            tracker->outstanding(),
+            FLAGS_physical_drain_timeout_seconds));
+  }
+}
 
 // Latency-stage accumulators. The benchmark reports only aggregate QPS, so a
 // multi-millisecond average RPC latency against a server measured idle in
@@ -1036,13 +1066,16 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   // simultaneously on first request, causing a connection storm that TKOs the
   // server.
 
-  auto startTime = std::chrono::steady_clock::now();
-  auto endTime = startTime + std::chrono::seconds(FLAGS_warmup_seconds);
+  std::chrono::steady_clock::time_point startTime;
+  std::chrono::steady_clock::time_point endTime;
+  std::chrono::steady_clock::time_point stabilityStartTime;
+  std::atomic<bool> warmupStarted{false};
 
   // Thread-safe counters
   std::atomic<uint64_t> totalOps{0};
   std::atomic<uint64_t> setSuccesses{0};
   std::atomic<uint64_t> setErrors{0};
+  std::atomic<uint64_t> tailSetErrors{0};
   std::atomic<bool> shouldStop{false};
 
   // Adaptive load control: shared dynamic inflight limit
@@ -1058,6 +1091,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   std::thread progressThread;
   if (FLAGS_verbose && FLAGS_progress_interval_seconds > 0) {
     progressThread = std::thread([&]() {
+      while (!shouldStop.load(std::memory_order_acquire) &&
+             !warmupStarted.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
       while (!shouldStop.load() && std::chrono::steady_clock::now() < endTime) {
         std::this_thread::sleep_for(
             std::chrono::seconds(FLAGS_progress_interval_seconds));
@@ -1093,6 +1130,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   std::thread adaptiveThread;
   if (FLAGS_warmup_adaptive_load) {
     adaptiveThread = std::thread([&]() {
+      while (!shouldStop.load(std::memory_order_acquire) &&
+             !warmupStarted.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
       constexpr auto kCheckInterval = std::chrono::seconds(2);
       constexpr double kErrorThreshold = 0.05; // 5% error rate triggers backoff
       constexpr double kHealthyThreshold = 0.01; // <1% errors = healthy, grow
@@ -1184,6 +1225,16 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     });
   }
 
+  auto warmupThreadGuard = folly::makeGuard([&]() {
+    shouldStop = true;
+    if (adaptiveThread.joinable()) {
+      adaptiveThread.join();
+    }
+    if (progressThread.joinable()) {
+      progressThread.join();
+    }
+  });
+
   // Create IO thread pool for coroutine execution - matches production pattern
   folly::IOThreadPoolExecutor workerPool(numThreads);
   auto workerEvbs = workerPool.getAllEventBases();
@@ -1196,12 +1247,17 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       clients;
   clients.reserve(numThreads);
   for (uint32_t i = 0; i < numThreads; ++i) {
-    // Use maxInflight as maximumOutstanding - McRouter will block if limit
-    // reached
-    auto client = routerInstance_->createClient(maxInflight);
+    // The physical tracker below is the warmup admission limit. Leaving the
+    // Carbon client unbounded avoids a handoff race between releasing that
+    // external slot and Carbon releasing its internal request context.
+    auto client = routerInstance_->createClient(0);
     if (client) {
       clients.push_back(std::move(client));
     }
+  }
+
+  if (workerEvbs.empty() || clients.empty()) {
+    throw std::runtime_error("Warmup requires at least one client EventBase");
   }
 
   // Connection activation: for each proxy, send a burst of concurrent
@@ -1209,8 +1265,15 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   // destinations. Each CarbonRouterClient is pinned to one proxy, so we
   // create one client per proxy to ensure full coverage.
   if (effectiveAdditionalFanout_ > 0) {
-    uint32_t scanOutstanding = effectiveAdditionalFanout_ + 1;
-    uint32_t totalConns = effectiveNumProxies_ * scanOutstanding;
+    const uint32_t scanOutstanding = effectiveAdditionalFanout_ + 1;
+    const uint32_t totalConns = effectiveNumProxies_ * scanOutstanding;
+    const uint32_t requestsPerCoroutine = 100;
+    const uint64_t expectedScanOps =
+        static_cast<uint64_t>(effectiveNumProxies_) * scanOutstanding *
+        requestsPerCoroutine;
+    const auto activationDeadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(FLAGS_connection_ramp_seconds) +
+        std::chrono::seconds(10);
 
     if (FLAGS_verbose) {
       printf(
@@ -1222,6 +1285,8 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     }
 
     std::atomic<uint64_t> scanOps{0};
+    auto activationPhysicalOutstanding =
+        std::make_shared<detail::PhysicalOutstandingTracker>();
 
     // Create one scan client per proxy. Each createClient() call assigns
     // the client to the next proxy via round-robin (nextProxyIndex()).
@@ -1229,23 +1294,33 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
         memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>::Pointer>
         scanClients;
     for (uint32_t p = 0; p < effectiveNumProxies_; ++p) {
-      scanClients.push_back(routerInstance_->createClient(scanOutstanding));
+      auto scanClient = routerInstance_->createClient(0);
+      if (!scanClient) {
+        throw std::runtime_error(
+            "Failed to create connection activation client");
+      }
+      scanClients.push_back(std::move(scanClient));
     }
 
     // For each proxy's client, launch scanOutstanding concurrent coroutines.
     // Each coroutine sends enough requests (with random keys) to cover all
     // destination slots via the coupon collector effect.
     // Need ~D*ln(D) ≈ 4000 requests for D=625 destinations to get 99% coverage.
-    uint32_t requestsPerCoroutine = 100;
     auto scanWorker =
         [&](memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>*
                 clientPtr,
             size_t) -> folly::coro::Task<void> {
       for (uint32_t i = 0; i < requestsPerCoroutine; ++i) {
+        if (std::chrono::steady_clock::now() >= activationDeadline) {
+          co_return;
+        }
         std::string key = generateKey();
         std::string value = generateValue();
 
-        UcbSetRequest request;
+        auto requestOwner =
+            std::make_shared<detail::PhysicalRequestOwner<UcbSetRequest>>(
+                activationPhysicalOutstanding->acquire());
+        UcbSetRequest& request = requestOwner->request;
         request.key_ref() = carbon::Keys<folly::IOBuf>(
             std::move(*folly::IOBuf::copyBuffer(key)));
         request.value_ref() = *folly::IOBuf::copyBuffer(value);
@@ -1253,19 +1328,35 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
 
         auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
 
-        clientPtr->send(
+        const bool dispatched = clientPtr->send(
             request,
-            [p = std::move(promise)](
+            [p = std::move(promise), requestOwner](
                 const UcbSetRequest&, UcbSetReply&& reply) mutable {
+              auto physicalLeaseGuard = folly::makeGuard(
+                  [&]() { requestOwner->physicalLease.release(); });
               p.setValue(std::move(reply));
             });
+        if (!dispatched) {
+          requestOwner->physicalLease.release();
+          continue;
+        }
 
         try {
-          co_await std::move(future).within(std::chrono::seconds(10));
-          scanOps++;
+          const auto timeoutNow = std::chrono::steady_clock::now();
+          if (timeoutNow >= activationDeadline) {
+            co_return;
+          }
+          const auto timeout = std::min(
+              std::chrono::seconds(10),
+              std::chrono::ceil<std::chrono::seconds>(
+                  activationDeadline - timeoutNow));
+          auto result = co_await std::move(future).within(timeout);
+          if (*result.result() == carbon::Result::STORED) {
+            scanOps++;
+          }
         } catch (const std::exception&) {
-          // Request timed out or failed (e.g. send() returned false and the
-          // callback never fired). Skip it rather than hang the scan join.
+          // Warmup below determines whether activation recovered; this phase is
+          // intentionally best-effort while fresh connections come online.
         }
       }
       co_return;
@@ -1312,16 +1403,20 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     }
 
     folly::coro::blockingWait(
-        scanScope.joinAsync().scheduleOn(workerEvbs.front()));
-
+        folly::coro::co_withExecutor(workerEvbs.at(0), scanScope.joinAsync()));
+    folly::coro::blockingWait(
+        folly::coro::co_withExecutor(
+            workerEvbs.at(0),
+            drainPhysicalOutstanding(
+                activationPhysicalOutstanding, "connection activation", 0)));
     printf(
-        "Connection activation complete: %lu requests sent across %u proxies "
-        "(expected %u per proxy x %u rounds = %u total)\n",
+        "Connection activation complete: %lu of %lu probe requests succeeded "
+        "across %u proxies (%u per proxy x %u rounds)\n",
         scanOps.load(),
+        expectedScanOps,
         effectiveNumProxies_,
         scanOutstanding,
-        requestsPerCoroutine,
-        effectiveNumProxies_ * scanOutstanding * requestsPerCoroutine);
+        requestsPerCoroutine);
     fflush(stdout);
 
     // Write scan count and router diagnostics for remote debugging
@@ -1361,10 +1456,26 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     }
   }
 
+  startTime = std::chrono::steady_clock::now();
+  endTime = startTime + std::chrono::seconds(FLAGS_warmup_seconds);
+  stabilityStartTime =
+      endTime - std::chrono::seconds(std::min(FLAGS_warmup_seconds, 60u));
+  warmupStarted.store(true, std::memory_order_release);
+
+  std::vector<std::shared_ptr<detail::PhysicalOutstandingTracker>>
+      warmupPhysicalOutstanding;
+  warmupPhysicalOutstanding.reserve(clients.size());
+  for (size_t i = 0; i < clients.size(); ++i) {
+    warmupPhysicalOutstanding.push_back(
+        std::make_shared<detail::PhysicalOutstandingTracker>());
+  }
+
   // Worker coroutine - matches production LoadgenWorker::co_run() pattern
   auto warmupWorker =
       [&](memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>*
-              clientPtr) -> folly::coro::Task<void> {
+              clientPtr,
+          size_t workerId) -> folly::coro::Task<void> {
+    const auto& physicalOutstanding = warmupPhysicalOutstanding.at(workerId);
     // CancellableAsyncScope so stragglers at warmup-end are cancelled, not
     // waited on forever (same hang as the measurement worker — see below).
     folly::coro::CancellableAsyncScope scope;
@@ -1374,17 +1485,27 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     std::atomic<uint64_t> localOps{0};
     std::atomic<uint64_t> localSuccesses{0};
     std::atomic<uint64_t> localErrors{0};
+    auto recordError = [&]() {
+      localErrors++;
+      if (std::chrono::steady_clock::now() >= stabilityStartTime) {
+        tailSetErrors++;
+      }
+    };
 
     // Track what's been synced to avoid race conditions
     uint64_t lastSyncedSuccesses = 0;
     uint64_t lastSyncedErrors = 0;
 
     // Send one request - matches production McrouterAdapter::coro() pattern
-    auto sendOneRequest = [&]() -> folly::coro::Task<void> {
+    auto sendOneRequest = [&](detail::PhysicalOutstandingLease physicalLease)
+        -> folly::coro::Task<void> {
       std::string key = generateKey();
       std::string value = generateValue();
 
-      UcbSetRequest request;
+      auto requestOwner =
+          std::make_shared<detail::PhysicalRequestOwner<UcbSetRequest>>(
+              std::move(physicalLease));
+      UcbSetRequest& request = requestOwner->request;
       request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
       request.value() = *folly::IOBuf::copyBuffer(value);
@@ -1400,26 +1521,35 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
         }
       }
 
-      // Same pattern as production McrouterAdapter::coro()
       auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
-
-      clientPtr->send(
+      const bool dispatched = clientPtr->send(
           request,
-          [p = std::move(promise)](
+          [p = std::move(promise), requestOwner](
               const UcbSetRequest&, UcbSetReply&& reply) mutable {
+            auto physicalLeaseGuard = folly::makeGuard(
+                [&]() { requestOwner->physicalLease.release(); });
             p.setValue(std::move(reply));
           });
+      if (!dispatched) {
+        requestOwner->physicalLease.release();
+        localOps++;
+        recordError();
+        co_return;
+      }
 
       UcbSetReply result;
       try {
-        result = co_await std::move(future).within(std::chrono::seconds(10));
+        result = co_await folly::coro::detachOnCancel(
+            std::move(future).within(std::chrono::seconds(10)));
+      } catch (const folly::OperationCancelled&) {
+        // The warmup scope cancels logical waiters at the phase boundary. Their
+        // accepted requests remain callback-owned and are drained below.
+        co_return;
       } catch (const std::exception&) {
-        // Request never completed (send() rejected without callback, or stuck
-        // pre-send during the connection storm). Count as error and return so
-        // the worker's scope.joinAsync() can't hang -> warmup completes and
-        // WARMUP_DONE is sent.
+        // The accepted request did not complete before its logical timeout.
+        // Its callback still owns the request and physical lease for the drain.
         localOps++;
-        localErrors++;
+        recordError();
         co_return;
       }
 
@@ -1427,7 +1557,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       if (*result.result() == carbon::Result::STORED) {
         localSuccesses++;
       } else {
-        localErrors++;
+        recordError();
         // Print only the FIRST error per worker. Any periodic sampling (even
         // 1/1000) floods stdout under a TKO storm at multi-M QPS; the
         // synchronous write() blocks on the backpressured benchpress/automark
@@ -1451,14 +1581,20 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       size_t n = (currentInflight < limit) ? (limit - currentInflight) : 0;
       if (n > 0 && std::chrono::steady_clock::now() < endTime) {
         for (size_t i = 0; i < n && inflight.load() < limit; i++) {
+          auto admissionLease = physicalOutstanding->tryAcquire(limit);
+          if (!admissionLease) {
+            break;
+          }
           inflight++;
           scope.add(
               folly::coro::co_withExecutor(
-                  exe, folly::coro::co_invoke([&]() -> folly::coro::Task<void> {
-                    co_await sendOneRequest();
-                    inflight--;
-                    co_return;
-                  })));
+                  exe,
+                  folly::coro::co_invoke(
+                      [&, requestLease = std::move(*admissionLease)]() mutable
+                          -> folly::coro::Task<void> {
+                        co_await sendOneRequest(std::move(requestLease));
+                        inflight--;
+                      })));
         }
       }
 
@@ -1487,8 +1623,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       co_await folly::futures::sleep(std::chrono::milliseconds(1));
     }
 
-    // Warmup window over: cancel stragglers and join (deterministic drain).
+    // Warmup window over: stop admissions, cancel logical waiters, then wait
+    // for every accepted Carbon callback before measurement can begin.
     co_await scope.cancelAndJoinAsync();
+    co_await drainPhysicalOutstanding(physicalOutstanding, "warmup", workerId);
 
     // Final update - add any remaining counts not yet synced
     uint64_t finalSuccesses = localSuccesses.load();
@@ -1505,17 +1643,17 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   };
 
   // Start workers - matches production LoadgenCommand::co_run() pattern
-  folly::coro::AsyncScope mainScope;
+  folly::coro::AsyncScope mainScope(true);
   for (size_t i = 0; i < clients.size(); ++i) {
     mainScope.add(
         folly::coro::co_withExecutor(
             workerEvbs.at(i % workerEvbs.size()),
-            warmupWorker(clients[i].get())));
+            warmupWorker(clients[i].get(), i)));
   }
 
   // Block until all workers complete
   folly::coro::blockingWait(
-      folly::coro::co_withExecutor(workerEvbs.front(), mainScope.joinAsync()));
+      folly::coro::co_withExecutor(workerEvbs.at(0), mainScope.joinAsync()));
 
   shouldStop = true;
   if (adaptiveThread.joinable()) {
@@ -1524,6 +1662,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   if (progressThread.joinable()) {
     progressThread.join();
   }
+  warmupThreadGuard.dismiss();
 
   WarmupResults warmupResults;
   warmupResults.startTime = startTime;
@@ -1531,7 +1670,9 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   warmupResults.totalOps = totalOps.load();
   warmupResults.setSuccesses = setSuccesses.load();
   warmupResults.setErrors = setErrors.load();
-  warmupResults.success = (setSuccesses > 0);
+  warmupResults.tailSetErrors = tailSetErrors.load();
+  warmupResults.success =
+      warmupResults.setSuccesses > 0 && warmupResults.tailSetErrors == 0;
 
   auto duration = std::chrono::duration<double>(
                       warmupResults.endTime - warmupResults.startTime)
@@ -1545,14 +1686,16 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
         duration,
         warmupQps);
     printf(
-        "  Successes: %lu, Errors: %lu, Success Rate: %.1f%%\n",
+        "  Successes: %lu, Errors: %lu, Errors in warmup tail: %lu, "
+        "Success Rate: %.1f%%\n",
         warmupResults.setSuccesses,
         warmupResults.setErrors,
+        warmupResults.tailSetErrors,
         warmupResults.totalOps > 0
             ? (warmupResults.setSuccesses * 100.0 / warmupResults.totalOps)
             : 0.0);
     if (!warmupResults.success) {
-      printf("  WARNING: Warmup failed - no successful SET operations!\n");
+      printf("  WARNING: Warmup failed its clean stable-tail gate.\n");
     }
     fflush(stdout);
   }
@@ -1650,11 +1793,6 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
   std::atomic<bool> shouldStop{false};
 
-  // Mutex for latency vector (std::vector is not thread-safe)
-  std::mutex latenciesMutex;
-  std::vector<double> allLatencies;
-  allLatencies.reserve(100000 * numThreads);
-
   // Create clients and get EventBases for worker coroutines.
   // Two modes:
   //   1. Same-thread mode: workers run on proxy EventBases, bypassing the
@@ -1679,12 +1817,20 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       if (!proxy) {
         continue;
       }
-      workerEvbs.push_back(&proxy->eventBase().getEventBase());
+      auto& eventBase = proxy->eventBase().getEventBase();
 
-      auto client =
-          routerInstance_->createSameThreadClient(mcrouterMaxOutstanding);
+      memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>::Pointer
+          client;
+      // Same-thread clients capture the current proxy EventBase at creation.
+      eventBase.runInEventBaseThreadAndWait([&]() {
+        client =
+            routerInstance_->createSameThreadClient(mcrouterMaxOutstanding);
+        if (client) {
+          client->setProxyIndex(i);
+        }
+      });
       if (client) {
-        client->setProxyIndex(i);
+        workerEvbs.push_back(&eventBase);
         clients.push_back(std::move(client));
       }
     }
@@ -1712,12 +1858,15 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     }
   }
 
+  if (workerEvbs.empty() || clients.empty()) {
+    throw std::runtime_error(
+        "Benchmark requires at least one client EventBase");
+  }
+
   double getRatio =
       distribution_.enabled ? distribution_.getRatio : FLAGS_get_ratio;
 
-  // Per-worker latencies storage
-  std::vector<std::vector<double>> workerLatencies(clients.size());
-  std::vector<std::mutex> workerLatencyMutexes(clients.size());
+  std::vector<WorkerLatencySampler> workerLatencySamplers(clients.size());
 
   // Per-worker counters
   // Use unique_ptr to avoid vector<atomic> which is invalid C++
@@ -1742,7 +1891,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
   // Initialize per-worker counters
   for (size_t i = 0; i < clients.size(); ++i) {
-    workerLatencies[i].reserve(100000);
+    workerLatencySamplers[i].samples.reserve(kMaxLatencySamples);
     workerTotalOps.push_back(std::make_unique<std::atomic<uint64_t>>(0));
     workerGetOps.push_back(std::make_unique<std::atomic<uint64_t>>(0));
     workerSetOps.push_back(std::make_unique<std::atomic<uint64_t>>(0));
@@ -1753,9 +1902,24 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     workerSetErrors.push_back(std::make_unique<std::atomic<uint64_t>>(0));
   }
 
+  auto recordLatency = [&](size_t workerId, double latencyMs) {
+    auto& sampler = workerLatencySamplers[workerId];
+    const uint64_t candidateIndex = sampler.candidates++;
+    const auto priority =
+        latencySamplePriority(candidateIndex, workerId, clientId_);
+    recordPrioritizedLatencySample(sampler.samples, priority, latencyMs);
+  };
+
   // Open-loop accounting is per proxy. Each entry is touched only from that
   // proxy's EventBase, then merged after all workers join.
   std::vector<OpenLoopWorkerStats> openLoopStats(clients.size());
+  std::vector<std::shared_ptr<detail::PhysicalOutstandingTracker>>
+      benchmarkPhysicalOutstanding;
+  benchmarkPhysicalOutstanding.reserve(clients.size());
+  for (size_t i = 0; i < clients.size(); ++i) {
+    benchmarkPhysicalOutstanding.push_back(
+        std::make_shared<detail::PhysicalOutstandingTracker>());
+  }
   std::unique_ptr<folly::HeapTimekeeper> openLoopTimekeeper;
   if (openLoopEnabled) {
     openLoopTimekeeper = std::make_unique<folly::HeapTimekeeper>();
@@ -1844,7 +2008,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       {
         std::unique_lock<std::mutex> lock(firstDispatchMutex);
         const auto deadline = std::chrono::steady_clock::now() +
-            std::chrono::seconds(firstDispatchTimeoutSeconds(
+            std::chrono::seconds(rampCoordinationTimeoutSeconds(
                 FLAGS_process_ramp_seconds));
         if (!firstDispatchCv.wait_until(lock, deadline, [&]() {
               return firstDispatch ||
@@ -1861,7 +2025,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
       const std::string notification = error.empty()
           ? adminConnection_->waitForNotification(
-                kMeasurementStartTimeoutSeconds)
+                rampCoordinationTimeoutSeconds(FLAGS_process_ramp_seconds))
           : std::string{};
       std::istringstream measurementMessage(notification);
       std::string command;
@@ -2111,14 +2275,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       [&](size_t workerId,
           memcache::mcrouter::CarbonRouterClient<UcacheBenchRouterInfo>*
               clientPtr) -> folly::coro::Task<void> {
-    // CancellableAsyncScope (not AsyncScope) so that when the measurement
-    // window ends we CANCEL any still-outstanding requests instead of waiting
-    // for them indefinitely. A small number of in-flight requests at
-    // measurementEndTime() can have responses that never arrive (and the
-    // per-request timeout's timer may sit on a momentarily-saturated proxy
-    // event base), which otherwise hangs joinAsync forever -> the client never
-    // sends BENCHMARK_DONE -> the whole run stalls. Cancelling at window-end is
-    // the correct semantics.
+    auto physicalOutstanding = benchmarkPhysicalOutstanding.at(workerId);
+    // CancellableAsyncScope (not AsyncScope) lets the measurement boundary
+    // stop logical waiters without imposing a per-RPC timeout in open-loop
+    // mode. Callback-owned leases below separately track and drain accepted
+    // Carbon work before results are reported.
     folly::coro::CancellableAsyncScope scope;
     auto exe = co_await folly::coro::co_current_executor;
     const auto workerStartNow = std::chrono::steady_clock::now();
@@ -2128,32 +2289,30 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
               startTime - workerStartNow));
     }
 
-    auto requestTimeout = [&]() {
-      constexpr auto kMaxRequestTimeout = std::chrono::seconds(10);
-      if (!openLoopEnabled) {
-        return std::chrono::duration_cast<std::chrono::microseconds>(
-            kMaxRequestTimeout);
-      }
-      const auto timeoutNow = std::chrono::steady_clock::now();
-      if (timeoutNow >= measurementEndTime()) {
-        return std::chrono::microseconds(0);
-      }
-      return std::min(
-          std::chrono::duration_cast<std::chrono::microseconds>(
-              kMaxRequestTimeout),
-          std::chrono::ceil<std::chrono::microseconds>(
-              measurementEndTime() - timeoutNow));
+    auto requestTimeout = []() {
+      return std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::seconds(10));
     };
 
     // Send one GET request - matches production McrouterAdapter::coro() pattern
     auto sendGetRequest =
         [&](std::chrono::steady_clock::time_point scheduledTime,
-            bool measuredRequest) -> folly::coro::Task<RequestOutcome> {
+            bool measuredRequest,
+            detail::PhysicalOutstandingLease physicalLease,
+            bool& primaryAccepted) -> folly::coro::Task<RequestOutcome> {
+      if (openLoopEnabled &&
+          std::chrono::steady_clock::now() >= measurementEndTime()) {
+        co_return measuredRequest ? RequestOutcome::DroppedAtWindowEnd
+                                  : RequestOutcome::Unmeasured;
+      }
+
       auto opStartTime = scheduledTime;
       std::string key = generateKey();
 
-      auto requestOwner = std::make_shared<UcbGetRequest>();
-      UcbGetRequest& request = *requestOwner;
+      auto requestOwner =
+          std::make_shared<detail::PhysicalRequestOwner<UcbGetRequest>>(
+              std::move(physicalLease));
+      UcbGetRequest& request = requestOwner->request;
       request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
 
@@ -2190,18 +2349,15 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
       if (openLoopEnabled &&
           std::chrono::steady_clock::now() >= measurementEndTime()) {
-        co_return countWindowEndCancellation(measuredRequest)
-            ? RequestOutcome::CancelledAtEnd
-            : RequestOutcome::Unmeasured;
-      }
-      if (openLoopEnabled && measuredRequest) {
-        ++openLoopStats[workerId].wireGetDispatched;
+        co_return measuredRequest ? RequestOutcome::DroppedAtWindowEnd
+                                  : RequestOutcome::Unmeasured;
       }
       const bool dispatched = clientPtr->send(
           request,
           [p = std::move(promise), sampleLat, cbEntry, requestOwner](
               const UcbGetRequest&, UcbGetReply&& reply) mutable {
-            (void)requestOwner;
+            auto physicalLeaseGuard = folly::makeGuard(
+                [&]() { requestOwner->physicalLease.release(); });
             if (sampleLat) {
               cbEntry->store(
                   std::chrono::steady_clock::now().time_since_epoch().count(),
@@ -2209,16 +2365,35 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             }
             p.setValue(std::move(reply));
           });
-      if (dispatched) {
-        markFirstDispatch();
+      if (!dispatched) {
+        requestOwner->physicalLease.release();
+        if (sampleLat) {
+          gLatLostSamples.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (!measuredRequest) {
+          co_return RequestOutcome::Unmeasured;
+        }
+        workerTotalOps[workerId]->fetch_add(1);
+        workerGetOps[workerId]->fetch_add(1);
+        workerGetErrors[workerId]->fetch_add(1);
+        co_return RequestOutcome::LocalRejection;
       }
+      primaryAccepted = true;
+      if (openLoopEnabled && measuredRequest) {
+        ++openLoopStats[workerId].wireGetDispatched;
+      }
+      markFirstDispatch();
       if (sampleLat) {
         tSent = std::chrono::steady_clock::now();
       }
 
       UcbGetReply result;
       try {
-        result = co_await std::move(future).within(requestTimeout());
+        if (shouldUsePerRequestTimeout(openLoopEnabled)) {
+          result = co_await std::move(future).within(requestTimeout());
+        } else {
+          result = co_await folly::coro::detachOnCancel(std::move(future));
+        }
       } catch (const std::exception&) {
         // Request never completed; count as a GET error and return so the
         // measurement worker's scope.joinAsync() can't hang.
@@ -2281,8 +2456,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           *result.result() == carbon::Result::NOTFOUND &&
           FLAGS_open_loop_refill_on_miss;
       if (measuredRequest && !deferLatencyForRefill) {
-        std::lock_guard<std::mutex> lock(workerLatencyMutexes[workerId]);
-        workerLatencies[workerId].push_back(latencyMs);
+        recordLatency(workerId, latencyMs);
       }
 
       if (measuredRequest) {
@@ -2311,12 +2485,34 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
                                     : RequestOutcome::Unmeasured;
         }
 
-        // SET on GET miss to simulate real cache warming behavior
-        // This matches the behavior from the old synchronous version
+        // SET on GET miss to simulate real cache warming behavior.
+        // This matches the behavior from the old synchronous version.
+        if (openLoopEnabled &&
+            std::chrono::steady_clock::now() >= measurementEndTime()) {
+          co_return measuredRequest ? RequestOutcome::CancelledAtEnd
+                                    : RequestOutcome::Unmeasured;
+        }
+        std::optional<detail::PhysicalOutstandingLease> refillPhysicalLease;
+        if (openLoopEnabled) {
+          refillPhysicalLease =
+              physicalOutstanding->tryAcquire(FLAGS_open_loop_max_outstanding);
+        }
+        if (openLoopEnabled && !refillPhysicalLease) {
+          if (!measuredRequest) {
+            co_return RequestOutcome::Unmeasured;
+          }
+          workerSetOps[workerId]->fetch_add(1);
+          workerSetErrors[workerId]->fetch_add(1);
+          co_return RequestOutcome::Error;
+        }
+
         std::string value = generateValue();
 
-        auto setRequestOwner = std::make_shared<UcbSetRequest>();
-        UcbSetRequest& setRequest = *setRequestOwner;
+        auto setRequestOwner =
+            std::make_shared<detail::PhysicalRequestOwner<UcbSetRequest>>(
+                openLoopEnabled ? std::move(*refillPhysicalLease)
+                                : detail::PhysicalOutstandingLease{});
+        UcbSetRequest& setRequest = setRequestOwner->request;
         setRequest.key() = carbon::Keys<folly::IOBuf>(
             std::move(*folly::IOBuf::copyBuffer(key)));
         setRequest.value() = *folly::IOBuf::copyBuffer(value);
@@ -2340,21 +2536,36 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           co_return measuredRequest ? RequestOutcome::CancelledAtEnd
                                     : RequestOutcome::Unmeasured;
         }
+        const bool setDispatched = clientPtr->send(
+            setRequest,
+            [p = std::move(setPromise), setRequestOwner](
+                const UcbSetRequest&, UcbSetReply&& reply) mutable {
+              auto physicalLeaseGuard = folly::makeGuard(
+                  [&]() { setRequestOwner->physicalLease.release(); });
+              p.setValue(std::move(reply));
+            });
+        if (!setDispatched) {
+          setRequestOwner->physicalLease.release();
+          if (!measuredRequest) {
+            co_return RequestOutcome::Unmeasured;
+          }
+          workerSetOps[workerId]->fetch_add(1);
+          workerSetErrors[workerId]->fetch_add(1);
+          co_return RequestOutcome::Error;
+        }
         if (openLoopEnabled && measuredRequest) {
           ++openLoopStats[workerId].wireSetDispatched;
           ++openLoopStats[workerId].wireRefillSetDispatched;
         }
-        clientPtr->send(
-            setRequest,
-            [p = std::move(setPromise), setRequestOwner](
-                const UcbSetRequest&, UcbSetReply&& reply) mutable {
-              (void)setRequestOwner;
-              p.setValue(std::move(reply));
-            });
 
         UcbSetReply setResult;
         try {
-          setResult = co_await std::move(setFuture).within(requestTimeout());
+          if (shouldUsePerRequestTimeout(openLoopEnabled)) {
+            setResult = co_await std::move(setFuture).within(requestTimeout());
+          } else {
+            setResult =
+                co_await folly::coro::detachOnCancel(std::move(setFuture));
+          }
         } catch (const std::exception&) {
           if (!measuredRequest) {
             co_return RequestOutcome::Unmeasured;
@@ -2382,8 +2593,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
               std::chrono::duration<double, std::milli>(
                   logicalEndTime - opStartTime)
                   .count();
-          std::lock_guard<std::mutex> lock(workerLatencyMutexes[workerId]);
-          workerLatencies[workerId].push_back(logicalLatencyMs);
+          recordLatency(workerId, logicalLatencyMs);
         }
 
         workerSetOps[workerId]->fetch_add(1);
@@ -2402,9 +2612,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
               "Benchmark SET error (on GET miss, first sample): %s\n",
               carbon::resultToString(*setResult.result_ref()));
         }
-        co_return *setResult.result() == carbon::Result::LOCAL_ERROR
-            ? RequestOutcome::LocalRejection
-            : RequestOutcome::Error;
+        co_return RequestOutcome::Error;
       }
 
       workerGetErrors[workerId]->fetch_add(1);
@@ -2413,21 +2621,29 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             "Benchmark GET error (first sample): %s\n",
             carbon::resultToString(*result.result_ref()));
       }
-      co_return *result.result() == carbon::Result::LOCAL_ERROR
-          ? RequestOutcome::LocalRejection
-          : RequestOutcome::Error;
+      co_return RequestOutcome::Error;
     };
 
     // Send one SET request - matches production McrouterAdapter::coro() pattern
     auto sendSetRequest =
         [&](std::chrono::steady_clock::time_point scheduledTime,
-            bool measuredRequest) -> folly::coro::Task<RequestOutcome> {
+            bool measuredRequest,
+            detail::PhysicalOutstandingLease physicalLease,
+            bool& primaryAccepted) -> folly::coro::Task<RequestOutcome> {
+      if (openLoopEnabled &&
+          std::chrono::steady_clock::now() >= measurementEndTime()) {
+        co_return measuredRequest ? RequestOutcome::DroppedAtWindowEnd
+                                  : RequestOutcome::Unmeasured;
+      }
+
       auto opStartTime = scheduledTime;
       std::string key = generateKey();
       std::string value = generateValue();
 
-      auto requestOwner = std::make_shared<UcbSetRequest>();
-      UcbSetRequest& request = *requestOwner;
+      auto requestOwner =
+          std::make_shared<detail::PhysicalRequestOwner<UcbSetRequest>>(
+              std::move(physicalLease));
+      UcbSetRequest& request = requestOwner->request;
       request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
       request.value() = *folly::IOBuf::copyBuffer(value);
@@ -2448,27 +2664,40 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
       if (openLoopEnabled &&
           std::chrono::steady_clock::now() >= measurementEndTime()) {
-        co_return countWindowEndCancellation(measuredRequest)
-            ? RequestOutcome::CancelledAtEnd
-            : RequestOutcome::Unmeasured;
-      }
-      if (openLoopEnabled && measuredRequest) {
-        ++openLoopStats[workerId].wireSetDispatched;
+        co_return measuredRequest ? RequestOutcome::DroppedAtWindowEnd
+                                  : RequestOutcome::Unmeasured;
       }
       const bool dispatched = clientPtr->send(
           request,
           [p = std::move(promise), requestOwner](
               const UcbSetRequest&, UcbSetReply&& reply) mutable {
-            (void)requestOwner;
+            auto physicalLeaseGuard = folly::makeGuard(
+                [&]() { requestOwner->physicalLease.release(); });
             p.setValue(std::move(reply));
           });
-      if (dispatched) {
-        markFirstDispatch();
+      if (!dispatched) {
+        requestOwner->physicalLease.release();
+        if (!measuredRequest) {
+          co_return RequestOutcome::Unmeasured;
+        }
+        workerTotalOps[workerId]->fetch_add(1);
+        workerSetOps[workerId]->fetch_add(1);
+        workerSetErrors[workerId]->fetch_add(1);
+        co_return RequestOutcome::LocalRejection;
       }
+      primaryAccepted = true;
+      if (openLoopEnabled && measuredRequest) {
+        ++openLoopStats[workerId].wireSetDispatched;
+      }
+      markFirstDispatch();
 
       UcbSetReply result;
       try {
-        result = co_await std::move(future).within(requestTimeout());
+        if (shouldUsePerRequestTimeout(openLoopEnabled)) {
+          result = co_await std::move(future).within(requestTimeout());
+        } else {
+          result = co_await folly::coro::detachOnCancel(std::move(future));
+        }
       } catch (const std::exception&) {
         if (!measuredRequest) {
           co_return RequestOutcome::Unmeasured;
@@ -2496,10 +2725,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           std::chrono::duration<double, std::milli>(opEndTime - opStartTime)
               .count();
 
-      {
-        std::lock_guard<std::mutex> lock(workerLatencyMutexes[workerId]);
-        workerLatencies[workerId].push_back(latencyMs);
-      }
+      recordLatency(workerId, latencyMs);
 
       workerTotalOps[workerId]->fetch_add(1);
       workerSetOps[workerId]->fetch_add(1);
@@ -2519,9 +2745,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             "Benchmark SET error (first sample): %s\n",
             carbon::resultToString(*result.result_ref()));
       }
-      co_return *result.result() == carbon::Result::LOCAL_ERROR
-          ? RequestOutcome::LocalRejection
-          : RequestOutcome::Error;
+      co_return RequestOutcome::Error;
     };
 
     auto& myInflight = *workerInflight[workerId];
@@ -2652,17 +2876,15 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             stats.recordSchedulerLag(lag);
           }
 
-          if (myInflight.load(std::memory_order_relaxed) >=
-              FLAGS_open_loop_max_outstanding) {
+          auto admissionLease =
+              physicalOutstanding->tryAcquire(FLAGS_open_loop_max_outstanding);
+          if (!admissionLease) {
             if (measuredRequest) {
               ++stats.droppedAtCap;
             }
             continue;
           }
 
-          if (measuredRequest) {
-            ++stats.dispatched;
-          }
           const uint32_t outstanding =
               myInflight.fetch_add(1, std::memory_order_relaxed) + 1;
           if (measuredRequest) {
@@ -2674,36 +2896,55 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
               folly::coro::co_withExecutor(
                   exe,
                   folly::coro::co_invoke(
-                      [&, deadline, measuredRequest]()
+                      [&,
+                       deadline,
+                       measuredRequest,
+                       requestLease = std::move(*admissionLease)]() mutable
                           -> folly::coro::Task<void> {
                         auto inflightGuard = folly::makeGuard([&]() {
                           myInflight.fetch_sub(1, std::memory_order_relaxed);
                         });
 
                         RequestOutcome outcome = RequestOutcome::Error;
+                        bool requestAccepted = false;
                         try {
                           if (std::chrono::steady_clock::now() >=
                               measurementEndTime()) {
-                            outcome =
-                                countWindowEndCancellation(measuredRequest)
-                                ? RequestOutcome::CancelledAtEnd
+                            outcome = measuredRequest
+                                ? RequestOutcome::DroppedAtWindowEnd
                                 : RequestOutcome::Unmeasured;
                           } else if (folly::Random::randDouble01() < getRatio) {
                             outcome = co_await sendGetRequest(
-                                deadline, measuredRequest);
+                                deadline,
+                                measuredRequest,
+                                std::move(requestLease),
+                                requestAccepted);
                           } else {
                             outcome = co_await sendSetRequest(
-                                deadline, measuredRequest);
+                                deadline,
+                                measuredRequest,
+                                std::move(requestLease),
+                                requestAccepted);
                           }
                         } catch (const std::exception&) {
-                          outcome = !measuredRequest
-                              ? RequestOutcome::Unmeasured
-                              : std::chrono::steady_clock::now() >=
-                                  measurementEndTime()
-                              ? RequestOutcome::CancelledAtEnd
-                              : RequestOutcome::Error;
+                          if (!measuredRequest) {
+                            outcome = RequestOutcome::Unmeasured;
+                          } else if (
+                              std::chrono::steady_clock::now() >=
+                              measurementEndTime()) {
+                            outcome = requestAccepted
+                                ? RequestOutcome::CancelledAtEnd
+                                : RequestOutcome::DroppedAtWindowEnd;
+                          } else {
+                            outcome = requestAccepted
+                                ? RequestOutcome::Error
+                                : RequestOutcome::LocalRejection;
+                          }
                         }
 
+                        if (requestAccepted && measuredRequest) {
+                          ++stats.dispatched;
+                        }
                         switch (outcome) {
                           case RequestOutcome::Unmeasured:
                             break;
@@ -2721,6 +2962,12 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
                             break;
                           case RequestOutcome::CancelledAtEnd:
                             ++stats.cancelledAtEnd;
+                            break;
+                          case RequestOutcome::DroppedAtCap:
+                            ++stats.droppedAtCap;
+                            break;
+                          case RequestOutcome::DroppedAtWindowEnd:
+                            ++stats.droppedAtWindowEnd;
                             break;
                         }
                         co_return;
@@ -2754,10 +3001,19 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
                     const auto scheduledTime = std::chrono::steady_clock::now();
                     const bool measuredRequest =
                         isMeasuredRequest(scheduledTime);
+                    bool laneRequestAccepted = false;
                     if (folly::Random::randDouble01() < getRatio) {
-                      co_await sendGetRequest(scheduledTime, measuredRequest);
+                      co_await sendGetRequest(
+                          scheduledTime,
+                          measuredRequest,
+                          detail::PhysicalOutstandingLease{},
+                          laneRequestAccepted);
                     } else {
-                      co_await sendSetRequest(scheduledTime, measuredRequest);
+                      co_await sendSetRequest(
+                          scheduledTime,
+                          measuredRequest,
+                          detail::PhysicalOutstandingLease{},
+                          laneRequestAccepted);
                     }
                     myInflight.fetch_sub(1);
                   }
@@ -2791,16 +3047,20 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           myInflight.load(std::memory_order_relaxed);
     }
 
-    // Measurement window is over: cancel any still-outstanding requests and
-    // join. This drains deterministically instead of hanging on stragglers.
+    // Measurement is over: stop admissions, cancel logical waiters, then wait
+    // for every accepted Carbon callback before results can be reported.
     co_await scope.cancelAndJoinAsync();
+    if (openLoopEnabled) {
+      co_await drainPhysicalOutstanding(
+          physicalOutstanding, "measurement", workerId);
+    }
 
     // No need to sync to global counters - they'll be summed at the end
     co_return;
   };
 
   // Start workers - matches production LoadgenCommand::co_run() pattern
-  folly::coro::AsyncScope mainScope;
+  folly::coro::AsyncScope mainScope(true);
   for (size_t i = 0; i < clients.size(); ++i) {
     mainScope.add(
         folly::coro::co_withExecutor(
@@ -2810,7 +3070,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
   // Block until all workers complete
   folly::coro::blockingWait(
-      mainScope.joinAsync().scheduleOn(workerEvbs.front()));
+      folly::coro::co_withExecutor(workerEvbs.at(0), mainScope.joinAsync()));
 
   if (measurementCoordinator.joinable()) {
     measurementCoordinator.join();
@@ -2881,10 +3141,10 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     }
 
     const uint64_t terminal = totals.completedSuccess + totals.completedError +
-        totals.timeouts + totals.localRejections + totals.cancelledAtEnd;
+        totals.timeouts + totals.cancelledAtEnd;
     const bool scheduledConserved = totals.scheduled ==
-        totals.dispatched + totals.droppedLate + totals.droppedAtCap +
-            totals.droppedAtWindowEnd;
+        totals.dispatched + totals.localRejections + totals.droppedLate +
+            totals.droppedAtCap + totals.droppedAtWindowEnd;
     const bool dispatchedConserved = totals.dispatched == terminal;
     const uint64_t generatorDrops = totals.droppedLate + totals.droppedAtCap;
     const bool generatorLimited = generatorDrops > totals.scheduled / 1000 ||
@@ -2933,7 +3193,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         generatorLimited ? "true" : "false",
         generatorDropPct,
         totals.droppedLate + totals.droppedAtCap + totals.droppedAtWindowEnd +
-            totals.timeouts + totals.cancelledAtEnd,
+            totals.localRejections + totals.timeouts + totals.cancelledAtEnd,
         meanLagUs,
         schedulerLagP99Us,
         totals.schedulerLagNsMax / 1000.0,
@@ -2964,13 +3224,29 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     fflush(stdout);
   }
 
-  // Merge all worker latencies
-  for (size_t i = 0; i < clients.size(); ++i) {
-    std::lock_guard<std::mutex> lock(latenciesMutex);
-    allLatencies.insert(
-        allLatencies.end(),
-        workerLatencies[i].begin(),
-        workerLatencies[i].end());
+  std::vector<PrioritizedLatencySample> mergedLatencySamples;
+  mergedLatencySamples.reserve(kMaxLatencySamples * clients.size());
+  for (auto& sampler : workerLatencySamplers) {
+    mergedLatencySamples.insert(
+        mergedLatencySamples.end(),
+        std::make_move_iterator(sampler.samples.begin()),
+        std::make_move_iterator(sampler.samples.end()));
+  }
+  const auto priorityLess = [](const auto& lhs, const auto& rhs) {
+    return lhs.first < rhs.first;
+  };
+  if (mergedLatencySamples.size() > kMaxLatencySamples) {
+    std::nth_element(
+        mergedLatencySamples.begin(),
+        mergedLatencySamples.begin() + kMaxLatencySamples,
+        mergedLatencySamples.end(),
+        priorityLess);
+    mergedLatencySamples.resize(kMaxLatencySamples);
+  }
+  std::vector<double> allLatencies;
+  allLatencies.reserve(mergedLatencySamples.size());
+  for (const auto& sample : mergedLatencySamples) {
+    allLatencies.push_back(sample.second);
   }
 
   BenchmarkResults results;
@@ -3430,6 +3706,9 @@ void UcacheBenchClient::printResults(const BenchmarkResults& results) {
         warmupQps);
     printf("  SET Successes: %lu\n", results.warmupResults.setSuccesses);
     printf("  SET Errors: %lu\n", results.warmupResults.setErrors);
+    printf(
+        "  SET Errors (warmup tail): %lu\n",
+        results.warmupResults.tailSetErrors);
     printf("  Success Rate: %.1f%%\n", warmupSuccessRate);
 
     if (!results.warmupResults.success) {
@@ -3457,6 +3736,10 @@ void UcacheBenchClient::printResults(const BenchmarkResults& results) {
   printf("  Errors: %lu\n", results.setErrors);
   printf("\n");
 
+  printf(
+      "Latency Samples: %zu (full-window priority reservoir cap %zu)\n",
+      results.latencies.size(),
+      kMaxLatencySamples);
   printf("Latency Percentiles (ms):\n");
   printf("  P50: %.2f\n", p50);
   printf("  P95: %.2f\n", p95);

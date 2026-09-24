@@ -79,6 +79,10 @@ int main(int argc, char** argv) {
 
     // Warmup phase
     auto warmupResults = client.warmup();
+    if (!warmupResults.success) {
+      throw std::runtime_error(
+          "Warmup did not recover to a clean stable tail; refusing to start measurement");
+    }
 
     // Benchmark phase
     auto results = client.runBenchmark();

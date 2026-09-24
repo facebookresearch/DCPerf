@@ -57,6 +57,13 @@ def _validate_metrics(output: str) -> None:
         _metric(r"SET Successes:\s+(\d+)", warmup, "warmup successes")
     )
     warmup_errors = int(_metric(r"SET Errors:\s+(\d+)", warmup, "warmup errors"))
+    warmup_tail_errors = int(
+        _metric(
+            r"SET Errors \(warmup tail\):\s+(\d+)",
+            warmup,
+            "stable warmup errors",
+        )
+    )
     total_operations = int(
         _metric(r"Total Operations:\s+(\d+)", benchmark, "total operations")
     )
@@ -82,10 +89,10 @@ def _validate_metrics(output: str) -> None:
         for label in ("P50", "P95", "P99", "P99.9")
     ]
 
-    if warmup_operations <= 0 or warmup_successes <= 0 or warmup_errors != 0:
-        raise ValueError(
-            "warmup did not complete with positive, error-free SET traffic"
-        )
+    if warmup_successes + warmup_errors != warmup_operations:
+        raise ValueError("warmup SET accounting is inconsistent")
+    if warmup_operations <= 0 or warmup_successes <= 0 or warmup_tail_errors != 0:
+        raise ValueError("warmup did not finish with positive, error-free SET traffic")
     if total_operations <= 0 or not math.isfinite(qps) or qps <= 0:
         raise ValueError("benchmark reported no real traffic")
     if (

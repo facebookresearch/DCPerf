@@ -18,13 +18,13 @@ from cea.chips.benchpress.packages.ucache_bench.sizing import (
     _physical_cores_from_sysfs,
     _resolve_topology,
     _round_to_nearest_multiple,
-    calculate_cache_fraction,
     calculate_cache_mib,
     calculate_client_shape,
     calculate_hash_power,
     calculate_proxy_count,
     calculate_reserve_mib,
     calculate_resources,
+    calculate_target_connections,
     calculate_total_connections,
     calculate_total_processes,
     detect_hardware,
@@ -72,6 +72,13 @@ class SizingTest(unittest.TestCase):
                 topology_dir.mkdir(parents=True)
                 (topology_dir / "thread_siblings_list").write_text(siblings)
 
+            for node in (0, 1):
+                node_dir = root / "sys" / "devices" / "system" / "node" / f"node{node}"
+                node_dir.mkdir(parents=True)
+                (node_dir / "meminfo").write_text(
+                    f"Node {node} MemTotal:       67108864 kB\n"
+                )
+
             meminfo = root / "meminfo"
             meminfo.write_text("MemTotal:       134217728 kB\n")
             cgroup_root = root / "cgroup"
@@ -95,26 +102,46 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(topology.logical_cpus, 3)
         self.assertEqual(topology.physical_cores, 2)
         self.assertEqual(topology.memory_mib, 64 * 1024)
+        self.assertEqual(topology.numa_memory_nodes, 2)
 
     def test_partial_override_is_applied_before_validation(self) -> None:
         args = Namespace(
             logical_cpus=None,
             physical_cores=None,
             memory_mib=160 * 1024,
+            numa_memory_nodes=None,
         )
         with patch(
             "cea.chips.benchpress.packages.ucache_bench.sizing._detect_hardware_values",
-            return_value=(90, 54, 1),
+            return_value=(90, 54, 1, 1),
         ):
             topology = _resolve_topology(args)
 
         self.assertEqual(topology, HardwareTopology(90, 54, 160 * 1024))
 
-    def test_cache_fraction_has_logarithmic_bounds(self) -> None:
-        self.assertEqual(calculate_cache_fraction(16 * 1024), 0.40)
-        self.assertEqual(calculate_cache_fraction(64 * 1024), 0.40)
-        self.assertEqual(calculate_cache_fraction(256 * 1024), 0.65)
-        self.assertEqual(calculate_cache_fraction(4 * 1024 * 1024), 0.80)
+    def test_explicit_zero_numa_nodes_is_rejected(self) -> None:
+        args = Namespace(
+            logical_cpus=8,
+            physical_cores=4,
+            memory_mib=8 * 1024,
+            numa_memory_nodes=0,
+        )
+
+        with self.assertRaisesRegex(ValueError, "numa_memory_nodes"):
+            _resolve_topology(args)
+
+    def test_cache_uses_taobench_style_memory_fraction_after_reserve(self) -> None:
+        cases = (
+            (4 * 1024, 2 * 1024, 1536),
+            (16 * 1024, 8 * 1024, 6 * 1024),
+            (64 * 1024, 32 * 1024, 24 * 1024),
+            (256 * 1024, 32 * 1024, 168 * 1024),
+            (2 * 1024 * 1024, 32 * 1024, 1024 * 1024),
+        )
+        for memory_mib, reserve_mib, cache_mib in cases:
+            with self.subTest(memory_mib=memory_mib):
+                self.assertEqual(calculate_reserve_mib(memory_mib), reserve_mib)
+                self.assertEqual(calculate_cache_mib(memory_mib), cache_mib)
 
     def test_cache_is_monotonic_aligned_capped_and_reserved(self) -> None:
         memory_points = (
@@ -197,6 +224,24 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(extreme.client_hosts, 5)
         self.assertEqual(extreme.processes_per_host, 8)
 
+    def test_t2_vnc_equation_uses_one_production_client_host(self) -> None:
+        for physical_cores, memory_gib, total_processes, num_proxies in (
+            (192, 1408, 24, 40),
+            (248, 1800, 32, 48),
+        ):
+            with self.subTest(physical_cores=physical_cores):
+                topology = HardwareTopology(
+                    logical_cpus=2 * physical_cores,
+                    physical_cores=physical_cores,
+                    memory_mib=memory_gib * 1024,
+                )
+                shape = calculate_client_shape(topology, LoadVariant.PRODUCTION)
+
+                self.assertEqual(shape.total_processes, total_processes)
+                self.assertEqual(shape.num_proxies, num_proxies)
+                self.assertEqual(shape.client_hosts, 1)
+                self.assertEqual(shape.processes_per_host, total_processes)
+
     def test_proxy_count_without_substantial_smt(self) -> None:
         topology = HardwareTopology(119, 80, 192 * 1024)
 
@@ -219,6 +264,22 @@ class SizingTest(unittest.TestCase):
 
         self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 36)
 
+    def test_production_proxy_count_preserves_validated_platform_shapes(self) -> None:
+        cases = (
+            (52, 26, 64 * 1024, 20),
+            (72, 36, 64 * 1024, 28),
+            (72, 72, 256 * 1024, 20),
+            (176, 88, 256 * 1024, 60),
+            (128, 128, 384 * 1024, 32),
+            (316, 158, 1024 * 1024, 32),
+        )
+        for logical_cpus, physical_cores, memory_mib, expected in cases:
+            with self.subTest(logical_cpus=logical_cpus, physical_cores=physical_cores):
+                topology = HardwareTopology(logical_cpus, physical_cores, memory_mib)
+                self.assertEqual(
+                    calculate_proxy_count(topology, LoadVariant.PRODUCTION), expected
+                )
+
     def test_proxy_count_clamps_to_destination_safe_range(self) -> None:
         small = HardwareTopology(8, 4, 512 * 1024)
         large = HardwareTopology(1200, 800, 384 * 1024)
@@ -230,12 +291,28 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(_round_to_nearest_multiple(10, 4), 12)
         self.assertEqual(_round_to_nearest_multiple(9, 4), 8)
 
-    def test_connections_are_variant_invariant_aligned_and_capped(self) -> None:
-        physical_core_counts = (12, 24, 48, 72, 96, 144, 220)
+    def test_connection_target_scales_until_the_measured_cap(self) -> None:
+        small = HardwareTopology(16, 8, 64 * 1024)
+        medium = HardwareTopology(96, 64, 256 * 1024)
+        large = HardwareTopology(512, 256, 1024 * 1024)
+
+        self.assertLess(
+            calculate_target_connections(small),
+            calculate_target_connections(medium),
+        )
+        self.assertLess(
+            calculate_target_connections(medium),
+            calculate_target_connections(large),
+        )
+        self.assertEqual(calculate_target_connections(large), 220_000)
+
+    def test_connections_are_variant_aligned_and_bounded(self) -> None:
+        physical_core_counts = (12, 24, 48, 72, 96, 144, 220, 330, 385, 800)
         memory_sizes_mib = (
             64 * 1024,
             192 * 1024,
             384 * 1024,
+            512 * 1024 - 1,
             512 * 1024,
             704 * 1024,
         )
@@ -259,12 +336,15 @@ class SizingTest(unittest.TestCase):
                         )
                         extreme = calculate_client_shape(topology, LoadVariant.EXTREME)
 
-                        self.assertEqual(
-                            production.total_connections,
-                            extreme.total_connections,
-                        )
+                        target_connections = calculate_target_connections(topology)
                         for shape in (production, extreme):
-                            self.assertGreaterEqual(shape.total_connections, 300_000)
+                            self.assertGreaterEqual(
+                                shape.total_connections, target_connections
+                            )
+                            self.assertLess(
+                                shape.total_connections,
+                                target_connections + shape.connection_quantum,
+                            )
                             self.assertEqual(
                                 shape.total_connections % shape.connection_quantum,
                                 0,
@@ -274,29 +354,28 @@ class SizingTest(unittest.TestCase):
                                 shape.max_total_connections,
                             )
 
-    def test_memory_rich_smt_uses_shared_connection_target(self) -> None:
+    def test_memory_rich_smt_aligns_each_variant_independently(self) -> None:
         topology = HardwareTopology(232, 144, 704 * 1024)
         production = calculate_client_shape(topology, LoadVariant.PRODUCTION)
         extreme = calculate_client_shape(topology, LoadVariant.EXTREME)
 
         self.assertEqual(production.num_proxies, 28)
         self.assertEqual(extreme.num_proxies, 72)
-        self.assertEqual(production.total_connections, 302_400)
-        self.assertEqual(extreme.total_connections, 302_400)
+        self.assertEqual(production.total_connections, 220_080)
+        self.assertEqual(extreme.total_connections, 221_184)
         self.assertEqual(
             production.total_connections % production.connection_quantum, 0
         )
         self.assertEqual(extreme.total_connections % extreme.connection_quantum, 0)
 
-    def test_connections_respect_common_aligned_per_process_limit(self) -> None:
+    def test_connections_respect_aligned_per_process_limit(self) -> None:
         topology = HardwareTopology(20_000, 10_000, 640 * 1024)
-        connections = calculate_total_connections(topology)
 
-        self.assertEqual(connections, 302_080)
         for variant in LoadVariant:
             with self.subTest(variant=variant):
+                connections = calculate_total_connections(topology, variant)
                 shape = calculate_client_shape(topology, variant)
-                self.assertEqual(shape.total_connections, connections)
+                self.assertEqual(connections, 220_160)
                 self.assertEqual(connections % shape.connection_quantum, 0)
                 self.assertLessEqual(
                     connections // shape.total_processes,
@@ -309,14 +388,14 @@ class SizingTest(unittest.TestCase):
         with (
             patch(
                 "cea.chips.benchpress.packages.ucache_bench.sizing._DESTINATIONS_PER_PROCESS",
-                1_024,
+                512,
             ),
             self.assertRaisesRegex(
                 ValueError,
-                "cannot reach 300000 total connections without exceeding 1024",
+                "cannot reach 180096 total connections without exceeding 512",
             ),
         ):
-            calculate_total_connections(topology)
+            calculate_total_connections(topology, LoadVariant.PRODUCTION)
 
     def test_workload_defaults_are_variant_stable(self) -> None:
         topology = HardwareTopology(152, 92, 384 * 1024)
@@ -327,20 +406,33 @@ class SizingTest(unittest.TestCase):
             "rpc_num_cpu_worker_threads": 1,
             "num_threads": 8,
             "max_inflight": 150,
+            "warmup_max_inflight": 32,
             "warmup_seconds": 720,
             "duration_seconds": 240,
             "timeout_seconds": 2400,
-            "connection_ramp_seconds": 25,
+            "connection_ramp_seconds": 60,
+            "full_load_stabilization_seconds": 60,
             "open_loop_refill_on_miss": 0,
         }
         for key, value in common.items():
             with self.subTest(key=key):
                 self.assertEqual(production.params[key], value)
                 self.assertEqual(extreme.params[key], value)
-        self.assertEqual(production.params["open_loop_max_outstanding"], 1024)
-        self.assertEqual(production.params["open_loop_max_lateness_us"], 1000)
-        self.assertEqual(extreme.params["open_loop_max_outstanding"], 4096)
-        self.assertEqual(extreme.params["open_loop_max_lateness_us"], 200_000)
+        self.assertEqual(production.params["open_loop_max_outstanding"], 8192)
+        self.assertEqual(production.params["open_loop_max_lateness_us"], 500_000)
+        self.assertEqual(extreme.params["open_loop_max_outstanding"], 8192)
+        self.assertEqual(extreme.params["open_loop_max_lateness_us"], 500_000)
+        self.assertEqual(production.params["failures_until_tko"], 12)
+        self.assertEqual(extreme.params["failures_until_tko"], 12)
+        self.assertEqual(production.params["server_numa_interleave"], 0)
+        self.assertEqual(extreme.params["server_numa_interleave"], 0)
+
+        numa = recommend(
+            HardwareTopology(316, 158, 1024 * 1024, numa_memory_nodes=2),
+            LoadVariant.PRODUCTION,
+            aggregate_qps=3_600_000,
+        )
+        self.assertEqual(numa.params["server_numa_interleave"], 1)
 
     def test_missing_qps_params_only_fails_clearly(self) -> None:
         stderr = StringIO()
@@ -378,6 +470,7 @@ class SizingTest(unittest.TestCase):
 
         self.assertNotIn("open_loop_qps", without_qps.params)
         self.assertNotIn("process_ramp_seconds", without_qps.params)
+        self.assertNotIn("full_load_stabilization_seconds", without_qps.params)
         self.assertEqual(
             without_qps.to_dict()["calibration"],
             {
@@ -389,6 +482,7 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(supplied.aggregate_qps, 24_000)
         self.assertEqual(supplied.params["open_loop_qps"], 1500)
         self.assertEqual(supplied.params["process_ramp_seconds"], 64)
+        self.assertEqual(supplied.params["full_load_stabilization_seconds"], 60)
 
     def test_latency_seed_and_next_qps_remain_bounded(self) -> None:
         self.assertEqual(seed_qps(90, 1000), 9000)

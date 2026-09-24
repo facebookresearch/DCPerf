@@ -17,11 +17,13 @@ UcacheBenchAdminServer::UcacheBenchAdminServer(
     uint16_t port,
     uint32_t numExpectedClients,
     uint32_t timeoutSeconds,
-    uint32_t processRampSeconds)
+    uint32_t processRampSeconds,
+    uint32_t fullLoadStabilizationSeconds)
     : port_(port),
       numExpectedClients_(numExpectedClients),
       timeoutSeconds_(timeoutSeconds),
-      processRampSeconds_(processRampSeconds) {}
+      processRampSeconds_(processRampSeconds),
+      fullLoadStabilizationSeconds_(fullLoadStabilizationSeconds) {}
 
 UcacheBenchAdminServer::~UcacheBenchAdminServer() {
   stop();
@@ -632,17 +634,22 @@ void UcacheBenchAdminServer::transitionToBenchmark() {
                              start.time_since_epoch())
                              .count();
     benchmarkStartNs_.store(startNs);
+    benchmarkWallStartNs_.store(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
     currentPhase_ = Phase::BENCHMARK;
     notifyPhaseChange(Phase::BENCHMARK);
     broadcast("ALL_WARMUP_DONE");
     return;
   }
 
-  constexpr auto kMeasurementStartGuard = std::chrono::seconds(10);
+  const auto measurementStartDelay = std::chrono::seconds(
+      measurementStartDelaySeconds(fullLoadStabilizationSeconds_));
   const auto steadyStart =
-      std::chrono::steady_clock::now() + kMeasurementStartGuard;
+      std::chrono::steady_clock::now() + measurementStartDelay;
   const auto wallStart =
-      std::chrono::system_clock::now() + kMeasurementStartGuard;
+      std::chrono::system_clock::now() + measurementStartDelay;
   const auto duration =
       std::chrono::seconds(measurementDurationSeconds_.load());
   benchmarkStartNs_.store(
@@ -653,10 +660,10 @@ void UcacheBenchAdminServer::transitionToBenchmark() {
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           (steadyStart + duration).time_since_epoch())
           .count());
-  benchmarkWallStartNs_.store(
+  const auto scheduledWallStartNs =
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           wallStart.time_since_epoch())
-          .count());
+          .count();
 
   // Reset counters while tracking is still disabled, before clients receive the
   // future boundary.
@@ -668,8 +675,8 @@ void UcacheBenchAdminServer::transitionToBenchmark() {
   // The future timestamp gives every client time to receive the notification.
   // Server tracking is enabled by measurementLoop() at that same timestamp.
   broadcast(
-      "MEASUREMENT_START " + std::to_string(benchmarkWallStartNs_.load()) +
-      " " + std::to_string(measurementDurationSeconds_.load()));
+      "MEASUREMENT_START " + std::to_string(scheduledWallStartNs) + " " +
+      std::to_string(measurementDurationSeconds_.load()));
 }
 
 void UcacheBenchAdminServer::measurementLoop() {
@@ -699,6 +706,10 @@ void UcacheBenchAdminServer::measurementLoop() {
     return;
   }
 
+  benchmarkWallStartNs_.store(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
   notifyPhaseChange(Phase::BENCHMARK);
   currentPhase_ = Phase::BENCHMARK;
 
@@ -718,6 +729,20 @@ void UcacheBenchAdminServer::transitionToMeasurementComplete() {
   bool expected = false;
   if (!measurementCompletionStarted_.compare_exchange_strong(expected, true)) {
     return;
+  }
+  const auto wallStartNs = benchmarkWallStartNs_.load();
+  const auto wallEndNs =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count();
+  if (wallStartNs > 0) {
+    printf(
+        "[AdminServer] MEASUREMENT_WINDOW wall_start_ns=%lld "
+        "wall_end_ns=%lld duration_seconds=%u\n",
+        static_cast<long long>(wallStartNs),
+        static_cast<long long>(wallEndNs),
+        measurementDurationSeconds_.load());
+    fflush(stdout);
   }
   // Disable request accounting before publishing completion to command
   // handlers.
