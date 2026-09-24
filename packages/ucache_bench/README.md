@@ -126,16 +126,14 @@ Cache sizing follows TaoBench's simple 75% memory rule after reserving up to
 64 GiB, the reserve is half of visible memory so the model remains usable on
 small hosts. The 1 TiB ceiling prevents unbounded working sets.
 
-Hash power follows cache-capacity boundaries. Production rounds logical CPUs
-per process to the nearest multiple of four proxies and caps each process at 16 to
-bound its thread footprint; the cap can leave very large synthetic inputs below
-one proxy EventBase per logical CPU. Production places every process on one
-client host. Extreme retains its separate stress-topology fanout. The one-host production invariant is covered for both T2 VNC inputs
-under consideration. For 192 physical cores / 384 logical CPUs, the equations
-produce `T=24`, `N=16`, `H=1`; for 248 physical cores / 496 logical CPUs, they
-produce `T=32`, `N=16`, `H=1`. These are equation-level topology checks only,
-not VNC hardware-acceptance claims; a full run is still required to prove that
-one physical client can deliver the calibrated QPS without errors or drops.
+Hash power follows cache-capacity boundaries. Proxy fanout retains the accepted
+hardware-regime equation: non-SMT, memory-rich high-core SMT, other high-core
+SMT, and smaller SMT. This is more complex than a single logical-CPU ratio, but
+it preserves the validated traffic shapes without platform names or stored
+profiles. Production places every process on one client host; that is an
+equation-level topology choice, not a hardware-acceptance claim. A full run must
+still prove that one physical client can deliver the calibrated QPS without
+errors, drops, scheduler imbalance, or changed server PMU behavior.
 Connection demand keeps its simple core-scaled equation because the CPL A/B
 showed that forcing 220,000 connections changed protocol behavior. The target
 uses `min(13250, 11000 + 64 * physical_cores)` destinations per process,
@@ -154,12 +152,15 @@ calibration formulas, see [SIZING.md](SIZING.md).
 
 The generated workload keeps one open-loop arrival per wire RPC, disables miss
 refill, enables fiber request handling, and uses the packaged traffic
-distribution. Warmup admits at most `max_inflight` physical requests per
-worker/client and holds each slot through Carbon callback exit. Open-loop
+distribution. Warmup admits at most `warmup_max_inflight` physical requests
+per worker/client and holds each slot through Carbon callback exit. Open-loop
 measurement uses the separate per-proxy outstanding cap and avoids allocating a
 second response-timeout timer for every RPC. At each phase boundary, logical
-waiters are cancelled and accepted mcrouter callbacks receive a bounded drain
-before measurement proceeds or results are reported. When
+waiters are cancelled without classifying that lifecycle event as a request
+error, and accepted mcrouter callbacks receive a bounded drain before
+measurement proceeds or results are reported. Process-ramped coordinated runs
+print exact `MEASUREMENT_WINDOW` wall-clock timestamps for aligning host
+telemetry. When
 autosizing has a resolved open-loop QPS, multi-client runs also stagger process
 traffic starts
 before a full 240-second measurement window; ramp traffic is excluded, while
