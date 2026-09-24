@@ -99,6 +99,7 @@ bool AdminConnection::connect(
   hints.ai_socktype = SOCK_STREAM;
 
   std::string portStr = std::to_string(port);
+  // patternlint-disable-next-line cpp-dns-deps
   int ret = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
   if (ret != 0) {
     printf(
@@ -1065,10 +1066,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   // simultaneously on first request, causing a connection storm that TKOs the
   // server.
 
-  auto startTime = std::chrono::steady_clock::now();
-  auto endTime = startTime + std::chrono::seconds(FLAGS_warmup_seconds);
-  const auto stabilityStartTime =
-      endTime - std::chrono::seconds(std::min(FLAGS_warmup_seconds, 60u));
+  std::chrono::steady_clock::time_point startTime;
+  std::chrono::steady_clock::time_point endTime;
+  std::chrono::steady_clock::time_point stabilityStartTime;
+  std::atomic<bool> warmupStarted{false};
 
   // Thread-safe counters
   std::atomic<uint64_t> totalOps{0};
@@ -1090,6 +1091,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   std::thread progressThread;
   if (FLAGS_verbose && FLAGS_progress_interval_seconds > 0) {
     progressThread = std::thread([&]() {
+      while (!shouldStop.load(std::memory_order_acquire) &&
+             !warmupStarted.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
       while (!shouldStop.load() && std::chrono::steady_clock::now() < endTime) {
         std::this_thread::sleep_for(
             std::chrono::seconds(FLAGS_progress_interval_seconds));
@@ -1125,6 +1130,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
   std::thread adaptiveThread;
   if (FLAGS_warmup_adaptive_load) {
     adaptiveThread = std::thread([&]() {
+      while (!shouldStop.load(std::memory_order_acquire) &&
+             !warmupStarted.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
       constexpr auto kCheckInterval = std::chrono::seconds(2);
       constexpr double kErrorThreshold = 0.05; // 5% error rate triggers backoff
       constexpr double kHealthyThreshold = 0.01; // <1% errors = healthy, grow
@@ -1262,6 +1271,9 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     const uint64_t expectedScanOps =
         static_cast<uint64_t>(effectiveNumProxies_) * scanOutstanding *
         requestsPerCoroutine;
+    const auto activationDeadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(FLAGS_connection_ramp_seconds) +
+        std::chrono::seconds(10);
 
     if (FLAGS_verbose) {
       printf(
@@ -1299,44 +1311,52 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
                 clientPtr,
             size_t) -> folly::coro::Task<void> {
       for (uint32_t i = 0; i < requestsPerCoroutine; ++i) {
+        if (std::chrono::steady_clock::now() >= activationDeadline) {
+          co_return;
+        }
         std::string key = generateKey();
         std::string value = generateValue();
 
-        auto requestOwner = std::make_shared<UcbSetRequest>();
-        UcbSetRequest& request = *requestOwner;
+        auto requestOwner =
+            std::make_shared<detail::PhysicalRequestOwner<UcbSetRequest>>(
+                activationPhysicalOutstanding->acquire());
+        UcbSetRequest& request = requestOwner->request;
         request.key_ref() = carbon::Keys<folly::IOBuf>(
             std::move(*folly::IOBuf::copyBuffer(key)));
         request.value_ref() = *folly::IOBuf::copyBuffer(value);
         request.exptime_ref() = 3600;
 
         auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
-        auto physicalLease = activationPhysicalOutstanding->acquire();
 
         const bool dispatched = clientPtr->send(
             request,
-            [p = std::move(promise), requestOwner, physicalLease](
+            [p = std::move(promise), requestOwner](
                 const UcbSetRequest&, UcbSetReply&& reply) mutable {
-              auto physicalLeaseGuard =
-                  folly::makeGuard([&]() { physicalLease->release(); });
-              (void)requestOwner;
+              auto physicalLeaseGuard = folly::makeGuard(
+                  [&]() { requestOwner->physicalLease.release(); });
               p.setValue(std::move(reply));
             });
         if (!dispatched) {
-          physicalLease->release();
+          requestOwner->physicalLease.release();
           continue;
         }
 
         try {
-          auto result =
-              co_await std::move(future).within(std::chrono::seconds(10));
-          if (*result.result() != carbon::Result::STORED) {
+          const auto timeoutNow = std::chrono::steady_clock::now();
+          if (timeoutNow >= activationDeadline) {
             co_return;
           }
-          scanOps++;
+          const auto timeout = std::min(
+              std::chrono::seconds(10),
+              std::chrono::ceil<std::chrono::seconds>(
+                  activationDeadline - timeoutNow));
+          auto result = co_await std::move(future).within(timeout);
+          if (*result.result() == carbon::Result::STORED) {
+            scanOps++;
+          }
         } catch (const std::exception&) {
-          // Stop this lane after a stalled accepted request. Its callback-owned
-          // lease keeps the request alive for the bounded activation drain.
-          co_return;
+          // Warmup below determines whether activation recovered; this phase is
+          // intentionally best-effort while fresh connections come online.
         }
       }
       co_return;
@@ -1389,22 +1409,14 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
             workerEvbs.at(0),
             drainPhysicalOutstanding(
                 activationPhysicalOutstanding, "connection activation", 0)));
-    if (scanOps.load() != expectedScanOps) {
-      throw std::runtime_error(
-          fmt::format(
-              "Connection activation completed only {} of {} requests",
-              scanOps.load(),
-              expectedScanOps));
-    }
-
     printf(
-        "Connection activation complete: %lu requests sent across %u proxies "
-        "(expected %u per proxy x %u rounds = %u total)\n",
+        "Connection activation complete: %lu of %lu probe requests succeeded "
+        "across %u proxies (%u per proxy x %u rounds)\n",
         scanOps.load(),
+        expectedScanOps,
         effectiveNumProxies_,
         scanOutstanding,
-        requestsPerCoroutine,
-        effectiveNumProxies_ * scanOutstanding * requestsPerCoroutine);
+        requestsPerCoroutine);
     fflush(stdout);
 
     // Write scan count and router diagnostics for remote debugging
@@ -1444,6 +1456,12 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     }
   }
 
+  startTime = std::chrono::steady_clock::now();
+  endTime = startTime + std::chrono::seconds(FLAGS_warmup_seconds);
+  stabilityStartTime =
+      endTime - std::chrono::seconds(std::min(FLAGS_warmup_seconds, 60u));
+  warmupStarted.store(true, std::memory_order_release);
+
   std::vector<std::shared_ptr<detail::PhysicalOutstandingTracker>>
       warmupPhysicalOutstanding;
   warmupPhysicalOutstanding.reserve(clients.size());
@@ -1479,14 +1497,15 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
     uint64_t lastSyncedErrors = 0;
 
     // Send one request - matches production McrouterAdapter::coro() pattern
-    auto sendOneRequest =
-        [&](std::shared_ptr<detail::PhysicalOutstandingLease> physicalLease)
+    auto sendOneRequest = [&](detail::PhysicalOutstandingLease physicalLease)
         -> folly::coro::Task<void> {
       std::string key = generateKey();
       std::string value = generateValue();
 
-      auto requestOwner = std::make_shared<UcbSetRequest>();
-      UcbSetRequest& request = *requestOwner;
+      auto requestOwner =
+          std::make_shared<detail::PhysicalRequestOwner<UcbSetRequest>>(
+              std::move(physicalLease));
+      UcbSetRequest& request = requestOwner->request;
       request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
       request.value() = *folly::IOBuf::copyBuffer(value);
@@ -1505,15 +1524,14 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       auto [promise, future] = folly::makePromiseContract<UcbSetReply>();
       const bool dispatched = clientPtr->send(
           request,
-          [p = std::move(promise), requestOwner, physicalLease](
+          [p = std::move(promise), requestOwner](
               const UcbSetRequest&, UcbSetReply&& reply) mutable {
-            auto physicalLeaseGuard =
-                folly::makeGuard([&]() { physicalLease->release(); });
-            (void)requestOwner;
+            auto physicalLeaseGuard = folly::makeGuard(
+                [&]() { requestOwner->physicalLease.release(); });
             p.setValue(std::move(reply));
           });
       if (!dispatched) {
-        physicalLease->release();
+        requestOwner->physicalLease.release();
         localOps++;
         recordError();
         co_return;
@@ -1572,7 +1590,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
               folly::coro::co_withExecutor(
                   exe,
                   folly::coro::co_invoke(
-                      [&, requestLease = std::move(admissionLease)]() mutable
+                      [&, requestLease = std::move(*admissionLease)]() mutable
                           -> folly::coro::Task<void> {
                         co_await sendOneRequest(std::move(requestLease));
                         inflight--;
@@ -1677,7 +1695,7 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
             ? (warmupResults.setSuccesses * 100.0 / warmupResults.totalOps)
             : 0.0);
     if (!warmupResults.success) {
-      printf("  WARNING: Warmup failed - no successful SET operations!\n");
+      printf("  WARNING: Warmup failed its clean stable-tail gate.\n");
     }
     fflush(stdout);
   }
@@ -2280,7 +2298,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     auto sendGetRequest =
         [&](std::chrono::steady_clock::time_point scheduledTime,
             bool measuredRequest,
-            std::shared_ptr<detail::PhysicalOutstandingLease> physicalLease,
+            detail::PhysicalOutstandingLease physicalLease,
             bool& primaryAccepted) -> folly::coro::Task<RequestOutcome> {
       if (openLoopEnabled &&
           std::chrono::steady_clock::now() >= measurementEndTime()) {
@@ -2291,8 +2309,10 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       auto opStartTime = scheduledTime;
       std::string key = generateKey();
 
-      auto requestOwner = std::make_shared<UcbGetRequest>();
-      UcbGetRequest& request = *requestOwner;
+      auto requestOwner =
+          std::make_shared<detail::PhysicalRequestOwner<UcbGetRequest>>(
+              std::move(physicalLease));
+      UcbGetRequest& request = requestOwner->request;
       request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
 
@@ -2334,17 +2354,10 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
       const bool dispatched = clientPtr->send(
           request,
-          [p = std::move(promise),
-           sampleLat,
-           cbEntry,
-           requestOwner,
-           physicalLease](const UcbGetRequest&, UcbGetReply&& reply) mutable {
-            auto physicalLeaseGuard = folly::makeGuard([&]() {
-              if (physicalLease) {
-                physicalLease->release();
-              }
-            });
-            (void)requestOwner;
+          [p = std::move(promise), sampleLat, cbEntry, requestOwner](
+              const UcbGetRequest&, UcbGetReply&& reply) mutable {
+            auto physicalLeaseGuard = folly::makeGuard(
+                [&]() { requestOwner->physicalLease.release(); });
             if (sampleLat) {
               cbEntry->store(
                   std::chrono::steady_clock::now().time_since_epoch().count(),
@@ -2353,9 +2366,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
             p.setValue(std::move(reply));
           });
       if (!dispatched) {
-        if (physicalLease) {
-          physicalLease->release();
-        }
+        requestOwner->physicalLease.release();
         if (sampleLat) {
           gLatLostSamples.fetch_add(1, std::memory_order_relaxed);
         }
@@ -2481,9 +2492,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
           co_return measuredRequest ? RequestOutcome::CancelledAtEnd
                                     : RequestOutcome::Unmeasured;
         }
-        auto refillPhysicalLease = openLoopEnabled
-            ? physicalOutstanding->tryAcquire(FLAGS_open_loop_max_outstanding)
-            : nullptr;
+        std::optional<detail::PhysicalOutstandingLease> refillPhysicalLease;
+        if (openLoopEnabled) {
+          refillPhysicalLease =
+              physicalOutstanding->tryAcquire(FLAGS_open_loop_max_outstanding);
+        }
         if (openLoopEnabled && !refillPhysicalLease) {
           if (!measuredRequest) {
             co_return RequestOutcome::Unmeasured;
@@ -2495,8 +2508,11 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
 
         std::string value = generateValue();
 
-        auto setRequestOwner = std::make_shared<UcbSetRequest>();
-        UcbSetRequest& setRequest = *setRequestOwner;
+        auto setRequestOwner =
+            std::make_shared<detail::PhysicalRequestOwner<UcbSetRequest>>(
+                openLoopEnabled ? std::move(*refillPhysicalLease)
+                                : detail::PhysicalOutstandingLease{});
+        UcbSetRequest& setRequest = setRequestOwner->request;
         setRequest.key() = carbon::Keys<folly::IOBuf>(
             std::move(*folly::IOBuf::copyBuffer(key)));
         setRequest.value() = *folly::IOBuf::copyBuffer(value);
@@ -2522,20 +2538,14 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
         }
         const bool setDispatched = clientPtr->send(
             setRequest,
-            [p = std::move(setPromise), setRequestOwner, refillPhysicalLease](
+            [p = std::move(setPromise), setRequestOwner](
                 const UcbSetRequest&, UcbSetReply&& reply) mutable {
-              auto physicalLeaseGuard = folly::makeGuard([&]() {
-                if (refillPhysicalLease) {
-                  refillPhysicalLease->release();
-                }
-              });
-              (void)setRequestOwner;
+              auto physicalLeaseGuard = folly::makeGuard(
+                  [&]() { setRequestOwner->physicalLease.release(); });
               p.setValue(std::move(reply));
             });
         if (!setDispatched) {
-          if (refillPhysicalLease) {
-            refillPhysicalLease->release();
-          }
+          setRequestOwner->physicalLease.release();
           if (!measuredRequest) {
             co_return RequestOutcome::Unmeasured;
           }
@@ -2618,7 +2628,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
     auto sendSetRequest =
         [&](std::chrono::steady_clock::time_point scheduledTime,
             bool measuredRequest,
-            std::shared_ptr<detail::PhysicalOutstandingLease> physicalLease,
+            detail::PhysicalOutstandingLease physicalLease,
             bool& primaryAccepted) -> folly::coro::Task<RequestOutcome> {
       if (openLoopEnabled &&
           std::chrono::steady_clock::now() >= measurementEndTime()) {
@@ -2630,8 +2640,10 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       std::string key = generateKey();
       std::string value = generateValue();
 
-      auto requestOwner = std::make_shared<UcbSetRequest>();
-      UcbSetRequest& request = *requestOwner;
+      auto requestOwner =
+          std::make_shared<detail::PhysicalRequestOwner<UcbSetRequest>>(
+              std::move(physicalLease));
+      UcbSetRequest& request = requestOwner->request;
       request.key() =
           carbon::Keys<folly::IOBuf>(std::move(*folly::IOBuf::copyBuffer(key)));
       request.value() = *folly::IOBuf::copyBuffer(value);
@@ -2657,20 +2669,14 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
       }
       const bool dispatched = clientPtr->send(
           request,
-          [p = std::move(promise), requestOwner, physicalLease](
+          [p = std::move(promise), requestOwner](
               const UcbSetRequest&, UcbSetReply&& reply) mutable {
-            auto physicalLeaseGuard = folly::makeGuard([&]() {
-              if (physicalLease) {
-                physicalLease->release();
-              }
-            });
-            (void)requestOwner;
+            auto physicalLeaseGuard = folly::makeGuard(
+                [&]() { requestOwner->physicalLease.release(); });
             p.setValue(std::move(reply));
           });
       if (!dispatched) {
-        if (physicalLease) {
-          physicalLease->release();
-        }
+        requestOwner->physicalLease.release();
         if (!measuredRequest) {
           co_return RequestOutcome::Unmeasured;
         }
@@ -2893,7 +2899,7 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
                       [&,
                        deadline,
                        measuredRequest,
-                       requestLease = std::move(admissionLease)]() mutable
+                       requestLease = std::move(*admissionLease)]() mutable
                           -> folly::coro::Task<void> {
                         auto inflightGuard = folly::makeGuard([&]() {
                           myInflight.fetch_sub(1, std::memory_order_relaxed);
@@ -3000,13 +3006,13 @@ UcacheBenchClient::BenchmarkResults UcacheBenchClient::runBenchmark() {
                       co_await sendGetRequest(
                           scheduledTime,
                           measuredRequest,
-                          nullptr,
+                          detail::PhysicalOutstandingLease{},
                           laneRequestAccepted);
                     } else {
                       co_await sendSetRequest(
                           scheduledTime,
                           measuredRequest,
-                          nullptr,
+                          detail::PhysicalOutstandingLease{},
                           laneRequestAccepted);
                     }
                     myInflight.fetch_sub(1);

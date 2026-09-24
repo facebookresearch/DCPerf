@@ -94,26 +94,28 @@ TEST(UcacheBenchLatencySamplingTest, UsesWorkerSpecificPriorities) {
 
 TEST(UcacheBenchOutstandingTest, ExplicitReleaseReopensCapWithOwnersAlive) {
   auto tracker = std::make_shared<detail::PhysicalOutstandingTracker>();
-  auto senderOwner = tracker->tryAcquire(1);
-  ASSERT_NE(senderOwner, nullptr);
+  auto lease = tracker->tryAcquire(1);
+  ASSERT_TRUE(lease.has_value());
+  auto senderOwner =
+      std::make_shared<detail::PhysicalRequestOwner<int>>(std::move(*lease));
   EXPECT_EQ(tracker->outstanding(), 1);
-  EXPECT_EQ(tracker->tryAcquire(1), nullptr);
+  EXPECT_FALSE(tracker->tryAcquire(1).has_value());
 
   auto callbackOwner = senderOwner;
-  callbackOwner->release();
+  callbackOwner->physicalLease.release();
   EXPECT_EQ(tracker->outstanding(), 0);
 
-  auto nextOwner = tracker->tryAcquire(1);
-  ASSERT_NE(nextOwner, nullptr);
+  auto nextLease = tracker->tryAcquire(1);
+  ASSERT_TRUE(nextLease.has_value());
   EXPECT_EQ(tracker->outstanding(), 1);
 
-  callbackOwner->release();
+  callbackOwner->physicalLease.release();
   EXPECT_EQ(tracker->outstanding(), 1);
   senderOwner.reset();
   callbackOwner.reset();
   EXPECT_EQ(tracker->outstanding(), 1);
 
-  nextOwner->release();
+  nextLease->release();
   EXPECT_EQ(tracker->outstanding(), 0);
 }
 
@@ -121,7 +123,7 @@ TEST(UcacheBenchOutstandingTest, DestructorReleasesLease) {
   auto tracker = std::make_shared<detail::PhysicalOutstandingTracker>();
   {
     auto lease = tracker->tryAcquire(1);
-    ASSERT_NE(lease, nullptr);
+    ASSERT_TRUE(lease.has_value());
     EXPECT_EQ(tracker->outstanding(), 1);
   }
   EXPECT_EQ(tracker->outstanding(), 0);
@@ -129,16 +131,18 @@ TEST(UcacheBenchOutstandingTest, DestructorReleasesLease) {
 
 TEST(UcacheBenchOutstandingTest, CancellationDetachesBeforePhysicalCompletion) {
   auto tracker = std::make_shared<detail::PhysicalOutstandingTracker>();
-  auto physicalLease = tracker->tryAcquire(1);
-  ASSERT_NE(physicalLease, nullptr);
+  auto lease = tracker->tryAcquire(1);
+  ASSERT_TRUE(lease.has_value());
+  auto requestOwner =
+      std::make_shared<detail::PhysicalRequestOwner<int>>(std::move(*lease));
   auto [promise, future] = folly::makePromiseContract<int>();
   std::atomic<bool> cancelled{false};
   std::atomic<bool> callbackRan{false};
   auto callback =
-      [p = std::move(promise), physicalLease, &callbackRan](int value) mutable {
+      [p = std::move(promise), requestOwner, &callbackRan](int value) mutable {
         callbackRan.store(true, std::memory_order_relaxed);
         p.setValue(value);
-        physicalLease->release();
+        requestOwner->physicalLease.release();
       };
 
   folly::coro::blockingWait([&]() -> folly::coro::Task<void> {
@@ -155,7 +159,7 @@ TEST(UcacheBenchOutstandingTest, CancellationDetachesBeforePhysicalCompletion) {
     EXPECT_TRUE(cancelled.load(std::memory_order_relaxed));
     EXPECT_FALSE(callbackRan.load(std::memory_order_relaxed));
     EXPECT_EQ(tracker->outstanding(), 1);
-    EXPECT_EQ(tracker->tryAcquire(1), nullptr);
+    EXPECT_FALSE(tracker->tryAcquire(1).has_value());
 
     callback(7);
     EXPECT_TRUE(callbackRan.load(std::memory_order_relaxed));
