@@ -107,43 +107,65 @@ Without `--aggregate-qps`, the full output omits `open_loop_qps` and sets
 `--baseline-latency-us` value can generate a conservative first point, but that
 point still requires calibration.
 
-The model uses only symbolic topology and memory relationships:
+The model uses only a few hardware relationships:
 
 ```text
 substantial_smt = (logical_cpus - physical_cores) >= 0.5 * physical_cores
 effective_cores = physical_cores
                 + 0.25 * min(physical_cores, logical_cpus - physical_cores)
-cache_fraction = clamp(0.40, 0.80,
-                       0.40 + 0.125 * log2(usable_memory_mib / 65536))
-reserve_mib = max(2048, ceil(0.20 * usable_memory_mib))
-cache_mib = floor_to_64(min(usable_memory_mib * cache_fraction,
-                            usable_memory_mib - reserve_mib,
+base_reserve_mib = min(32768, floor(usable_memory_mib / 2))
+cache_mib = floor_to_64(min(0.75 * (usable_memory_mib - base_reserve_mib),
                             1048576))
 rpc_io_threads = logical_cpus
-production_processes = min(64, round_up_4(max(16, physical_cores / 8)))
+production_processes = min(64, max(16, round_up_4(physical_cores / 8)))
 extreme_processes = min(64, round_up_8(max(16, physical_cores / 6)))
 ```
 
-Hash power follows cache-capacity boundaries. Proxy fanout uses generic SMT,
-memory-rich, and high-core branches. The server connection target is independent
-of load variant and is aligned to a common multiple of both variants' process
-and proxy counts, so production and extreme emit exactly the same total
-connections while keeping integral fanout and at most 32,768 destinations per
-process. The variants differ through offered load and client host/process
-placement. Client thread count, in-flight depth, warmup, duration, timeout, and
-open-loop safety limits are workload defaults rather than fitted hardware
-equations.
+Cache sizing follows TaoBench's simple 75% memory rule after reserving up to
+32 GiB for the operating system and benchmark overhead. On machines below
+64 GiB, the reserve is half of visible memory so the model remains usable on
+small hosts. The 1 TiB ceiling prevents unbounded working sets.
+
+Hash power follows cache-capacity boundaries. Production rounds logical CPUs
+per process to the nearest multiple of four proxies and caps each process at 16 to
+bound its thread footprint; the cap can leave very large synthetic inputs below
+one proxy EventBase per logical CPU. Production places every process on one
+client host. Extreme retains its separate stress-topology fanout. The one-host production invariant is covered for both T2 VNC inputs
+under consideration. For 192 physical cores / 384 logical CPUs, the equations
+produce `T=24`, `N=16`, `H=1`; for 248 physical cores / 496 logical CPUs, they
+produce `T=32`, `N=16`, `H=1`. These are equation-level topology checks only,
+not VNC hardware-acceptance claims; a full run is still required to prove that
+one physical client can deliver the calibrated QPS without errors or drops.
+Connection demand keeps its simple core-scaled equation because the CPL A/B
+showed that forcing 220,000 connections changed protocol behavior. The target
+uses `min(13250, 11000 + 64 * physical_cores)` destinations per process,
+multiplied by the larger variant process count and capped at 220,000, then
+rounds up to each variant's process-and-proxy quantum. Client thread count,
+measurement in-flight depth, the lower warmup cap, warmup, duration, timeout,
+and open-loop safety limits are fixed workload defaults rather than fitted
+hardware equations. NUMA interleave is enabled only when hardware detection
+finds more than one memory-bearing NUMA node. Latency reporting uses bounded,
+cache-line-isolated per-worker priority sampling followed by a process-wide
+merge, keeping one deterministic full-window reservoir without shared hot-path
+locks or multi-gigabyte vector growth during high-QPS runs.
 
 For the complete server-resource, process, proxy, connection, workload, and
 calibration formulas, see [SIZING.md](SIZING.md).
 
 The generated workload keeps one open-loop arrival per wire RPC, disables miss
 refill, enables fiber request handling, and uses the packaged traffic
-distribution. When autosizing has a resolved open-loop QPS, multi-client runs
-also stagger process traffic starts before a full 240-second measurement window;
-ramp traffic is excluded, while total connection count and steady-state offered
-QPS are unchanged. Calibration-only output with no resolved QPS omits the process
-ramp as well as the open-loop rate.
+distribution. Warmup admits at most `max_inflight` physical requests per
+worker/client and holds each slot through Carbon callback exit. Open-loop
+measurement uses the separate per-proxy outstanding cap and avoids allocating a
+second response-timeout timer for every RPC. At each phase boundary, logical
+waiters are cancelled and accepted mcrouter callbacks receive a bounded drain
+before measurement proceeds or results are reported. When
+autosizing has a resolved open-loop QPS, multi-client runs also stagger process
+traffic starts
+before a full 240-second measurement window; ramp traffic is excluded, while
+total connection count and steady-state offered QPS are unchanged.
+Calibration-only output with no resolved QPS omits the process ramp as well as
+the open-loop rate.
 
 ## Run on multiple client hosts
 
