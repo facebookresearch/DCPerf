@@ -241,6 +241,34 @@ class ParserTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires --open-loop-qps"):
             run_client(args)
 
+    def test_full_load_stabilization_requires_process_ramp(self) -> None:
+        args = init_parser().parse_args(
+            ["server", "--full-load-stabilization-seconds=60"]
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires --process-ramp-seconds"):
+            run_server(args)
+
+    def test_full_load_stabilization_is_forwarded_to_server_binary(self) -> None:
+        args = init_parser().parse_args(
+            [
+                "server",
+                "--interface-name=lo",
+                "--num-clients=16",
+                "--process-ramp-seconds=64",
+                "--full-load-stabilization-seconds=60",
+            ]
+        )
+        result = CommandResult([], "", 0, False, None)
+        target = "cea.chips.benchpress.packages.ucache_bench.run.run_cmd"
+
+        with patch(target, return_value=result) as run:
+            run_server(args)
+
+        command = run.call_args.args[0]
+        self.assertIn("--process_ramp_seconds=64", command)
+        self.assertIn("--full_load_stabilization_seconds=60", command)
+
     def test_process_ramp_is_forwarded_to_client_binary(self) -> None:
         args = init_parser().parse_args(
             [

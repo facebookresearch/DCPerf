@@ -40,6 +40,12 @@ class UcacheBenchAdminServerTestPeer {
   }
 };
 
+TEST(UcacheBenchAdminServerTest, AppliesFullLoadStabilizationAfterRamp) {
+  EXPECT_EQ(measurementStartDelaySeconds(0), 10);
+  EXPECT_EQ(measurementStartDelaySeconds(5), 10);
+  EXPECT_EQ(measurementStartDelaySeconds(60), 60);
+}
+
 TEST(UcacheBenchAdminServerTest, RejectsProtocolMismatch) {
   UcacheBenchAdminServer rampServer(0, 1, 0, 16);
   EXPECT_EQ(
@@ -53,7 +59,7 @@ TEST(UcacheBenchAdminServerTest, RejectsProtocolMismatch) {
 }
 
 TEST(UcacheBenchAdminServerTest, CoordinatesRampAndDefersMeasurement) {
-  UcacheBenchAdminServer server(0, 2, 30, 16);
+  UcacheBenchAdminServer server(0, 2, 30, 16, 11);
   UcacheBenchAdminServerTestPeer::startMeasurementLoop(server);
   std::mutex callbackMutex;
   std::condition_variable callbackCv;
@@ -128,13 +134,13 @@ TEST(UcacheBenchAdminServerTest, CoordinatesRampAndDefersMeasurement) {
       UcacheBenchAdminServerTestPeer::benchmarkStartNs(server) -
           scheduleRequestNs,
       std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::milliseconds(9000))
+          std::chrono::milliseconds(10000))
           .count());
   EXPECT_LE(
       UcacheBenchAdminServerTestPeer::benchmarkStartNs(server) -
           scheduleRequestNs,
       std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::milliseconds(11000))
+          std::chrono::milliseconds(12000))
           .count());
 
   // Early completion is retained and completed only after the measurement end.
