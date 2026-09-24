@@ -102,6 +102,33 @@ def _parse_json_or_file(value, arg_name):
         raise ParseInputError(f"{arg_name}: failed to load {value}: {e}") from e
 
 
+def _collect_sys_spec(collector, default, ignore_errors):
+    """Invoke a sys_specs collector, optionally tolerating tool failures.
+
+    System-information helpers (numactl, lshw, ...) may be missing in minimal
+    environments such as CI containers. When `ignore_errors` is set, an
+    OSError from the collector (e.g. FileNotFoundError for a missing binary)
+    is logged and `default` is returned instead of aborting the run. Any
+    other exception type (e.g. a parsing bug) always propagates.
+
+    Args:
+        collector: zero-argument callable returning the collected specs.
+        default: value to return when collection fails and `ignore_errors`
+            is set ({} or [] matching the collector's return shape).
+        ignore_errors: tolerate OSError raised by the collector.
+
+    Returns:
+        The collector's result, or `default` on tolerated failure.
+    """
+    try:
+        return collector()
+    except OSError as ex:
+        if not ignore_errors:
+            raise
+        logger.warning("Ignoring error while collecting %s: %s", collector.__name__, ex)
+        return default
+
+
 class RunCommand(BenchpressCommand):
     # Directories under BENCHPRESS_ROOT that never contain workload source
     # checkouts -- skipped while scanning for git repos to keep the walk cheap.
@@ -317,6 +344,15 @@ class RunCommand(BenchpressCommand):
                 "or a path to a .json/.yml/.yaml file containing the same."
             ),
         )
+        parser.add_argument(
+            "--ignore-sys-specs-errors",
+            action="store_true",
+            help=(
+                "Tolerate failures while collecting system specifications "
+                "(e.g. missing numactl/lshw binaries in minimal containers): "
+                "warn and continue with empty values instead of aborting."
+            ),
+        )
 
     def run(self, args, jobs) -> None:
         json_reporter = ReporterFactory.create("json_file")
@@ -360,26 +396,52 @@ class RunCommand(BenchpressCommand):
         history = History(args.results)
         now = datetime.now(timezone.utc)
 
-        cpu_topology = sys_specs.get_cpu_topology()
-        os_kernel_data = sys_specs.get_os_kernel()
-        os_release_data = sys_specs.get_os_release_data()
-        kernel_cmdline = sys_specs.get_kernel_cmdline()
-        dmidecode_data = sys_specs.get_dmidecode_data()
-        numa_topology = sys_specs.get_numa_topology()
-        numastat_data = sys_specs.get_numastat()
-        ulimit_data = sys_specs.get_ulimit()
+        ignore_sys_specs_errors = args.ignore_sys_specs_errors
+
+        cpu_topology = _collect_sys_spec(
+            sys_specs.get_cpu_topology, {}, ignore_sys_specs_errors
+        )
+        os_kernel_data = _collect_sys_spec(
+            sys_specs.get_os_kernel, {}, ignore_sys_specs_errors
+        )
+        os_release_data = _collect_sys_spec(
+            sys_specs.get_os_release_data, {}, ignore_sys_specs_errors
+        )
+        kernel_cmdline = _collect_sys_spec(
+            sys_specs.get_kernel_cmdline, [], ignore_sys_specs_errors
+        )
+        dmidecode_data = _collect_sys_spec(
+            sys_specs.get_dmidecode_data, {}, ignore_sys_specs_errors
+        )
+        numa_topology = _collect_sys_spec(
+            sys_specs.get_numa_topology, {}, ignore_sys_specs_errors
+        )
+        numastat_data = _collect_sys_spec(
+            sys_specs.get_numastat, {}, ignore_sys_specs_errors
+        )
+        ulimit_data = _collect_sys_spec(
+            sys_specs.get_ulimit, {}, ignore_sys_specs_errors
+        )
         sys_packages = []
         if "id" in os_release_data:
             os_id = os_release_data["id"].lower()
             if os_id in ("centos", "rhel", "fedora"):
-                sys_packages = sys_specs.get_rpm_packages()
+                sys_packages = _collect_sys_spec(
+                    sys_specs.get_rpm_packages, [], ignore_sys_specs_errors
+                )
             elif os_id in ("ubuntu", "debian"):
-                sys_packages = sys_specs.get_dpkg_packages()
+                sys_packages = _collect_sys_spec(
+                    sys_specs.get_dpkg_packages, [], ignore_sys_specs_errors
+                )
             else:
                 sys_packages = []
-        kernel_params = sys_specs.get_sysctl_data()
-        mem_data = sys_specs.get_cpu_mem_data()
-        hw_data = sys_specs.get_hw_data()
+        kernel_params = _collect_sys_spec(
+            sys_specs.get_sysctl_data, {}, ignore_sys_specs_errors
+        )
+        mem_data = _collect_sys_spec(
+            sys_specs.get_cpu_mem_data, {}, ignore_sys_specs_errors
+        )
+        hw_data = _collect_sys_spec(sys_specs.get_hw_data, {}, ignore_sys_specs_errors)
 
         sys_specs_dict = {}
         sys_specs_dict["cpu_topology"] = cpu_topology
