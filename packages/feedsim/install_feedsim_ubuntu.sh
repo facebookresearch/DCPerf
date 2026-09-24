@@ -19,6 +19,10 @@ LIBTORCH_VERSION="${LIBTORCH_VERSION:-2.13.0}"
 # LIBTORCH_VERSION=2.13.0 default so the out-of-box install works without
 # additional env overrides.
 LIBTORCH_FROM_WHEEL="${LIBTORCH_FROM_WHEEL:-1}"
+# Dependency versions are env-overridable so experiments can bump them without
+# forking this script; defaults match the CentOS installer.
+JEMALLOC_VERSION="${FEEDSIM_JEMALLOC_VERSION:-5.3.0}"
+LIBEVENT_VERSION="${FEEDSIM_LIBEVENT_VERSION:-2.1.12-stable}"
 DLRM_MODEL_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-dlrm/dlrm_small.tar.gz"
 echo "BENCHPRESS_ROOT is ${BENCHPRESS_ROOT}"
 
@@ -37,7 +41,7 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    sysstat jq xxhash libxxhash-dev unzip rsync curl
+    sysstat jq xxhash libxxhash-dev unzip rsync curl git wget python3
 
 # Install liburing >= 2.6 from source. Ubuntu's apt-shipped liburing (0.7 on
 # 20.04, 2.1 on 22.04) is older than folly's minimum, so folly's io_uring
@@ -73,6 +77,12 @@ cp "${BENCHPRESS_ROOT}/packages/feedsim/run-feedsim-multi.sh" "${FEEDSIM_ROOT_SR
 chmod u+x "${FEEDSIM_ROOT_SRC}/run.sh"
 chmod u+x "${FEEDSIM_ROOT_SRC}/run-feedsim-multi.sh"
 
+# Copy production size distribution JSONs (consumed by run.sh / DriverNodeRank).
+cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_req_sizes.json" "${FEEDSIM_ROOT_SRC}/feed_aggregator_req_sizes.json"
+cp "${BENCHPRESS_ROOT}/packages/feedsim/feed_aggregator_resp_sizes.json" "${FEEDSIM_ROOT_SRC}/feed_aggregator_resp_sizes.json"
+# Phase 6 session-mode driver loads rpc_dist.json from the FEEDSIM_ROOT runtime dir.
+cp "${BENCHPRESS_ROOT}/packages/feedsim/rpc_dist.json" "${FEEDSIM_ROOT_SRC}/rpc_dist.json"
+
 msg "Installing third-party dependencies..."
 # Sync feedsim source with --delete so `./benchpress install -f` actually picks up
 # source changes. The previous "skip if dir exists" guard meant -f never refreshed
@@ -91,7 +101,30 @@ rsync -a --delete --exclude=third_party \
 mkdir -p "${FEEDSIM_ROOT_SRC}/src/third_party"
 cp -f "${BENCHPRESS_ROOT}/packages/feedsim/third_party/src/third_party/CMakeLists.txt" \
     "${FEEDSIM_ROOT_SRC}/src/third_party/CMakeLists.txt"
+# Sync the rest of third_party/ (cmake source dir, fbthrift submodule, etc.) WITHOUT
+# --delete because subsequent steps download cmake / boost / libtorch into this dir
+# and we don't want to wipe them on re-install. The --exclude=src keeps src/ out of
+# this rsync — it's already handled above and lives under ${FEEDSIM_ROOT_SRC}/src.
+rsync -a --exclude=src \
+    "${BENCHPRESS_ROOT}/packages/feedsim/third_party/" \
+    "${FEEDSIM_THIRD_PARTY_SRC}/"
 cd "${FEEDSIM_THIRD_PARTY_SRC}"
+
+# Optionally build DynamoRIO for tracing support.
+DR_TRACE_FLAGS=()
+if [ "${ENABLE_DR_TRACE:-0}" = "1" ]; then
+  msg "[DR_TRACE] Setting up DynamoRIO tracing support..."
+  BUILD_DIR="${FEEDSIM_THIRD_PARTY_SRC}"
+  export BUILD_DIR
+  # shellcheck disable=SC1091
+  source "${BENCHPRESS_ROOT}/packages/common/dr_trace/install_dynamorio.sh"
+  DR_TRACE_FLAGS=(
+    -DENABLE_DR_TRACE=ON
+    -DDR_INSTALL="${DR_INSTALL}"
+    -DDR_TRACE_DIR="${BENCHPRESS_ROOT}/packages/common/dr_trace"
+  )
+  msg "[DR_TRACE] DR_INSTALL=${DR_INSTALL}"
+fi
 
 # Installing cmake-4.0.3
 
@@ -123,6 +156,7 @@ fi
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
     # Source the download retry function
+    # shellcheck disable=SC1091 # path is dynamic; file ships in-repo at scripts/
     source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
     download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
     tar -xf "gengetopt-2.23.tar.xz"
@@ -180,30 +214,30 @@ fi
 ldconfig
 
 # Installing JEMalloc
-if ! [ -d "jemalloc-5.3.0" ]; then
-    wget "https://github.com/jemalloc/jemalloc/releases/download/5.3.0/jemalloc-5.3.0.tar.bz2"
-    bunzip2 "jemalloc-5.3.0.tar.bz2"
-    tar -xvf "jemalloc-5.3.0.tar"
-    cd "jemalloc-5.3.0"
+if ! [ -d "jemalloc-${JEMALLOC_VERSION}" ]; then
+    wget "https://github.com/jemalloc/jemalloc/releases/download/${JEMALLOC_VERSION}/jemalloc-${JEMALLOC_VERSION}.tar.bz2"
+    bunzip2 "jemalloc-${JEMALLOC_VERSION}.tar.bz2"
+    tar -xvf "jemalloc-${JEMALLOC_VERSION}.tar"
+    cd "jemalloc-${JEMALLOC_VERSION}"
     ./configure --enable-prof --enable-prof-libunwind
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] jemalloc-5.3.0"
+    msg "[SKIPPED] jemalloc-${JEMALLOC_VERSION}"
 fi
 
 # Installing libevent
-if ! [ -d "libevent-2.1.12-stable" ]; then
-    wget "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
-    tar -xzf "libevent-2.1.12-stable.tar.gz"
-    cd "libevent-2.1.12-stable"
+if ! [ -d "libevent-${LIBEVENT_VERSION}" ]; then
+    wget "https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}/libevent-${LIBEVENT_VERSION}.tar.gz"
+    tar -xzf "libevent-${LIBEVENT_VERSION}.tar.gz"
+    cd "libevent-${LIBEVENT_VERSION}"
     ./configure
     make -j"$(nproc)"
     make install
     cd ../
 else
-    msg "[SKIPPED] libevent-2.1.12-stable"
+    msg "[SKIPPED] libevent-${LIBEVENT_VERSION}"
 fi
 
 msg "Installing third-party dependencies ... DONE"
@@ -266,6 +300,67 @@ else
 fi
 
 
+# Download Silesia compression corpus for story-based requests (Phase 3).
+# A sentinel file marks a fully downloaded + extracted corpus. Downloads
+# stage into a temp dir and swap into place only on success, so a failed
+# redownload never destroys a previously-good corpus (e.g. from an older
+# installer without the sentinel) and the next install retries cleanly.
+SILESIA_DIR="${FEEDSIM_ROOT_SRC}/silesia"
+SILESIA_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-silesia/silesia.tar.gz"
+SILESIA_DONE="${SILESIA_DIR}/.silesia_complete"
+if ! [ -f "$SILESIA_DONE" ]; then
+    msg "Downloading Silesia corpus..."
+    mkdir -p "$SILESIA_DIR"
+    rm -rf -- "${SILESIA_DIR}"/.staging.*
+    SILESIA_STAGE="$(mktemp -d "${SILESIA_DIR}/.staging.XXXXXX")"
+    cd "$SILESIA_STAGE" || { msg "[ERROR] cannot cd to $SILESIA_STAGE"; exit 1; }
+    SILESIA_OK=0
+    if wget -q "$SILESIA_URL" -O silesia.tar.gz 2>/dev/null && tar -xzf silesia.tar.gz; then
+        SILESIA_OK=1
+    else
+        # Fallback to original Silesia host
+        msg "[INFO] GitHub dataset not available, trying original Silesia host..."
+        SILESIA_FALLBACK_URL="https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip"
+        rm -f silesia.tar.gz
+        if wget -q "$SILESIA_FALLBACK_URL" -O silesia.zip 2>/dev/null && unzip -q silesia.zip; then
+            SILESIA_OK=1
+        fi
+    fi
+    rm -f silesia.tar.gz silesia.zip
+    # Treat an empty extraction as failure so we warn instead of
+    # installing an empty corpus (SilesiaLoader rejects empty dirs).
+    [ -n "$(find . -maxdepth 1 -type f -print -quit)" ] || SILESIA_OK=0
+    cd "${FEEDSIM_THIRD_PARTY_SRC}"
+    if [ "$SILESIA_OK" = "1" ]; then
+        # Swap staged files into place, dropping stale leftovers.
+        find "$SILESIA_DIR" -maxdepth 1 -type f -delete
+        mv "$SILESIA_STAGE"/* "$SILESIA_DIR"/
+        rmdir "$SILESIA_STAGE"
+        touch "$SILESIA_DONE"
+        msg "Silesia corpus downloaded: $(find "$SILESIA_DIR" -maxdepth 1 -type f ! -name '.*' | wc -l) files, $(du -sh "$SILESIA_DIR" | cut -f1)"
+    else
+        rm -rf "$SILESIA_STAGE"
+        msg "[WARNING] Silesia download failed — story-based requests will be unavailable"
+    fi
+else
+    msg "[SKIPPED] Silesia corpus already present at $SILESIA_DIR"
+fi
+
+# Extract example TLS certs for mock_services (used when --tls_cert/--tls_key
+# are passed; see run-feedsim-multi.sh). The tarball ships example.crt and
+# example.key suitable for benchmark use only (no peer verification).
+CERTS_DIR="${FEEDSIM_ROOT_SRC}/certs"
+CERTS_TARBALL="${BENCHPRESS_ROOT}/packages/common/certs.tar.gz"
+if [ -f "$CERTS_TARBALL" ]; then
+    mkdir -p "$CERTS_DIR"
+    # --strip-components=1 drops the top-level `certs/` directory inside the
+    # tarball so the files land directly at $CERTS_DIR/example.{crt,key}.
+    tar -xzf "$CERTS_TARBALL" -C "$CERTS_DIR" --strip-components=1
+    msg "Extracted TLS certs to $CERTS_DIR"
+else
+    msg "[WARNING] $CERTS_TARBALL not found; TLS for mock_services will be unavailable"
+fi
+
 # Installing FeedSim
 cd "${FEEDSIM_ROOT_SRC}"
 
@@ -309,7 +404,12 @@ mkdir -p build && cd build/
 # Build FeedSim with DLRM support
 FS_CFLAGS="${BP_CFLAGS:--O3 -DNDEBUG}"
 FS_CXXFLAGS="${BP_CXXFLAGS:--O3 -DNDEBUG }"
-FS_LDFLAGS="${BP_LDFLAGS:-} -latomic -Wl,--export-dynamic"
+# -luring: folly's IoUringZeroCopyBufferPool/IoUringEvent reference io_uring
+# symbols but folly's CMake doesn't propagate liburing as a transitive link
+# dependency. The static libfolly.a otherwise fails to link LeafNodeRank with
+# undefined references to io_uring_register_ifq / io_uring_register_eventfd.
+# Force the link explicitly (liburing 2.12 was built into /usr/local above).
+FS_LDFLAGS="${BP_LDFLAGS:-} -luring -latomic -Wl,--export-dynamic"
 
 BP_CC="${BP_CC:-gcc}"
 BP_CXX="${BP_CXX:-g++}"
@@ -323,9 +423,20 @@ cmake -G Ninja \
     -DCMAKE_EXE_LINKER_FLAGS_RELEASE="$FS_LDFLAGS" \
     -DTorch_DIR="${FEEDSIM_THIRD_PARTY_SRC}/libtorch/share/cmake/Torch" \
     -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/libtorch" \
+    "${DR_TRACE_FLAGS[@]}" \
     ../
 
-ninja -v -j1
+# Dependencies (fmt, folly, fbthrift, etc.) are already installed above via
+# separate make commands in their own build directories. This ninja step only
+# builds FeedSim itself (LeafNodeRank, DriverNodeRank, feature extractors),
+# so parallel builds are safe here. Use nproc/2 to avoid OOM.
+NINJA_JOBS="${BP_NINJA_JOBS:-$(( $(nproc) / 2 ))}"
+# Guard against non-numeric BP_NINJA_JOBS overrides, which would make the
+# integer comparison below abort the install under `set -e`.
+[[ "$NINJA_JOBS" =~ ^[0-9]+$ ]] || NINJA_JOBS=1
+[ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
+msg "Building FeedSim with ninja -j${NINJA_JOBS} (set BP_NINJA_JOBS to override)"
+ninja -j"${NINJA_JOBS}"
 
 msg ""
 msg "=== FeedSim Installation Complete ==="

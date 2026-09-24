@@ -153,6 +153,7 @@ fi
 # Installing gengetopt
 if ! [ -d "gengetopt-2.23" ]; then
     # Source the download retry function
+    # shellcheck disable=SC1091 # path is dynamic; file ships in-repo at scripts/
     source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
     download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-2.23.tar.xz"
     tar -xf "gengetopt-2.23.tar.xz"
@@ -295,28 +296,48 @@ else
 fi
 
 
-# Download Silesia compression corpus for story-based requests (Phase 3)
+# Download Silesia compression corpus for story-based requests (Phase 3).
+# A sentinel file marks a fully downloaded + extracted corpus. Downloads
+# stage into a temp dir and swap into place only on success, so a failed
+# redownload never destroys a previously-good corpus (e.g. from an older
+# installer without the sentinel) and the next install retries cleanly.
 SILESIA_DIR="${FEEDSIM_ROOT_SRC}/silesia"
 SILESIA_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-silesia/silesia.tar.gz"
-if ! [ -d "$SILESIA_DIR" ] || [ -z "$(ls -A "$SILESIA_DIR" 2>/dev/null)" ]; then
+SILESIA_DONE="${SILESIA_DIR}/.silesia_complete"
+if ! [ -f "$SILESIA_DONE" ]; then
     msg "Downloading Silesia corpus..."
     mkdir -p "$SILESIA_DIR"
-    cd "$SILESIA_DIR" || { msg "[ERROR] cannot cd to $SILESIA_DIR"; exit 1; }
-    if wget -q "$SILESIA_URL" -O silesia.tar.gz 2>/dev/null; then
-        tar -xzf silesia.tar.gz && rm -f silesia.tar.gz
-        msg "Silesia corpus downloaded: $(ls | wc -l) files, $(du -sh . | cut -f1)"
+    rm -rf -- "${SILESIA_DIR}"/.staging.*
+    SILESIA_STAGE="$(mktemp -d "${SILESIA_DIR}/.staging.XXXXXX")"
+    cd "$SILESIA_STAGE" || { msg "[ERROR] cannot cd to $SILESIA_STAGE"; exit 1; }
+    SILESIA_OK=0
+    if wget -q "$SILESIA_URL" -O silesia.tar.gz 2>/dev/null && tar -xzf silesia.tar.gz; then
+        SILESIA_OK=1
     else
         # Fallback to original Silesia host
         msg "[INFO] GitHub dataset not available, trying original Silesia host..."
         SILESIA_FALLBACK_URL="https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip"
-        if wget -q "$SILESIA_FALLBACK_URL" -O silesia.zip 2>/dev/null; then
-            unzip -q silesia.zip && rm -f silesia.zip
-            msg "Silesia corpus downloaded: $(ls | wc -l) files, $(du -sh . | cut -f1)"
-        else
-            msg "[WARNING] Silesia download failed — story-based requests will be unavailable"
+        rm -f silesia.tar.gz
+        if wget -q "$SILESIA_FALLBACK_URL" -O silesia.zip 2>/dev/null && unzip -q silesia.zip; then
+            SILESIA_OK=1
         fi
     fi
+    rm -f silesia.tar.gz silesia.zip
+    # Treat an empty extraction as failure so we warn instead of
+    # installing an empty corpus (SilesiaLoader rejects empty dirs).
+    [ -n "$(find . -maxdepth 1 -type f -print -quit)" ] || SILESIA_OK=0
     cd "${FEEDSIM_THIRD_PARTY_SRC}"
+    if [ "$SILESIA_OK" = "1" ]; then
+        # Swap staged files into place, dropping stale leftovers.
+        find "$SILESIA_DIR" -maxdepth 1 -type f -delete
+        mv "$SILESIA_STAGE"/* "$SILESIA_DIR"/
+        rmdir "$SILESIA_STAGE"
+        touch "$SILESIA_DONE"
+        msg "Silesia corpus downloaded: $(find "$SILESIA_DIR" -maxdepth 1 -type f ! -name '.*' | wc -l) files, $(du -sh "$SILESIA_DIR" | cut -f1)"
+    else
+        rm -rf "$SILESIA_STAGE"
+        msg "[WARNING] Silesia download failed — story-based requests will be unavailable"
+    fi
 else
     msg "[SKIPPED] Silesia corpus already present at $SILESIA_DIR"
 fi
@@ -403,6 +424,9 @@ cmake -G Ninja \
 # builds FeedSim itself (LeafNodeRank, DriverNodeRank, feature extractors),
 # so parallel builds are safe here. Use nproc/2 to avoid OOM.
 NINJA_JOBS="${BP_NINJA_JOBS:-$(( $(nproc) / 2 ))}"
+# Guard against non-numeric BP_NINJA_JOBS overrides, which would make the
+# integer comparison below abort the install under `set -e`.
+[[ "$NINJA_JOBS" =~ ^[0-9]+$ ]] || NINJA_JOBS=1
 [ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
 msg "Building FeedSim with ninja -j${NINJA_JOBS} (set BP_NINJA_JOBS to override)"
 ninja -j"${NINJA_JOBS}"
