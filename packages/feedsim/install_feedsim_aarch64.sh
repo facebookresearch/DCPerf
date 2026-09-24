@@ -121,24 +121,33 @@ fi
 # `cmake: command not found` at line 401.)
 export PATH="${FEEDSIM_THIRD_PARTY_SRC}/cmake-${DEP_CMAKE_VERSION}-linux-aarch64/bin:${PATH}"
 
-# Installing fast_float
-if ! [ -d "fast_float" ]; then
+# Installing fast_float, pinned for reproducibility. The pin is enforced on
+# every install (not just fresh clones): fast_float is header-only so
+# re-installing is cheap, and this heals checkouts made by older installers.
+FAST_FLOAT_VERSION="v8.1.0"
+# Re-clone when the directory is missing or not a valid repo (a prior
+# install may have left an empty/non-repo dir that would fail checkout).
+if [ ! -d "fast_float" ] || ! git -C fast_float rev-parse --git-dir >/dev/null 2>&1; then
+    rm -rf fast_float
     git clone https://github.com/fastfloat/fast_float.git
-    cd fast_float
-    git checkout v8.1.0
-    mkdir build && cd build
-    cmake ..
-    make -j"$(nproc)"
-    make install
-    cd ../../
-else
-    msg "[SKIPPED] fast_float"
 fi
+cd fast_float
+if ! git checkout -q "${FAST_FLOAT_VERSION}" 2>/dev/null; then
+    msg "[INFO] fetching fast_float tags for ${FAST_FLOAT_VERSION}..."
+    git fetch -q --tags origin
+    git checkout -q "${FAST_FLOAT_VERSION}"
+fi
+mkdir -p build && cd build
+cmake ..
+make -j"$(nproc)"
+make install
+cd ../../
 
 # Installing gengetopt
 DEP_GENGOPT_VERSION="2.23"
 if ! [ -d "gengetopt-${DEP_GENGOPT_VERSION}" ]; then
     # Source the download retry function
+    # shellcheck disable=SC1091 # path is dynamic; file ships in-repo at scripts/
     source "${BENCHPRESS_ROOT}/scripts/download_with_retry.sh"
     download_with_retry "https://mirrors.ocf.berkeley.edu/gnu/gengetopt/gengetopt-${DEP_GENGOPT_VERSION}.tar.xz"
     verify_checksum "gengetopt-${DEP_GENGOPT_VERSION}.tar.xz" "b941aec9011864978dd7fdeb052b1943535824169d2aa2b0e7eae9ab807584ac"
@@ -323,27 +332,48 @@ else
     msg "[SKIPPED] DLRM model already installed"
 fi
 
-# Download Silesia compression corpus for story-based requests (Phase 3)
+# Download Silesia compression corpus for story-based requests (Phase 3).
+# A sentinel file marks a fully downloaded + extracted corpus. Downloads
+# stage into a temp dir and swap into place only on success, so a failed
+# redownload never destroys a previously-good corpus (e.g. from an older
+# installer without the sentinel) and the next install retries cleanly.
 SILESIA_DIR="${FEEDSIM_ROOT_SRC}/silesia"
 SILESIA_URL="https://github.com/facebookresearch/DCPerf-datasets/releases/download/feedsim-silesia/silesia.tar.gz"
-if ! [ -d "$SILESIA_DIR" ] || [ -z "$(ls -A "$SILESIA_DIR" 2>/dev/null)" ]; then
+SILESIA_DONE="${SILESIA_DIR}/.silesia_complete"
+if ! [ -f "$SILESIA_DONE" ]; then
     msg "Downloading Silesia corpus..."
     mkdir -p "$SILESIA_DIR"
-    cd "$SILESIA_DIR" || { msg "[ERROR] cannot cd to $SILESIA_DIR"; exit 1; }
-    if wget -q "$SILESIA_URL" -O silesia.tar.gz 2>/dev/null; then
-        tar -xzf silesia.tar.gz && rm -f silesia.tar.gz
-        msg "Silesia corpus downloaded: $(ls | wc -l) files, $(du -sh . | cut -f1)"
+    rm -rf -- "${SILESIA_DIR}"/.staging.*
+    SILESIA_STAGE="$(mktemp -d "${SILESIA_DIR}/.staging.XXXXXX")"
+    cd "$SILESIA_STAGE" || { msg "[ERROR] cannot cd to $SILESIA_STAGE"; exit 1; }
+    SILESIA_OK=0
+    if wget -q "$SILESIA_URL" -O silesia.tar.gz 2>/dev/null && tar -xzf silesia.tar.gz; then
+        SILESIA_OK=1
     else
+        # Fallback to original Silesia host
         msg "[INFO] GitHub dataset not available, trying original Silesia host..."
         SILESIA_FALLBACK_URL="https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip"
-        if wget -q "$SILESIA_FALLBACK_URL" -O silesia.zip 2>/dev/null; then
-            unzip -q silesia.zip && rm -f silesia.zip
-            msg "Silesia corpus downloaded: $(ls | wc -l) files, $(du -sh . | cut -f1)"
-        else
-            msg "[WARNING] Silesia download failed — story-based requests will be unavailable"
+        rm -f silesia.tar.gz
+        if wget -q "$SILESIA_FALLBACK_URL" -O silesia.zip 2>/dev/null && unzip -q silesia.zip; then
+            SILESIA_OK=1
         fi
     fi
+    rm -f silesia.tar.gz silesia.zip
+    # Treat an empty extraction as failure so we warn instead of
+    # installing an empty corpus (SilesiaLoader rejects empty dirs).
+    [ -n "$(find . -maxdepth 1 -type f -print -quit)" ] || SILESIA_OK=0
     cd "${FEEDSIM_THIRD_PARTY_SRC}"
+    if [ "$SILESIA_OK" = "1" ]; then
+        # Swap staged files into place, dropping stale leftovers.
+        find "$SILESIA_DIR" -maxdepth 1 -type f -delete
+        mv "$SILESIA_STAGE"/* "$SILESIA_DIR"/
+        rmdir "$SILESIA_STAGE"
+        touch "$SILESIA_DONE"
+        msg "Silesia corpus downloaded: $(find "$SILESIA_DIR" -maxdepth 1 -type f ! -name '.*' | wc -l) files, $(du -sh "$SILESIA_DIR" | cut -f1)"
+    else
+        rm -rf "$SILESIA_STAGE"
+        msg "[WARNING] Silesia download failed — story-based requests will be unavailable"
+    fi
 else
     msg "[SKIPPED] Silesia corpus already present at $SILESIA_DIR"
 fi
@@ -439,6 +469,9 @@ cmake -G Ninja \
 # ExternalProject_Add_StepDependencies(), so ninja respects the DAG under -jN.
 # Use nproc/2 to avoid OOM during heavy template-instantiation steps.
 NINJA_JOBS="${BP_NINJA_JOBS:-$(( $(nproc) / 2 ))}"
+# Guard against non-numeric BP_NINJA_JOBS overrides, which would make the
+# integer comparison below abort the install under `set -e`.
+[[ "$NINJA_JOBS" =~ ^[0-9]+$ ]] || NINJA_JOBS=1
 [ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
 msg "Building FeedSim with ninja -j${NINJA_JOBS} (set BP_NINJA_JOBS to override)"
 ninja-build -j"${NINJA_JOBS}"
