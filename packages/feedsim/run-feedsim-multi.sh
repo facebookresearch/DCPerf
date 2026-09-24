@@ -249,7 +249,9 @@ fi
 function get_cpu_range() {
     total_instances="$1"
     inst_id="$2"
-    has_smt="$(cat /sys/devices/system/cpu/smt/active)"
+    # smt/active is absent on non-SMT architectures (e.g. ARM) and in some
+    # containers; default to 0 (physical cores = logical cores).
+    has_smt="$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo 0)"
 
     NPROC="$(nproc)"
     if [ "$has_smt" -eq 1 ]; then
