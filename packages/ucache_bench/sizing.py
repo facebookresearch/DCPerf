@@ -31,7 +31,6 @@ _TARGET_DESTINATIONS_PER_CORE: int = 64
 _MAX_TARGET_DESTINATIONS_PER_PROCESS: int = 13_250
 _MAX_TARGET_TOTAL_CONNECTIONS: int = 220_000
 _MAX_TOTAL_PROCESSES: int = 64
-_MAX_PRODUCTION_PROXIES: int = 16
 _MAX_PROXIES: int = 80
 
 
@@ -440,18 +439,11 @@ def calculate_total_processes(physical_cores: int, variant: LoadVariant) -> int:
 
 
 def calculate_proxy_count(topology: HardwareTopology, variant: LoadVariant) -> int:
-    if variant == LoadVariant.PRODUCTION:
-        total_processes = calculate_total_processes(
-            topology.physical_cores, LoadVariant.PRODUCTION
-        )
-        requested = _round_to_nearest_multiple(
-            topology.logical_cpus / total_processes, 4
-        )
-        return _clamp(4, _MAX_PRODUCTION_PROXIES, requested)
-    elif not topology.substantial_smt:
+    if not topology.substantial_smt:
         requested = max(20, topology.physical_cores / 4)
     elif topology.memory_mib >= _MEMORY_RICH_MIB:
-        requested = topology.physical_cores / 2
+        divisor = 5 if variant == LoadVariant.PRODUCTION else 2
+        requested = topology.physical_cores / divisor
     elif topology.physical_cores >= 64:
         requested = 0.68 * topology.physical_cores
     else:

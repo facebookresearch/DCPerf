@@ -1523,6 +1523,10 @@ UcacheBenchClient::WarmupResults UcacheBenchClient::warmup() {
       try {
         result = co_await folly::coro::detachOnCancel(
             std::move(future).within(std::chrono::seconds(10)));
+      } catch (const folly::OperationCancelled&) {
+        // The warmup scope cancels logical waiters at the phase boundary. Their
+        // accepted requests remain callback-owned and are drained below.
+        co_return;
       } catch (const std::exception&) {
         // The accepted request did not complete before its logical timeout.
         // Its callback still owns the request and physical lease for the drain.

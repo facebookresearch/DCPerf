@@ -122,8 +122,8 @@ total client processes = H * (num_source_ips + 1)
 
 Production uses one physical client by construction. For the two T2 VNC inputs
 under consideration, 192 physical cores / 384 logical CPUs produce `T=24`,
-`N=16`, `H=1`, while 248 physical cores / 496 logical CPUs produce `T=32`,
-`N=16`, `H=1`. Unit tests lock down both equation-level cases. They do not
+`N=40`, `H=1`, while 248 physical cores / 496 logical CPUs produce `T=32`,
+`N=48`, `H=1`. Unit tests lock down both equation-level cases. They do not
 constitute VNC hardware acceptance: a full run is still required to prove that
 one physical client can deliver the calibrated QPS without errors or drops
 because the autosizer never predicts load-generator headroom.
@@ -133,33 +133,31 @@ address if one address cannot provide the required destination count.
 
 ## Proxy scheduler fanout
 
-Let `N` be proxies per process. Production uses one short capacity equation:
+Let `N` be proxies per process. The equation retains the hardware scheduling
+regimes from the accepted cross-platform campaign:
 
 ```text
-production:
-  N = clamp(4, 16, round_nearest_4(L / T))
-```
-
-This rounds to the closest one proxy EventBase per logical CPU on the supported
-production topologies, avoiding a large client-thread jump when the ratio is just
-above a multiple of four. The 16-proxy cap bounds each process's thread
-footprint on larger inputs. Extreme retains its larger stress-topology fanout:
-
-```text
-extreme without substantial SMT:
+no substantial SMT:
   requested = max(20, P / 4)
 
-extreme with substantial SMT and M >= 512 * 1024:
-  requested = P / 2
+substantial SMT and M >= 512 * 1024:
+  production requested = P / 5
+  extreme requested = P / 2
 
-extreme with other substantial SMT and P >= 64:
+other substantial SMT and P >= 64:
   requested = 0.68 * P
 
-extreme with other substantial SMT:
+other substantial SMT:
   requested = max(20, 0.75 * P)
 
 N = clamp(4, 80, round_nearest_4(requested))
 ```
+
+These branches represent client scheduler regimes rather than server capacity:
+non-SMT, memory-rich high-core SMT, other high-core SMT, and smaller SMT. They
+preserve the previously validated traffic shapes without platform identity or a
+stored sizing profile. Offered QPS and connection count remain independently
+calibrated and bounded.
 
 ## Connections
 
@@ -231,7 +229,12 @@ synchronization, and the process keeps the globally lowest priorities, preservin
 request-proportional pseudorandom sampling without a shared hot-path lock. At each phase boundary, logical waiters
 are cancelled and accepted mcrouter callbacks drain for up to
 `physical_drain_timeout_seconds` before measurement proceeds or results are
-reported. Completion-driven mode retains its per-request timeout. When sizing
+reported. Boundary cancellation is lifecycle accounting, not a warmup error;
+actual dispatch failures, reply errors, and timeouts remain counted.
+Process-ramped coordinated runs emit a machine-readable `MEASUREMENT_WINDOW`
+line with the actual server-side wall-clock start/end nanoseconds so host
+telemetry can be sliced to the same measurement interval. Completion-driven
+mode retains its per-request timeout. When sizing
 has a resolved open-loop QPS, it
 also emits a 64-second process ramp: multi-client traffic starts are spread
 before the full 240-second measurement window. Ramp traffic is excluded from
