@@ -34,6 +34,7 @@ WARMUP PHASE:
   Operations: 10 (10.0 QPS)
   SET Successes: 10
   SET Errors: 0
+  SET Errors (warmup tail): 0
   Success Rate: 100.0%
 
 BENCHMARK PHASE:
@@ -96,6 +97,7 @@ class ClientSummaryTest(unittest.TestCase):
             warmup_operations=0,
             warmup_set_successes=0,
             warmup_set_errors=0,
+            warmup_tail_set_errors=0,
             total_operations=0,
             qps=0.0,
             get_operations=0,
@@ -116,6 +118,7 @@ class ClientSummaryTest(unittest.TestCase):
             warmup_operations=10,
             warmup_set_successes=0,
             warmup_set_errors=10,
+            warmup_tail_set_errors=10,
             total_operations=10,
             qps=10.0,
             get_operations=5,
@@ -131,12 +134,39 @@ class ClientSummaryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no successful protocol responses"):
             validate_client_summary(summary)
 
+    def test_inconsistent_warmup_accounting_fails(self) -> None:
+        summary = replace(parse_client_summary(_VALID_OUTPUT), warmup_operations=11)
+
+        with self.assertRaisesRegex(ValueError, "warmup SET accounting"):
+            validate_client_summary(summary)
+
     def test_inconsistent_accounting_fails(self) -> None:
         summary = parse_client_summary(_VALID_OUTPUT)
         invalid = replace(summary, total_operations=summary.total_operations + 1)
 
         with self.assertRaisesRegex(ValueError, "GET and SET totals"):
             validate_client_summary(invalid)
+
+    def test_warmup_accepts_recovered_startup_errors(self) -> None:
+        summary = replace(
+            parse_client_summary(_VALID_OUTPUT),
+            warmup_operations=20,
+            warmup_set_errors=10,
+            warmup_tail_set_errors=0,
+        )
+
+        validate_client_summary(summary, require_warmup=True)
+
+    def test_warmup_rejects_errors_in_final_stable_minute(self) -> None:
+        summary = replace(
+            parse_client_summary(_VALID_OUTPUT),
+            warmup_operations=20,
+            warmup_set_errors=10,
+            warmup_tail_set_errors=1,
+        )
+
+        with self.assertRaisesRegex(ValueError, "did not finish"):
+            validate_client_summary(summary, require_warmup=True)
 
 
 class ParserTest(unittest.TestCase):
@@ -150,6 +180,40 @@ class ParserTest(unittest.TestCase):
         args = init_parser().parse_args(["server", "--process-ramp-seconds=-1"])
 
         with self.assertRaisesRegex(ValueError, "must be non-negative"):
+            run_server(args)
+
+    def test_server_numa_interleave_prefixes_numactl(self) -> None:
+        args = init_parser().parse_args(
+            ["server", "--server-numa-interleave=1", "--interface-name=lo"]
+        )
+        result = CommandResult([], "", 0, False, None)
+        target = "cea.chips.benchpress.packages.ucache_bench.run.run_cmd"
+
+        with (
+            patch(target, return_value=result) as run,
+            patch(
+                "cea.chips.benchpress.packages.ucache_bench.run.shutil.which",
+                return_value="/usr/bin/numactl",
+            ),
+        ):
+            run_server(args)
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ["/usr/bin/numactl", "--interleave=all"])
+        self.assertTrue(command[2].endswith("/server/ucachebench_server"))
+
+    def test_server_numa_interleave_requires_numactl(self) -> None:
+        args = init_parser().parse_args(
+            ["server", "--server-numa-interleave=1", "--interface-name=lo"]
+        )
+
+        with (
+            patch(
+                "cea.chips.benchpress.packages.ucache_bench.run.shutil.which",
+                return_value=None,
+            ),
+            self.assertRaisesRegex(RuntimeError, "requires numactl"),
+        ):
             run_server(args)
 
     def test_process_ramp_requires_admin_coordination(self) -> None:
@@ -196,6 +260,24 @@ class ParserTest(unittest.TestCase):
         command = run.call_args.args[0]
         self.assertIn("--admin_port=11213", command)
         self.assertIn("--process_ramp_seconds=16", command)
+
+    def test_warmup_cap_keeps_adaptive_ramp_enabled(self) -> None:
+        args = init_parser().parse_args(
+            [
+                "client",
+                "--server-host=cache.example.com",
+                "--warmup-max-inflight=32",
+            ]
+        )
+        result = CommandResult([], "", 0, False, None)
+        target = "cea.chips.benchpress.packages.ucache_bench.run.run_cmd"
+
+        with patch(target, return_value=result) as run:
+            run_client(args)
+
+        command = run.call_args.args[0]
+        self.assertIn("--warmup_max_inflight=32", command)
+        self.assertNotIn("--warmup_adaptive_load=false", command)
 
     def test_missing_or_non_executable_binary_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

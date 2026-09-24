@@ -159,6 +159,7 @@ class ClientSummary:
     warmup_operations: int
     warmup_set_successes: int
     warmup_set_errors: int
+    warmup_tail_set_errors: int
     total_operations: int
     qps: float
     get_operations: int
@@ -221,11 +222,12 @@ def parse_client_summary(stdout: str) -> ClientSummary:
     warmup, benchmark = summary.split("BENCHMARK PHASE:", 1)
 
     if "Status: Disabled" in warmup:
-        warmup_values = (0, 0, 0)
+        warmup_values = (0, 0, 0, 0)
     else:
         warmup_match = _required_match(
             r"Operations:\s+(\d+)\s+\([^\n]+\).*?"
-            r"SET Successes:\s+(\d+).*?SET Errors:\s+(\d+)",
+            r"SET Successes:\s+(\d+).*?SET Errors:\s+(\d+).*?"
+            r"SET Errors \(warmup tail\):\s+(\d+)",
             warmup,
             "warmup accounting",
         )
@@ -260,6 +262,7 @@ def parse_client_summary(stdout: str) -> ClientSummary:
         warmup_operations=warmup_values[0],
         warmup_set_successes=warmup_values[1],
         warmup_set_errors=warmup_values[2],
+        warmup_tail_set_errors=warmup_values[3],
         total_operations=total_operations,
         qps=qps,
         get_operations=int(get_match.group(1)),
@@ -296,14 +299,17 @@ def validate_client_summary(
         raise ValueError("client reported no successful protocol responses")
     if require_zero_errors and (summary.get_errors != 0 or summary.set_errors != 0):
         raise ValueError("client reported protocol errors")
+    if (
+        summary.warmup_set_successes + summary.warmup_set_errors
+        != summary.warmup_operations
+    ):
+        raise ValueError("warmup SET accounting is inconsistent")
     if require_warmup and (
         summary.warmup_operations <= 0
         or summary.warmup_set_successes <= 0
-        or summary.warmup_set_errors != 0
+        or summary.warmup_tail_set_errors != 0
     ):
-        raise ValueError(
-            "warmup did not complete with positive, error-free SET traffic"
-        )
+        raise ValueError("warmup did not finish with positive, error-free SET traffic")
     if any(not math.isfinite(value) or value < 0 for value in summary.latencies_ms):
         raise ValueError("client reported invalid latency percentiles")
     if list(summary.latencies_ms) != sorted(summary.latencies_ms):
@@ -718,7 +724,6 @@ def run_client(args: argparse.Namespace) -> None:  # noqa: C901
     disable_warmup_adaptive = not bool(getattr(args, "warmup_adaptive_load", 1))
     if warmup_max_inflight > 0:
         client_cmd.append(f"--warmup_max_inflight={warmup_max_inflight}")
-        disable_warmup_adaptive = True
     elif args.max_inflight <= 5:
         client_cmd.append("--warmup_max_inflight=50")
         disable_warmup_adaptive = True
