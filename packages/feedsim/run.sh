@@ -44,7 +44,9 @@ source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
 # Thrift threads: scale with logical CPUs till 216. Having more than that
 # will risk running out of memory and getting killed
-IS_SMT_ON="$(cat /sys/devices/system/cpu/smt/active)"
+# smt/active is absent on non-SMT architectures (e.g. ARM) and in some
+# containers; default to 0 instead of failing under `set -e`.
+IS_SMT_ON="$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo 0)"
 THRIFT_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc), 216)" | bc)"
 EVENTBASE_THREADS_DEFAULT="$(nproc)"  # nproc threads so the ThriftSrv.IO pool isn't a 4-EB bottleneck. Each EB owns its own MockServicesClient so outbound RPC fanout (issueOutboundFanout) actually spreads across the SREventBase pool instead of serializing through 4 EBs.
 SRV_THREADS_DEFAULT=8        # 8 should also suffice for most purposes
