@@ -225,9 +225,9 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(extreme.processes_per_host, 8)
 
     def test_t2_vnc_equation_uses_one_production_client_host(self) -> None:
-        for physical_cores, memory_gib, total_processes in (
-            (192, 1408, 24),
-            (248, 1800, 32),
+        for physical_cores, memory_gib, total_processes, num_proxies in (
+            (192, 1408, 24, 40),
+            (248, 1800, 32, 48),
         ):
             with self.subTest(physical_cores=physical_cores):
                 topology = HardwareTopology(
@@ -238,7 +238,7 @@ class SizingTest(unittest.TestCase):
                 shape = calculate_client_shape(topology, LoadVariant.PRODUCTION)
 
                 self.assertEqual(shape.total_processes, total_processes)
-                self.assertEqual(shape.num_proxies, 16)
+                self.assertEqual(shape.num_proxies, num_proxies)
                 self.assertEqual(shape.client_hosts, 1)
                 self.assertEqual(shape.processes_per_host, total_processes)
 
@@ -246,36 +246,36 @@ class SizingTest(unittest.TestCase):
         topology = HardwareTopology(119, 80, 192 * 1024)
 
         self.assertFalse(topology.substantial_smt)
-        self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 8)
+        self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 20)
 
     def test_proxy_count_for_memory_rich_smt(self) -> None:
         topology = HardwareTopology(232, 144, 704 * 1024)
 
-        self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 12)
+        self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 28)
         self.assertEqual(calculate_proxy_count(topology, LoadVariant.EXTREME), 72)
 
     def test_proxy_count_for_high_core_smt(self) -> None:
         topology = HardwareTopology(152, 92, 384 * 1024)
 
-        self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 8)
+        self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 64)
 
     def test_proxy_count_for_other_substantial_smt(self) -> None:
         topology = HardwareTopology(88, 48, 192 * 1024)
 
-        self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 4)
+        self.assertEqual(calculate_proxy_count(topology, LoadVariant.PRODUCTION), 36)
 
     def test_production_proxy_count_preserves_validated_platform_shapes(self) -> None:
         cases = (
-            (52, 26, 4),
-            (72, 36, 4),
-            (72, 72, 4),
-            (176, 88, 12),
-            (128, 128, 8),
-            (316, 158, 16),
+            (52, 26, 64 * 1024, 20),
+            (72, 36, 64 * 1024, 28),
+            (72, 72, 256 * 1024, 20),
+            (176, 88, 256 * 1024, 60),
+            (128, 128, 384 * 1024, 32),
+            (316, 158, 1024 * 1024, 32),
         )
-        for logical_cpus, physical_cores, expected in cases:
+        for logical_cpus, physical_cores, memory_mib, expected in cases:
             with self.subTest(logical_cpus=logical_cpus, physical_cores=physical_cores):
-                topology = HardwareTopology(logical_cpus, physical_cores, 384 * 1024)
+                topology = HardwareTopology(logical_cpus, physical_cores, memory_mib)
                 self.assertEqual(
                     calculate_proxy_count(topology, LoadVariant.PRODUCTION), expected
                 )
@@ -285,7 +285,7 @@ class SizingTest(unittest.TestCase):
         large = HardwareTopology(1200, 800, 384 * 1024)
 
         self.assertEqual(calculate_proxy_count(small, LoadVariant.PRODUCTION), 4)
-        self.assertEqual(calculate_proxy_count(large, LoadVariant.PRODUCTION), 16)
+        self.assertEqual(calculate_proxy_count(large, LoadVariant.PRODUCTION), 80)
 
     def test_round_nearest_uses_half_up(self) -> None:
         self.assertEqual(_round_to_nearest_multiple(10, 4), 12)
@@ -359,7 +359,7 @@ class SizingTest(unittest.TestCase):
         production = calculate_client_shape(topology, LoadVariant.PRODUCTION)
         extreme = calculate_client_shape(topology, LoadVariant.EXTREME)
 
-        self.assertEqual(production.num_proxies, 12)
+        self.assertEqual(production.num_proxies, 28)
         self.assertEqual(extreme.num_proxies, 72)
         self.assertEqual(production.total_connections, 220_080)
         self.assertEqual(extreme.total_connections, 221_184)
@@ -388,11 +388,11 @@ class SizingTest(unittest.TestCase):
         with (
             patch(
                 "cea.chips.benchpress.packages.ucache_bench.sizing._DESTINATIONS_PER_PROCESS",
-                1_024,
+                512,
             ),
             self.assertRaisesRegex(
                 ValueError,
-                "cannot reach 180096 total connections without exceeding 1024",
+                "cannot reach 180096 total connections without exceeding 512",
             ),
         ):
             calculate_total_connections(topology, LoadVariant.PRODUCTION)
