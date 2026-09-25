@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -14,6 +15,13 @@
 #include <vector>
 
 namespace facebook::ucachebench {
+
+constexpr uint32_t kMeasurementStartGuardSeconds = 10;
+
+constexpr uint32_t measurementStartDelaySeconds(
+    uint32_t fullLoadStabilizationSeconds) {
+  return std::max(kMeasurementStartGuardSeconds, fullLoadStabilizationSeconds);
+}
 
 /**
  * Admin server for coordinating multi-client benchmark runs.
@@ -81,7 +89,8 @@ class UcacheBenchAdminServer {
       uint16_t port,
       uint32_t numExpectedClients,
       uint32_t timeoutSeconds,
-      uint32_t processRampSeconds = 0);
+      uint32_t processRampSeconds = 0,
+      uint32_t fullLoadStabilizationSeconds = 0);
 
   ~UcacheBenchAdminServer();
 
@@ -172,6 +181,7 @@ class UcacheBenchAdminServer {
   uint32_t numExpectedClients_;
   uint32_t timeoutSeconds_;
   uint32_t processRampSeconds_;
+  uint32_t fullLoadStabilizationSeconds_;
   std::atomic<uint32_t> measurementDurationSeconds_{0};
 
   // Phase tracking

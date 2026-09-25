@@ -463,6 +463,12 @@ def run_server(args: argparse.Namespace) -> None:  # noqa: C901
     """
     if args.process_ramp_seconds < 0:
         raise ValueError("--process-ramp-seconds must be non-negative")
+    if args.full_load_stabilization_seconds < 0:
+        raise ValueError("--full-load-stabilization-seconds must be non-negative")
+    if args.full_load_stabilization_seconds > 0 and args.process_ramp_seconds == 0:
+        raise ValueError(
+            "--full-load-stabilization-seconds requires --process-ramp-seconds"
+        )
 
     # Calculate memory size
     memory_mb = int(args.memory_mb * MEM_USAGE_FACTOR)
@@ -535,6 +541,10 @@ def run_server(args: argparse.Namespace) -> None:  # noqa: C901
         if args.num_clients <= 0:
             raise ValueError("--process-ramp-seconds requires --num-clients")
         server_cmd.append(f"--process_ramp_seconds={args.process_ramp_seconds}")
+    if args.full_load_stabilization_seconds > 0:
+        server_cmd.append(
+            f"--full_load_stabilization_seconds={args.full_load_stabilization_seconds}"
+        )
 
     # RPC configuration
     if args.rpc_io_threads > 0:
@@ -1054,6 +1064,12 @@ def init_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Spread coordinated client-process starts over this many seconds",
+    )
+    server_parser.add_argument(
+        "--full-load-stabilization-seconds",
+        type=int,
+        default=0,
+        help="Delay measurement after all ramped processes reach full load",
     )
 
     # Fiber configuration
