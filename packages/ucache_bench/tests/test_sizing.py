@@ -410,7 +410,8 @@ class SizingTest(unittest.TestCase):
             "warmup_seconds": 720,
             "duration_seconds": 240,
             "timeout_seconds": 2400,
-            "connection_ramp_seconds": 25,
+            "connection_ramp_seconds": 60,
+            "full_load_stabilization_seconds": 60,
             "open_loop_refill_on_miss": 0,
         }
         for key, value in common.items():
@@ -469,6 +470,7 @@ class SizingTest(unittest.TestCase):
 
         self.assertNotIn("open_loop_qps", without_qps.params)
         self.assertNotIn("process_ramp_seconds", without_qps.params)
+        self.assertNotIn("full_load_stabilization_seconds", without_qps.params)
         self.assertEqual(
             without_qps.to_dict()["calibration"],
             {
@@ -480,6 +482,7 @@ class SizingTest(unittest.TestCase):
         self.assertEqual(supplied.aggregate_qps, 24_000)
         self.assertEqual(supplied.params["open_loop_qps"], 1500)
         self.assertEqual(supplied.params["process_ramp_seconds"], 64)
+        self.assertEqual(supplied.params["full_load_stabilization_seconds"], 60)
 
     def test_latency_seed_and_next_qps_remain_bounded(self) -> None:
         self.assertEqual(seed_qps(90, 1000), 9000)

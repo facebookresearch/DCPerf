@@ -17,11 +17,13 @@ UcacheBenchAdminServer::UcacheBenchAdminServer(
     uint16_t port,
     uint32_t numExpectedClients,
     uint32_t timeoutSeconds,
-    uint32_t processRampSeconds)
+    uint32_t processRampSeconds,
+    uint32_t fullLoadStabilizationSeconds)
     : port_(port),
       numExpectedClients_(numExpectedClients),
       timeoutSeconds_(timeoutSeconds),
-      processRampSeconds_(processRampSeconds) {}
+      processRampSeconds_(processRampSeconds),
+      fullLoadStabilizationSeconds_(fullLoadStabilizationSeconds) {}
 
 UcacheBenchAdminServer::~UcacheBenchAdminServer() {
   stop();
@@ -642,11 +644,12 @@ void UcacheBenchAdminServer::transitionToBenchmark() {
     return;
   }
 
-  constexpr auto kMeasurementStartGuard = std::chrono::seconds(10);
+  const auto measurementStartDelay = std::chrono::seconds(
+      measurementStartDelaySeconds(fullLoadStabilizationSeconds_));
   const auto steadyStart =
-      std::chrono::steady_clock::now() + kMeasurementStartGuard;
+      std::chrono::steady_clock::now() + measurementStartDelay;
   const auto wallStart =
-      std::chrono::system_clock::now() + kMeasurementStartGuard;
+      std::chrono::system_clock::now() + measurementStartDelay;
   const auto duration =
       std::chrono::seconds(measurementDurationSeconds_.load());
   benchmarkStartNs_.store(

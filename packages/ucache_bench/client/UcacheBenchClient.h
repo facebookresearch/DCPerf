@@ -138,36 +138,47 @@ class PhysicalOutstandingTracker;
 
 class PhysicalOutstandingLease final {
  public:
+  PhysicalOutstandingLease() = default;
   explicit PhysicalOutstandingLease(
       std::shared_ptr<PhysicalOutstandingTracker> tracker)
-      : tracker_(std::move(tracker)) {}
+      : tracker_(std::move(tracker)), released_(false) {}
   PhysicalOutstandingLease(const PhysicalOutstandingLease&) = delete;
   PhysicalOutstandingLease& operator=(const PhysicalOutstandingLease&) = delete;
-  PhysicalOutstandingLease(PhysicalOutstandingLease&&) = delete;
-  PhysicalOutstandingLease& operator=(PhysicalOutstandingLease&&) = delete;
+  PhysicalOutstandingLease(PhysicalOutstandingLease&& other) noexcept
+      : tracker_(std::move(other.tracker_)),
+        released_(other.released_.exchange(true, std::memory_order_relaxed)) {}
+  PhysicalOutstandingLease& operator=(
+      PhysicalOutstandingLease&& other) noexcept {
+    if (this != &other) {
+      release();
+      tracker_ = std::move(other.tracker_);
+      released_.store(
+          other.released_.exchange(true, std::memory_order_relaxed),
+          std::memory_order_relaxed);
+    }
+    return *this;
+  }
   ~PhysicalOutstandingLease() noexcept;
 
+  explicit operator bool() const noexcept {
+    return tracker_ != nullptr && !released_.load(std::memory_order_relaxed);
+  }
   void release() noexcept;
 
  private:
   std::shared_ptr<PhysicalOutstandingTracker> tracker_;
-  std::atomic<bool> released_{false};
+  std::atomic<bool> released_{true};
 };
 
 class PhysicalOutstandingTracker final
     : public std::enable_shared_from_this<PhysicalOutstandingTracker> {
  public:
-  std::shared_ptr<PhysicalOutstandingLease> acquire() {
+  PhysicalOutstandingLease acquire() {
     outstanding_.fetch_add(1, std::memory_order_relaxed);
-    try {
-      return std::make_shared<PhysicalOutstandingLease>(shared_from_this());
-    } catch (...) {
-      release();
-      throw;
-    }
+    return PhysicalOutstandingLease(shared_from_this());
   }
 
-  std::shared_ptr<PhysicalOutstandingLease> tryAcquire(uint32_t limit) {
+  std::optional<PhysicalOutstandingLease> tryAcquire(uint32_t limit) {
     uint32_t outstanding = outstanding_.load(std::memory_order_relaxed);
     while (outstanding < limit) {
       if (outstanding_.compare_exchange_weak(
@@ -175,15 +186,10 @@ class PhysicalOutstandingTracker final
               outstanding + 1,
               std::memory_order_relaxed,
               std::memory_order_relaxed)) {
-        try {
-          return std::make_shared<PhysicalOutstandingLease>(shared_from_this());
-        } catch (...) {
-          release();
-          throw;
-        }
+        return PhysicalOutstandingLease(shared_from_this());
       }
     }
-    return nullptr;
+    return std::nullopt;
   }
 
   uint32_t outstanding() const {
@@ -201,7 +207,7 @@ class PhysicalOutstandingTracker final
 };
 
 inline void PhysicalOutstandingLease::release() noexcept {
-  if (!released_.exchange(true, std::memory_order_relaxed)) {
+  if (tracker_ && !released_.exchange(true, std::memory_order_relaxed)) {
     tracker_->release();
   }
 }
@@ -209,6 +215,15 @@ inline void PhysicalOutstandingLease::release() noexcept {
 inline PhysicalOutstandingLease::~PhysicalOutstandingLease() noexcept {
   release();
 }
+
+template <typename Request>
+struct PhysicalRequestOwner final {
+  explicit PhysicalRequestOwner(PhysicalOutstandingLease lease)
+      : physicalLease(std::move(lease)) {}
+
+  Request request;
+  PhysicalOutstandingLease physicalLease;
+};
 
 } // namespace detail
 
