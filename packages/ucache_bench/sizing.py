@@ -595,13 +595,14 @@ def recommend(
         "open_loop_refill_on_miss": 0,
         "open_loop_max_outstanding": variant.max_outstanding,
         "open_loop_max_lateness_us": variant.max_lateness_us,
-        "connection_ramp_seconds": 25,
+        "connection_ramp_seconds": 60,
         "failures_until_tko": 12,
         "use_same_thread_client": 1,
     }
     if resolved_qps is not None:
         params["open_loop_qps"] = max(1, resolved_qps // shape.total_processes)
         params["process_ramp_seconds"] = 64
+        params["full_load_stabilization_seconds"] = 60
 
     return Recommendation(
         topology=topology,

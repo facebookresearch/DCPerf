@@ -190,7 +190,7 @@ warmup_max_inflight = 32
 warmup_seconds = 720
 duration_seconds = 240
 timeout_seconds = 2400
-connection_ramp_seconds = 25
+connection_ramp_seconds = 60
 open_loop_refill_on_miss = 0
 min_alloc_size = 64
 enable_fibers = 1
@@ -210,7 +210,9 @@ both:       open_loop_max_lateness_us = 500000
 ```
 
 One open-loop arrival remains one wire RPC, fiber request handling remains
-enabled, and the packaged workload distribution is used. Warmup admits at most
+enabled, and the packaged workload distribution is used. Connection activation
+spreads each proxy's destination scan over 60 seconds so 16 processes do not
+synchronize a 200K-connection accept storm on fresh hosts. Warmup admits at most
 32 physical requests per worker/client, retaining each slot until its Carbon
 callback exits; with the default eight workers this bounds the process to 256
 warmup requests. Startup connection recovery may report transient errors, so
@@ -234,13 +236,15 @@ actual dispatch failures, reply errors, and timeouts remain counted.
 Process-ramped coordinated runs emit a machine-readable `MEASUREMENT_WINDOW`
 line with the actual server-side wall-clock start/end nanoseconds so host
 telemetry can be sliced to the same measurement interval. Completion-driven
-mode retains its per-request timeout. When sizing
-has a resolved open-loop QPS, it
-also emits a 64-second process ramp: multi-client traffic starts are spread
-before the full 240-second measurement window. Ramp traffic is excluded from
-reported counters; total connections and steady-state offered-QPS semantics are
-unchanged. Calibration-only output with no resolved QPS omits both
-`open_loop_qps` and `process_ramp_seconds`.
+mode retains its per-request timeout. When sizing has a resolved open-loop QPS,
+it also emits a 64-second process ramp followed by 60 seconds at full mixed
+load before the measurement boundary. The process ramp spreads client starts;
+the stabilization interval lets connection buffers and host memory reach steady
+state after the last process joins. Both intervals are excluded from reported
+counters, so the exact 240-second measurement window, total connections, and
+steady-state offered-QPS semantics are unchanged. Calibration-only output with
+no resolved QPS omits `open_loop_qps`, `process_ramp_seconds`, and
+`full_load_stabilization_seconds`.
 
 ## Offered-load calibration
 

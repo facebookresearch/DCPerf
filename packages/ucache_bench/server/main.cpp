@@ -50,6 +50,11 @@ DEFINE_uint32(
     0,
     "Spread coordinated client-process traffic starts over this many seconds. "
     "Requires multi-client admin protocol v2; 0 preserves the legacy protocol.");
+DEFINE_uint32(
+    full_load_stabilization_seconds,
+    0,
+    "Keep full mixed traffic running for this many seconds after process ramp "
+    "before measurement (minimum 10-second delivery guard).");
 DEFINE_bool(verbose, false, "Enable verbose logging");
 DEFINE_uint32(
     stats_interval_seconds,
@@ -444,6 +449,13 @@ int main(int argc, char** argv) {
         "Error: --process_ramp_seconds requires multi-client admin coordination\n");
     return 1;
   }
+  if (FLAGS_full_load_stabilization_seconds > 0 &&
+      FLAGS_process_ramp_seconds == 0) {
+    fprintf(
+        stderr,
+        "Error: --full_load_stabilization_seconds requires --process_ramp_seconds\n");
+    return 1;
+  }
   if (effectiveAdminPort > 0 && FLAGS_num_clients == 0) {
     fprintf(
         stderr,
@@ -479,7 +491,8 @@ int main(int argc, char** argv) {
           static_cast<uint16_t>(effectiveAdminPort),
           FLAGS_num_clients,
           FLAGS_timeout_seconds,
-          FLAGS_process_ramp_seconds);
+          FLAGS_process_ramp_seconds,
+          FLAGS_full_load_stabilization_seconds);
 
       // Set up phase change callback for metric tracking
       adminServer->setPhaseChangeCallback([server](
