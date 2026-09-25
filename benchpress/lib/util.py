@@ -16,6 +16,7 @@ import threading
 import time
 import typing
 import uuid
+from collections import deque
 
 import click
 
@@ -190,13 +191,22 @@ def verify_install(job) -> bool:
         return True
 
 
-def output_catcher(reader, writer=None):
+# Automark forwards only the final 1,000 lines of Benchpress stderr. Keep both
+# stream tails, exception headers, and the Python traceback inside that budget.
+INSTALL_LOG_TAIL_LINES = 400
+INSTALL_LOG_TAIL_LINE_CHARS = 4096
+
+
+def output_catcher(reader, writer=None, tail=None):
     for line in iter(reader.readline, ""):
         if not line:
             continue
+        line = line.rstrip()
         if writer is not None:
-            writer.write(line.rstrip() + "\n")
-        click.echo(line.rstrip())
+            writer.write(line + "\n")
+        if tail is not None:
+            tail.append(line[-INSTALL_LOG_TAIL_LINE_CHARS:])
+        click.echo(line)
 
 
 def install_benchmark(install_script, args=None, env=None, install_log=None):
@@ -207,6 +217,8 @@ def install_benchmark(install_script, args=None, env=None, install_log=None):
         install_benchmark_cmd.extend(args)
     install_benchmark_cmd = get_safe_cmd(install_benchmark_cmd)
 
+    install_stdout_tail = deque(maxlen=INSTALL_LOG_TAIL_LINES)
+    install_stderr_tail = deque(maxlen=INSTALL_LOG_TAIL_LINES)
     install_benchmark_proc = subprocess.Popen(
         install_benchmark_cmd,
         shell=False,
@@ -218,12 +230,12 @@ def install_benchmark(install_script, args=None, env=None, install_log=None):
     stdout_catcher = threading.Thread(
         target=output_catcher,
         name="stdout-catcher",
-        args=(install_benchmark_proc.stdout, install_log),
+        args=(install_benchmark_proc.stdout, install_log, install_stdout_tail),
     )
     stderr_catcher = threading.Thread(
         target=output_catcher,
         name="stderr-catcher",
-        args=(install_benchmark_proc.stderr, install_log),
+        args=(install_benchmark_proc.stderr, install_log, install_stderr_tail),
     )
 
     stdout_catcher.start()
@@ -236,7 +248,18 @@ def install_benchmark(install_script, args=None, env=None, install_log=None):
         install_list_append(install_script)
     else:
         cmd_str = " ".join(install_benchmark_cmd)
-        raise Exception(f"Failed to run '{cmd_str}'")
+        message = f"Failed to run '{cmd_str}'"
+        if install_stdout_tail:
+            message += (
+                f"\n\nLast {INSTALL_LOG_TAIL_LINES} lines of installer stdout:\n"
+                + "\n".join(install_stdout_tail)
+            )
+        if install_stderr_tail:
+            message += (
+                f"\n\nLast {INSTALL_LOG_TAIL_LINES} lines of installer stderr:\n"
+                + "\n".join(install_stderr_tail)
+            )
+        raise Exception(message)
 
     return install_benchmark_proc
 
