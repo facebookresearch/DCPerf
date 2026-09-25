@@ -1,13 +1,14 @@
-# UcacheBench hardware sizing
+# UCacheBench hardware sizing
 
 `autosize` derives a runnable topology from affinity-visible CPU topology and
 usable memory. It does not predict server capacity. Offered load must come from
 an explicit measurement or from a latency-based seed followed by measurement.
 
 ```bash
+export AGGREGATE_QPS=1000000  # replace with the measured aggregate QPS
 ./packages/ucache_bench/autosize.sh \
   --variant production \
-  --aggregate-qps <measured-qps> \
+  --aggregate-qps "$AGGREGATE_QPS" \
   --params-only
 ```
 
@@ -120,13 +121,11 @@ num_source_ips = R - 1
 total client processes = H * (num_source_ips + 1)
 ```
 
-Production uses one physical client by construction. For the two T2 VNC inputs
-under consideration, 192 physical cores / 384 logical CPUs produce `T=24`,
-`N=40`, `H=1`, while 248 physical cores / 496 logical CPUs produce `T=32`,
-`N=48`, `H=1`. Unit tests lock down both equation-level cases. They do not
-constitute VNC hardware acceptance: a full run is still required to prove that
-one physical client can deliver the calibrated QPS without errors or drops
-because the autosizer never predicts load-generator headroom.
+Production uses one physical client by construction. Representative high-core,
+substantial-SMT topology tests lock down the process, proxy, and host equations.
+They do not constitute hardware acceptance: a full run is still required to
+prove that one physical client can deliver the calibrated QPS without errors or
+drops because the autosizer never predicts load-generator headroom.
 
 When several processes share a host, each process needs a distinct source
 address if one address cannot provide the required destination count.
@@ -161,9 +160,9 @@ calibrated and bounded.
 
 ## Connections
 
-Connections remain hardware-scaled because the CPL A/B showed that forcing a
-fixed 220,000 changed protocol behavior. The equation is bounded and shared by
-both variants:
+Connections remain hardware-scaled because controlled A/B testing showed that
+forcing a fixed 220,000 changed protocol behavior. The equation is bounded and
+shared by both variants:
 
 ```text
 T_max = max(T_production, T_extreme)
@@ -190,7 +189,7 @@ warmup_max_inflight = 32
 warmup_seconds = 720
 duration_seconds = 240
 timeout_seconds = 2400
-connection_ramp_seconds = 25
+connection_ramp_seconds = 60
 open_loop_refill_on_miss = 0
 min_alloc_size = 64
 enable_fibers = 1
@@ -210,7 +209,9 @@ both:       open_loop_max_lateness_us = 500000
 ```
 
 One open-loop arrival remains one wire RPC, fiber request handling remains
-enabled, and the packaged workload distribution is used. Warmup admits at most
+enabled, and the packaged workload distribution is used. Connection activation
+spreads each proxy's destination scan over 60 seconds so 16 processes do not
+synchronize a 200K-connection accept storm on fresh hosts. Warmup admits at most
 32 physical requests per worker/client, retaining each slot until its Carbon
 callback exits; with the default eight workers this bounds the process to 256
 warmup requests. Startup connection recovery may report transient errors, so
@@ -234,13 +235,15 @@ actual dispatch failures, reply errors, and timeouts remain counted.
 Process-ramped coordinated runs emit a machine-readable `MEASUREMENT_WINDOW`
 line with the actual server-side wall-clock start/end nanoseconds so host
 telemetry can be sliced to the same measurement interval. Completion-driven
-mode retains its per-request timeout. When sizing
-has a resolved open-loop QPS, it
-also emits a 64-second process ramp: multi-client traffic starts are spread
-before the full 240-second measurement window. Ramp traffic is excluded from
-reported counters; total connections and steady-state offered-QPS semantics are
-unchanged. Calibration-only output with no resolved QPS omits both
-`open_loop_qps` and `process_ramp_seconds`.
+mode retains its per-request timeout. When sizing has a resolved open-loop QPS,
+it also emits a 64-second process ramp followed by 60 seconds at full mixed
+load before the measurement boundary. The process ramp spreads client starts;
+the stabilization interval lets connection buffers and host memory reach steady
+state after the last process joins. Both intervals are excluded from reported
+counters, so the exact 240-second measurement window, total connections, and
+steady-state offered-QPS semantics are unchanged. Calibration-only output with
+no resolved QPS omits `open_loop_qps`, `process_ramp_seconds`, and
+`full_load_stabilization_seconds`.
 
 ## Offered-load calibration
 

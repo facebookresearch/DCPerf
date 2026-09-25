@@ -2069,6 +2069,7 @@
         - '--num-clients={num_clients}'
         - '--timeout-seconds={timeout_seconds}'
         - '--process-ramp-seconds={process_ramp_seconds}'
+        - '--full-load-stabilization-seconds={full_load_stabilization_seconds}'
         - '--perf-record-delay={perf_record_delay}'
         - '--verbose={verbose}'
         - '--real'
@@ -2120,6 +2121,7 @@
         - 'num_clients=0'
         - 'timeout_seconds=600'
         - 'process_ramp_seconds=0'
+        - 'full_load_stabilization_seconds=0'
         - 'perf_record_delay=120'
         - 'verbose=0'
     client:
