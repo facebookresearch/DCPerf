@@ -1,0 +1,369 @@
+diff --git a/src/Scheduler.cpp b/src/Scheduler.cpp
+index 6c0e624..84be943 100644
+--- a/src/Scheduler.cpp
++++ b/src/Scheduler.cpp
+@@ -91,6 +91,7 @@ void Scheduler::loop() {
+        more than the budget value), increase by the next interval */
+     budget += randomExponentialInterval(interval_ns) - (a - b);
+     queues_[next_].putMessage(0);
++    ++scheduled_enqueued_;
+     if (queues_[next_].size() > logging_threshold_ * logged_[next_]) {
+       LOG(INFO) << "Notification queue for worker " << next_
+                 << " is overloaded by factor of " << logged_[next_];
+diff --git a/src/Scheduler.h b/src/Scheduler.h
+index 934a196..a598c8e 100644
+--- a/src/Scheduler.h
++++ b/src/Scheduler.h
+@@ -36,6 +36,11 @@ class Scheduler {
+   void join();
+ 
+   folly::NotificationQueue<int>& getWorkerQueue(uint32_t id);
++
++  // Valid after join(). Counts requests handed to workers, excluding the
++  // stop sentinels.
++  uint64_t getScheduledEnqueued() const { return scheduled_enqueued_; }
++
+  private:
+   /**
+    * Draws from an exponential distribution with the given mean.
+@@ -53,6 +58,7 @@ class Scheduler {
+   uint32_t logging_threshold_;
+   uint32_t next_{0};
+   uint32_t rps_;
++  uint64_t scheduled_enqueued_{0};
+ 
+   std::vector<uint64_t> logged_;
+   std::vector<folly::NotificationQueue<int>> queues_;
+diff --git a/src/Treadmill.cpp b/src/Treadmill.cpp
+index c64ee2a..122d333 100644
+--- a/src/Treadmill.cpp
++++ b/src/Treadmill.cpp
+@@ -62,6 +62,16 @@ DEFINE_int32(runtime,
+              120,
+              "The total runtime in seconds.");
+ 
++// Wait for outstanding requests and check request accounting before dumping
++// statistics. 0 keeps the original behavior.
++DEFINE_int32(drain_timeout_seconds,
++             0,
++             "If positive, wait up to this many seconds after the scheduler "
++             "stops for submitted requests to complete, log "
++             "REQUEST_ACCOUNTING_JSON, and exit with status 2 if any "
++             "scheduled request is unaccounted for. 0 dumps statistics "
++             "immediately.");
++
+ // The file to store the JSON output statistics
+ DEFINE_string(output_file,
+               "",
+diff --git a/src/Treadmill.h b/src/Treadmill.h
+index 3da8080..1fda7e1 100644
+--- a/src/Treadmill.h
++++ b/src/Treadmill.h
+@@ -10,6 +10,9 @@
+ 
+ #pragma once
+ 
++#include <chrono>
++#include <cstdint>
++#include <cstdlib>
+ #include <string>
+ #include <thread>
+ #include <vector>
+@@ -51,6 +54,9 @@ DECLARE_int32(request_per_second);
+ // The total testing time in second
+ DECLARE_int32(runtime);
+ 
++// Seconds to wait for outstanding requests before dumping statistics
++DECLARE_int32(drain_timeout_seconds);
++
+ // The file to store the JSON output statistics
+ DECLARE_string(output_file);
+ 
+@@ -85,6 +91,66 @@ namespace facebook {
+ namespace windtunnel {
+ namespace treadmill {
+ 
++/**
++ * Waits for every worker to finish its outstanding requests and logs the
++ * request accounting. Exits the process with status 2 if the drain times out,
++ * because outstanding callbacks still reference the workers.
++ *
++ * @return Whether every scheduled request was submitted or dropped, and every
++ *         submitted request completed
++ */
++template <typename Service>
++bool drainAndLogRequestAccounting(
++    const std::vector<std::unique_ptr<Worker<Service>>> &workers,
++    const Scheduler &scheduler) {
++  const auto deadline = std::chrono::steady_clock::now() +
++      std::chrono::seconds(FLAGS_drain_timeout_seconds);
++  bool drain_complete = true;
++  for (const auto &worker : workers) {
++    if (!worker->waitUntilQuiescent(deadline)) {
++      drain_complete = false;
++      break;
++    }
++  }
++
++  uint64_t submitted = 0;
++  uint64_t success_completed = 0;
++  uint64_t exception_completed = 0;
++  uint64_t dropped = 0;
++  uint64_t in_flight = 0;
++  for (const auto &worker : workers) {
++    submitted += worker->getSubmittedRequests();
++    success_completed += worker->getSuccessCompletedRequests();
++    exception_completed += worker->getExceptionCompletedRequests();
++    dropped += worker->getDroppedRequests();
++    in_flight += worker->getInFlightRequests();
++  }
++  const uint64_t scheduled_enqueued = scheduler.getScheduledEnqueued();
++  const bool accounting_valid = drain_complete &&
++      scheduled_enqueued == submitted + dropped &&
++      submitted == success_completed + exception_completed + in_flight;
++
++  folly::dynamic accounting = folly::dynamic::object;
++  accounting["schema_version"] = 1;
++  accounting["scheduled_enqueued"] = static_cast<int64_t>(scheduled_enqueued);
++  accounting["submitted"] = static_cast<int64_t>(submitted);
++  accounting["success_completed"] = static_cast<int64_t>(success_completed);
++  accounting["exception_completed"] =
++      static_cast<int64_t>(exception_completed);
++  accounting["dropped"] = static_cast<int64_t>(dropped);
++  accounting["in_flight"] = static_cast<int64_t>(in_flight);
++  accounting["drain_complete"] = drain_complete;
++  accounting["accounting_valid"] = accounting_valid;
++
++  if (!drain_complete) {
++    LOG(ERROR) << "REQUEST_ACCOUNTING_JSON: " << folly::toJson(accounting);
++    google::FlushLogFiles(google::GLOG_INFO);
++    std::_Exit(2);
++  }
++  LOG(INFO) << "REQUEST_ACCOUNTING_JSON: " << folly::toJson(accounting);
++  return accounting_valid;
++}
++
+ /**
+  * Press start to rock
+  *
+@@ -92,6 +158,11 @@ namespace treadmill {
+  * @param argv Argument vector
+  */
+ template <typename Service> int run(int argc, char *argv[]) {
++  if (FLAGS_drain_timeout_seconds < 0) {
++    LOG(ERROR) << "--drain_timeout_seconds must not be negative";
++    return 2;
++  }
++
+   std::vector<std::unique_ptr<Worker<Service>>> workers;
+   double rps = FLAGS_request_per_second / (double)FLAGS_number_of_workers;
+   int max_outstanding_requests_per_worker =
+@@ -161,6 +232,11 @@ template <typename Service> int run(int argc, char *argv[]) {
+   scheduler.stop();
+   scheduler.join();
+ 
++  bool accounting_valid = true;
++  if (FLAGS_drain_timeout_seconds > 0) {
++    accounting_valid = drainAndLogRequestAccounting(workers, scheduler);
++  }
++
+   StatisticsManager::printAll();
+   if (FLAGS_output_file != "") {
+     int fd =
+@@ -177,7 +253,11 @@ template <typename Service> int run(int argc, char *argv[]) {
+ 
+   // We already stored stats, so just drop all remaining scheduled request.
+   for (int i = 0; i < FLAGS_number_of_workers; i++) {
+-    workers[i]->stop();
++    if (FLAGS_drain_timeout_seconds > 0) {
++      workers[i]->terminateAfterSnapshot();
++    } else {
++      workers[i]->stop();
++    }
+   }
+ 
+   LOG(INFO) << "Joining worker threads";
+@@ -198,7 +278,7 @@ template <typename Service> int run(int argc, char *argv[]) {
+ 
+   LOG(INFO) << "Complete";
+ 
+-  return 0;
++  return accounting_valid ? 0 : 2;
+ }
+ 
+ void init(int argc, char *argv[]);
+diff --git a/src/Worker.h b/src/Worker.h
+index acdb2ca..f85b7ed 100644
+--- a/src/Worker.h
++++ b/src/Worker.h
+@@ -12,6 +12,10 @@
+ 
+ #include <sched.h>
+ 
++#include <atomic>
++#include <chrono>
++#include <cstdint>
++#include <future>
+ #include <memory>
+ #include <thread>
+ 
+@@ -35,6 +39,7 @@ DEFINE_bool(wait_for_target_ready, false,
+ 
+ DECLARE_string(counter_name);
+ DECLARE_int32(counter_threshold);
++DECLARE_int32(drain_timeout_seconds);
+ 
+ namespace facebook {
+ namespace windtunnel {
+@@ -86,8 +91,43 @@ public:
+ 
+   void stop() { running_.store(false); }
+ 
++  // Used with --drain_timeout_seconds. Returns true once the worker has seen
++  // the stop sentinel and has no outstanding requests.
++  bool waitUntilQuiescent(
++      const std::chrono::steady_clock::time_point &deadline) {
++    return quiescent_future_.wait_until(deadline) == std::future_status::ready;
++  }
++
++  // Used with --drain_timeout_seconds instead of stop(). The event loop stays
++  // alive after draining because statistics are thread-local and are lost
++  // when the worker thread exits.
++  void terminateAfterSnapshot() {
++    event_base_.runInEventBaseThread(
++        [this] { event_base_.terminateLoopSoon(); });
++  }
++
+   void join() { sender_thread_->join(); }
+ 
++  uint64_t getSubmittedRequests() const {
++    return submitted_requests_.load(std::memory_order_relaxed);
++  }
++
++  uint64_t getSuccessCompletedRequests() const {
++    return success_completed_requests_.load(std::memory_order_relaxed);
++  }
++
++  uint64_t getExceptionCompletedRequests() const {
++    return exception_completed_requests_.load(std::memory_order_relaxed);
++  }
++
++  uint64_t getDroppedRequests() const {
++    return dropped_requests_.load(std::memory_order_relaxed);
++  }
++
++  uint64_t getInFlightRequests() const {
++    return outstanding_requests_.load(std::memory_order_relaxed);
++  }
++
+   folly::dynamic makeConfigOutputs(std::vector<Worker *> worker_refs) {
+     std::vector<Workload<Service> *> workload_refs;
+     for (auto worker : worker_refs) {
+@@ -128,6 +168,10 @@ private:
+   }
+ 
+   void messageAvailable(int &&message) noexcept override {
++    if (FLAGS_drain_timeout_seconds > 0 && (message == -1 || !running_)) {
++      stopWithDrain(message);
++      return;
++    }
+     if (message == -1 || !running_) {
+       stopConsuming();
+       if (to_send_ == 0 && outstanding_requests_ == 0) {
+@@ -157,6 +201,7 @@ private:
+       auto pw = folly::makeMoveWrapper(std::move(std::get<1>(request_tuple)));
+       ++outstanding_requests_;
+       --to_send_;
++      submitted_requests_.fetch_add(1, std::memory_order_relaxed);
+       auto conn_idx = conn_idx_;
+       conn_idx_ = (conn_idx_ + 1) % number_of_connections_;
+       auto send_time = nowNs();
+@@ -170,18 +215,25 @@ private:
+                 latency_statistic_->addSample((recv_time - send_time) / 1000.0);
+                 n_throughput_requests_++;
+                 if (t.hasException()) {
++                  exception_completed_requests_.fetch_add(
++                      1, std::memory_order_relaxed);
+                   n_exceptions_by_type_
+                       [t.exception().class_name().toStdString()]++;
+                   LOG(INFO) << t.exception().what();
+                   pw->setException(t.exception());
+                 }
+                 if (t.hasValue()) {
++                  success_completed_requests_.fetch_add(
++                      1, std::memory_order_relaxed);
+                   pw->setValue(std::move(t.value()));
+                 }
+ 
+                 --outstanding_requests_;
+ 
+-                if (!running_ && outstanding_requests_ == 0) {
++                if (FLAGS_drain_timeout_seconds > 0) {
++                  pumpRequests();
++                  signalQuiescenceIfDrained();
++                } else if (!running_ && outstanding_requests_ == 0) {
+                   event_base_.terminateLoopSoon();
+                 } else {
+                   pumpRequests();
+@@ -195,6 +247,42 @@ private:
+       });
+     }
+ 
++    flushStatistics();
++  }
++
++  // With --drain_timeout_seconds, the event loop keeps running after the
++  // scheduler stops so that every scheduled request is either completed or
++  // counted as dropped before statistics are dumped.
++  void stopWithDrain(int message) {
++    if (message != -1) {
++      // Submission already stopped early; keep consuming so that the
++      // remaining scheduled requests are counted and the sentinel arrives.
++      dropped_requests_.fetch_add(1, std::memory_order_relaxed);
++      return;
++    }
++    stopConsuming();
++    running_.store(false);
++    dropped_requests_.fetch_add(to_send_, std::memory_order_relaxed);
++    to_send_ = 0;
++    sentinel_received_ = true;
++    signalQuiescenceIfDrained();
++  }
++
++  void signalQuiescenceIfDrained() {
++    if (!sentinel_received_ || outstanding_requests_ != 0 ||
++        quiescence_signaled_) {
++      return;
++    }
++    quiescence_signaled_ = true;
++    // Defer the signal by one loop iteration so that promise continuations
++    // of the last reply can update this thread's statistics first.
++    event_base_.runInLoop([this] {
++      flushStatistics();
++      quiescent_promise_.set_value();
++    });
++  }
++
++  void flushStatistics() {
+     // Estimate throughput and outstanding requests
+     auto t = nowNs();
+     double throughput_delta = double(t - last_throughput_time_) / k_ns_per_s;
+@@ -235,8 +323,17 @@ private:
+   folly::NotificationQueue<int> &queue_;
+   std::unique_ptr<std::thread> sender_thread_;
+   size_t conn_idx_{0};
+-  size_t outstanding_requests_{0};
++  // Atomic so the main thread can read request accounting.
++  std::atomic<uint64_t> submitted_requests_{0};
++  std::atomic<uint64_t> success_completed_requests_{0};
++  std::atomic<uint64_t> exception_completed_requests_{0};
++  std::atomic<uint64_t> dropped_requests_{0};
++  std::atomic<size_t> outstanding_requests_{0};
+   size_t to_send_{0};
++  bool sentinel_received_{false};
++  bool quiescence_signaled_{false};
++  std::promise<void> quiescent_promise_;
++  std::future<void> quiescent_future_{quiescent_promise_.get_future()};
+   ContinuousStatistic *latency_statistic_{nullptr};
+   ContinuousStatistic *throughput_statistic_{nullptr};
+   ContinuousStatistic *outstanding_statistic_{nullptr};

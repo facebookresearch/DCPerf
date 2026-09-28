@@ -95,6 +95,10 @@ build_treadmill() {
   # Apply AdSim-specific patches for integration
   patch -p1 --follow-symlinks --forward < "${BENCHPRESS_ROOT}/packages/adsim/patches/treadmill.patch" || true
 
+  # Add opt-in request accounting (--drain_timeout_seconds, off by default).
+  # Unlike the patch above, a failure here aborts the install.
+  patch -p1 --follow-symlinks --forward < "${BENCHPRESS_ROOT}/packages/adsim/patches/treadmill_request_accounting.patch"
+
   # Make build script executable and compile Treadmill
   sudo chmod u+x build.sh
   ./build.sh
