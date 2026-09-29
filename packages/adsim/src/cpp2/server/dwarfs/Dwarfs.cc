@@ -23,10 +23,12 @@
 #include <cea/chips/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/DeepCopy.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Delay.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/DenseFP32.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Dwarfs.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Embedding.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/FakeIO.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/GEMM.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/GpuSpinWait.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/HashMap.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/IBRun.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
@@ -34,6 +36,8 @@
 #include <cea/chips/adsim/cpp2/server/dwarfs/Serialize.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Shape.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/TensorDeser.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/TensorOps.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/TorchDispatch.h>
 
 namespace facebook::cea::chips::adsim {
 
@@ -49,6 +53,10 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"Serialize", Serialize::config},
     {"Deserialize", Deserialize::config},
     {"TensorDeser", TensorDeser::config},
+    {"TensorOps", TensorOps::config},
+    {"TorchDispatch", TorchDispatch::config},
+    {"DenseFP32", DenseFP32::config},
+    {"GpuSpinWait", GpuSpinWait::config},
     {"HashMap", HashMap::config},
     {"ConcurrentHashMap", ConcurrentHashMap::config},
     {"Rebatch", Rebatch::config},

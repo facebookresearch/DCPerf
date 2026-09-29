@@ -153,6 +153,22 @@ add_library(tensordeser TensorDeser.cc TensorDeser.h)
 target_link_libraries(tensordeser data_objects kernel ${JEMALLOC_LIB})
 target_compile_options(tensordeser PRIVATE ${COROUTINES_FLAG})
 
+add_library(tensorops TensorOps.h TensorOpsImpl.h)
+target_link_libraries(tensorops data_objects kernel)
+target_compile_options(tensorops PRIVATE ${COROUTINES_FLAG})
+
+add_library(torchdispatch TorchDispatch.h TorchDispatchImpl.h)
+target_link_libraries(torchdispatch data_objects kernel)
+target_compile_options(torchdispatch PRIVATE ${COROUTINES_FLAG})
+
+add_library(densefp32 DenseFP32.h DenseFP32Impl.h)
+target_link_libraries(densefp32 data_objects kernel fbgemm)
+target_compile_options(densefp32 PRIVATE ${COROUTINES_FLAG})
+
+add_library(gpuspinwait GpuSpinWait.h GpuSpinWaitImpl.h)
+target_link_libraries(gpuspinwait data_objects kernel)
+target_compile_options(gpuspinwait PRIVATE ${COROUTINES_FLAG})
+
 add_library(rebatch Rebatch.cc Rebatch.h)
 target_link_libraries(rebatch data_objects kernel)
 target_compile_options(rebatch PRIVATE ${COROUTINES_FLAG})
@@ -174,12 +190,16 @@ target_link_libraries(dwarfs
     rebatch
     deepcopy
     delay
+    densefp32
     embedding
     fakeio
     gemm
+    gpuspinwait
     hashmap
     ibrun
     serialize
     shape
-    tensordeser)
+    tensordeser
+    tensorops
+    torchdispatch)
 target_compile_options(dwarfs PRIVATE ${COROUTINES_FLAG})
