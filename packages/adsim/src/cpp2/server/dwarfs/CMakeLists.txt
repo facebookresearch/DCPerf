@@ -157,6 +157,10 @@ add_library(tensorops TensorOps.h TensorOpsImpl.h)
 target_link_libraries(tensorops data_objects kernel)
 target_compile_options(tensorops PRIVATE ${COROUTINES_FLAG})
 
+add_library(torchdispatch TorchDispatch.h TorchDispatchImpl.h)
+target_link_libraries(torchdispatch data_objects kernel)
+target_compile_options(torchdispatch PRIVATE ${COROUTINES_FLAG})
+
 add_library(rebatch Rebatch.cc Rebatch.h)
 target_link_libraries(rebatch data_objects kernel)
 target_compile_options(rebatch PRIVATE ${COROUTINES_FLAG})
@@ -186,5 +190,6 @@ target_link_libraries(dwarfs
     serialize
     shape
     tensordeser
-    tensorops)
+    tensorops
+    torchdispatch)
 target_compile_options(dwarfs PRIVATE ${COROUTINES_FLAG})
