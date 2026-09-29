@@ -153,6 +153,10 @@ add_library(tensordeser TensorDeser.cc TensorDeser.h)
 target_link_libraries(tensordeser data_objects kernel ${JEMALLOC_LIB})
 target_compile_options(tensordeser PRIVATE ${COROUTINES_FLAG})
 
+add_library(tensorops TensorOps.h TensorOpsImpl.h)
+target_link_libraries(tensorops data_objects kernel)
+target_compile_options(tensorops PRIVATE ${COROUTINES_FLAG})
+
 add_library(rebatch Rebatch.cc Rebatch.h)
 target_link_libraries(rebatch data_objects kernel)
 target_compile_options(rebatch PRIVATE ${COROUTINES_FLAG})
@@ -181,5 +185,6 @@ target_link_libraries(dwarfs
     ibrun
     serialize
     shape
-    tensordeser)
+    tensordeser
+    tensorops)
 target_compile_options(dwarfs PRIVATE ${COROUTINES_FLAG})
