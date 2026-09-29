@@ -28,6 +28,7 @@
 #include <cea/chips/adsim/cpp2/server/dwarfs/Embedding.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/FakeIO.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/GEMM.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/GpuSpinWait.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/HashMap.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/IBRun.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
@@ -55,6 +56,7 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"TensorOps", TensorOps::config},
     {"TorchDispatch", TorchDispatch::config},
     {"DenseFP32", DenseFP32::config},
+    {"GpuSpinWait", GpuSpinWait::config},
     {"HashMap", HashMap::config},
     {"ConcurrentHashMap", ConcurrentHashMap::config},
     {"Rebatch", Rebatch::config},
