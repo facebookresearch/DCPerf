@@ -153,6 +153,10 @@ add_library(tensordeser TensorDeser.cc TensorDeser.h)
 target_link_libraries(tensordeser data_objects kernel ${JEMALLOC_LIB})
 target_compile_options(tensordeser PRIVATE ${COROUTINES_FLAG})
 
+add_library(densefp32 DenseFP32.h DenseFP32Impl.h)
+target_link_libraries(densefp32 data_objects kernel fbgemm)
+target_compile_options(densefp32 PRIVATE ${COROUTINES_FLAG})
+
 add_library(rebatch Rebatch.cc Rebatch.h)
 target_link_libraries(rebatch data_objects kernel)
 target_compile_options(rebatch PRIVATE ${COROUTINES_FLAG})
@@ -174,6 +178,7 @@ target_link_libraries(dwarfs
     rebatch
     deepcopy
     delay
+    densefp32
     embedding
     fakeio
     gemm
