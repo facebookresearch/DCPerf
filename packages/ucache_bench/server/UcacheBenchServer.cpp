@@ -8,7 +8,6 @@
 #include "UcacheBenchServer.h"
 
 #include <folly/BenchmarkUtil.h>
-#include <folly/Format.h>
 #include <folly/hash/Checksum.h>
 #include <folly/hash/Hash.h>
 #include <folly/io/IOBuf.h>
