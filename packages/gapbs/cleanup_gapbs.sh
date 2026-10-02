@@ -9,7 +9,9 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 BENCHPRESS_ROOT="$(readlink -f "${SCRIPT_DIR}/../..")"
 
-"${BENCHPRESS_ROOT}"/install_remove_git.sh remove
+if [ -f "$BENCHPRESS_ROOT/install_remove_git.sh" ]; then
+    "${BENCHPRESS_ROOT}"/install_remove_git.sh remove
+fi
 
 GAPBS_INSTALLATION_PREFIX="$(pwd)/benchmarks/gapbs"
 rm -rf "${GAPBS_INSTALLATION_PREFIX}"
