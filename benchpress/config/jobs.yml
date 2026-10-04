@@ -44,6 +44,7 @@
     - '-T {temp_dir}'
     - '-U {auto_fix_ulimit}'
     - '-p'
+    - '-b'
     - '--'
     - '--mediawiki'
     - '--client-duration={duration}'
