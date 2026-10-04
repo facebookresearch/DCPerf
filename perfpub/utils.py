@@ -16,7 +16,7 @@ default_skip_last_secs = 0
 
 # Maps CSV filenames to (timestamp_column_name, timestamp_format)
 # "time_of_day": absolute time strings like "04:33:45 PM" (mpstat, memstat, etc.)
-# "relative_secs": numeric seconds relative to benchmark start (uArch collectors)
+# "relative_secs": numeric seconds since the collector started (uArch collectors)
 # "epoch_secs": absolute Unix epoch timestamps (Intel PerfSpect)
 TIMESTAMP_COLUMN_MAP = {
     "mpstat.csv": ("timestamp", "time_of_day"),
@@ -558,7 +558,7 @@ def get_start_end_index(
 
     Supports two timestamp formats:
     - "time_of_day": Absolute time strings (e.g., "04:33:45 PM") in a "timestamp" column
-    - "relative_secs": Numeric seconds relative to benchmark start (e.g., Timestamp_Secs)
+    - "relative_secs": Numeric seconds since the collector started (e.g., Timestamp_Secs)
 
     Args:
         df: DataFrame with timestamp data
@@ -569,8 +569,8 @@ def get_start_end_index(
         end_time: End time in datetime format, or None
         ts_column: Name of the timestamp column in the CSV
         ts_format: Format type ("time_of_day" or "relative_secs")
-        start_offset_secs: Start offset in seconds from benchmark epoch (for relative_secs)
-        end_offset_secs: End offset in seconds from benchmark epoch (for relative_secs)
+        start_offset_secs: Start offset in seconds from the collector start (for relative_secs)
+        end_offset_secs: End offset in seconds from the collector start (for relative_secs)
 
     Returns:
         Tuple of (start_index, end_index)
@@ -653,6 +653,27 @@ def get_start_end_index(
     return start_index, end_index
 
 
+def collector_start_time(filename):
+    """Return when a relative-time collector started, or None if unknown.
+
+    Benchpress writes <name>-start-epoch.txt next to <name>-timeseries.csv
+    just before it starts a perf-stat collector. Runs recorded before that
+    file existed return None.
+    """
+    suffix = "-timeseries.csv"
+    if not filename.endswith(suffix):
+        return None
+    path = filename[: -len(suffix)] + "-start-epoch.txt"
+    try:
+        with open(path) as f:
+            return datetime.fromtimestamp(float(f.read()))
+    except FileNotFoundError:
+        return None
+    except (OSError, OverflowError, ValueError) as e:
+        print(f"Warning: failed to read collector start time {path}: {e}")
+        return None
+
+
 def sample_avg_from_csv(
     filename,
     interval,
@@ -681,9 +702,13 @@ def sample_avg_from_csv(
     if ts_info:
         ts_column, ts_format = ts_info
     if start_time is not None and end_time is not None:
-        if ts_format == "relative_secs" and bm_epoch is not None:
-            start_offset_secs = (start_time - bm_epoch).total_seconds()
-            end_offset_secs = (end_time - bm_epoch).total_seconds()
+        if ts_format == "relative_secs":
+            # Assume a collector with no recorded start began at the
+            # benchmark epoch.
+            ts_start = collector_start_time(filename) or bm_epoch
+            if ts_start is not None:
+                start_offset_secs = (start_time - ts_start).total_seconds()
+                end_offset_secs = (end_time - ts_start).total_seconds()
         elif ts_format == "epoch_secs":
             start_offset_secs = start_time.timestamp()
             end_offset_secs = end_time.timestamp()
