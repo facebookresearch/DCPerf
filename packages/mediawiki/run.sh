@@ -46,7 +46,7 @@ restart_mariadb_systemctl() {
 
 function show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [-H db host] [-r hhvm path] [-n nginx path] [-L siege or wrk ] [-s load generator path] [-t server threads] [-c client threads] [-m memcache thrads] [-p] [-T temp-dir] [-- extra_args]
+Usage: ${0##*/} [-h] [-H db host] [-r hhvm path] [-n nginx path] [-L siege or wrk ] [-s load generator path] [-t server threads] [-c client threads] [-m memcache thrads] [-p] [-b] [-T temp-dir] [-- extra_args]
 Proxy shell script to executes oss-performance benchmark
     -h          display this help and exit
     -H          hostname or IP address to mariadb or mysql database
@@ -61,6 +61,9 @@ Proxy shell script to executes oss-performance benchmark
     -c          number of load generator threads. Default: ${SIEGE_CLIENT_THREADS} for siege, ${WRK_CLIENT_THREADS} for wrk.
     -m          number of memcache threads. Default: 8 * number of HHVM (=${MEMCACHE_THREADS})
     -p          disable perf-record.sh execution after warmup
+    -b          record the measured phase in breakdown.csv for PerfPub.
+                Cannot be combined with --exec-after-warmup or
+                --exec-after-benchmark in extra_args.
     -T          specify temporary directory path
     -j          enable JIT size monitoring with dump_jit_size.py
     -J          JIT monitoring port (default: localhost:9092)
@@ -166,10 +169,25 @@ function run_benchmark() {
   local _use_temp_dir="$7"
   local _temp_dir="$8"
   local _perf_record_arg=""
+  local _breakdown_args=()
   local _temp_dir_arg=""
 
   if [[ "$_disable_perf_record" != "true" ]]; then
     _perf_record_arg="--exec-after-warmup=${SCRIPT_DIR}/perf-record.sh"
+  fi
+
+  if [[ "${write_breakdown}" == "true" ]]; then
+    # perf.php accepts only one --exec-after-warmup command, so perf-record.sh
+    # runs after the start mark instead of being passed separately.
+    local _after_warmup_cmd="${SCRIPT_DIR}/log-breakdown.sh start"
+    if [[ -n "${_perf_record_arg}" ]]; then
+      _after_warmup_cmd+="; ${SCRIPT_DIR}/perf-record.sh"
+      _perf_record_arg=""
+    fi
+    _breakdown_args=(
+      "--exec-after-warmup=${_after_warmup_cmd}"
+      "--exec-after-benchmark=${SCRIPT_DIR}/log-breakdown.sh end"
+    )
   fi
 
   if [[ "$_use_temp_dir" = true && "$_temp_dir" != "default_no_temp_dir" ]]; then
@@ -222,6 +240,7 @@ function run_benchmark() {
     --delay-check-health 30 \
     --hhvm-extra-arguments='-vEval.ProfileHWEnable=0' \
     ${_perf_record_arg} \
+    "${_breakdown_args[@]}" \
     ${_temp_dir_arg} \
     ${extra_args}
 
@@ -255,6 +274,8 @@ function main() {
   local disable_perf_record
   disable_perf_record=false
 
+  write_breakdown=false
+
   local temp_dir
   temp_dir=""
 
@@ -270,7 +291,7 @@ function main() {
   tc_dump_interval=600
   jit_output_dir="/tmp/jit_study_output"
 
-  while getopts 'H:n:r:L:s:R:t:c:m:pT:jJ:DI:C:O:U:' OPTION "${@}"; do
+  while getopts 'H:n:r:L:s:R:t:c:m:pbT:jJ:DI:C:O:U:' OPTION "${@}"; do
     case "$OPTION" in
       H)
         db_host="${OPTARG}"
@@ -327,6 +348,9 @@ function main() {
       p)
         disable_perf_record=true
         ;;
+      b)
+        write_breakdown=true
+        ;;
       T)
         temp_dir="${OPTARG}"
         use_temp_dir=true
@@ -375,6 +399,7 @@ function main() {
   readonly load_generator
   readonly lg_path
   readonly disable_perf_record
+  readonly write_breakdown
   readonly use_temp_dir
   readonly temp_dir
   readonly auto_fix_ulimit
@@ -384,6 +409,22 @@ function main() {
   readonly enable_tc_dump
   readonly tc_dump_interval
   readonly jit_output_dir
+
+  if [[ "${write_breakdown}" == "true" ]]; then
+    # -b sets both hooks, and perf.php accepts only one of each.
+    if [[ "${extra_args}" =~ --exec-after-(warmup|benchmark) ]]; then
+      echo "Error: -b cannot be combined with --exec-after-warmup or --exec-after-benchmark" >&2
+      exit 1
+    fi
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/../common/runtime_breakdown_utils.sh"
+    # Benchpress exports a per-job metrics directory. Fall back to this
+    # directory when run.sh is invoked directly.
+    export MEDIAWIKI_BREAKDOWN_FOLDER="${BENCHPRESS_METRICS_DIR:-${SCRIPT_DIR}}"
+    # create_breakdown_csv keeps an existing file, so start from a clean one.
+    rm -f "${MEDIAWIKI_BREAKDOWN_FOLDER}/breakdown.csv"
+    create_breakdown_csv "${MEDIAWIKI_BREAKDOWN_FOLDER}"
+  fi
 
   # Run pre-flight checks (FD limits, SELinux, IPv6 hostname)
   local _preflight_args=(--benchmark mediawiki --benchpress-root "${OLD_CWD}")

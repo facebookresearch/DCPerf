@@ -187,6 +187,9 @@ Mediawiki mini is a shrunken version of Mediawiki
 - Configure load generation durations for warmup.
 - Set the interval for JIT retranslation.
 - Specify a deterministic number of warmup iterations.
+- Record the measured phase in `breakdown.csv` (`run.sh -b`), so PerfPub
+  averages only the measured window. `-b` cannot be combined with
+  `--exec-after-warmup` or `--exec-after-benchmark` in the extra arguments.
 
 To run the mini version of
 Mediawiki, please follow these steps:
