@@ -10,6 +10,7 @@ import os
 import re
 import socket
 import subprocess
+import time
 
 import numpy as np
 import pandas as pd
@@ -342,6 +343,11 @@ class BasePerfUtil(Monitor):
         cmd = [perf_collect_script]
         if self.interval is not None:
             cmd.append(str(self.interval))
+        # perf stat -I stamps rows with seconds since the collector started.
+        # Record that start in wall-clock time so PerfPub can line the rows up
+        # with breakdown.csv.
+        with open(self.gen_path(f"{self.name}-start-epoch.txt"), "w") as f:
+            f.write(f"{time.time():.6f}\n")
         self.proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
