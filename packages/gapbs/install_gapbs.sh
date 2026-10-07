@@ -25,7 +25,11 @@ GAPBS_GIT_COMMIT_TAG="v1.1"
 
 # Install system deps. fb-fwdproxy-config gives `git clone` access to public
 # github via fwdproxy on Meta dev servers / sandboxes.
-dnf install -y fb-fwdproxy-config gcc gcc-c++ libstdc++
+if dnf list fb-fwdproxy-config &> /dev/null; then
+    dnf install -y fb-fwdproxy-config
+fi
+
+dnf install -y gcc gcc-c++ libstdc++
 
 BENCHMARKS_DIR="$(pwd)/benchmarks"
 mkdir -p "${BENCHMARKS_DIR}"
@@ -36,10 +40,16 @@ rm -rf build
 mkdir -p build
 cd build/ || exit 1
 
-"${BENCHPRESS_ROOT}"/install_remove_git.sh install
+if [ -f "$BENCHPRESS_ROOT/install_remove_git.sh" ]; then
+    "${BENCHPRESS_ROOT}"/install_remove_git.sh install
+fi
 
-# shellcheck disable=SC2046
-git $(fwdproxy-config --git-command git) clone "${GAPBS_GIT_REPO_URL}"
+if command -v fwdproxy-config &> /dev/null; then
+    # shellcheck disable=SC2046
+    git $(fwdproxy-config --git-command git) clone "${GAPBS_GIT_REPO_URL}"
+else
+    git clone "${GAPBS_GIT_REPO_URL}"
+fi
 cd gapbs/ || exit 1
 git checkout -b benchpress "tags/${GAPBS_GIT_COMMIT_TAG}"
 
