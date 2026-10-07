@@ -6,7 +6,7 @@ include "thrift/annotation/thrift.thrift"
 @thrift.AllowLegacyMissingUris
 package;
 
-cpp_include "folly/small_vector.h"
+cpp_include "ranking/if/ranking_containers.h"
 cpp_include "folly/container/F14Map.h"
 
 struct Payload {
@@ -78,7 +78,7 @@ struct Action {
   4: i64 actorID;
 }
 
-@cpp.Type{name = "folly::small_vector<int64_t, 8>"}
+@cpp.Type{template = "::ranking::SmallVector8"}
 typedef list<i64> SmallListI64
 @cpp.Type{template = "folly::F14FastMap"}
 typedef map<i16, i64> RankingPayloadIntMap
