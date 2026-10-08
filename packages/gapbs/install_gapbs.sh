@@ -20,16 +20,27 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 BENCHPRESS_ROOT="$(readlink -f "${SCRIPT_DIR}/../..")"
 
+# shellcheck source=../common/os-distro.sh
+source "${BENCHPRESS_ROOT}/packages/common/os-distro.sh"
+
 GAPBS_GIT_REPO_URL="https://github.com/sbeamer/gapbs.git"
 GAPBS_GIT_COMMIT_TAG="v1.1"
 
-# Install system deps. fb-fwdproxy-config gives `git clone` access to public
-# github via fwdproxy on Meta dev servers / sandboxes.
-if dnf list fb-fwdproxy-config &> /dev/null; then
-    dnf install -y fb-fwdproxy-config
+# Install the toolchain (compiler, make, git) with the native package manager.
+# fb-fwdproxy-config gives `git clone` access to public github via fwdproxy on
+# Meta dev servers / sandboxes (CentOS-only rpm).
+if distro_is_like ubuntu || distro_is_like debian; then
+    apt -y update
+    apt -y install gcc g++ make git
+elif distro_is_like centos || distro_is_like rhel || distro_is_like fedora; then
+    if dnf list fb-fwdproxy-config &> /dev/null; then
+        dnf install -y fb-fwdproxy-config
+    fi
+    dnf install -y gcc gcc-c++ libstdc++ make git
+else
+    echo "ERROR: unsupported Linux distribution: $(get_os_distro_id)" >&2
+    exit 1
 fi
-
-dnf install -y gcc gcc-c++ libstdc++
 
 BENCHMARKS_DIR="$(pwd)/benchmarks"
 mkdir -p "${BENCHMARKS_DIR}"
