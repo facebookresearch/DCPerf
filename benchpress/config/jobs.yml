@@ -56,7 +56,6 @@
     - '--skip-sleep-between-warmups'
     - '--hhvm-extra-arguments="-vEval.JitRetranslateAllSeconds={translation_interval_seconds}"'
     - '--num-multi-req-warmups={num_multi_req_warmups}'
-    - '--no-load-if-pending-translate'
     - '--first-multi-warmup-duration={first_multi_warmup_duration}'
     - '--subseq-multi-warmup-duration={subseq_multi_warmup_duration}'
     - '--load-gen-seed={load_generator_seed}'
@@ -64,9 +63,9 @@
   vars:
     - 'load_generator=wrk'
     - 'lg_path=benchmarks/oss_performance_mediawiki/wrk/wrk'
-    - 'duration=4s'
-    - 'timeout=60s'
-    - 'translation_interval_seconds=5'
+    - 'duration=30s'
+    - 'timeout=120s'
+    - 'translation_interval_seconds=45'
     - 'first_multi_warmup_duration=25' # long enough to get a high score
     - 'subseq_multi_warmup_duration=5'
     - 'temp_dir=default_no_temp_dir'
