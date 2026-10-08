@@ -175,7 +175,6 @@ void EmbeddingTable::embedding_lookup_and_pool(
           output_stride,
           input_stride / sizeof(float),
           false,
-          false,
           false);
 
       success = kernel(
@@ -192,7 +191,7 @@ void EmbeddingTable::embedding_lookup_and_pool(
 
     case WeightsPrecision::FP16: {
       auto kernel = GenerateEmbeddingSpMDMWithStrides<
-          uint16_t,
+          fbgemm::float16,
           int64_t,
           int32_t,
           float,
@@ -204,8 +203,7 @@ void EmbeddingTable::embedding_lookup_and_pool(
           false,
           true,
           output_stride,
-          input_stride / sizeof(uint16_t),
-          false,
+          input_stride / sizeof(fbgemm::float16),
           false,
           false);
 
@@ -213,7 +211,8 @@ void EmbeddingTable::embedding_lookup_and_pool(
           batch_size,
           lengths_sum,
           spec_.num_embeddings,
-          reinterpret_cast<const uint16_t*>(fused_embedding_table_.data()),
+          reinterpret_cast<const fbgemm::float16*>(
+              fused_embedding_table_.data()),
           indices.data(),
           offsets.data(),
           weighted ? weights.data() : nullptr,
@@ -237,7 +236,6 @@ void EmbeddingTable::embedding_lookup_and_pool(
           output_stride,
           input_stride,
           true,
-          false,
           false);
 
       success = kernel(
@@ -265,10 +263,7 @@ void EmbeddingTable::embedding_lookup_and_pool(
               true,
               output_stride,
               input_stride,
-              true,
-              false,
-              false,
-              32);
+              true);
 
       success = kernel(
           batch_size,
