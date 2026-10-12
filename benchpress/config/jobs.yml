@@ -314,17 +314,21 @@
         - '-w {server_workers}'
         - '--thrift-server-workers {thrift_server_workers}'
         - '--cassandra-heap {cassandra_heap}'
+        - '--warmup-duration {warmup_duration}'
+        - '--use-jit {use_jit}'
       vars:
         - 'duration=15S'
         - 'iterations=1'
         - 'reps=0'
-        - 'interpreter=cpython'
+        - 'warmup_duration=60S'
+        - 'interpreter=cinder'
         - 'use_async=1'
         - 'base_port=16668'
         - 'stats_port=8001'
         - 'server_workers=0'
         - 'thrift_server_workers=0'
         - 'cassandra_heap=1536M'
+        - 'use_jit=1'
   hooks:
     - hook: copymove
       options:

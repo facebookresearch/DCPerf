@@ -863,7 +863,7 @@ cd <DCPerf-folder>
 | :---- | :---- | :---- |
 | `django_workload_default` | Standard run (5M duration) | Full benchmark |
 | `django_workload_arm` | ARM-optimized params | ARM testing |
-| `django_workload_mini` | Quick test (1000 reps) | Emulation support |
+| `django_workload_mini` | 60s warmup + 15s measurement | Emulation support |
 | `django_workload_custom` | More customizable params | Tuning experiments |
 
 **All jobs default to async mode (`use_async=1`)**
