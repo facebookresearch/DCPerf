@@ -510,9 +510,11 @@
     DCPerf Mini variant of feedsim_dlrm, for pre-silicon emulation, regression
     testing and machine health checks. Same single-instance DLRM aggregator
     workload as feedsim_dlrm (calibrated recipe baked into defaults); only the
-    run control differs — it skips warmup and the QPS search and instead drives a
-    fixed load for a short fixed window, reporting the QPS the server sustains.
-    Override fixed_qps to drive a specific rate instead of saturating the server.
+    run control differs — it skips the QPS search and instead runs a short
+    warmup, then drives a fixed load at a fixed driver depth for a short fixed
+    window, reporting the QPS the server sustains. The default fixed_qps is above
+    the depth-2 throughput of current platforms, so the window measures each
+    server's throughput at that depth. Lower fixed_qps to drive a specific rate.
   args:
     - '-n 1'
     - '-t {thrift_threads}'
@@ -525,17 +527,21 @@
     - '-R {node_rank_seed}'
     - '-C {pointer_chase_seed}'
     - '-N'
+    - '--depth={depth}'
     - '{extra_args}'
   vars:
     - 'thrift_threads=0'
-    - 'fixed_qps=100000'
-    - 'fixed_qps_duration=20'
-    - 'warmup_time=0'
+    - 'fixed_qps=100'
+    - 'fixed_qps_duration=10'
+    - 'warmup_time=10'
     - 'qps_percentage_threshold=-1'
     - 'max_warmup_iterations=-1'
     - 'queue_drain_time=1'
-    - 'node_rank_seed=54321'
-    - 'pointer_chase_seed=98765'
+    - 'node_rank_seed=42'
+    - 'pointer_chase_seed=42'
+    # Driver pipeline depth for both the warmup and the measured window. The
+    # fixed-QPS path has no adaptive depth.
+    - 'depth=2'
     - 'extra_args='
   hooks:
     - hook: copymove
