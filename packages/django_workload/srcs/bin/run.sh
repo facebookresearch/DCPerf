@@ -262,7 +262,7 @@ Usage: ${0##*/} [-h] [-r role] [-w number of workers] [-i number of iterations] 
 [-s urls path] [-c cassandra host ip] [-S skip database setup] [-L snapshot loading] \
 [-t snapshot taking] [--interpreter cpython|cinder] [--base-port port] [-T stats port] \
 [--worker-transport unix|tcp] [--thrift-server-workers num] [--use-async 0|1] \
-[--use-jit 0|1] [--skip-datagen 0|1]
+[--use-jit 0|1] [--skip-datagen 0|1] [--warmup-duration duration]
 
 Proxy shell script to executes django-workload benchmark
     -r          role (clientserver, client, server or db, default is clientserver)
@@ -283,6 +283,9 @@ For role "server", "clientserver":
                 If enabled, sets PYTHONJIT environment variables. (default 0)
     --skip-datagen
                 set to 1 to skip data generation and use existing data (default 0)
+    --warmup-duration
+                run the workload for this duration before the measured iterations
+                (e.g. 60S; default disabled)
     -L          when provided snapshot loading is enabled, meaning that the database is loaded from a snapshot stored in the specifed path (default disabled)
     -t          when provided snapshot taking is enabled, meaning that the a snapshot of the generetaed database will be stored in the specifed path (default disabled)
     -S          skip the database setup and use the snapshot stored in the Cassandra data directory (default disabled)
@@ -661,6 +664,7 @@ start_client() {
   local iterations="$6"
   local reps="$7"
   local server_pid="${8:-}"
+  local warmup_duration="${9:-}"
 
   # Replace the host in url template to the actual server addr
   CLIENTS_DIR="${SCRIPT_ROOT}/../django-workload/client"
@@ -727,9 +731,27 @@ start_client() {
     fi
   done
 
-  # Additional small delay to ensure workers are fully warmed up
-  echo "Brief warmup delay before starting benchmark..."
+  # Allow the healthy workers to settle before optional workload warmup.
+  echo "Brief delay before starting workload..."
   sleep 2
+
+  if [ -n "$warmup_duration" ]; then
+    local warmup_log="${BENCHPRESS_ROOT}/benchmarks/django_workload/warmup.log"
+    echo "Running workload warmup for ${warmup_duration}..."
+    if ! DCPERF_PERF_RECORD=0 run_benchmark \
+      "${num_client_workers}" \
+      "${warmup_duration}" \
+      "./warmup.log" \
+      "${urls_path}" \
+      1 \
+      0 \
+      > "${warmup_log}" 2>&1; then
+      echo "Workload warmup failed; output follows:"
+      cat "${warmup_log}"
+      exit 1
+    fi
+    echo "Workload warmup complete. Full output is available in ${warmup_log}"
+  fi
 
   if [ -n "$server_pid" ]; then
     log_main_benchmark_start "$BREAKDOWN_FOLDER" "$server_pid"
@@ -755,6 +777,7 @@ start_clientserver() {
   local use_async="${10:-0}"
   local use_jit="${11:-0}"
   local worker_transport="${12:-unix}"
+  local warmup_duration="${13:-}"
 
   create_breakdown_csv "$BREAKDOWN_FOLDER"
   log_preprocessing_start "$BREAKDOWN_FOLDER" "$$"
@@ -789,7 +812,9 @@ start_clientserver() {
 
   log_preprocessing_end "$BREAKDOWN_FOLDER" "$$"
 
-  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "127.0.0.1" "${iterations}" "${reps}" "${django_server_pid}"
+  start_client "${num_client_workers}" "${duration}" "${siege_logs_path}" \
+    "${urls_path}" "127.0.0.1" "${iterations}" "${reps}" \
+    "${django_server_pid}" "${warmup_duration}"
 
   log_postprocessing_start "$BREAKDOWN_FOLDER" "$$"
 
@@ -892,6 +917,9 @@ main() {
   local skip_datagen
   skip_datagen=0
 
+  local warmup_duration
+  warmup_duration=
+
   # Parse long options manually
   local args=()
   while [[ $# -gt 0 ]]; do
@@ -950,6 +978,14 @@ main() {
         ;;
       --skip-datagen=*)
         skip_datagen="${1#*=}"
+        shift
+        ;;
+      --warmup-duration)
+        warmup_duration="$2"
+        shift 2
+        ;;
+      --warmup-duration=*)
+        warmup_duration="${1#*=}"
         shift
         ;;
       --worker-transport)
@@ -1096,6 +1132,7 @@ main() {
   readonly use_jit
   readonly worker_transport
   readonly skip_datagen
+  readonly warmup_duration
 
   # Export skip_datagen as environment variable for use in start_django_server
   export SKIP_DATAGEN="${skip_datagen}"
@@ -1121,10 +1158,13 @@ main() {
     start_cassandra "$num_cassandra_writes" "$cassandra_bind_addr";
   elif [ "$role" = "clientserver" ]; then
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
-      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "${interpreter}" "${use_async}" "${use_jit}" "${worker_transport}";
+      "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" \
+      "${interpreter}" "${use_async}" "${use_jit}" "${worker_transport}" \
+      "${warmup_duration}";
   elif [ "$role" = "client" ]; then
     start_client "$num_client_workers" "$duration" "$siege_logs_path" \
-      "$urls_path" "$server_addr" "$iterations" "$reps";
+      "$urls_path" "$server_addr" "$iterations" "$reps" "" \
+      "${warmup_duration}";
   elif [ "$role" = "server" ]; then
     start_django_server "$cassandra_addr" "$num_server_workers" "$interpreter" "${use_async}" "${use_jit}" "${worker_transport}";
     # Report interpreter type
@@ -1134,7 +1174,7 @@ main() {
     start_cassandra "$num_cassandra_writes" 127.0.0.1 &
     start_clientserver "$cassandra_addr" "$num_server_workers" "$num_client_workers" \
       "$duration" "$siege_logs_path" "$urls_path" "$iterations" "$reps" "$interpreter" \
-      "${use_async}" "${use_jit}" "${worker_transport}";
+      "${use_async}" "${use_jit}" "${worker_transport}" "${warmup_duration}";
 
   else
     echo "Role $role is invalid, it can only be 'db' or 'clientserver' or 'standalone'";

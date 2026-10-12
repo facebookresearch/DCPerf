@@ -23,4 +23,4 @@ NPROC=$(nproc)
 THREADS=$((NPROC > 16 ? NPROC / 2 : 16))
 MAXCONNS=$((NPROC * 8))
 
-/usr/bin/memcached -u "$USER" -m "$MEMORY" -l "$LISTEN" -p "$PORT" -t "$THREADS" -c "$MAXCONNS"
+exec /usr/bin/memcached -u "$USER" -m "$MEMORY" -l "$LISTEN" -p "$PORT" -t "$THREADS" -c "$MAXCONNS"
