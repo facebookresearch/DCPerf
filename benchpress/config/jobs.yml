@@ -727,6 +727,7 @@
     - '--local-hostname "{local_hostname}"'
     - '--shuffle-partitions {shuffle_partitions}'
     - '--skip-datagen {skip_datagen}'
+    - '--score-query-time {score_query_time}'
     - '--worker-cores "{worker_cores}"'
     - '--worker-mem "{worker_mem}"'
   vars:
@@ -739,6 +740,7 @@
     - 'worker_mem='
     # Skip the datagen phase and reuse the existing one. Set to 0 to force a rebuild.
     - 'skip_datagen=1'
+    - 'score_query_time=1'
   hooks:
     - hook: copymove
       options:
