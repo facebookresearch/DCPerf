@@ -745,30 +745,47 @@ done
 benchreps_tell_state "after tuning_qps"
 
 # gap tuning
+# Each probe takes about two minutes; cap persistent requested/achieved QPS
+# disagreement so a noisy driver cannot keep the benchmark alive indefinitely.
 benchreps_tell_state "before gap_qps"
+max_gap_iters=10
+gap_iters=0
 loop_cond=$(echo "($cur_qps > ($measured_qps*1.02))" | bc)
-while [[ $loop_cond -eq 1 ]]; do
+while [[ $loop_cond -eq 1 ]] && [[ $gap_iters -lt $max_gap_iters ]]; do
   cur_qps=$(echo "scale=5; $cur_qps - (($cur_qps - $measured_qps)/2)" | bc)
 
   # run experiment and report result
   run_loadtest measured_qps measured_latency $cur_qps ""
   printf "requested_qps = %.2f, measured_qps = %.2f, latency = %.2f\n" $cur_qps $measured_qps $measured_latency
 
+  gap_iters=$((gap_iters + 1))
   loop_cond=$(echo "($cur_qps > ($measured_qps*1.02))" | bc)
 done
+if [[ $loop_cond -eq 1 ]]; then
+  benchreps_tell_state "gap_qps_failed"
+  printf "error: gap tuning failed to converge after %d iterations (requested %.2f QPS, achieved %.2f QPS).\n" \
+    "$gap_iters" "$cur_qps" "$measured_qps" >&2
+  exit 1
+fi
 benchreps_tell_state "after gap_qps"
 
 if [[ -n "$IS_AUTOSCALE_RUN" ]] && [[ "$IS_AUTOSCALE_RUN" -gt 1 ]]; then
     NUM_INSTANCES=$IS_AUTOSCALE_RUN
-    num_ready_inst=$(grep --count "after gap_qps" $BREPS_LFILE)
-    if [[ $num_ready_inst -lt $NUM_INSTANCES ]]; then
+    num_ready_inst=$(grep --count "after gap_qps" "$BREPS_LFILE")
+    num_failed_inst=$(grep --count "gap_qps_failed" "$BREPS_LFILE")
+    if [[ $num_ready_inst -lt $NUM_INSTANCES ]] && [[ $num_failed_inst -eq 0 ]]; then
         result_filename=$(basename "$output_csv_file")
         current_inst_num=$(echo "$result_filename" | sed -E "s/feedsim_results_(fixqps-)?([0-9]+)\.txt/\2/")
         benchreps_tell_state "[Instance $current_inst_num] Waiting for other instances to finish \"gap_qps\" stage."
-        while [[ $num_ready_inst -lt $NUM_INSTANCES ]]; do
+        while [[ $num_ready_inst -lt $NUM_INSTANCES ]] && [[ $num_failed_inst -eq 0 ]]; do
             sleep 1
-            num_ready_inst=$(grep --count "after gap_qps" $BREPS_LFILE)
+            num_ready_inst=$(grep --count "after gap_qps" "$BREPS_LFILE")
+            num_failed_inst=$(grep --count "gap_qps_failed" "$BREPS_LFILE")
         done
+    fi
+    if [[ $num_failed_inst -gt 0 ]]; then
+        printf "error: another FeedSim instance failed gap tuning.\n" >&2
+        exit 1
     fi
 fi
 

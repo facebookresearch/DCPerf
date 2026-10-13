@@ -317,10 +317,16 @@ for i in $(seq 1 ${NUM_INSTANCES}); do
     PORT=$((PORT + 1))
 done
 
-# shellcheck disable=SC2068,SC2069
-for pid in ${PIDS[@]}; do
-    wait "$pid" 2>&1 >/dev/null
+child_failure=0
+for pid in "${PIDS[@]}"; do
+    if ! wait "$pid"; then
+        child_failure=1
+    fi
 done
+if [ "$child_failure" -ne 0 ]; then
+    echo "ERROR: one or more FeedSim instances failed; see ${FEEDSIM_LOG_PREFIX}*.log" >&2
+    exit 1
+fi
 
 BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
 BC_MIN_FN='define min (a, b) { if (a <= b) return (a); return (b); }'
