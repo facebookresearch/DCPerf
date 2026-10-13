@@ -7,7 +7,7 @@ import glob
 import json
 import math
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -993,6 +993,26 @@ def put_value(db_fields: dict, key: str, kv: str):
         pass
 
 
+def trim_window(start_time, end_time, trim_secs, interval):
+    """Shrink the benchmark window by trim_secs at each end.
+
+    The window is left unchanged when it is unknown or not longer than
+    2 * trim_secs.
+    """
+    if start_time is None or end_time is None or trim_secs <= 0:
+        return start_time, end_time
+    trim = timedelta(seconds=trim_secs)
+    if end_time - start_time <= 2 * trim:
+        print(
+            f"Warning: benchmark window {start_time} - {end_time} is not longer "
+            f"than 2 * {trim_secs}s; not trimming it"
+        )
+        return start_time, end_time
+    # Samples are stamped at their end; the shift keeps those ending in the window.
+    shift = timedelta(seconds=interval / 2)
+    return start_time + trim + shift, end_time - trim + shift
+
+
 def process_metrics(
     args, additional_processing_on_metrics=None, dump_overall_metrics=None
 ):
@@ -1005,6 +1025,9 @@ def process_metrics(
     breakdown_path = "breakdown.csv"
     if os.path.exists(breakdown_path):
         start_time, end_time = parse_breakdown_csv(breakdown_path)
+        start_time, end_time = trim_window(
+            start_time, end_time, args.trim_secs, args.interval
+        )
 
     db_fields = {}
     bm_metrics = read_benchmark_metrics()
@@ -1413,6 +1436,14 @@ def init_parser():
         type=int,
         default=None,
         help=f"Skip the last N seconds of metrics. If not provided and breakdown.csv is not present, use default of {default_skip_last_secs}. Recommended value: Taobench: 120; Feedsim: 30; Spark: 10; Video Transcode: 10; Django: 60; MediaWiki: 30",
+    )
+    parser.add_argument(
+        "--trim-secs",
+        type=float,
+        default=0,
+        help="Shrink the breakdown.csv benchmark window by N seconds at each end "
+        "and keep the samples that end inside it, so samples covering the load "
+        "starting or stopping are left out",
     )
     parser.add_argument(
         "--note", type=str, default="", help="Additional note to be added to the folder"
