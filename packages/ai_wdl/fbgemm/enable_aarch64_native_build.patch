@@ -1,0 +1,13 @@
+diff --git a/.github/scripts/fbgemm_build.bash b/.github/scripts/fbgemm_build.bash
+--- a/.github/scripts/fbgemm_build.bash
++++ b/.github/scripts/fbgemm_build.bash
+@@ -28,5 +28,9 @@ __configure_fbgemm_build_cmake () {
+     -DPYTHON_EXECUTABLE=${python_path}
+   )
+
++  if [[ "$(uname -m)" == "aarch64" ]]; then
++    build_args+=(-DFBGEMM_AARCH64_BUILD_NATIVE=ON)
++  fi
++
+   if print_exec "conda run ${env_prefix} c++ --version | grep -i clang"; then
+     echo "[BUILD] Host compiler is Clang; adding extra compiler flags ..."
