@@ -723,7 +723,12 @@ def run_server(args):
                 print(f"  {line}")
 
             skip_check = getattr(args, "skip_hit_rate_check", 0) != 0
-            parser = TaoBenchParser(f"server_{i}.csv", skip_hit_rate_check=skip_check)
+            parser = TaoBenchParser(
+                f"server_{i}.csv",
+                skip_hit_rate_check=skip_check,
+                drop_first_samples=getattr(args, "drop_first_samples", 0),
+                drop_last_samples=getattr(args, "drop_last_samples", 0),
+            )
             res = parser.parse(log, None, returncode)
 
             # Diagnose parser results
@@ -882,6 +887,18 @@ def init_parser():
         help="set to 1 to skip the hit rate threshold check when computing "
         + "server QPS. Useful on low core counts where the cache cannot reach "
         + "the 88%% hit rate within a short test.",
+    )
+    parser.add_argument(
+        "--drop-first-samples",
+        type=int,
+        default=0,
+        help="number of earliest server QPS samples to leave out of the score",
+    )
+    parser.add_argument(
+        "--drop-last-samples",
+        type=int,
+        default=0,
+        help="number of latest server QPS samples to leave out of the score",
     )
 
     # Add custom thread parameters to SERVER_CMD_OPTIONS

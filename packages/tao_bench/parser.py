@@ -45,9 +45,17 @@ class TaoBenchParser:
     # result qps calculation
     MIN_HIT_RATE = 0.88
 
-    def __init__(self, server_csv_name="server.csv", skip_hit_rate_check=False):
+    def __init__(
+        self,
+        server_csv_name="server.csv",
+        skip_hit_rate_check=False,
+        drop_first_samples=0,
+        drop_last_samples=0,
+    ):
         self.server_csv_name = server_csv_name
         self.skip_hit_rate_check = skip_hit_rate_check
+        self.drop_first_samples = drop_first_samples
+        self.drop_last_samples = drop_last_samples
 
     def parse(self, stdout, stderr, returncode):
         """Extracts TAO bench results from stdout."""
@@ -103,9 +111,7 @@ class TaoBenchParser:
             table.writelines(lines)
 
     def process_server_snapshots(self, metrics, server_snapshots):
-        counter = 0
-        total_fast_qps = 0
-        total_slow_pqs = 0
+        selected = []
         for snapshot in reversed(server_snapshots):
             if not snapshot.valid:
                 continue
@@ -114,13 +120,19 @@ class TaoBenchParser:
                 self.skip_hit_rate_check
                 or snapshot.get("hit_rate") >= self.MIN_HIT_RATE
             ):
-                counter += 1
-            else:
-                continue
+                selected.append(snapshot)
+            if len(selected) >= 360 / 5 - 10:
+                break
+        # `selected` is newest first, so the last samples are at its start.
+        selected = selected[
+            self.drop_last_samples : max(len(selected) - self.drop_first_samples, 0)
+        ]
+        counter = len(selected)
+        total_fast_qps = 0
+        total_slow_pqs = 0
+        for snapshot in selected:
             total_fast_qps += snapshot.get("fast_qps")
             total_slow_pqs += snapshot.get("slow_qps")
-            if counter >= 360 / 5 - 10:
-                break
         if counter > 0:
             metrics["fast_qps"] = total_fast_qps / counter
             metrics["slow_qps"] = total_slow_pqs / counter

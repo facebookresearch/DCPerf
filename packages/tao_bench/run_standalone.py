@@ -169,6 +169,18 @@ def init_parser():
         + "the 88%% hit rate within a short test.",
     )
     parser.add_argument(
+        "--drop-first-samples",
+        type=int,
+        default=0,
+        help="number of earliest server QPS samples to leave out of the score",
+    )
+    parser.add_argument(
+        "--drop-last-samples",
+        type=int,
+        default=0,
+        help="number of latest server QPS samples to leave out of the score",
+    )
+    parser.add_argument(
         "--auto-fix-ulimit",
         type=int,
         default=0,
@@ -225,6 +237,8 @@ def launch_server(port_number_start=11211, bind_cpu=1, bind_mem=1):
     # Pass skip-hit-rate-check if specified
     if hasattr(args, "skip_hit_rate_check") and args.skip_hit_rate_check:
         script_args["--skip-hit-rate-check"] = args.skip_hit_rate_check
+    script_args["--drop-first-samples"] = args.drop_first_samples
+    script_args["--drop-last-samples"] = args.drop_last_samples
 
     cmd = [f"{TAO_BENCH_DIR}/run_autoscale.py --real"]
 
