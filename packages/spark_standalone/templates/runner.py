@@ -215,6 +215,8 @@ def run_test(args):
     if hasattr(args, "query") and args.query:
         cmd_list.append("--query")
         cmd_list.append(args.query)
+    if getattr(args, "score_query_time", 0):
+        cmd_list.append("--score-query-time 1")
     cmd_list.append("--real")
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
@@ -504,6 +506,14 @@ def init_parser():
         choices=[0, 1],
         help="reuse an existing warehouse and metastore instead of rebuilding "
         "them. Falls back to building if either is missing.",
+    )
+    run_parser.add_argument(
+        "--score-query-time",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="score on the query time spark-sql reports instead of the wall "
+        "time of the spark-sql process, which includes JVM start and exit",
     )
     run_parser.add_argument("--real", action="store_true", help="for real")
     setup_parser.set_defaults(func=setup)

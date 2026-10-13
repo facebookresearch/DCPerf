@@ -172,6 +172,19 @@ def create(args) -> None:
         run_spark_sql(sql_file, database=None, for_real=args.real)
 
 
+def query_time_secs(logfile: str) -> float:
+    """Total of the "Time taken" lines spark-sql prints after each statement."""
+    times = []
+    with open(logfile, "r") as f:
+        for line in f:
+            match = re.match(r"Time taken: ([\d.]+) seconds", line)
+            if match:
+                times.append(float(match.group(1)))
+    if not times:
+        raise RuntimeError(f"No 'Time taken' line in {logfile}")
+    return sum(times)
+
+
 def parse_per_stage_runtime(
     logfile: str, worker_cores: int
 ) -> Dict[str, List[datetime.datetime]]:
@@ -250,6 +263,8 @@ def run(args) -> None:
                     exec_logname = sql_file.replace(".sql", ".log")
                     exec_logpath = joinpath(WORK_PATH, exec_logname)
                     stages = parse_per_stage_runtime(exec_logpath, sum(worker_cores))
+                    if args.score_query_time:
+                        queries_per_hour = 3600.0 / query_time_secs(exec_logpath)
                     fp.write(f"{' ' * 4}queries-per-hour : {queries_per_hour:.3f}\n")
                     fp.write(f"{' ' * 4}test-{test_name} : {test_elapsed_time:.1f}\n")
                     for stage, timeline in stages.items():
@@ -640,6 +655,14 @@ def init_parser():
             type=str,
             default=None,
             help="Path to a custom SQL file to run instead of the dataset's built-in query",
+        )
+        x.add_argument(
+            "--score-query-time",
+            type=int,
+            default=0,
+            choices=[0, 1],
+            help="compute queries-per-hour from the query time spark-sql reports "
+            "instead of the wall time of the spark-sql process",
         )
     # numa setting
     for x in [start_parser, run_parser, exp_parser]:
