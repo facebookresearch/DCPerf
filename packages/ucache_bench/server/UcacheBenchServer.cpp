@@ -1006,7 +1006,11 @@ UcbGetReply UcacheBenchServer::processUcbGetSync(const UcbGetRequest& req) {
       auto valueView = item->getMemory();
       reply.value() = *folly::IOBuf::copyBuffer(
           reinterpret_cast<const char*>(valueView), item->getSize());
-      reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
+      reply.flags() =
+          apache::thrift::is_non_optional_field_set_manually_or_by_serializer(
+              req.flags())
+          ? req.flags().value()
+          : 0;
       recordGet(true);
     } else {
       reply.result() = carbon::Result::NOTFOUND;
@@ -1058,7 +1062,11 @@ UcbSetReply UcacheBenchServer::processUcbSetSync(const UcbSetRequest& req) {
       std::memcpy(item->getMemory(), valueStr.data(), valueStr.size());
       cache_->insertOrReplace(item);
       reply.result() = carbon::Result::STORED;
-      reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
+      reply.flags() =
+          apache::thrift::is_non_optional_field_set_manually_or_by_serializer(
+              req.flags())
+          ? req.flags().value()
+          : 0;
       recordSet();
     } else {
       reply.result() = carbon::Result::NOTSTORED;
@@ -1089,7 +1097,11 @@ UcbDeleteReply UcacheBenchServer::processUcbDeleteSync(
     auto removeResult = cache_->remove(keyStr);
     if (removeResult == CacheAllocator::RemoveRes::kSuccess) {
       reply.result() = carbon::Result::DELETED;
-      reply.flags() = req.flags().has_value() ? req.flags().value() : 0;
+      reply.flags() =
+          apache::thrift::is_non_optional_field_set_manually_or_by_serializer(
+              req.flags())
+          ? req.flags().value()
+          : 0;
       recordDelete();
     } else {
       reply.result() = carbon::Result::NOTFOUND;
