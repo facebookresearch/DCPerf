@@ -41,7 +41,8 @@ class AdSimHandler : virtual public AdSimSvIf, public fb303::BaseService {
  public:
   explicit AdSimHandler(
       std::shared_ptr<std::vector<Stage>> stages,
-      int req_local_pool_size = 8);
+      int req_local_pool_size = 8,
+      bool lazy_req_local_pool = false);
 
   // The main endpoint to invoke AdSim service
   folly::coro::Task<std::unique_ptr<AdSimResponse>> co_sim(
@@ -63,5 +64,6 @@ class AdSimHandler : virtual public AdSimSvIf, public fb303::BaseService {
   std::shared_ptr<AdSimHandleObjs> handle_objs;
   std::shared_ptr<std::vector<Stage>> stages;
   int num_req_local_threads;
+  bool lazy_req_local_pool;
 };
 } // namespace facebook::cea::chips::adsim

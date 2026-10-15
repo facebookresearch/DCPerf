@@ -357,18 +357,21 @@ TensorDeser::TensorDeser(
     int request_book_multiplier,
     int num_threads,
     std::string input_str,
-    std::string distribution_file)
+    std::string distribution_file,
+    std::optional<uint32_t> seed)
     : requests_per_run_(requests_per_run),
       request_book_multiplier_(request_book_multiplier),
       num_threads_(num_threads),
       input_str_(std::move(input_str)),
       distribution_file_(std::move(distribution_file)),
+      seed_(seed),
       current_request_position_(0) {
   LOG(INFO) << "TensorDeser initialized with params: " << "requests_per_run="
             << requests_per_run_
             << ", request_book_multiplier=" << request_book_multiplier_
             << ", num_threads=" << num_threads_
-            << ", distribution_file=" << distribution_file_;
+            << ", distribution_file=" << distribution_file_
+            << ", seed=" << (seed_ ? std::to_string(*seed_) : "random");
 }
 
 void TensorDeser::generatePregeneratedRequests(
@@ -381,8 +384,7 @@ void TensorDeser::generatePregeneratedRequests(
 
   auto accessDistribution = generator.createIOBufSampler();
 
-  std::random_device rd;
-  std::mt19937 rng(rd());
+  std::mt19937 rng(seed_ ? *seed_ : std::random_device{}());
 
   for (uint32_t i = 0; i < request_book_size; ++i) {
     size_t configIdx = accessDistribution.getRandomIOBufIndex(rng);
