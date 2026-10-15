@@ -108,7 +108,8 @@ class Compress : public CompressBase {
 /* A kernel for decompression */
 class Decompress : public CompressBase {
  public:
-  explicit Decompress(const CompressBase& base) : CompressBase(base) {}
+  Decompress(const CompressBase& base, bool run_decompressor)
+      : CompressBase(base), run_decompressor_(run_decompressor) {}
   std::string init(
       std::shared_ptr<AdSimHandleObjs> h_objs,
       std::shared_ptr<AdSimRequestObjs> r_objs = nullptr) override;
@@ -118,8 +119,12 @@ class Decompress : public CompressBase {
       std::shared_ptr<folly::Executor> pool) override;
   static std::shared_ptr<Kernel> config(const folly::dynamic& config_d) {
     return std::make_shared<Decompress>(
-        CompressBase::config(config_d, "Hdecompress", "Rdecompressed"));
+        CompressBase::config(config_d, "Hdecompress", "Rdecompressed"),
+        config_d.getDefault("run_decompressor", false).asBool());
   }
+
+ private:
+  bool run_decompressor_ = false;
 };
 
 } // namespace facebook::cea::chips::adsim
