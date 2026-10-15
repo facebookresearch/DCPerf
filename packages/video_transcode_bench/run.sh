@@ -29,7 +29,7 @@ source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
 show_help() {
 cat <<EOF
-Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]|[--parallelism 0-6]|[--procs {number of jobs}]|[--sample-rate 0.0-1.0]|[--sampling-seed {seed}] [--sleep-before-perf {seconds}] [--max-time {seconds}] [--score-mode throughput|megapixel] [--sweep-stride {N}] [--output {output file name}]
+Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime long|medium|short]|[--parallelism 0-6]|[--procs {number of jobs}]|[--sample-rate 0.0-1.0]|[--sampling-seed {seed}] [--sleep-before-perf {seconds}] [--max-time {seconds}] [--score-mode throughput|megapixel] [--sweep-stride {N}] [--encode-list {file}] [--output {output file name}]
 
     -h Display this help and exit
     --encoder encoder name. Default: svt
@@ -42,6 +42,7 @@ Usage: ${0##*/} [-h] [--encoder svt|aom|x264] [--levels low:high]|[--runtime lon
     --score-mode scoring method: throughput (GB/s) or megapixel (MPx/s). Default: throughput
     --fast-jobs-first reverse command order so fast (small resolution) jobs run first
     --sweep-stride {N} keep every Nth encode of the resolution x QP grid. 1 = keep all. Default: 1
+    --encode-list {file} run only the encodes in the file (an input clip and a CRF per line), in its order, and downscale only their clips. Overrides --sweep-stride. A relative path is relative to the benchpress root. Default: run all
     -output Result output file name. Default: "ffmpeg_video_workload_results.txt"
 EOF
 }
@@ -77,6 +78,81 @@ apply_sweep_stride() {
         mv "${f}.strided" "${f}"
         kept=$(wc -l < "${f}")
         echo "sweep-stride ${stride}: ${f} ${total} -> ${kept} encodes"
+    done
+}
+
+# Keep only the encodes named in an encode list, in the list's order, and
+# downscale or copy only the clips that those encodes read.
+apply_encode_list() {
+    local list="$1" test_id="$2" lo="$3" hi="$4"
+
+    if [[ "${list}" != /* ]]; then
+        list="${BENCHPRESS_ROOT}/${list}"
+    fi
+    if [ ! -f "${list}" ]; then
+        echo "Encode list '${list}' not found" 1>&2
+        return 1
+    fi
+
+    local m f total
+    local -a cmd_files=()
+    for m in $(seq "${lo}" "${hi}"); do
+        f="run-${test_id}-m${m}.txt"
+        [ -f "${f}" ] || continue
+        total=$(wc -l < "${f}")
+        awk '
+            NR == FNR {
+                if ($1 != "" && $1 !~ /^#/) {
+                    want[++n] = $1 " " $2
+                }
+                next
+            }
+            match($0, /-i [^ ]+/) {
+                clip = substr($0, RSTART + 3, RLENGTH - 3)
+                sub(/.*\//, "", clip)
+                if (match($0, /-crf [0-9]+/)) {
+                    cmd[clip " " substr($0, RSTART + 5, RLENGTH - 5)] = $0
+                }
+            }
+            END {
+                for (i = 1; i <= n; i++) {
+                    if (!(want[i] in cmd)) {
+                        print "Encode not found in " FILENAME ": " want[i] > "/dev/stderr"
+                        exit 1
+                    }
+                    print cmd[want[i]]
+                }
+            }' "${list}" "${f}" > "${f}.listed" || return 1
+        mv "${f}.listed" "${f}"
+        cmd_files+=("${f}")
+        echo "encode-list: ${f} ${total} -> $(wc -l < "${f}") encodes"
+    done
+    if [ "${#cmd_files[@]}" -eq 0 ]; then
+        echo "No command files to apply the encode list to" 1>&2
+        return 1
+    fi
+
+    for f in run_downscale.txt run_copy_reference.txt; do
+        [ -f "${f}" ] || continue
+        total=$(wc -l < "${f}")
+        awk '
+            NR == FNR {
+                if (match($0, /-i [^ ]+/)) {
+                    clip = substr($0, RSTART + 3, RLENGTH - 3)
+                    sub(/.*\//, "", clip)
+                    need[clip] = 1
+                }
+                next
+            }
+            {
+                clip = $NF
+                sub(/.*\//, "", clip)
+                if (clip in need) {
+                    print
+                }
+            }' <(cat "${cmd_files[@]}") "${f}" > "${f}.listed" || return 1
+        mv "${f}.listed" "${f}"
+        echo "encode-list: ${f} ${total} -> $(wc -l < "${f}") clips"
     done
 }
 
@@ -136,6 +212,10 @@ main() {
     local sweep_stride
     sweep_stride=1
 
+    # Run only the encodes in this file, in its order. Empty = run all.
+    local encode_list
+    encode_list=""
+
     # Create a backup of generate_commands_all.py before making any changes, to restore it later and avoid replicating changes for susequent runs
     cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.backup.py
 
@@ -184,6 +264,9 @@ main() {
                 fi
                 sweep_stride="$2"
                 ;;
+            --encode-list)
+                encode_list="$2"
+                ;;
             --skip-downscale)
                 skip_downscale=1
                 ;;
@@ -203,7 +286,7 @@ main() {
         esac
 
         case $1 in
-            --levels|--encoder|--output|--runtime|--parallelism|--procs|--sample-rate|--sampling-seed|--sleep-before-perf|--max-time|--score-mode|--fast-jobs-first|--sweep-stride)
+            --levels|--encoder|--output|--runtime|--parallelism|--procs|--sample-rate|--sampling-seed|--sleep-before-perf|--max-time|--score-mode|--fast-jobs-first|--sweep-stride|--encode-list)
                 if [ -z "$2" ]; then
                     echo "Invalid option: $1 requires an argument" 1>&2
                     exit 1
@@ -339,6 +422,9 @@ main() {
             echo "Note: --sweep-stride ${sweep_stride} is ignored on a --skip-downscale reuse run;" 1>&2
             echo "      the reused command files already carry the prep run's stride." 1>&2
         fi
+        if [ -n "${encode_list}" ]; then
+            echo "Note: --encode-list is ignored on a --skip-downscale reuse run." 1>&2
+        fi
     else
         # Use the Python script to modify generate_commands_all.py
         python3 ./modify_generate_commands_all.py --sample-rate ${sample_rate} --sampling-seed ${sampling_seed} --lp-number "${lp_number}" --num-pool "${num_pool}" --range "${range}" --encoder $encoder
@@ -346,7 +432,14 @@ main() {
         cp ${FFMPEG_ROOT}/generate_commands_all.py ${FFMPEG_ROOT}/generate_commands_all.debug.py
         #generate commands
         python3 ./generate_commands_all.py
-        apply_sweep_stride "$sweep_stride" "$enc_test_id" "$low" "$high"
+        if [ -n "${encode_list}" ]; then
+            if [ "${sweep_stride}" -gt 1 ]; then
+                echo "Note: --sweep-stride ${sweep_stride} is ignored with --encode-list." 1>&2
+            fi
+            apply_encode_list "$encode_list" "$enc_test_id" "$low" "$high"
+        else
+            apply_sweep_stride "$sweep_stride" "$enc_test_id" "$low" "$high"
+        fi
     fi
 
     # Overwrite run-paral-cpu to use the timed parallel feeder.

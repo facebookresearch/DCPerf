@@ -84,10 +84,16 @@ in which phases they measure:
 
 ### Downscale + Encode: `video_transcode_bench_svt_mini`
 
-This mini job downscales the sampled clips and encodes them in the same run. Both the runtime and the peak memory vary
-from machine to machine: the defaults size themselves from the cores the job
-can actually use, so the same job is heavier on a large host than on a small
-one. Two recommend knobs to tune the runtime and peak memory usage of the benchmark:
+This mini job downscales the sampled clips and encodes them in the same run.
+It runs the fixed list of encodes in `svt_mini_encodes.txt`: 70 encodes drawn
+at random from the encode grid of 20% of the clips, so that their mix of
+resolutions and CRFs follows the full benchmark's. The list is ordered longest
+first, so the short encodes fill the cores while the long ones finish. Only the
+clips that these encodes read are downscaled. Both the runtime and the peak
+memory vary from machine to machine: the defaults size themselves from the
+cores the job can actually use, so the same job is heavier on a large host than
+on a small one. Two recommend knobs to tune the runtime and peak memory usage
+of the benchmark:
 
 
 - `procs` is the number of concurrent single-threaded encoders. At `-1` it
@@ -103,17 +109,18 @@ gives a smaller memory footprint. Tune it down if the test machine has limited
 memory capacity.
 
 
-- `sweep_stride` downsamples the number of encoding jobs, keeping one job out
-of every N. The default `3` therefore runs a third of them. Raise it to drop
-more jobs and shorten the run further, or lower it towards `1` for a fuller
-run:
+- `encode_list` names the file of encodes to run, one per line: the input clip
+and its CRF, in run order. A relative path is relative to the benchpress root.
+Every listed encode must exist in the grid of the sampled clips, or the run
+fails. The list is sized for about 15 s of encoding on 16 cores; with fewer
+cores the run takes proportionally longer:
 
 ```
-./benchpress_cli.py run video_transcode_bench_svt_mini -i '{"sweep_stride": "3"}'
+./benchpress_cli.py run video_transcode_bench_svt_mini -i '{"encode_list": "packages/video_transcode_bench/svt_mini_encodes.txt"}'
 ```
 
-Because it drops whole jobs rather than shrinking them, it changes the
-runtime and the score's sample size but not the peak memory.
+Because it runs a fixed set of encodes, it sets the runtime and the score's
+sample size but not the peak memory.
 
 ### Encode-only: `..._timed_mini_prep` + `..._timed_mini_reuse`
 
