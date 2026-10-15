@@ -18,13 +18,16 @@
 #include <util.h>
 
 #include <glog/logging.h>
+#include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include <cea/chips/adsim/cpp2/server/dwarfs/Compress.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Kernel.h>
 
 #include <fb303/ThreadCachedServiceData.h>
 #include <folly/coro/Task.h>
+#include <stdexcept>
 
 extern int64_t lzbench_compress_helper(
     lzbench_params_t* params,
@@ -194,12 +197,18 @@ std::string Decompress::init(
   auto buf_usage = CompressBase::init(h_objs, r_objs);
 
   if (input_str_.empty() || 'H' != input_str_[0]) {
+    if (run_decompressor_) {
+      throw std::invalid_argument(
+          "Decompress: run_decompressor needs an H input, got " + input_str_);
+    }
     return "Decompress: " + input_str_;
   }
 
   uint8_t* buf = (uint8_t*)h_objs->get_plain_ptr(input_str_ + ".buf_");
-  void* compressed_buf = malloc(compressed_size_);
-  uint8_t* cbuf = (uint8_t*)compressed_buf;
+  const size_t capacity = GET_COMPRESS_BOUND(size_);
+  std::unique_ptr<void, decltype(&free)> compressed_buf(
+      malloc(capacity), &free);
+  uint8_t* cbuf = (uint8_t*)compressed_buf.get();
   char* workmem = (char*)cbuf; // keep linter happy. if no init, no access
   if (compressor_->init) { // if the compressor uses workmem, overwrite
     workmem = compressor_->init(size_, level_, 0);
@@ -216,14 +225,44 @@ std::string Decompress::init(
       compr_sizes,
       buf,
       cbuf,
-      size_,
+      capacity,
       level_,
       0,
       workmem);
+  // Check that the input was compressed and decodes back
+  bool round_trips = true;
+  if (run_decompressor_) {
+    // Decode with the same sizes fire() uses
+    chunk_sizes = {size_};
+    compr_sizes = {compressed_size_};
+    std::vector<uint8_t> decoded(size_ + PAD_SIZE);
+    round_trips = compressed_size_ != size_ &&
+        static_cast<int64_t>(size_) ==
+            lzbench_decompress_helper(
+                &params,
+                chunk_sizes,
+                compressor_->decompress,
+                compr_sizes,
+                cbuf,
+                decoded.data(),
+                level_,
+                0,
+                workmem) &&
+        0 == memcmp(buf, decoded.data(), size_);
+  }
   if (compressor_->deinit) {
     compressor_->deinit(workmem);
   }
-  h_objs->set_plain_ptr(input_str_ + ".compressed_buf_", compressed_buf);
+  if (!round_trips) {
+    throw std::runtime_error(
+        folly::to<std::string>(
+            "Decompress: ",
+            input_str_,
+            " did not round-trip through ",
+            compressor_->name));
+  }
+  h_objs->set_plain_ptr(
+      input_str_ + ".compressed_buf_", compressed_buf.release());
   return folly::to<std::string>(
       "Decompress: ",
       buf_usage,
@@ -250,7 +289,8 @@ folly::coro::Task<std::string> Decompress::fire(
   lzbench_params_t params; // lzbench_decompress doesn't really use it
   params.verbose = 0;
   std::vector<size_t> chunk_sizes, compr_sizes;
-  uint8_t* outbuf = (uint8_t*)malloc(size_);
+  uint8_t* outbuf =
+      (uint8_t*)malloc(run_decompressor_ ? size_ + PAD_SIZE : size_);
   char* workmem = (char*)outbuf; // keep linter happy. if no init, no access
   if (compressor_->init) { // if the compressor uses workmem, overwrite
     workmem = compressor_->init(size_, level_, 0);
@@ -258,7 +298,12 @@ folly::coro::Task<std::string> Decompress::fire(
   if (!input_str_.empty() && 'H' == input_str_[0]) {
     uint8_t* compressed_buf =
         (uint8_t*)h_objs->get_plain_ptr(input_str_ + ".compressed_buf_");
-    chunk_sizes.push_back(compressed_size_);
+    if (run_decompressor_) {
+      chunk_sizes.push_back(size_);
+      compr_sizes.push_back(compressed_size_);
+    } else {
+      chunk_sizes.push_back(compressed_size_);
+    }
     lzbench_decompress_helper(
         &params,
         chunk_sizes,
