@@ -85,19 +85,15 @@ bool SizeDistribution::loadFromFile(const std::string& filename) {
 /**
  * Sample a random size using binary search on the CDF
  * Time complexity: O(log n) where n is the number of unique sizes
- * Uses thread-local RNG for better performance in multi-threaded scenarios
  */
-size_t SizeDistribution::getRandomSize() const {
+size_t SizeDistribution::getRandomSize(std::mt19937& rng) const {
   if (sizes.empty()) {
     return 0;
   }
 
-  // Initialize thread-local random generator
-  static thread_local std::mt19937 local_gen(std::random_device{}());
-
   // Generate random value between 0 and 1
   std::uniform_real_distribution<double> dist(0.0, 1.0);
-  double rand_val = dist(local_gen);
+  double rand_val = dist(rng);
 
   // Binary search to find the corresponding size
   auto it = std::lower_bound(cum_probs.begin(), cum_probs.end(), rand_val);
@@ -165,16 +161,15 @@ TensorBatch::TensorBatch(
     size_t count,
     const SizeDistribution& size_dist,
     size_t max_total_size,
-    const InputMemoryPool& memory_pool) {
-  // Initialize random number generator for offsets
-  static thread_local std::mt19937 rng(std::random_device{}());
-
+    const InputMemoryPool& memory_pool,
+    std::mt19937& size_rng,
+    std::mt19937& offset_rng) {
   // Get the total size of the memory pool
   size_t pool_size = memory_pool.getSize();
 
   // Allocate memory for each tensor based on the size distribution
   for (size_t i = 0; i < count; ++i) {
-    size_t size = size_dist.getRandomSize();
+    size_t size = size_dist.getRandomSize(size_rng);
     if (size == 0) {
       continue;
     }
@@ -192,7 +187,7 @@ TensorBatch::TensorBatch(
 
     // Generate a random offset within the valid range
     std::uniform_int_distribution<size_t> dist(0, max_offset);
-    size_t offset = dist(rng);
+    size_t offset = dist(offset_rng);
 
     // Get a pointer at the random offset in the memory pool
     void* tensor = memory_pool.getPointerAtOffset(offset);
@@ -245,7 +240,8 @@ Rebatch::Rebatch(
     int prefetch_dist,
     std::string input_str,
     std::string distribution_file,
-    size_t num_pregenerated_batches)
+    size_t num_pregenerated_batches,
+    std::optional<uint32_t> seed)
     : tensors_per_batch_(tensors_per_batch),
       num_threads_(num_threads),
       output_tensor_size_(output_tensor_size),
@@ -253,13 +249,15 @@ Rebatch::Rebatch(
       prefetch_dist_(prefetch_dist),
       input_str_(std::move(input_str)),
       distribution_file_(std::move(distribution_file)),
-      num_pregenerated_batches_(num_pregenerated_batches) {
+      num_pregenerated_batches_(num_pregenerated_batches),
+      seed_(seed) {
   LOG(INFO) << "Rebatch initialized with params: " << "tensors_per_batch="
             << tensors_per_batch_ << ", num_threads=" << num_threads_
             << ", output_tensor_size=" << output_tensor_size_
             << ", memory_pool_size_gb=" << memory_pool_size_gb_
             << ", prefetch_dist=" << prefetch_dist_
-            << ", distribution_file=" << distribution_file_;
+            << ", distribution_file=" << distribution_file_
+            << ", seed=" << (seed_ ? std::to_string(*seed_) : "random");
 }
 
 /**
@@ -310,12 +308,16 @@ void Rebatch::pregenerateBatches() {
 
   pregenerated_batches_.reserve(num_pregenerated_batches_);
 
+  std::mt19937 size_rng(seed_ ? *seed_ : std::random_device{}());
+  std::mt19937 offset_rng(seed_ ? *seed_ + 1 : std::random_device{}());
   for (size_t i = 0; i < num_pregenerated_batches_; ++i) {
     auto batch = std::make_shared<TensorBatch>(
         tensors_per_batch_,
         *size_distribution_,
         output_tensor_size_,
-        *input_memory_pool_);
+        *input_memory_pool_,
+        size_rng,
+        offset_rng);
     pregenerated_batches_.push_back(std::move(batch));
   }
 

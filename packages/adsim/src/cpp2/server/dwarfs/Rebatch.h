@@ -18,11 +18,15 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -58,7 +62,7 @@ struct SizeDistribution {
    * Sample a random size using binary search on the CDF
    * Time complexity: O(log n) where n is the number of unique sizes
    */
-  size_t getRandomSize() const;
+  size_t getRandomSize(std::mt19937& rng) const;
 };
 
 /**
@@ -102,7 +106,9 @@ class TensorBatch {
       size_t count,
       const SizeDistribution& size_dist,
       size_t max_total_size,
-      const InputMemoryPool& memory_pool);
+      const InputMemoryPool& memory_pool,
+      std::mt19937& size_rng,
+      std::mt19937& offset_rng);
   ~TensorBatch();
 
   // Delete copy constructor and copy assignment operator
@@ -141,7 +147,8 @@ class Rebatch : public Kernel {
       int prefetch_dist,
       std::string input_str,
       std::string distribution_file,
-      size_t num_pregenerated_batches = 100);
+      size_t num_pregenerated_batches = 100,
+      std::optional<uint32_t> seed = std::nullopt);
 
   std::string init(
       std::shared_ptr<AdSimHandleObjs> h_objs,
@@ -177,6 +184,14 @@ class Rebatch : public Kernel {
     size_t num_pregenerated_batches = config_d.count("num_pregenerated_batches")
         ? static_cast<size_t>(config_d["num_pregenerated_batches"].asInt())
         : 100;
+    std::optional<uint32_t> seed;
+    if (config_d.count("seed")) {
+      const int64_t value = config_d["seed"].asInt();
+      if (value < 0 || value > std::numeric_limits<uint32_t>::max()) {
+        throw std::invalid_argument("Rebatch seed must be in [0, 4294967295]");
+      }
+      seed = static_cast<uint32_t>(value);
+    }
 
     return std::make_shared<Rebatch>(
         tensors_per_batch,
@@ -186,7 +201,8 @@ class Rebatch : public Kernel {
         prefetch_dist,
         input_str,
         distribution_file,
-        num_pregenerated_batches);
+        num_pregenerated_batches,
+        seed);
   }
 
  private:
@@ -198,6 +214,7 @@ class Rebatch : public Kernel {
   std::string input_str_;
   std::string distribution_file_;
   size_t num_pregenerated_batches_;
+  std::optional<uint32_t> seed_;
 
   std::shared_ptr<SizeDistribution> size_distribution_;
   std::shared_ptr<InputMemoryPool> input_memory_pool_;
