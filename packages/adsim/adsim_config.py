@@ -10,7 +10,7 @@ ads_config = {
     "num_req_handle_threads": math.ceil(NPROC / 6),
     "num_io_handle_threads": 1,
     "num_app_logic_threads": math.ceil(NPROC * 1.5),
-    "num_req_local_threads": 2,
+    "num_req_local_threads": 8,
     "num_thrift_accept_threads": 1,
     "Kernels": [
         {

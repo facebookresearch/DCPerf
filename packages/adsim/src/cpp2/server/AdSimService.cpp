@@ -33,13 +33,17 @@ namespace facebook::cea::chips::adsim {
  *
  * @param  $stages  A pointer to pipeline stages info (constructed after thr
  *                  server parses the config file)
+ * @param  $req_local_pool_size  Threads in the per-request pool
+ * @param  $lazy_req_local_pool  Create the per-request pool only when needed
  * @return  AdSimHandler instance
  */
 AdSimHandler::AdSimHandler(
     std::shared_ptr<std::vector<Stage>> stages,
-    int req_local_pool_size)
+    int req_local_pool_size,
+    bool lazy_req_local_pool)
     : fb303::BaseService("AdSim Service"),
-      num_req_local_threads(req_local_pool_size) {
+      num_req_local_threads(req_local_pool_size),
+      lazy_req_local_pool(lazy_req_local_pool) {
   this->stages = stages;
   this->handle_objs = std::make_shared<AdSimHandleObjs>();
   auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(
@@ -71,9 +75,15 @@ AdSimHandler::AdSimHandler(
  */
 folly::coro::Task<std::unique_ptr<AdSimResponse>> AdSimHandler::co_sim(
     std::unique_ptr<AdSimRequest> req) {
-  auto req_pool = std::make_shared<folly::CPUThreadPoolExecutor>(
-      num_req_local_threads,
-      std::make_shared<folly::NamedThreadFactory>("reqLocal"));
+  auto make_req_pool = [this]() {
+    return std::make_shared<folly::CPUThreadPoolExecutor>(
+        num_req_local_threads,
+        std::make_shared<folly::NamedThreadFactory>("reqLocal"));
+  };
+  std::shared_ptr<folly::CPUThreadPoolExecutor> req_pool;
+  if (!lazy_req_local_pool) {
+    req_pool = make_req_pool();
+  }
   // STATS_request_received.add(1);
   // std::string request_str = *req->request_ref();
   std::string response_str;
@@ -84,6 +94,9 @@ folly::coro::Task<std::unique_ptr<AdSimResponse>> AdSimHandler::co_sim(
     // concurrantly
     std::vector<folly::coro::TaskWithExecutor<std::string>> tasks;
     for (int i = 0; i < stage.kernels.size(); ++i) {
+      if (nullptr == stage.pools[i] && nullptr == req_pool) {
+        req_pool = make_req_pool();
+      }
       auto pool =
           (nullptr == stage.pools[i]) ? req_pool.get() : stage.pools[i].get();
       tasks.push_back(co_withExecutor(

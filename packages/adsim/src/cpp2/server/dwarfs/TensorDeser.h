@@ -21,11 +21,14 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -151,7 +154,8 @@ class TensorDeser : public Kernel {
       int request_book_multiplier,
       int num_threads,
       std::string input_str,
-      std::string distribution_file);
+      std::string distribution_file,
+      std::optional<uint32_t> seed = std::nullopt);
 
   std::string init(
       std::shared_ptr<AdSimHandleObjs> h_objs,
@@ -176,12 +180,22 @@ class TensorDeser : public Kernel {
       input_str = config_d["input"].asString();
     }
     std::string distribution_file = config_d["distribution_file"].asString();
+    std::optional<uint32_t> seed;
+    if (config_d.count("seed")) {
+      const int64_t value = config_d["seed"].asInt();
+      if (value < 0 || value > std::numeric_limits<uint32_t>::max()) {
+        throw std::invalid_argument(
+            "TensorDeser seed must be in [0, 4294967295]");
+      }
+      seed = static_cast<uint32_t>(value);
+    }
     return std::make_shared<TensorDeser>(
         requests_per_run,
         request_book_multiplier,
         num_threads,
         input_str,
-        distribution_file);
+        distribution_file,
+        seed);
   }
 
  private:
@@ -190,6 +204,7 @@ class TensorDeser : public Kernel {
   int num_threads_;
   std::string input_str_;
   std::string distribution_file_;
+  std::optional<uint32_t> seed_;
   std::vector<uint32_t> pregenerated_requests_;
   mutable std::atomic<uint32_t> current_request_position_;
 

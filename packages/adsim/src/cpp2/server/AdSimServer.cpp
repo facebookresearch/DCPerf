@@ -141,6 +141,7 @@ struct AdSimServerConfig {
   int port;
   int num_req_handle_threads, num_io_handle_threads, num_thrift_accept_threads;
   int num_app_logic_threads, num_req_local_threads;
+  bool lazy_req_local_pool = false;
   std::shared_ptr<folly::Executor> thrift_cpu_threadpool;
   std::shared_ptr<folly::Executor> thrift_io_threadpool;
   std::shared_ptr<folly::Executor> app_cpu_threadpool;
@@ -189,6 +190,8 @@ std::unique_ptr<AdSimServerConfig> read_config(std::string config_file) {
     server_config->num_req_local_threads = (0 <= FLAGS_num_req_local_threads)
         ? FLAGS_num_req_local_threads
         : config_d.getDefault("num_req_local_threads", 8).asInt();
+    server_config->lazy_req_local_pool =
+        config_d.getDefault("lazy_req_local_pool", false).asBool();
     // Kernel config from the config file
     {
       const folly::dynamic& kernels_d =
@@ -248,7 +251,8 @@ std::unique_ptr<AdSimServerConfig> read_config(std::string config_file) {
               << ", #thriftCPU: " << server_config->num_req_handle_threads
               << ", #thriftIO: " << server_config->num_io_handle_threads
               << ", #appCPU: " << server_config->num_app_logic_threads
-              << ", #reqLocal: " << server_config->num_req_local_threads;
+              << ", #reqLocal: " << server_config->num_req_local_threads
+              << ", lazyReqLocal: " << server_config->lazy_req_local_pool;
   } else {
     LOG(ERROR) << "Failed to open configuration file " << config_file;
   }
@@ -377,8 +381,12 @@ std::shared_ptr<ThriftServer> newServer(
   server_config->thrift_cpu_threadpool = server->getThreadManager();
   server_config->thrift_io_threadpool = server->getIOThreadPool();
 
-  auto handler =
-      std::make_shared<ServiceHandler>(config_stages(std::move(server_config)));
+  const bool lazy_req_local_pool = server_config->lazy_req_local_pool;
+  const int req_local_pool_size = server_config->num_req_local_threads;
+  auto handler = std::make_shared<ServiceHandler>(
+      config_stages(std::move(server_config)),
+      req_local_pool_size,
+      lazy_req_local_pool);
   auto proc_factory =
       std::make_shared<ThriftServerAsyncProcessorFactory<ServiceHandler>>(
           handler);
