@@ -1739,6 +1739,8 @@
   benchmark: video_transcode_bench
   description: >
     SVT-AV1 based video encoding workload. Compute and memory intensive.
+    Runs a fixed list of 70 encodes sampled from 20% of the clips, longest
+    first, so that all cores stay busy until the end.
   execute_cmd_from_file: true
   args:
     - '--encoder {encoder}'
@@ -1750,7 +1752,7 @@
     - '--sample-rate {sample_rate}'
     - '--sampling-seed {sampling_seed}'
     - '--sleep-before-perf {sleep_before_perf}'
-    - '--sweep-stride {sweep_stride}'
+    - '--encode-list {encode_list}'
   vars:
     - 'encoder=svt'
     - 'levels=0:0'
@@ -1760,10 +1762,10 @@
     # -1 = one encoder per usable core. Peak memory is roughly
     # procs * 0.5GB, so override this to fit a memory budget; see README.
     - 'procs=-1'
-    - 'sample_rate=0.01'
+    - 'sample_rate=0.2'
     - 'sampling_seed=1000'
     - 'sleep_before_perf=0'
-    - 'sweep_stride=3'
+    - 'encode_list=packages/video_transcode_bench/svt_mini_encodes.txt'
   hooks:
     - hook: copymove
       options:
