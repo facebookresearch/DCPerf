@@ -44,6 +44,7 @@ class TaoBenchParser:
     # Minimum hit rate for a server data point to be considered in
     # result qps calculation
     MIN_HIT_RATE = 0.88
+    MAX_DATA_POINTS = int(360 / 5 - 10)
 
     def __init__(
         self,
@@ -110,6 +111,37 @@ class TaoBenchParser:
         with open(f"benchmarks/tao_bench/{self.server_csv_name}", "w") as table:
             table.writelines(lines)
 
+    def validate_server_metrics(self, metrics, returncode, test_time):
+        errors = []
+        minimum_data_points = max(
+            min(test_time, 360) // 5
+            - 14
+            - self.drop_first_samples
+            - self.drop_last_samples,
+            1,
+        )
+        if returncode != 0:
+            errors.append(f"server exited with status {returncode}")
+        if metrics.get("role") != "server":
+            errors.append(f"unexpected role {metrics.get('role', 'missing')}")
+        if metrics.get("num_data_points", 0) < minimum_data_points:
+            errors.append(
+                f"expected at least {minimum_data_points} data points, got "
+                f"{metrics.get('num_data_points', 0)}"
+            )
+        if metrics.get("total_qps", 0) <= 0:
+            errors.append("total QPS is zero")
+        if (
+            not self.skip_hit_rate_check
+            and metrics.get("hit_ratio", 0) < self.MIN_HIT_RATE
+        ):
+            errors.append(
+                f"hit ratio {metrics.get('hit_ratio', 0):.4f} is below "
+                f"{self.MIN_HIT_RATE:.2f}"
+            )
+        if errors:
+            raise ValueError("; ".join(errors))
+
     def process_server_snapshots(self, metrics, server_snapshots):
         selected = []
         for snapshot in reversed(server_snapshots):
@@ -121,7 +153,7 @@ class TaoBenchParser:
                 or snapshot.get("hit_rate") >= self.MIN_HIT_RATE
             ):
                 selected.append(snapshot)
-            if len(selected) >= 360 / 5 - 10:
+            if len(selected) >= self.MAX_DATA_POINTS:
                 break
         # `selected` is newest first, so the last samples are at its start.
         selected = selected[
