@@ -81,6 +81,11 @@ JOBS="${NUM_BUILD_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 #   $3: version - Git tag/version to checkout (optional, uses default branch if empty)
 #   $4: cmake_source_subdir - (Optional) Subdirectory containing CMakeLists.txt, defaults to "."
 #   $5: extra_cmake_args - (Optional) Additional cmake arguments
+# Source directory of a dependency built by build_dependency
+dep_dir() {
+    echo "${ADSIM_DEPS_DIR}/$1"
+}
+
 build_dependency() {
     local dep_name="$1"
     local repo_url="$2"
@@ -93,7 +98,8 @@ build_dependency() {
     echo "Building and Installing ${dep_name}"
     echo "====================================================================="
 
-    local DEP_DIR="${ADSIM_DEPS_DIR}/${dep_name}"
+    local DEP_DIR
+    DEP_DIR="$(dep_dir "${dep_name}")"
     local BUILD_DIR="${DEP_DIR}/build"
 
     # Clone repository if not already present
@@ -278,7 +284,40 @@ build_dependency "folly" "https://github.com/facebook/folly.git" "${FOLLY_VERSIO
 build_dependency "fizz" "https://github.com/facebookincubator/fizz.git" "${FIZZ_VERSION}" "fizz"
 build_dependency "wangle" "https://github.com/facebook/wangle.git" "${WANGLE_VERSION}" "wangle"
 build_dependency "mvfst" "https://github.com/facebook/mvfst.git" "${MVFST_VERSION}"
+
+# Clone fbthrift first to apply patches before building
+# Patch the tree build_dependency builds
+FBTHRIFT_DIR="$(dep_dir fbthrift)"
+if [ ! -d "$FBTHRIFT_DIR" ]; then
+    git clone "https://github.com/facebook/fbthrift.git" "$FBTHRIFT_DIR" || exit 1
+    if ! git -C "$FBTHRIFT_DIR" fetch --tags || ! git -C "$FBTHRIFT_DIR" checkout "${FBTHRIFT_VERSION}"; then
+        rm -rf "$FBTHRIFT_DIR"
+        exit 1
+    fi
+fi
+
+# Patch fbthrift to add the --thrift_reply_via_event_base server flag
+FBTHRIFT_PATCH="${ADSIM_PROJ_ROOT}/patches/fbthrift-reply-via-event-base.patch"
+FBTHRIFT_PATCHED_FILES=(
+    thrift/lib/cpp2/async/processor/HandlerCallbackBase.h
+    thrift/lib/cpp2/async/processor/HandlerCallbackBase.cpp
+)
+if ! git -C "$FBTHRIFT_DIR" apply --reverse --check "$FBTHRIFT_PATCH" 2>/dev/null; then
+    echo -e "${COLOR_GREEN}Patching fbthrift to add --thrift_reply_via_event_base${COLOR_OFF}"
+    git -C "$FBTHRIFT_DIR" checkout -- "${FBTHRIFT_PATCHED_FILES[@]}"
+    if ! git -C "$FBTHRIFT_DIR" apply "$FBTHRIFT_PATCH"; then
+        echo -e "${COLOR_RED}Patching fbthrift failed!${COLOR_OFF}"
+        exit 1
+    fi
+fi
+
 build_dependency "fbthrift" "https://github.com/facebook/fbthrift.git" "${FBTHRIFT_VERSION}"
+
+# Fail if the installed fbthrift lacks the flag
+if ! grep -q thrift_reply_via_event_base "${ADSIM_STAGING_DIR}/include/thrift/lib/cpp2/async/processor/HandlerCallbackBase.h"; then
+    echo -e "${COLOR_RED}fbthrift was built without --thrift_reply_via_event_base${COLOR_OFF}"
+    exit 1
+fi
 build_dependency "fb303" "https://github.com/facebook/fb303.git" "${FB303_VERSION}" "." "-DCMAKE_INCLUDE_PATH=${ADSIM_STAGING_DIR}/include -DTHRIFT_INCLUDE_DIRECTORIES=${ADSIM_STAGING_DIR}/include -DPYTHON_EXTENSIONS=OFF -Dthriftpy3_FOUND=OFF"
 
 # Fix fb303 header installation paths

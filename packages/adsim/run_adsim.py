@@ -6,7 +6,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
-from typing import List
+from typing import Callable, Iterable, List, Optional, Set
 
 import adsim_config
 
@@ -225,7 +225,7 @@ ai_req_size_dist = [
 AI_REQUEST_SIZE_MULTIPLIER = 20
 
 
-def run_cmd(cmd: List[str], timeout=None, dryrun=False, verbose=False) -> str:
+def run_cmd(cmd: List[str], timeout=None, dryrun=False, verbose=False) -> Optional[int]:
     if verbose or dryrun:
         print(" ".join(cmd))
     if dryrun:
@@ -242,8 +242,56 @@ def run_cmd(cmd: List[str], timeout=None, dryrun=False, verbose=False) -> str:
     return proc.wait()
 
 
+def parse_cpu_list(text: str) -> Set[int]:
+    cpus = set()
+    for part in text.strip().split(","):
+        if "-" in part:
+            first, last = part.split("-")
+            cpus.update(range(int(first), int(last) + 1))
+        elif part:
+            cpus.add(int(part))
+    return cpus
+
+
+def cpu_siblings(cpu: int) -> Set[int]:
+    path = f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list"
+    try:
+        with open(path) as f:
+            return parse_cpu_list(f.read())
+    except OSError:
+        return {cpu}
+
+
+def select_cpus(
+    allowed: Iterable[int],
+    num_cpus: int,
+    siblings: Callable[[int], Set[int]],
+) -> List[int]:
+    """Pick num_cpus CPUs from allowed in ascending order, whole cores first."""
+    allowed = set(allowed)
+    if num_cpus > len(allowed):
+        raise ValueError(
+            f"--num-cpus {num_cpus} exceeds the {len(allowed)} CPUs allowed "
+            "for this process"
+        )
+    selected = set()
+    for cpu in sorted(allowed):
+        for sibling in sorted((siblings(cpu) | {cpu}) & allowed):
+            if len(selected) == num_cpus:
+                return sorted(selected)
+            selected.add(sibling)
+    if len(selected) != num_cpus:
+        raise ValueError(f"Selected {len(selected)} CPUs instead of {num_cpus}")
+    return sorted(selected)
+
+
 def run_server(args):
     timeout = args.timeout
+
+    if args.num_cpus > 0:
+        cpus = select_cpus(os.sched_getaffinity(0), args.num_cpus, cpu_siblings)
+        print(f"Running {args.server_binary} on {len(cpus)} CPUs: {cpus}", flush=True)
+        os.sched_setaffinity(0, cpus)
 
     # Handle config file generation
     if args.cfg_file:
@@ -257,9 +305,7 @@ def run_server(args):
     elif args.auto_config_type:
         # Auto-generate config using get_config function
         config_type = args.auto_config_type
-        model = args.auto_config_model if config_type == "inference" else None
-
-        config = adsim_config.get_config(config_type, model)
+        config = adsim_config.get_config(config_type)
 
         with tempfile.NamedTemporaryFile(
             mode="w+", prefix=f"adsim-{config_type}-", suffix=".json", delete=False
@@ -269,22 +315,23 @@ def run_server(args):
     else:
         raise ValueError("Either --cfg-file or --auto-config-type must be specified")
 
-    return run_cmd(
-        [
-            ADSIM_DIR + "/adsim_server",
-            "--config_file",
-            config_file,
-            "--tlscert",
-            ADSIM_DIR + "/configs/certs/example.crt",
-            "--tlskey",
-            ADSIM_DIR + "/configs/certs/example.key",
-            "-stderrthreshold",
-            "0",
-            "-logtostderr",
-            "1",
-        ],
-        timeout=timeout,
-    )
+    cmd = [
+        ADSIM_DIR + "/" + args.server_binary,
+        "--config_file",
+        config_file,
+        "--tlscert",
+        ADSIM_DIR + "/configs/certs/example.crt",
+        "--tlskey",
+        ADSIM_DIR + "/configs/certs/example.key",
+        "-stderrthreshold",
+        "0",
+        "-logtostderr",
+        "1",
+    ]
+    if args.reply_via_event_base:
+        cmd.append("--thrift_reply_via_event_base")
+
+    return run_cmd(cmd, timeout=timeout)
 
 
 def run_client(args):
@@ -349,19 +396,39 @@ def init_parser():
     config_group.add_argument(
         "--auto-config-type",
         type=str,
-        choices=["ads", "inference"],
-        help="Auto-generate config file of specified type (ads, inference). "
+        choices=["ads", "adsim_inference_a"],
+        help="Auto-generate config file of specified type "
+        + "(ads, adsim_inference_a). "
         + "Cannot be used with --cfg-file.",
     )
     server_parser.add_argument(
-        "--auto-config-model",
-        type=str,
-        default="model_a",
-        help="Model name for inference configs (default: model_a). "
-        + "Only used with --auto-config-type=inference.",
+        "--timeout", type=int, default=0, help="How long to run the server?"
     )
     server_parser.add_argument(
-        "--timeout", type=int, default=0, help="How long to run the server?"
+        "--num-cpus",
+        type=int,
+        default=0,
+        help="Run the server on this many CPUs from the current affinity mask, "
+        + "taking whole SMT cores in ascending CPU order. "
+        + "0 uses all CPUs in the mask.",
+    )
+    server_parser.add_argument(
+        "--reply-via-event-base",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help="1 makes fbthrift send replies with EventBase::runInEventBaseThread "
+        + "instead of the IO thread's reply queue "
+        + "(passes --thrift_reply_via_event_base to the server binary). "
+        + "0 keeps fbthrift's default.",
+    )
+    server_parser.add_argument(
+        "--server-binary",
+        type=str,
+        choices=["adsim_server", "adsim_server_torch"],
+        default="adsim_server",
+        help="Server executable to run. adsim_server_torch also has the "
+        + "TorchScriptOps kernel, which runs ATen ops from libtorch.",
     )
     # client side arguments
     client_parser.add_argument(
