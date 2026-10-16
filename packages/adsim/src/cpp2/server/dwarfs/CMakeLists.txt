@@ -193,3 +193,33 @@ target_link_libraries(dwarfs
     shape
     tensordeser)
 target_compile_options(dwarfs PRIVATE ${COROUTINES_FLAG})
+
+if(ADSIM_TORCHSCRIPT_OPS)
+    add_library(torchscriptops
+        TorchScriptOps.h
+        TorchScriptOpsImpl.h
+        TorchScriptOpsImpl.cpp)
+    target_include_directories(torchscriptops SYSTEM
+        PRIVATE
+            ${TORCH_INCLUDE_DIR}
+            ${TORCH_INCLUDE_DIR}/torch/csrc/api/include
+    )
+    target_link_libraries(torchscriptops
+        data_objects
+        kernel
+        ${TORCH_CPU_LIBRARY}
+        ${C10_LIBRARY})
+    # Link libfbgemm and OpenMP ahead of libtorch_cpu and libc10
+    target_link_options(torchscriptops INTERFACE
+        "LINKER:--push-state,--no-as-needed"
+        "$<TARGET_FILE:fbgemm>"
+        "${OpenMP_omp_LIBRARY}"
+        "LINKER:--pop-state")
+    target_compile_options(torchscriptops PRIVATE ${COROUTINES_FLAG})
+
+    # Dwarfs.cc with TorchScriptOps in KERNEL_DICT, linked ahead of libdwarfs.a
+    add_library(dwarfs_torch OBJECT Dwarfs.cc Dwarfs.h)
+    target_compile_definitions(dwarfs_torch PRIVATE ADSIM_TORCHSCRIPT_OPS)
+    target_link_libraries(dwarfs_torch dwarfs torchscriptops)
+    target_compile_options(dwarfs_torch PRIVATE ${COROUTINES_FLAG})
+endif()

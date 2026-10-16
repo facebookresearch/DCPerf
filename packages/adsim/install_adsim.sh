@@ -107,8 +107,9 @@ build_treadmill() {
 
 # Copy built executables, libraries, and configurations to final benchmark directory
 post_build() {
-  # Copy main executables: AdSim server and Treadmill load generator
+  # Copy main executables: AdSim servers and Treadmill load generator
   cp "${BUILD_DIR}/adsim/build/cpp2/server/adsim_server" "${BENCHMARKS_DIR}"
+  cp "${BUILD_DIR}/adsim/build/cpp2/server/adsim_server_torch" "${BENCHMARKS_DIR}"
   cp "${BUILD_DIR}/treadmill/build/services/adsim/treadmill_adsim" "${BENCHMARKS_DIR}"
 
   # Create library directory and copy all shared libraries
@@ -116,6 +117,15 @@ post_build() {
   mkdir -p "${BENCHMARKS_DIR}/lib/"
   cp ${BUILD_DIR}/staging/lib/*.so* "${BENCHMARKS_DIR}/lib/" 2>/dev/null || true
   cp ${BUILD_DIR}/staging/lib64/*.so* "${BENCHMARKS_DIR}/lib/" 2>/dev/null || true
+
+  # Copy the torch libraries adsim_server_torch loads, including torch.libs
+  mapfile -t torch_libs < <(ldd "${BUILD_DIR}/adsim/build/cpp2/server/adsim_server_torch" |
+    awk '$3 ~ /\/torch(\/lib|\.libs)\// {print $3}')
+  if [ "${#torch_libs[@]}" -eq 0 ]; then
+    echo "Error: adsim_server_torch loads no torch libraries"
+    exit 1
+  fi
+  cp "${torch_libs[@]}" "${BENCHMARKS_DIR}/lib/"
 
   # Copy Boost shared libraries (may be system-wide or in custom locations)
   # These are required by the adsim_server and treadmill_adsim executables
@@ -161,6 +171,7 @@ post_build() {
   # Install patchelf and set runtime library paths for executables
   install_packages patchelf
   patchelf --set-rpath "${BENCHMARKS_DIR}/lib" ${BENCHMARKS_DIR}/adsim_server
+  patchelf --set-rpath "${BENCHMARKS_DIR}/lib" ${BENCHMARKS_DIR}/adsim_server_torch
   patchelf --set-rpath "${BENCHMARKS_DIR}/lib" ${BENCHMARKS_DIR}/treadmill_adsim
 }
 

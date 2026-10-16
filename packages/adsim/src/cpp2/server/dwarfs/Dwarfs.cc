@@ -37,6 +37,11 @@
 #include <cea/chips/adsim/cpp2/server/dwarfs/Shape.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/TensorDeser.h>
 
+// Register TorchScriptOps only in adsim_server_torch builds
+#ifdef ADSIM_TORCHSCRIPT_OPS
+#include <cea/chips/adsim/cpp2/server/dwarfs/TorchScriptOps.h> // @manual
+#endif
+
 namespace facebook::cea::chips::adsim {
 
 /* All kernels available to add in the config file is registed bellow */
@@ -53,6 +58,9 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"TensorDeser", TensorDeser::config},
     {"DenseFP32", DenseFP32::config},
     {"GpuSpinWait", GpuSpinWait::config},
+#ifdef ADSIM_TORCHSCRIPT_OPS
+    {"TorchScriptOps", TorchScriptOps::config},
+#endif
     {"HashMap", HashMap::config},
     {"ConcurrentHashMap", ConcurrentHashMap::config},
     {"Rebatch", Rebatch::config},
