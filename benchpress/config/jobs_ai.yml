@@ -302,17 +302,19 @@
 
 - benchmark: adsim
   name: adsim_inference_a
-  description: Benchmark for Model Inference Workload
+  description: Benchmark for Model Inference Workload, with ATen ops from libtorch (P99 150 ms, server on 48 CPUs)
   roles:
     server:
       args:
         - 'server'
-        - '--auto-config-type {config_type}'
-        - '--auto-config-model {config_model}'
+        - '--auto-config-type adsim_inference_a'
+        - '--server-binary adsim_server_torch'
+        - '--num-cpus {num_cpus}'
+        - '--reply-via-event-base {reply_via_event_base}'
         - '--timeout {timeout}'
       vars:
-        - 'config_type=inference'
-        - 'config_model=model_a'
+        - 'num_cpus=48'
+        - 'reply_via_event_base=1'
         - 'timeout=0'
     client:
       args:
@@ -331,9 +333,9 @@
         - 'num_workers=20'
         - 'runtime=120'
         - 'criteria=P99'
-        - 'lat_target_ms=100'
-        - 'timeout=1800'
-        - 'request_size_multiplier=6'
+        - 'lat_target_ms=150'
+        - 'timeout=3600'
+        - 'request_size_multiplier=1'
 
 - benchmark: type_conversion
   name: type_conversion
