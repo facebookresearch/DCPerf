@@ -517,23 +517,203 @@ ads_config = {
     ],
 }
 
-inference_config = {
+adsim_inference_a_config = {
     "port": 10086,
     "num_req_handle_threads": 16,
-    "num_io_handle_threads": 16,
+    "num_io_handle_threads": 116,
     "num_app_logic_threads": 128,
-    "num_thrift_accept_threads": 32,
-    "Kernels": [],
+    "num_req_local_threads": 8,
+    "num_thrift_accept_threads": 1,
+    "lazy_req_local_pool": True,
+    "Kernels": [
+        {
+            "name": "TensorDeser",
+            "pool": "applicationLogic",
+            "stage": 1,
+            "fanout": 1,
+            "params": {
+                "requests_per_run": 480,
+                "request_book_multiplier": 1,
+                "num_threads": 1,
+                "input": "tensor_data",
+                "distribution_file": str(
+                    os.path.join(os.path.dirname(__file__), "deser_model_a.dist")
+                ),
+                "seed": 42,
+            },
+        },
+        {
+            "name": "TorchScriptOps",
+            "pool": "applicationLogic",
+            "stage": 2,
+            "fanout": 5,
+            "params": {
+                "nops": 143,
+                "nruns": 1,
+                "nregs": 32,
+                "ninputs": 8,
+                "rows": 4,
+                "cols": 16,
+                "nbuffers": 1,
+                "input": "tsops_broad",
+                "dtypes": ["float32", "float64", "bfloat16", "float16"],
+                "cover": True,
+            },
+        },
+        {
+            "name": "TorchScriptOps",
+            "pool": "applicationLogic",
+            "stage": 2,
+            "fanout": 1,
+            "params": {
+                "nbuffers": 6,
+                "input": "tsops_pre",
+                "ops": [
+                    {
+                        "op": "searchsorted",
+                        "rows": 64,
+                        "cols": 16,
+                        "aux": 256,
+                        "reps": 8,
+                    },
+                    {
+                        "op": "clamp_range_lengths",
+                        "rows": 512,
+                        "cols": 64,
+                        "aux": 4,
+                        "reps": 14,
+                    },
+                    {
+                        "op": "complete_cumsum",
+                        "rows": 512,
+                        "cols": 64,
+                        "aux": 4,
+                        "reps": 24,
+                    },
+                    {"op": "diff", "rows": 512, "cols": 256, "aux": 4, "reps": 8},
+                    {
+                        "op": "index_select",
+                        "rows": 256,
+                        "cols": 256,
+                        "aux": 1024,
+                        "reps": 13,
+                    },
+                    {"op": "cat", "rows": 256, "cols": 64, "aux": 4, "reps": 9},
+                    {"op": "copy", "rows": 1024, "cols": 256, "aux": 4, "reps": 1},
+                    {"op": "fill", "rows": 1024, "cols": 256, "aux": 4, "reps": 2},
+                ],
+            },
+        },
+        {
+            "name": "TorchScriptOps",
+            "pool": "applicationLogic",
+            "stage": 2,
+            "fanout": 1,
+            "params": {
+                "nbuffers": 32,
+                "input": "tsops_gather_l3",
+                "ops": [
+                    {
+                        "op": "index_select",
+                        "rows": 2048,
+                        "cols": 16,
+                        "aux": 16384,
+                        "reps": 90,
+                    }
+                ],
+            },
+        },
+        {
+            "name": "DenseFP32",
+            "pool": "applicationLogic",
+            "stage": 3,
+            "fanout": 9,
+            "params": {
+                "batch": 16,
+                "dims": [2048, 1024, 512, 256],
+                "nweight_sets": 1,
+                "niters": 1,
+                "input": "densefp32",
+            },
+        },
+        {
+            "name": "TorchScriptOps",
+            "pool": "applicationLogic",
+            "stage": 3,
+            "fanout": 1,
+            "params": {
+                "nbuffers": 6,
+                "input": "tsops_post",
+                "ops": [
+                    {"op": "layernorm", "rows": 512, "cols": 256, "aux": 4, "reps": 48},
+                    {"op": "add", "rows": 512, "cols": 256, "aux": 4, "reps": 6},
+                    {"op": "to_half", "rows": 512, "cols": 256, "aux": 4, "reps": 11},
+                    {"op": "copy", "rows": 1024, "cols": 256, "aux": 4, "reps": 1},
+                    {"op": "fill", "rows": 1024, "cols": 256, "aux": 4, "reps": 2},
+                ],
+            },
+        },
+        {
+            "name": "Rebatch",
+            "pool": "requestHandle",
+            "stage": 4,
+            "fanout": 3,
+            "params": {
+                "tensors_per_batch": 22,
+                "num_threads": 1,
+                "output_tensor_size": 5023008,
+                "memory_pool_size_gb": 1,
+                "prefetch_dist": 0,
+                "input": "rebatch_stage",
+                "distribution_file": str(
+                    os.path.join(os.path.dirname(__file__), "rebatch_model_a.dist")
+                ),
+                "seed": 42,
+            },
+        },
+        {
+            "name": "GpuSpinWait",
+            "pool": "applicationLogic",
+            "stage": 5,
+            "fanout": 1,
+            "params": {"wait_us": 50, "nwaits": 128, "use_mwaitx": False},
+        },
+        {
+            "name": "Decompress",
+            "pool": "requestHandle",
+            "stage": 5,
+            "fanout": 4,
+            "params": {
+                "input": "Hdecompress512k{fidx}",
+                "output": "Rdecompressed512k{fidx}",
+                "compressor": "zstd",
+                "level": 4,
+                "size": 524288,
+                "run_decompressor": True,
+            },
+        },
+        {
+            "name": "FakeIO",
+            "pool": "requestHandle",
+            "stage": 5,
+            "fanout": 1,
+            "params": {
+                "quantiles": [0.5, 0.9, 0.99, 1.0],
+                "latencies": [73200, 86700, 108200, 135200],
+                "ntimekeepers": 8,
+                "input": "GPU_io",
+            },
+        },
+    ],
 }
 
 
-def get_config(name, model=None):
+def get_config(name):
     """
     Get configuration by name.
 
     Args:
-        name (str): Configuration name. Supported values: 'ads', 'inference'
-        model (str, optional): Model name for inference configs. Defaults to 'model_a'
+        name (str): Configuration name. Supported values: 'ads', 'adsim_inference_a'
 
     Returns:
         dict: Configuration dictionary
@@ -543,87 +723,12 @@ def get_config(name, model=None):
     """
     if name == "ads":
         return ads_config
-    elif name == "inference":
-        if model is None:
-            model = "model_a"
-
-        # Create a copy of the inference config to avoid modifying the original
-        config = inference_config.copy()
-        # config["Kernels"] = []
-
-        # Add kernels with dynamic model path
-        config["Kernels"] = [
-            {
-                "name": "TensorDeser",
-                "pool": "applicationLogic",
-                "stage": 0,
-                "fanout": 1,
-                "params": {
-                    "requests_per_run": 48,
-                    "request_book_multiplier": 1,
-                    "num_threads": 1,
-                    "input": "tensor_data",
-                    "distribution_file": str(
-                        os.path.join(os.path.dirname(__file__), f"deser_{model}.dist")
-                    ),
-                },
-            },
-            {
-                "name": "Embedding",
-                "pool": "applicationLogic",
-                "stage": 1,
-                "fanout": 1,
-                "params": {
-                    "batch_size": 100,
-                    "pregenerated_req_num": 300000,
-                    "num_embeddings_list": "40000000",
-                    "embedding_dim_list": "96",
-                    "bag_size_list": "2",
-                    "access_weight_list": "1.0",
-                    "weights_precision": "int4",
-                    "output_dtype": "fp32",
-                    "pooling": "sum",
-                    "requests_per_fire": 48,
-                    "nthreads": 1,
-                    "weighted": False,
-                    "warmup_runs": 0,
-                },
-            },
-            {
-                "name": "Rebatch",
-                "pool": "requestHandle",
-                "stage": 2,
-                "fanout": 1,
-                "params": {
-                    "tensors_per_batch": 12,
-                    "num_threads": 1,
-                    "output_tensor_size": 5023008,
-                    "memory_pool_size_gb": 1,
-                    "prefetch_dist": 0,
-                    "input": "rebatch_stage",
-                    "distribution_file": str(
-                        os.path.join(os.path.dirname(__file__), f"rebatch_{model}.dist")
-                    ),
-                },
-            },
-            {
-                "name": "FakeIO",
-                "pool": "requestHandle",
-                "stage": 3,
-                "fanout": 1,
-                "params": {
-                    "quantiles": [0.5, 0.9, 0.99, 1.0],
-                    "latencies": [20000, 30000, 40000, 60000],
-                    "ntimekeepers": 8,
-                    "input": "GPU_io",
-                },
-            },
-        ]
-
-        return config
+    elif name == "adsim_inference_a":
+        return adsim_inference_a_config
     else:
         raise ValueError(
-            f"Unknown config name: {name}. Supported configs: ['ads', 'inference']"
+            f"Unknown config name: {name}. "
+            "Supported configs: ['ads', 'adsim_inference_a']"
         )
 
 
