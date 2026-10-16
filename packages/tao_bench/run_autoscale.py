@@ -19,6 +19,7 @@ from datetime import datetime
 from parser import TaoBenchParser
 
 import args_utils
+from server_command import append_server_argument
 from warmup_monitor import LogTailer, WarmupControlServer, WarmupMonitor
 
 # Add parent directory to path to import diagnosis_utils
@@ -100,11 +101,7 @@ def compose_server_cmd(args, cpu_core_range, memsize, port_number, instance_inde
         "server",
     ]
     for argname, argval in server_args.items():
-        if isinstance(argval, bool):
-            if argval:
-                cmd.append(argname)
-        elif argval is not None and argval != 0 and argval != "":
-            cmd += [argname, str(argval)]
+        append_server_argument(cmd, argname, argval)
 
     if len(NUMA_NODES) > 1 and (args.bind_cpu > 0 or args.bind_mem > 0):
         numa_nodes_belong_to = check_nodes_of_cpu_range(cpu_core_range, NUMA_NODES)
@@ -765,9 +762,29 @@ def run_server(args):
                     f"ERROR: Parser result has role '{res['role']}' instead of 'server' for server {i}"
                 )
             else:
-                # Valid server result
-                results.append(res)
-                print(f"Server {i}: Successfully parsed and added to results")
+                try:
+                    parser.validate_server_metrics(res, returncode, args.test_time)
+                except ValueError as error:
+                    recorder.record_failure(
+                        benchmark="tao_bench",
+                        error_type="invalid_server_result",
+                        reason=f"Invalid result for server {i}: {error}",
+                        metadata={
+                            "server_index": i,
+                            "logpath": logpath,
+                            "result": str(res),
+                        },
+                    )
+                    print(f"ERROR: Invalid result for server {i}: {error}")
+                else:
+                    results.append(res)
+                    print(f"Server {i}: Successfully parsed and added to results")
+    if len(results) != args.num_servers:
+        raise RuntimeError(
+            f"TaoBench produced valid results for {len(results)} of "
+            f"{args.num_servers} server instances"
+        )
+
     for res in results:
         overall["fast_qps"] += res["fast_qps"]
         overall["slow_qps"] += res["slow_qps"]
