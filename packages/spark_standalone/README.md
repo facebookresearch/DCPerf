@@ -165,151 +165,127 @@ to be the path of the JDK: /usr/lib/jvm/graalvm-community-openjdk-17.0.9+9.1 if 
 
 ## On the storage nodes
 
-We need to first export the data SSDs on the storage nodes. The exportation command is as follows:
+First export dedicated data SSDs from every storage node. `setup_nvmet.py` now
+validates the selected devices, creates or reuses one partition per device, and
+journals the exact NVMe targets that it creates.
 
-```
-./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n <N> -s <S> -p <P> [--target-name <name>] [--ipv4] [--ipaddr <host-ip-address>] --real
-```
+> **Warning:** `--real` applies destructive storage changes. The exporter wipes
+> filesystem signatures from the selected data partitions. Never select a boot,
+> root, mounted, or otherwise in-use device. The script rejects mounted devices,
+> root-backed devices, active holders, unexpected partition layouts, and stale
+> setup state.
 
-- `N` is the number of SSDs you would like to export.
-- `S` is the starting device number. If you would like to export devices starting from `/dev/nvme1n1`,
-  `N` will be 1; if starting from `/dev/nvme3n1`, `N` will be 3.
-- `P` is the starting partition number. Usually this is 1, but if you would like to export the
-  particular partition `/dev/nvme2n1p3`, `P` will be 3.
+Choose exactly one device-selection mode:
 
-There are also some optional arguments and when we should set them (shown in `[]` above):
+* `--auto-devices`: recommended when the host has exactly `N` unmounted local
+  PCIe NVMe data SSDs. Discovery fails unless it finds exactly `N` safe candidates.
+* `--device-indices <i,j,...>`: select explicit, possibly non-contiguous controller
+  indices such as `0,2` for `/dev/nvme0n1` and `/dev/nvme2n1`.
+* `--start-device <S>` or `-s <S>`: select `N` contiguous controller indices
+  beginning at `S`.
 
-- `--target-name` or `-t`: Exported NVMe drive's target name prefix. By default it will be based on
-  the hostname, but it would be recommended to set this parameter to a unique name if your hostname
-  is `localhost`.
-- `--ipv4`: Use ipv4 - please set this if your system and network do not support IPv6.
-- `--ipaddr`: IP address of this host. By default it will be the first IP address returned by
-  `hostname -i` command. Please set this parameter to a host IP that other machines can reach if
-  `hostname -i` returns a local-only address such as `127.0.0.1`, `::1` or an address starting
-  with `fe80`.
+The recommended command is:
 
-Here are some example usages:
-
-If you have a single storage node that can provide 3 spare data SSDs (`/dev/nvme1n1`, `/dev/nvme2n1`
-and `/dev/nvme3n1`),
-run the following:
-
-```
-./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n 3 -s 1 -p 1 --real
+```bash
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py \
+  exporter setup -n <N> --auto-devices -p 1 \
+  [--target-name <unique-prefix>] [--ipv4] [--ipaddr <reachable-address>] \
+  --real
 ```
 
-If you have 3 storage nodes and each of them has one spare data SSD (`/dev/nvme1n1`), run the
-following command on all the three machines:
+For explicit device indices, use:
 
-```
-./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n 1 -s 1 -p 1 --real
-```
-
-If your machines only have a boot drive but the drive has an unused partition that
-can be used for storing data (say it's called `/dev/nvme0n1pX`), you can export
-the partition instead:
-
-```
-./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py exporter setup -n 1 -s 0 -p X --real
+```bash
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py \
+  exporter setup -n 2 --device-indices 0,2 -p 1 \
+  --target-name nvmet-storage0 --ipv4 --ipaddr <storage-node-ipv4> --real
 ```
 
-When running the commands, it will execute `fdisk` to ask you to create partitions.
-If the data SSDs are uninitialized, you will need to create a partition in
-order for `setup_nvmet.py` to use. The recommended way is to create one single primary partition
-that uses the entire drive by pressing `n`->`ENTER`->`p`->`ENTER` all the way till the main prompt->
-`w`->`ENTER`. If you have already created a partition, you
-can skip the step by quitting fdisk with `q`->`ENTER`, or prepend the exporter command with
-`yes q | ` to automatically skip fdisk.
+`-p 1` uses partition 1. On a signature-free, unpartitioned data SSD, the
+script creates a single GPT data partition that consumes the drive. If the
+requested partition already exists, it must be the device's only partition.
+There is no interactive `fdisk` step. A drive with any other partition layout
+or a whole-device signature is rejected.
 
-After each of above command finishes, `setup_nvmet.py` will print out a command
-at the end of the output like the following:
-```
-./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py importer connect -n 1 -s 1 -i <storage-node-ipaddr> -t nvmet-<storage-node-hostname> --real
-```
-We will need to execute this command on the compute node to import the data SSD
-over network.
+Use a different `--target-name` prefix on each storage node. The default is
+`nvmet-<short-hostname>`, but an explicit role-unique prefix is safer when
+hostnames may be duplicated or set to `localhost`. With `--auto-devices` or
+`--device-indices`, exported targets are numbered from zero, for example
+`nvmet-storage0-0` and `nvmet-storage0-1`. With `--start-device S`, numbering
+starts at `S`.
+
+IPv6 is the default. Add `--ipv4` when using IPv4. If `--ipaddr` is omitted,
+the exporter derives a local address; pass an explicit address when discovery
+could select a loopback, link-local, or otherwise unreachable interface.
+
+A successful setup logs the exact exported target names and writes
+`.<target-prefix>-nvmet-state.json`. Keep this journal until cleanup. A second
+setup with the same prefix or a pre-existing NVMe target port fails closed.
 
 ## On the compute node
 
-1. Execute the commands generated by `setup_nvmet.py` on all storage nodes.
+Run one importer connection command for each storage node. Use the same target
+prefix and target numbering that the exporter logged:
 
-2. Then we should be able to see a number of additional NVMe devices on the
-   compute node by running `lsblk`:
+```bash
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py \
+  importer connect -n <N> -s <target-start> \
+  -i <storage-node-address> -t <target-prefix> [--ipv4] --real
+```
 
-   ```
-   NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
-   nvme0n1     259:0    0 238.5G  0 disk
-   ├─nvme0n1p1 259:1    0   243M  0 part /boot/efi
-   ├─nvme0n1p2 259:2    0   488M  0 part /boot
-   ├─nvme0n1p3 259:3    0   1.9G  0 part [SWAP]
-   └─nvme0n1p4 259:4    0 235.9G  0 part /
-   nvme1n1     259:6    0   1.8T  0 disk
-   nvme2n1     259:8    0   1.8T  0 disk
-   nvme3n1     259:10   0   1.8T  0 disk
-   ```
+For exporters configured with `--auto-devices` or `--device-indices`, set
+`<target-start>` to `0`. For an exporter configured with `--start-device S`,
+set it to `S`. Repeat the command for every storage node. The importer resolves
+each target NQN to the actual namespace device and accumulates the mapping in
+`.automark-spark-nvme-state.json`; do not infer imported `/dev/nvme*` numbers.
 
-3. Mounting the remote NVMe drives:
+After all targets are connected, create RAID-0 and mount it at `/flash23`:
 
-    3.1. If you setup Spark for the first time, create a RAID-0 array and mount it.
-    Suppose you have 3 SSDs imported now, starting from `nvme1n1`:
+```bash
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py \
+  importer mount --real
+```
 
-    ```
-    ./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py importer mount -n 3 -s 1 --real
-    ```
-    If you would like to use other number of drives and/or the starting device number
-    is not 1, please change `-n` and/or `-s` accordingly.
+The mount command consumes the journaled target list, writes `nomerges=2` to
+each namespace queue and matching controller path, creates `/dev/md23`, formats
+it as XFS, and mounts it at `/flash23`. It refuses an existing RAID device,
+mount path, remapped target, or unexpected namespace.
 
-    Then you should see remote SSDs mounted at `/flash23`:
+Verify the result before downloading the dataset or running SparkBench:
 
-    ```
-    [root@compute-node ~/DCPerf]# df -h
-    Filesystem       Size  Used Avail Use% Mounted on
-    devtmpfs          32G     0   32G   0% /dev
-    tmpfs             32G  1.8M   32G   1% /dev/shm
-    tmpfs             13G   15M   13G   1% /run
-    /dev/nvme0n1p4   236G   38G  195G  17% /
-    /dev/nvme0n1p2   465M   90M  347M  21% /boot
-    /dev/nvme0n1p1   243M  4.4M  239M   2% /boot/efi
-    /dev/md127       5.3T  261G  5.0T   5% /flash23
-    ```
+```bash
+mountpoint -q /flash23
+findmnt /flash23
+lsblk
+```
 
-    3.2. If you have already set up before, after importing the NVMe drives you will
-    see each of the drives has a soft RAID device attached like the following:
+To use different RAID and mount indices, pass them to the mount command. Cleanup
+reads the selected paths from the state journal:
 
-    ```
-    NAME        MAJ:MIN RM   SIZE RO TYPE  MOUNTPOINTS
-    nvme0n1     259:0    0 763.1G  0 disk
-    ├─nvme0n1p1 259:1    0   243M  0 part  /boot/efi
-    ├─nvme0n1p2 259:2    0   488M  0 part  /boot
-    ├─nvme0n1p3 259:3    0   1.9G  0 part  [SWAP]
-    └─nvme0n1p4 259:4    0 760.5G  0 part  /
-    nvme1n1     259:6    0   1.7T  0 disk
-    └─md127       9:127  0     7T  0 raid0
-    nvme2n1     259:8    0   1.7T  0 disk
-    └─md127       9:127  0     7T  0 raid0
-    nvme3n1     259:10   0   1.7T  0 disk
-    └─md127       9:127  0     7T  0 raid0
-    nvme4n1     259:12   0   1.7T  0 disk
-    └─md127       9:127  0     7T  0 raid0
-    ```
-    In this case, simply mount the RAID device with `mount -t xfs /dev/md127 /flash23`
+```bash
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py \
+  importer mount --md-idx <M> --flash-idx <F> --real
+```
 
-    If you do not see the RAID device automatically created, you can run this command
-    to scan and assemble the RAID device:
+### Cleanup or reconfiguration
 
-    ```
-    mdadm --assemble --scan
-    ```
+Use the helper's journals instead of manually stopping or assembling RAID.
+Clean the compute node first, then each exporter:
 
-    If it's successfuly, you will see a message like
-    `mdadm: /dev/md/23_0 has been started with 4 drives.` and the RAID device attached
-    to remote NVMe drives. Then you can use `mount` command to mount the RAID device.
+```bash
+# Compute node
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py importer clear --real
 
-    3.3. If you have set up before but would like to change the setup of
-    data nodes (adding more or reducing data nodes), after importing all remote
-    NVMe drives please run `mdadm --manage --stop /dev/mdXXX` to stop the
-    RAID device, remove `/flash23` folder and then do step 3.1 to recreate a
-    RAID device and mount it.
+# Each storage node, using that node's exact prefix
+./packages/spark_standalone/templates/nvme_tcp/setup_nvmet.py \
+  exporter clear -t <target-prefix> --real
+```
+
+Importer cleanup verifies the recorded mount source, RAID members, and
+NQN-to-device mappings before unmounting, stopping RAID, erasing recorded RAID
+metadata, disconnecting targets, and removing its journal. Exporter cleanup
+removes only the targets recorded for the exact prefix. If a setup or cleanup
+fails, preserve the state file and investigate instead of deleting it.
 
 4. Download dataset
 
