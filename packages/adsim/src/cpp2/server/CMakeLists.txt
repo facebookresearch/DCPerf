@@ -49,36 +49,46 @@ target_link_libraries(server_handlers
         Folly::folly
 )
 
-# AdSim server executable
+# AdSim server executables
 add_executable(adsim_server AdSimServer.cpp)
+set(ADSIM_SERVERS adsim_server)
 
-# Main dependencies
-target_link_libraries(adsim_server
-    PUBLIC
-        server_handlers
-        dwarfs
-        AdSim-cpp2
-        Serialize-cpp2
-        fb303-cpp2
-        fb303::fb303
-        fb303::fb303_thrift_cpp
-        FBThrift::thriftcpp2
-        Folly::folly
-        Atomic::Atomic
-        ${FMT_LIBRARIES}
-        ${JEMALLOC_LIB}
-)
-
-# Link folly_memcpy_obj only on x86 — on ARM the custom memmove causes
-# R_AARCH64_CALL26 relocation overflows and is a no-op anyway
-# (FOLLY_MEMCPY_IS_MEMCPY is defined).
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
-    target_link_libraries(adsim_server
-        PUBLIC $<LINK_LIBRARY:WHOLE_ARCHIVE,folly_memcpy_obj>)
-    target_compile_options(adsim_server PRIVATE
-        -fno-builtin-mempcpy
-        -fno-builtin-memmove)
+# adsim_server with the TorchScriptOps kernel
+if(ADSIM_TORCHSCRIPT_OPS)
+    add_executable(adsim_server_torch AdSimServer.cpp)
+    target_link_libraries(adsim_server_torch PUBLIC dwarfs_torch)
+    list(APPEND ADSIM_SERVERS adsim_server_torch)
 endif()
 
-# Linker and compiler options
-target_link_options(adsim_server PRIVATE "-Wl,--export-dynamic")
+foreach(server IN LISTS ADSIM_SERVERS)
+    # Main dependencies
+    target_link_libraries(${server}
+        PUBLIC
+            server_handlers
+            dwarfs
+            AdSim-cpp2
+            Serialize-cpp2
+            fb303-cpp2
+            fb303::fb303
+            fb303::fb303_thrift_cpp
+            FBThrift::thriftcpp2
+            Folly::folly
+            Atomic::Atomic
+            ${FMT_LIBRARIES}
+            ${JEMALLOC_LIB}
+    )
+
+    # Link folly_memcpy_obj only on x86 — on ARM the custom memmove causes
+    # R_AARCH64_CALL26 relocation overflows and is a no-op anyway
+    # (FOLLY_MEMCPY_IS_MEMCPY is defined).
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+        target_link_libraries(${server}
+            PUBLIC $<LINK_LIBRARY:WHOLE_ARCHIVE,folly_memcpy_obj>)
+        target_compile_options(${server} PRIVATE
+            -fno-builtin-mempcpy
+            -fno-builtin-memmove)
+    endif()
+
+    # Linker and compiler options
+    target_link_options(${server} PRIVATE "-Wl,--export-dynamic")
+endforeach()
