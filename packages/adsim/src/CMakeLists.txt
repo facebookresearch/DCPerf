@@ -61,6 +61,20 @@ find_package(fbgemmLibrary CONFIG REQUIRED
     NO_DEFAULT_PATH)
 find_program(GENGETOPT_EXECUTABLE gengetopt REQUIRED)
 
+option(ADSIM_TORCHSCRIPT_OPS
+    "Also build adsim_server_torch, whose TorchScriptOps kernel links libtorch"
+    OFF)
+if(ADSIM_TORCHSCRIPT_OPS)
+    # Find libtorch_cpu, libc10 and the torch headers under TORCH_ROOT
+    set(TORCH_ROOT "" CACHE PATH "A torch install, such as site-packages/torch")
+    find_library(TORCH_CPU_LIBRARY torch_cpu
+        PATHS "${TORCH_ROOT}/lib" NO_DEFAULT_PATH REQUIRED)
+    find_library(C10_LIBRARY c10
+        PATHS "${TORCH_ROOT}/lib" NO_DEFAULT_PATH REQUIRED)
+    find_path(TORCH_INCLUDE_DIR torch/script.h
+        PATHS "${TORCH_ROOT}/include" NO_DEFAULT_PATH REQUIRED)
+endif()
+
 
 include_directories(
     ${FOLLY_INCLUDE_DIR}

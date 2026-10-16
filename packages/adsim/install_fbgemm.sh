@@ -15,11 +15,25 @@
 # Path to Miniconda installation
 MINICONDA_PREFIX=${FBGEMM_STAGING_DIR}/miniconda
 
-# Version of FBGEMM to install
-FBGEMM_VERSION=v1.8.0
+# Version of FBGEMM to install, matching the FBGEMM in PyTorch's libtorch_cpu.so
+FBGEMM_VERSION=7a26e2690fba4067db5ab03d780a686085e832a4
 
-# Version of PyTorch to install
+# Version of PyTorch to install, the Python tag of its CPU wheels, and the SHA-256 of each
 PYTORCH_VERSION=2.13.0
+PYTORCH_PYTHON_TAG=cp313
+declare -A PYTORCH_WHEEL_SHA256=(
+  [x86_64]=3fbf9c9d1f3c10c2d59d04aca426dee9ccc6ceb32d255c61e93acc3b4f75fae6
+  [aarch64]=0b8f7d0423027ae8b90c7977c627f3379f325363a08224dffad9b4b2d684a83d
+)
+
+# Version and SHA-256 of each PyTorch dependency that the conda environment lacks
+PYTORCH_REQUIREMENTS=(
+  "filelock==3.32.3 --hash=sha256:7f0ca4bcc0e181c60dbbd8aa9ab5b120ebb99e4e064e83636340056f833a1f09"
+  "fsspec==2026.7.0 --hash=sha256:b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279"
+  "mpmath==1.3.0 --hash=sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+  "networkx==3.6.1 --hash=sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762"
+  "sympy==1.14.0 --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+)
 
 MINICONDA_VERSION="5.1-0"
 
@@ -164,6 +178,15 @@ setup_miniconda() {
   conda update -n base -c conda-forge -y conda
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
+  # Run conda with the base python when a long prefix gave it an env shebang
+  for f in "${miniconda_prefix}/bin/conda" "${miniconda_prefix}/condabin/conda"; do
+    sed -i "1s|^#!/usr/bin/env python3\\?\$|#!/bin/sh\n'''exec' \"${miniconda_prefix}/bin/python\" \"\$0\" \"\$@\"\n' '''|" "$f"
+    if head -n 1 "$f" | grep -q '^#!/usr/bin/env python'; then
+      echo "Failed to replace the env shebang of $f"
+      return 1
+    fi
+  done
   echo "Miniconda setup complete and ready for use!"
 }
 
@@ -823,7 +846,7 @@ setup_conda_environment() {
   # This installs the Conda package manager
   echo "[SETUP] Installing Miniconda..."
   # shellcheck disable=SC2086
-  setup_miniconda $MINICONDA_PREFIX
+  setup_miniconda $MINICONDA_PREFIX || exit 1
 
   # Create a new Conda environment with the specified Python version
   # This environment will be used for building and running the benchmark tools
@@ -868,10 +891,27 @@ install_pytorch() {
   echo "[SETUP] Checking network connection..."
   test_network_connection || return 1
 
-  # Install the CPU variant of PyTorch using PIP
-  # We use the pre-release version and specify the CPU-only variant
+  # Install the CPU wheel after checking its SHA-256
+  local wheel="torch-${PYTORCH_VERSION}+cpu-${PYTORCH_PYTHON_TAG}-${PYTORCH_PYTHON_TAG}-manylinux_2_28_${MACHINE_NAME}.whl"
+  local sha256="${PYTORCH_WHEEL_SHA256[${MACHINE_NAME}]}"
+  if [ -z "${sha256}" ]; then
+    echo "[SETUP] No pinned PyTorch wheel for ${MACHINE_NAME}"
+    return 1
+  fi
+  local env_python_tag
+  env_python_tag="$(conda run -n $BUILD_ENV python -c 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")')" || return 1
+  if [ "${env_python_tag}" != "${PYTORCH_PYTHON_TAG}" ]; then
+    echo "[SETUP] ${BUILD_ENV} has Python ${env_python_tag}, but the pinned PyTorch wheels are ${PYTORCH_PYTHON_TAG}"
+    return 1
+  fi
+  echo "[SETUP] Downloading ${wheel}..."
+  wget -nv "https://download.pytorch.org/whl/cpu/${wheel/+/%2B}" -O "${wheel}" || return 1
+  echo "${sha256}  ${wheel}" | sha256sum -c - || return 1
   echo "[SETUP] Installing PyTorch CPU variant..."
-  conda run -n $BUILD_ENV pip install --pre torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu/
+  printf '%s\n' "${PYTORCH_REQUIREMENTS[@]}" > pytorch-requirements.txt
+  conda run -n $BUILD_ENV pip install --require-hashes -r pytorch-requirements.txt --index-url https://download.pytorch.org/whl/cpu/ || return 1
+  # Install the wheel offline so its dependencies come only from the environment
+  conda run -n $BUILD_ENV pip install --no-index "./${wheel}" || return 1
 
   # Test if the PyTorch package loads correctly by importing a submodule
   # This verifies that PyTorch is properly installed
@@ -895,10 +935,11 @@ clone_fbgemm_repo() {
   echo "[SETUP] Checking network connection..."
   test_network_connection || return 1
 
-  # Clone the FBGEMM repository along with its submodules
-  # We specify the version tag to ensure we get the correct version
+  # Clone the FBGEMM repository at the pinned commit, with its submodules
   echo "[SETUP] Cloning repository with submodules..."
-  git clone --recursive -b ${FBGEMM_VERSION} https://github.com/pytorch/FBGEMM.git fbgemm
+  git clone https://github.com/pytorch/FBGEMM.git fbgemm || return 1
+  git -C fbgemm checkout ${FBGEMM_VERSION} || return 1
+  git -C fbgemm submodule update --init --recursive || return 1
 
   # Disable the postbuild script to prevent race conditions during linking
   # This is a workaround for a known issue in the build process
@@ -1042,11 +1083,11 @@ main() {
 
   # Install PyTorch
   echo "[MAIN] Installing PyTorch..."
-  install_pytorch
+  install_pytorch || exit 1
 
   # Clone the FBGEMM repository
   echo "[MAIN] Cloning FBGEMM repository..."
-  clone_fbgemm_repo
+  clone_fbgemm_repo || exit 1
 
   # Install FBGEMM requirements and build the library
   echo "[MAIN] Building FBGEMM..."

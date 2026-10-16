@@ -212,6 +212,11 @@ echo "Verifying symlink:"
 ls -la cea/chips/
 ls -la cea/chips/adsim/cpp2/server/dwarfs/ | head -5
 
+# Find the torch package in the FBGEMM build environment
+TORCH_ROOT=$("${FBGEMM_STAGING_DIR}/miniconda/envs/fbgemm_build_oss_env/bin/python" -I -c \
+    "import importlib.util; print(importlib.util.find_spec('torch').submodule_search_locations[0])")
+echo "Using torch: ${TORCH_ROOT}"
+
 cmake \
      -DCMAKE_BUILD_TYPE=Release \
      -DCMAKE_C_COMPILER="${ADSIM_C_COMPILER}" \
@@ -223,6 +228,8 @@ cmake \
      -DFOLLY_MEMCPY_IS_MEMCPY=1 \
      -DFOLLY_DIR="${ADSIM_DEPS_DIR}/folly/folly" \
      -DCMAKE_CXX_FLAGS="-I$(pwd)" \
+     -DADSIM_TORCHSCRIPT_OPS=ON \
+     -DTORCH_ROOT="${TORCH_ROOT}" \
      ..
 
 # After cmake generates ICacheBuster.h, link it into the source tree
