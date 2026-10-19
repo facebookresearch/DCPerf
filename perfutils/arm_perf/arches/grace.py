@@ -217,8 +217,8 @@ def grace_gflops(grouped_df):
 
 @skip_if_missing
 def grace_sve_gflops(grouped_df):
-    fp_scale_series = grouped_df.get_group("r80C1").counter_value  # FP_FIXED_OPS_SPEC
-    duration_series = get_duration_series(grouped_df.get_group("r80C1"))
+    fp_scale_series = grouped_df.get_group("r80C0").counter_value  # FP_SCALE_OPS_SPEC
+    duration_series = get_duration_series(grouped_df.get_group("r80C0"))
 
     fp_scale_series.index = duration_series.index
 

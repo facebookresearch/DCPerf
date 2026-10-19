@@ -179,12 +179,12 @@ def axion_gflops(grouped_df):
 
 @skip_if_missing
 def axion_sve_gflops(grouped_df):
-    fp_fixed = grouped_df.get_group("r80C1").counter_value  # FP_FIXED_OPS_SPEC
-    duration_series = get_duration_series(grouped_df.get_group("r80C1"))
-    fp_fixed.index = duration_series.index
+    fp_scale = grouped_df.get_group("r80C0").counter_value  # FP_SCALE_OPS_SPEC
+    duration_series = get_duration_series(grouped_df.get_group("r80C0"))
+    fp_scale.index = duration_series.index
     return {
         "name": "SVE GFLOPS (any precision)",
-        "series": fp_fixed.div(duration_series) / 10**9,
+        "series": fp_scale.div(duration_series) / 10**9,
     }
 
 
