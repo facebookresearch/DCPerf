@@ -30,6 +30,7 @@ TIMESTAMP_COLUMN_MAP = {
     "amd-zen5-perf-collector-timeseries.csv": ("Timestamp_Secs", "relative_secs"),
     "nv-perf-collector-timeseries.csv": ("Timestamp_Secs", "relative_secs"),
     "nv3-perf-collector-timeseries.csv": ("Timestamp_Secs", "relative_secs"),
+    "vera-perf-collector-timeseries.csv": ("Timestamp_Secs", "relative_secs"),
     "arm-perf-collector-transposed.csv": ("time", "relative_secs"),
     "topdown-intel.sys.csv": ("TS", "epoch_secs"),
 }
@@ -372,6 +373,9 @@ def _build_stage_overall_metrics_text(stage, bm_metrics, interval):
         interval, last_secs, skip_last_secs, start_time, end_time, bm_epoch
     )
     res += read_neoversev3_perf_collector(
+        interval, last_secs, skip_last_secs, start_time, end_time, bm_epoch
+    )
+    res += read_vera_perf_collector(
         interval, last_secs, skip_last_secs, start_time, end_time, bm_epoch
     )
     res += read_intel_perfspect(
@@ -958,6 +962,21 @@ def read_neoversev3_perf_collector(
     )
 
 
+def read_vera_perf_collector(
+    interval, last_secs, skip_last_secs, start_time=None, end_time=None, bm_epoch=None
+):
+    return sample_avg_from_csv(
+        "vera-perf-collector-timeseries.csv",
+        interval,
+        last_secs,
+        skip_last_secs,
+        exclude_columns=("index", "Timestamp_Secs"),
+        start_time=start_time,
+        end_time=end_time,
+        bm_epoch=bm_epoch,
+    )
+
+
 def read_intel_perfspect(
     interval, last_secs, skip_last_secs, start_time=None, end_time=None, bm_epoch=None
 ):
@@ -987,10 +1006,17 @@ def unfold_json(obj, prefix=""):
 
 def put_value(db_fields: dict, key: str, kv: str):
     try:
-        _, value = kv.split(",")
+        _, value = kv.split(",", 1)
         db_fields[key] = value
     except ValueError:
         pass
+
+
+def _add_mapped_metrics(db_fields: dict, mapping: dict, metrics: str) -> None:
+    for line in metrics.splitlines():
+        key, separator, value = line.partition(",")
+        if separator and key in mapping:
+            db_fields[mapping[key]] = value
 
 
 def trim_window(start_time, end_time, trim_secs, interval):
@@ -1203,6 +1229,7 @@ def process_metrics(
         "General/Instructions Per Cycle": "IPC",
         "metric_IPC": "IPC",
         "Branch Mispred %": "branch_mispred",
+        "Branch Miss Rate %": "branch_mispred",
         "Branch Effectiveness/Branch Misprediction Ratio": "branch_mispred",
         "metric_TMA_..Branch_Mispredicts(%)": "branch_mispred",
         "TMA_..Branch_Mispredicts(%)": "branch_mispred",
@@ -1343,6 +1370,16 @@ def process_metrics(
         if key in Map:
             db_fields[f"{Map[key]}"] = value
     res += nv3_perf_collector
+    vera_perf_collector = read_vera_perf_collector(
+        args.interval,
+        args.last_secs,
+        args.skip_last_secs,
+        start_time,
+        end_time,
+        bm_epoch,
+    )
+    _add_mapped_metrics(db_fields, Map, vera_perf_collector)
+    res += vera_perf_collector
     intel_perfspect = read_intel_perfspect(
         args.interval,
         args.last_secs,
