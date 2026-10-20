@@ -660,6 +660,19 @@ class NVPerfUtil(BasePerfUtil):
         super(NVPerfUtil, self).run()
 
 
+class VeraPerfUtil(BasePerfUtil):
+    def __init__(self, interval, job_uuid, subdir=None, **kwargs):
+        super(VeraPerfUtil, self).__init__(
+            interval,
+            job_uuid,
+            "vera-perf-collector",
+            perf_collect_script_name="collect_vera_perf_counters.sh",
+            perf_postproc_script_name="generate_arm_perf_report.py",
+            perf_postproc_args=["--arch", "vera"],
+            subdir=subdir,
+        )
+
+
 class NeoVerseV3PerfUtil(BasePerfUtil):
     def __init__(self, interval, job_uuid, subdir=None, **kwargs):
         super(NeoVerseV3PerfUtil, self).__init__(
@@ -719,6 +732,25 @@ def _is_neoversev3_string(value: str) -> bool:
     return "neoverse-v3" in normalized
 
 
+def is_vera(
+    cpuinfo=None, midr_path="/sys/devices/system/cpu/cpu0/regs/identification/midr_el1"
+):
+    """Detect NVIDIA Vera from its model name or architectural MIDR."""
+    cpuinfo = cpuinfo if cpuinfo is not None else get_cpuinfo()
+    if "vera" in cpuinfo.get("Model name", "").lower():
+        return True
+
+    try:
+        with open(midr_path) as midr_file:
+            midr = int(midr_file.read().strip(), 0)
+    except (OSError, ValueError):
+        return False
+
+    implementer = (midr >> 24) & 0xFF
+    part = (midr >> 4) & 0xFFF
+    return implementer == 0x4E and part == 0x010
+
+
 def is_neoversev3():
     """Detect ARM Neoverse V3 platforms.
 
@@ -747,6 +779,15 @@ def is_neoversev3():
     return False
 
 
+def choose_arm_perfutil(cpuinfo):
+    vendor = get_cpu_vendor_from_dmi()
+    if vendor == "nvidia":
+        return VeraPerfUtil if is_vera(cpuinfo) else NVPerfUtil
+    if is_neoversev3():
+        return NeoVerseV3PerfUtil
+    return ARMPerfUtil
+
+
 cpuinfo = get_cpuinfo()
 cpu_vendor = get_cpu_vendor(cpuinfo)
 if cpu_vendor == "intel":
@@ -754,13 +795,7 @@ if cpu_vendor == "intel":
 elif cpu_vendor == "amd":
     TopDown = AMDPerfUtil
 elif cpu_vendor == "arm":
-    vendor2 = get_cpu_vendor_from_dmi()
-    if vendor2 == "nvidia":
-        TopDown = NVPerfUtil
-    elif is_neoversev3():
-        TopDown = NeoVerseV3PerfUtil
-    else:
-        TopDown = ARMPerfUtil
+    TopDown = choose_arm_perfutil(cpuinfo)
 else:
     logger.warning(f"Unsupported CPU vendor '{cpu_vendor}'")
     TopDown = DummyPerfUtil
