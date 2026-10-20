@@ -14,7 +14,7 @@ while running DCPerf benchmarks.
 | [cpufreq_scaling](#cpufreq_scaling) <br> [cpufreq_cpuinfo](#cpufreq_cpuinfo) | Monitors CPU frequency during benchmarks. |
 | [topdown](#topdown) | Monitors uArch and top-down telemetries such as cache miss rates, memory bandwidth, and frontend/backend boundedness. |
 | [perfstat](#perfstat) | Collects performance counters through the `perf stat` command. Includes IPC by default. |
-| [vmstat](#vmstat) | Collects memory and uarchitecture counters through the `vmstat -s` command. |          
+| [vmstat](#vmstat) | Collects memory and uarchitecture counters through the `vmstat -s` command. |
 
 ## Getting started
 
@@ -408,6 +408,13 @@ NVIDIA Grace:
 * `nv-perf-collector-timeseries.csv`: The time-series sheet recording the
   microarch metrics during the benchmark, in the interval of 5 secs.
 * `nv-perf-collector.log`: The raw perf event data collected during the benchmark.
+
+NVIDIA Vera:
+
+* `vera-perf-collector-summary.csv`: Olympus core PMU, UCF SLC and memory
+  traffic, and CMEM latency summary.
+* `vera-perf-collector-timeseries.csv`: The corresponding time-series data.
+* `vera-perf-collector.log`: The raw `perf stat` event data.
 
 Other ARM CPUs:
 

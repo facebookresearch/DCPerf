@@ -21,6 +21,9 @@ collect_amd_zen4_perf_counters.sh
 ## ARM (NVIDIA Grace, Neoverse V2)
 - Data Collection: collect_nvda_neoversev2_perf_counters.sh
 - Data Processing: generate_arm_perf_report.py --arch grace
+## ARM (NVIDIA Vera)
+- Data Collection: collect_vera_perf_counters.sh
+- Data Processing: generate_arm_perf_report.py --arch vera
 ## ARM (Neoverse V3)
 - Data Collection: collect_neoversev3_perf_counters.sh
 - Data Processing: generate_arm_perf_report.py --arch neoversev3

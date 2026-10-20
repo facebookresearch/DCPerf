@@ -18,10 +18,12 @@ try:
         axion,
         grace,
         neoversev3,
+        vera,
     )
 except ModuleNotFoundError:  # standalone / OSS: run from perfutils/ dir
     from arm_perf.arches import (  # noqa: F401  # pyre-ignore[21]
         axion,
         grace,
         neoversev3,
+        vera,
     )
