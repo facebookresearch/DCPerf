@@ -30,7 +30,7 @@ PerfPub can determine the CPU name in two ways (in order of priority):
 
 `--interval`: Metrics collection interval (default: 5).
 
-`--last-secs`: Last N seconds of metrics to process as benchmarking stage (default: 300). **Note:** For benchmarks that have integrated `breakdown.csv`, this parameter is not needed as PerfPub will automatically determine the benchmark start and end time (see [Automatic Metric Filtering with breakdown.csv](#automatic-metric-filtering-with-breakdowncsv)).
+`--last-secs`: Last N seconds of metrics to process as benchmarking stage (default: 300; SPEC CPU2017/CPU2026 int/fp rate/speed runs default to 0, i.e. all collected samples). **Note:** For benchmarks that have integrated `breakdown.csv`, this parameter is not needed as PerfPub will automatically determine the benchmark start and end time (see [Automatic Metric Filtering with breakdown.csv](#automatic-metric-filtering-with-breakdowncsv)).
 
 `--skip-last-secs`: Skip the last N seconds of metrics (default: 0). This is useful to rule out the final benchmark cleanup phase when the CPU utilization is low and should not be counted in the benchmark execution. **Note:** For benchmarks that have integrated `breakdown.csv`, this parameter is not needed.
 
@@ -72,7 +72,7 @@ The metric filtering logic follows this priority order:
    - Extract the earliest start timestamp and latest end timestamp
    - Automatically filter metrics to match the exact benchmark execution window
 
-3. **Default values**: If `breakdown.csv` is not present and no timing parameters are provided, PerfPub uses defaults (`--last-secs=300`, `--skip-last-secs=0`).
+3. **Default values**: If `breakdown.csv` is not present and no timing parameters are provided, PerfPub uses defaults (`--last-secs=300`, `--skip-last-secs=0`). SPEC CPU2017/CPU2026 int/fp rate/speed runs instead use all collected samples (`--last-secs=0`).
 
 ## breakdown.csv Format
 

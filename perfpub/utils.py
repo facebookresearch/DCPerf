@@ -7,6 +7,7 @@ import glob
 import json
 import math
 import os
+import re
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -622,6 +623,9 @@ def get_start_end_index(
         last_secs = default_last_secs
         skip_last_secs = default_skip_last_secs
 
+    if last_secs == 0 and skip_last_secs == 0:
+        return 0, len(df)
+
     # Calculate indices using last_secs and skip_last_secs.
     # For CSVs with relative_secs/epoch_secs timestamps, use timestamp-based
     # selection to ensure all CSVs cover the same absolute time window,
@@ -1065,6 +1069,15 @@ def process_metrics(
     generate_stage_perf_summary()
     generate_stage_overall_metrics(bm_metrics, args.interval)
     bm_name = bm_metrics["benchmark_name"]
+    # SPEC runs have no breakdown.csv; summarize the whole suite, not its tail.
+    if (
+        start_time is None
+        and args.last_secs is None
+        and args.skip_last_secs is None
+        and re.fullmatch(r"spec_cpu(2017|2026)_(int|fp)_(rate|speed)", bm_name)
+    ):
+        args.last_secs = 0
+        args.skip_last_secs = 0
     db_fields["benchmark_name"] = f'"{bm_name}"'
     bm_epoch = datetime.fromtimestamp(bm_metrics["timestamp"])
     timestamp = datetime.strftime(bm_epoch, "%Y-%m-%d %H:%M:%S")
@@ -1466,7 +1479,7 @@ def init_parser():
         "--last-secs",
         type=int,
         default=None,
-        help=f'Last N seconds of metrics to process as benchmarking stage. If not provided and breakdown.csv is not present, use default of {default_last_secs}. Recommended value: Taobench: 600; Feedsim: 300; Spark (full run): value of "execution_time_test_93586"; Spark (stage 2.0): value of "execution_time_test_93586-stage-2.0"; Video Transcode: value of "level6_time_secs"; Django: 300; MediaWiki: 600',
+        help=f'Last N seconds of metrics to process as benchmarking stage. If not provided and breakdown.csv is not present, use default of {default_last_secs} (0, i.e. all samples, for SPEC CPU2017/CPU2026 int/fp rate/speed). Recommended value: Taobench: 600; Feedsim: 300; Spark (full run): value of "execution_time_test_93586"; Spark (stage 2.0): value of "execution_time_test_93586-stage-2.0"; Video Transcode: value of "level6_time_secs"; Django: 300; MediaWiki: 600',
     )
     parser.add_argument(
         "--skip-last-secs",
