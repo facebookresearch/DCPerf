@@ -17,11 +17,9 @@ traditional synchronous Thrift transport/protocol stack.
 
 import logging
 import os
-import random
 import sys
 import threading
 from pathlib import Path
-from typing import Any
 
 # Add OSS fbthrift Python library to path
 FBTHRIFT_PREFIX = os.environ.get(
