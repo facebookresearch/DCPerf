@@ -32,7 +32,6 @@
 #include <folly/coro/DetachOnCancel.h>
 #include <folly/coro/Promise.h>
 #include <folly/coro/Sleep.h>
-#include <folly/coro/Timeout.h>
 #include <folly/fibers/FiberManagerMap.h>
 #include <folly/futures/Future.h>
 #include <folly/futures/HeapTimekeeper.h>
