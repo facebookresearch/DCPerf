@@ -779,6 +779,8 @@ start_clientserver() {
   local worker_transport="${12:-unix}"
   local warmup_duration="${13:-}"
 
+  # create_breakdown_csv keeps an existing file, so start from a clean one.
+  rm -f "${BREAKDOWN_FOLDER}/breakdown.csv"
   create_breakdown_csv "$BREAKDOWN_FOLDER"
   log_preprocessing_start "$BREAKDOWN_FOLDER" "$$"
 

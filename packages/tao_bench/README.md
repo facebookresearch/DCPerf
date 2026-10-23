@@ -177,55 +177,113 @@ To start the clients and the server with autoscale on the same benchmarking mach
 ```
 All the parameters used with autoscale can be used with standalone except interface_name.
 
-### Running TaoBench Mini
+### TaoBench Mini
 
-TaoBench Standalone Mini is a shrunken version of TaoBench Standalone that
-aims to reduce execution time.
-It includes runtime breakdown tracking capabilities that record
-benchmark timestamps to enable metric filtering for the actual benchmark time,
-which is essential for mini jobs where execution time is only a few seconds.
+Use the v1 pair, `tao_bench_v1_mini_prep` and `tao_bench_v1_mini`, the default
+Mini job. It is the Mini version of `tao_bench_autoscale`. The v2 pair,
+`tao_bench_v2_mini_prep` and `tao_bench_v2_mini`, is the Mini version of the
+experimental `tao_bench_autoscale_v2_beta`. All DCPerf Mini jobs are listed in
+[README_mini.md](../../README_mini.md).
 
-To run TaoBench Standalone Mini, please follow these steps:
+The prep job fills a 2.25 GiB cache in about 6 minutes and saves it to a file in
+`/dev/shm` (see [Memory file for fast warm restart](#memory-file-for-fast-warm-restart)),
+and the Mini job loads it and measures for 15 seconds. Run the prep job once per
+boot, because `/dev/shm` does not survive a reboot. The two pairs use separate
+files, so you can prep and run both on one machine. On 16 cores, the Mini job
+takes about 26 s (v1) or 36-47 s (v2), and peak memory is about 1 GiB plus the
+2.25 GiB file.
 
-1. Make sure that you get the latest version of DCPerf and check out the latest commit in the `v2-beta` branch.
-If you've installed TaoBench with an older version of DCPerf,
-we recommend you clean and re-install TaoBench.
+#### Run with benchpress
 
-2. Run the `tao_bench_standalone_mini` job:
+Install the benchmark first (see [Installation](#installation)), then run:
 
-```bash
-./benchpress_cli.py run tao_bench_standalone_mini
+```
+./benchpress_cli.py run tao_bench_v1_mini_prep
+./benchpress_cli.py run tao_bench_v1_mini
 ```
 
-This mini job runs the same workload as the full TaoBench Standalone but with
-minimal settings to enable quick testing and validation.
-A `breakdown.csv` file will be generated in the results to track runtime breakdowns,
-which can be used to filter metrics for the actual benchmark execution time.
+For v2, run `tao_bench_v2_mini_prep` and then `tao_bench_v2_mini`.
 
+#### Run with run_standalone.py
 
-#### Larger working set: `tao_bench_v1_mini` and `tao_bench_v2_mini`
+Run the script directly when you need the shortest run and the smallest memory
+footprint, for example on an emulator: it skips benchpress's start-up, hooks
+and result handling. Run it with the jobs' arguments, as root. For v1:
 
-Two warm-restart Mini pairs, one per TaoBench server configuration. Each prep job
-fills a cache and persists it to the memory file described in
-[Memory file for fast warm restart](#memory-file-for-fast-warm-restart); the
-measurement job then loads that file instead of warming up, which is what lets it
-measure a much larger cache -- `memsize=3` -- and still finish under 30s.
-
-```bash
-# v1 server configuration, matching tao_bench_autoscale
-./benchpress_cli.py run tao_bench_v1_mini_prep    # ~6min, once per host
-./benchpress_cli.py run tao_bench_v1_mini         # ~28s, repeatable
-
-# v2 server configuration, matching tao_bench_autoscale_v2_beta
-./benchpress_cli.py run tao_bench_v2_mini_prep    # ~6min, once per host
-./benchpress_cli.py run tao_bench_v2_mini         # ~28s, repeatable
+```
+cd <path_to_DCPerf>
+# Prep: warm the cache and save it to /dev/shm (about 6 minutes, once per boot)
+./packages/tao_bench/run_standalone.py --num-servers=0 --memsize=3 \
+  --fast-threads-ratio=0.75 --slow-to-fast-ratio=3 --warmup-time=300 \
+  --test-time=10 --num-clients=2 --clients-per-thread=190 --bind-cpu=1 \
+  --bind-mem=1 --stats-interval=1000 --port-number-start=11211 --disable-tls=0 \
+  --timeout-buffer=60 --num-slow-threads=0 --num-fast-threads=0 \
+  --num-client-threads=0 --warmup-timeout-buffer=0 --test-timeout-buffer=0 \
+  --postprocessing-timeout-buffer=60 --poll-interval=0.2 \
+  --memory-file=/dev/shm/tao_bench_v1_mini_mem --auto-fix-ports=1 \
+  --auto-fix-ulimit=1 --skip-hit-rate-check=1 --ipv4=0
+# Mini: load the saved cache and measure; the score comes from this run
+./packages/tao_bench/run_standalone.py --num-servers=0 --memsize=3 \
+  --fast-threads-ratio=0.75 --slow-to-fast-ratio=3 --warmup-time=0 \
+  --test-time=15 --num-clients=2 --clients-per-thread=190 --bind-cpu=1 \
+  --bind-mem=1 --stats-interval=1000 --port-number-start=11211 --disable-tls=0 \
+  --timeout-buffer=8 --num-slow-threads=0 --num-fast-threads=0 \
+  --num-client-threads=0 --warmup-timeout-buffer=0 --test-timeout-buffer=0 \
+  --postprocessing-timeout-buffer=60 --poll-interval=0.2 \
+  --memory-file=/dev/shm/tao_bench_v1_mini_mem --auto-fix-ports=1 \
+  --auto-fix-ulimit=1 --skip-hit-rate-check=1 --drop-first-samples=5 \
+  --drop-last-samples=2 --ipv4=0 | tee mini.log
 ```
 
-The pairs differ only in the server-side threading knobs, so running both
-isolates the v1-vs-v2 difference. They use separate memory files
-(`/dev/shm/tao_bench_v1_mini_mem` and `..._v2_mini_mem`), so both can be prepped
-and run independently on one host. `/dev/shm` does not survive a reboot, so the
-prep job must be re-run after one.
+For v2:
+
+```
+cd <path_to_DCPerf>
+# Prep: warm the cache and save it to /dev/shm (about 6 minutes, once per boot)
+./packages/tao_bench/run_standalone.py --num-servers=0 --memsize=3 \
+  --fast-threads-ratio=1.25 --slow-to-fast-ratio=3 --slow-threads-use-semaphore=1 \
+  --pin-threads=0 --warmup-time=300 --test-time=15 --num-clients=2 \
+  --clients-per-thread=190 --bind-cpu=1 --bind-mem=1 --stats-interval=1000 \
+  --port-number-start=11211 --disable-tls=0 --timeout-buffer=60 \
+  --num-client-threads=0 --client-wait-after-warmup=5 --warmup-timeout-buffer=5 \
+  --test-timeout-buffer=30 --postprocessing-timeout-buffer=60 --poll-interval=0.2 \
+  --memory-file=/dev/shm/tao_bench_v2_mini_mem --auto-fix-ports=1 \
+  --auto-fix-ulimit=1 --skip-hit-rate-check=1 --ipv4=0
+# Mini: load the saved cache and measure; the score comes from this run
+./packages/tao_bench/run_standalone.py --num-servers=0 --memsize=3 \
+  --fast-threads-ratio=1.25 --slow-to-fast-ratio=3 --slow-threads-use-semaphore=1 \
+  --pin-threads=0 --warmup-time=5 --test-time=15 --num-clients=2 \
+  --clients-per-thread=190 --bind-cpu=1 --bind-mem=1 --stats-interval=1000 \
+  --port-number-start=11211 --disable-tls=0 --timeout-buffer=35 \
+  --num-client-threads=0 --client-wait-after-warmup=0 --warmup-timeout-buffer=5 \
+  --test-timeout-buffer=30 --postprocessing-timeout-buffer=0 --poll-interval=0.2 \
+  --memory-file=/dev/shm/tao_bench_v2_mini_mem --auto-fix-ports=1 \
+  --auto-fix-ulimit=1 --skip-hit-rate-check=1 --drop-first-samples=10 \
+  --drop-last-samples=2 --ipv4=0 | tee mini.log
+```
+
+The Mini job's output ends with a JSON object. The score is its `total_qps` over
+683,000, the same score that benchpress reports:
+
+```
+    "total_qps": 371815.1,
+```
+
+In this example, the score is 371815.1 / 683000 = 0.544.
+
+#### Use less memory
+
+Lower `memsize`, the memory TaoBench uses in GB (default 3). The cache file is
+0.75 x `memsize` GiB. Use the same value for a pair's prep job and Mini job, and
+compare scores only between runs with the same `memsize`:
+
+```
+./benchpress_cli.py run tao_bench_v1_mini_prep -i '{"memsize": "2"}'
+./benchpress_cli.py run tao_bench_v1_mini -i '{"memsize": "2"}'
+```
+
+`tao_bench_standalone_mini` is an older Mini job with a 0.25 GB cache and no
+prep job.
 
 ### Result reporting
 

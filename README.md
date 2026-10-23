@@ -43,6 +43,8 @@ For more information, see:
 well DCPerf can represent real-world datacenter applications
 * [Versioning](#versioning) for DCPerf's release and versioning policy
 * [Getting Started](#getting-started) for how to install and run DCPerf benchmarks
+* [DCPerf Mini](#dcperf-mini) for short versions of the benchmarks, for
+environments such as emulators and simulators
 * [Limitations and Future Work](#limitations-and-future-works) for what we plan
 to improve and add in the future
 
@@ -306,6 +308,7 @@ please feel free to use the following Table of Contents:
   - [Execution](#execution)
   - [Getting results](#getting-results)
 - [**Getting DCPerf Score**](#getting-dcperf-score)
+- [**DCPerf Mini**](#dcperf-mini)
 - [**Monitoring system performance metrics**](#monitoring-system-performance-metrics)
 - [**Profiling**](#profiling)
 - [**Expected CPU Utilization**](#expected-cpu-utilization)
@@ -525,6 +528,9 @@ running the benchmarks. What's discussed in this section is an overview of Bench
 * [VideoTranscodeBench](packages/video_transcode_bench/README.md).
 * [Halcyon](packages/halcyon/README.md).
 
+For the short DCPerf Mini versions of these benchmarks, see
+[DCPerf Mini](#dcperf-mini).
+
 #### Installation
 
 Before running a benchmark you need to install it. To install a benchmark in DCPerf,
@@ -648,6 +654,21 @@ result we obtained from running DCPerf on a reference machine.
 2. The "score" of a benchmark is defined as the ratio of the performance metric
 achieved by the test machine to the baseline.
 3. The DCPerf overall score is the geometric mean of all five benchmarks' scores.
+
+### DCPerf Mini
+
+DCPerf Mini is a set of short versions of the DCPerf benchmarks, for
+environments where the full benchmarks take too long or need too much memory,
+such as emulators and simulators. TaoBench, FeedSim, DjangoBench, MediaWiki,
+SparkBench and VideoTranscodeBench each have a Mini job, a short version of a
+full job. On 16 cores, most Mini jobs run in under a minute; DjangoBench takes
+about 2 minutes and MediaWiki about 3. You can run them with benchpress, or run
+their scripts directly to save more time and memory. Each Mini job reports its
+own score with the same baseline as its benchmark;
+`./benchpress_cli.py report score` does not include Mini jobs.
+
+See [README_mini.md](README_mini.md) for the Mini jobs, how to run them, how to
+read their scores and how to lower their memory use.
 
 ### Monitoring system performance metrics
 
