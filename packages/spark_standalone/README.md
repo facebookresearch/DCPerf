@@ -351,71 +351,81 @@ faster with the already built database. Therefore, it's normal that the first ru
 takes much longer time than what the benchmark eventually reports. The database will
 be stored in `/flash23/warehouse`.
 
-### Running SparkBench Mini
+### SparkBench Mini
 
-SparkBench Mini is a shrunken version of SparkBench that aims to reduce execution time to
-less than 30 seconds and can potentially be used for emulations. To run the mini version of
-SparkBench, please follow the following steps:
+`spark_standalone_remote_mini` is the Mini version of `spark_standalone_remote`.
+It runs on the 1 GB dataset, `bpc_t93586_s2_synthetic_1GB`, by default. The 5 GB
+dataset, `bpc_t93586_s2_synthetic_5GB`, takes longer and uses more memory, and
+its microarchitecture metrics are closer to the full job's. On 16 cores, the
+script takes about 25-40 s and peaks at about 10 GiB on the 1 GB dataset, and
+about 40-72 s and 12-14 GiB on the 5 GB dataset.
 
-1. Download one of the down-sampled version of the dataset:
-    - 5GB variant `bpc_t93586_s2_synthetic_5GB`
-    - 1GB variant `bpc_t93586_s2_synthetic_1GB`
+#### Run with benchpress
 
-You can download these datasets from the following Github repository:
+Download the dataset you use from DCPerf-datasets, as in step 4 of
+[On the compute node](#on-the-compute-node), and copy it to `/flash23/`. The
+Mini job does not need distributed storage, so `/flash23` can be on the system drive.
 
-```
-https://github.com/facebookresearch/DCPerf-datasets
-```
-
-2. Make sure that you get the latest version of DCPerf and check out the latest commit in the `v2-beta` branch.
-If you've installed SparkBench with an older version of DCPerf,
-we recommend you clean and re-install SparkBench.
-
-3. If you have run SparkBench with a different dataset,
-please remove the data from previous runs so that SparkBench can rebuild database with the new dataset:
-
-```bash
-rm -rf /flash23/warehouse
-rm -rf <benchpressPath>/benchmarks/spark_standalone/spark-4.0.3-bin-hadoop3/metastore_db
-```
-
-4. Create the `/flash23` folder. Copy `bpc_t93586_s2_synthetic_5GB`
-or `bpc_t93586_s2_synthetic_1GB` in the `/flash23` folder.
-Note that SparkBench mini does not require the high I/O throughput
- as the regular version, so it's OK to put `/flash23` folder on your system drive.
-
-5. Run `spark_standalone_remote_mini` job on a real machine.
-This will create data in `/flash23/warehouse`
-and `<benchpressPath>/benchmarks/spark_standalone/spark-4.0.3-bin-hadoop3/metastore_db`.
-Create a backup of these two folders. By default, this job uses the 5GB dataset.
-If you want to use the 1GB dataset, run the job with specifying the
-`dataset_name` parameter like this:
-
-```bash
-./benchpress run spark_standalone_remote_mini -i '{"dataset_name":"bpc_t93586_s2_synthetic_1GB"}'
-```
-
-6. Run Spark mini on a real machine/emulator for the second time to reuse data,
-with the same commands and options.
-
-#### Tuning the peak memory usage
-
-`worker_cores` and `worker_mem` size the Spark cluster and together set peak
-memory. Each takes one value per worker -- `'8'` for a single worker, `'8,8'`
-for two -- and both default to empty, meaning derive automatically:
-`worker_cores` from the cores the job can actually use, `worker_mem` from
-total host memory. Either way the footprint scales with the machine.
-
-To set cores and memory per worker explicitly:
+The first run on a dataset builds its Spark database, and later runs reuse it,
+so run the job once before you measure. On the 1 GB dataset:
 
 ```
-./benchpress_cli.py run spark_standalone_remote_mini \
-  -i '{"worker_cores": "8", "worker_mem": "8"}'
+./benchpress_cli.py run spark_standalone_remote_mini   # builds the database
+./benchpress_cli.py run spark_standalone_remote_mini
 ```
 
-`worker_cores=8 worker_mem=8` is the recommended setting for a ~4GB memory
-usage budget.
+On the 5 GB dataset:
 
+```
+./benchpress_cli.py run spark_standalone_remote_mini -i '{"dataset_name": "bpc_t93586_s2_synthetic_5GB"}'   # builds the database
+./benchpress_cli.py run spark_standalone_remote_mini -i '{"dataset_name": "bpc_t93586_s2_synthetic_5GB"}'
+```
+
+A DCPerf folder holds the Spark database of one dataset at a time. When you
+switch datasets, add `"skip_datagen": "0"` to the first run so that it rebuilds
+the database, for example:
+
+```
+./benchpress_cli.py run spark_standalone_remote_mini -i '{"dataset_name": "bpc_t93586_s2_synthetic_1GB", "skip_datagen": "0"}'
+```
+
+To run on another machine, such as an emulator, make sure to copy the database to it, as
+described in [Reusing database on another machine](#reusing-database-on-another-machine).
+
+#### Run with runner.py
+
+Run the script directly when you need the shortest run and the smallest memory
+footprint, for example on an emulator: it skips benchpress's start-up, hooks
+and result handling. Run it with the job's arguments, as root. On the 1 GB dataset
+(for the 5 GB dataset, use `--dataset-name bpc_t93586_s2_synthetic_5GB`):
+
+```
+cd <path_to_DCPerf>
+./packages/spark_standalone/templates/runner.py run --dataset-path /flash23/ \
+  --dataset-name bpc_t93586_s2_synthetic_1GB --warehouse-dir /flash23/warehouse \
+  --shuffle-dir /flash23/spark_local_dir --ipv4 0 --real --sanity 0 \
+  --local-hostname "" --shuffle-partitions 20 --skip-datagen 1 \
+  --score-query-time 1 --worker-cores "" --worker-mem "" | tee mini.log
+```
+
+The score is the `queries-per-hour` line of the output divide by 4. For example:
+
+```
+    queries-per-hour : 308.960
+```
+
+In this example, the score is 308.960 / 4 = 77.24. The 5 GB dataset gives lower
+scores due to longer query time, so compare scores only between runs on the same dataset.
+
+#### Use less memory
+
+Size the Spark worker with `worker_cores` and `worker_mem` (`--worker-cores` and
+`--worker-mem` for `runner.py`, memory in GB). Both default to empty, which
+derives them from the machine. With 8 cores and 8 GB, the job uses about 4 GB:
+
+```
+./benchpress_cli.py run spark_standalone_remote_mini -i '{"worker_cores": "8", "worker_mem": "8"}'
+```
 
 ## Reusing database on another machine
 

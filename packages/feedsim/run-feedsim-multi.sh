@@ -285,6 +285,11 @@ function get_cpu_range() {
 }
 
 echo > $BREPS_LFILE
+# The instances share breakdown.csv, so clear it here rather than in run.sh. A
+# variance rerun keeps the phases of the run that triggered it.
+if [[ -z "$IS_RERUN" ]]; then
+    rm -f "${FEEDSIM_ROOT}/breakdown.csv"
+fi
 # shellcheck disable=SC2086
 for i in $(seq 1 ${NUM_INSTANCES}); do
     CORE_RANGE="$(get_cpu_range "${NUM_INSTANCES}" "$((i - 1))")"
