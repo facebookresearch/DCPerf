@@ -22,6 +22,7 @@ MINICONDA_PREFIX=$(pwd)/build/miniconda
 # This will be updated to the latest release once the fix is included.
 FBGEMM_VERSION=fd32631d837b41251311099c393af7d7be5cfbf5
 FBGEMM_DISABLE_ASAN_PATCH="$(pwd)/packages/ai_wdl/fbgemm/disable_fbgemm_asan.patch"
+FBGEMM_CACHE_EVICT_PATCH="$(pwd)/packages/ai_wdl/fbgemm/0001-cache-evict-dummy.patch"
 
 # Version of PyTorch to install
 PYTORCH_VERSION=2.8.0
@@ -973,6 +974,18 @@ clone_fbgemm_repo() {
   git -C fbgemm_${FBGEMM_VERSION} cherry-pick 9df97a7090c2c5edecea4fd08bad11ab8a23284c
 
   apply_avx_compile_check_fix || return 1
+
+  # Add the cache-eviction dummy computation used by the benchmark.
+  echo "[SETUP] Applying FBGEMM cache-eviction patch..."
+  if [ ! -f "${FBGEMM_CACHE_EVICT_PATCH}" ]; then
+    echo "[ERROR] Cache-eviction patch not found: ${FBGEMM_CACHE_EVICT_PATCH}"
+    return 1
+  fi
+  if git -C fbgemm_${FBGEMM_VERSION} apply --reverse --check "${FBGEMM_CACHE_EVICT_PATCH}" 2>/dev/null; then
+    echo "[SETUP] Cache-eviction patch already applied."
+  else
+    git -C fbgemm_${FBGEMM_VERSION} apply "${FBGEMM_CACHE_EVICT_PATCH}" || return 1
+  fi
 
   # The upstream helper enables AddressSanitizer by default. Disable it for
   # production performance benchmarks so instrumentation does not skew scores.
