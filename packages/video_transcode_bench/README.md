@@ -70,57 +70,82 @@ Another example: if you would like to run level 5 to 11, you can run the followi
 ./benchpress_cli.py run video_transcode_bench_svt -i '{"levels": "5:11"}'
 ```
 
-## DCPerf Mini
+## VideoTranscodeBench Mini
 
-Two mini variants shrink VideoTranscodeBench so it finishes in tens of
-seconds instead of tens of minutes, for compute- and memory-constrained
-environments such as emulators. They differ in how many runs they take and
-in which phases they measure:
+Use `video_transcode_bench_svt_mini`, the default Mini job. If the test
+machine cannot hold the ~42GB source dataset, use the two-run
+`..._timed_mini_prep` + `..._timed_mini_reuse` variant below instead.
 
-| | `video_transcode_bench_svt_mini` | `..._timed_mini_prep` + `..._timed_mini_reuse` |
-|---|---|---|
-| Phases measured | downscale **and** encode | encode only |
-| Source dataset (~42GB) needed | every run | prep run only |
+### `video_transcode_bench_svt_mini` (default)
 
-### Downscale + Encode: `video_transcode_bench_svt_mini`
+It runs the 70 encodes listed in `svt_mini_encodes.txt`, one encoder per
+usable core. On 16 cores, encoding takes about 15-45 s, depending on the CPU,
+and peak memory is about 7 GiB.
 
-This mini job downscales the sampled clips and encodes them in the same run.
-It runs the fixed list of encodes in `svt_mini_encodes.txt`: 70 encodes drawn
-at random from the encode grid of 20% of the clips, so that their mix of
-resolutions and CRFs follows the full benchmark's. The list is ordered longest
-first, so the short encodes fill the cores while the long ones finish. Only the
-clips that these encodes read are downscaled. Both the runtime and the peak
-memory vary from machine to machine: the defaults size themselves from the
-cores the job can actually use, so the same job is heavier on a large host than
-on a small one. Two recommend knobs to tune the runtime and peak memory usage
-of the benchmark:
+#### Run with benchpress
 
-
-- `procs` is the number of concurrent single-threaded encoders. At `-1` it
-follows the usable core count, so the peak memory footprint scales with the
-machine (or with the cpuset the job runs in). To fit a memory budget, set
-`procs` explicitly:
+Install the benchmark and the clips first (see "Install VideoTranscodeBench"
+above), then run:
 
 ```
-./benchpress_cli.py run video_transcode_bench_svt_mini -i '{"procs": "6"}'
-```
-Memory usage varies from machine to machine, but a smaller `procs` always
-gives a smaller memory footprint. Tune it down if the test machine has limited
-memory capacity.
-
-
-- `encode_list` names the file of encodes to run, one per line: the input clip
-and its CRF, in run order. A relative path is relative to the benchpress root.
-Every listed encode must exist in the grid of the sampled clips, or the run
-fails. The list is sized for about 15 s of encoding on 16 cores; with fewer
-cores the run takes proportionally longer:
-
-```
-./benchpress_cli.py run video_transcode_bench_svt_mini -i '{"encode_list": "packages/video_transcode_bench/svt_mini_encodes.txt"}'
+./benchpress_cli.py run video_transcode_bench_svt_mini
 ```
 
-Because it runs a fixed set of encodes, it sets the runtime and the score's
-sample size but not the peak memory.
+#### Run with run.sh
+
+Run the script directly when you need the shortest run and the smallest memory
+footprint, for example on an emulator: it skips benchpress's start-up, hooks
+and result handling. On 16 cores, the script alone takes about 19-50 s,
+depending on the CPU. Run it with the job's arguments, as root:
+
+```
+cd <path_to_DCPerf>
+./benchmarks/video_transcode_bench/run.sh --encoder svt --levels 0:0 \
+  --output video_transcode_bench_results.txt --runtime medium --parallelism 1 \
+  --procs -1 --sample-rate 0.2 --sampling-seed 1000 --sleep-before-perf 0 \
+  --encode-list packages/video_transcode_bench/svt_mini_encodes.txt | tee mini.log
+```
+
+The score comes from two lines of the output, which `tee` saves to `mini.log`:
+
+```
+total_data_encoded: 5.01 GB
+res_level6: 0:15.47
+```
+
+- `total_data_encoded` is the size of the input clips that the encodes read,
+  in GB.
+- `res_level6` is the encode time, as minutes:seconds.
+
+The score is the throughput in MB/s over the 11.2 MB/s baseline, the same score
+that benchpress reports:
+
+```
+score = total_data_encoded x 1024 / encode time in seconds / 11.2
+```
+
+In this example, 5.01 x 1024 / 15.47 = 331.6 MB/s, a score of 29.6. To compute
+it from `mini.log`:
+
+```
+awk '/^total_data_encoded:/ {gb = $2}
+     /^res_level6:/ {split($2, t, ":"); s = t[1] * 60 + t[2]}
+     END {printf "%.1f MB/s, score %.2f\n", gb * 1024 / s, gb * 1024 / s / 11.2}' mini.log
+```
+
+#### Use less memory
+
+Run fewer encoders with `procs` (`--procs` for `run.sh`). Each encoder removed
+saves about 0.4-0.5 GiB. The same 70 encodes then take about 16/`procs` times
+as long, and the idle cores lower the score, so compare scores only between
+runs with the same `procs`:
+
+```
+./benchpress_cli.py run video_transcode_bench_svt_mini -i '{"procs": "8"}'
+```
+
+Keep the other variables at their defaults: the encode list only matches the
+default `sample_rate` and `sampling_seed`.
 
 ### Encode-only: `..._timed_mini_prep` + `..._timed_mini_reuse`
 

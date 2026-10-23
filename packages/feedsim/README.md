@@ -169,26 +169,52 @@ Per-instance CSVs live at
 `benchmark_metrics_<run_id>/feedsim-multi-inst-<1>.log`; the runtime
 breakdown at `benchmark_metrics_<run_id>/breakdown.csv`.
 
-## DCPerf Mini: `feedsim_dlrm_mini`
+## FeedSim Mini
 
-`thrift_threads` is the knob that controls peak memory usage. Each thrift serving
-thread keeps its own copy of the dataset, at roughly **0.33GB per thread**.
-It defaults to `0`, meaning `min(nproc, 216)`, so the footprint scales with
-the machine (or with the cpuset the job runs in).
+`feedsim_dlrm_mini` is the Mini version of `feedsim_dlrm`. After a short warmup,
+it drives a fixed load for 10 seconds and reports the QPS the server sustains.
+On 16 cores, it takes about 28 s and peak memory is about 7 GiB.
 
-Please adjust it as following:
+### Run with benchpress
+
+Install the benchmark first (see [Install](#install)), then run:
+
+```
+./benchpress_cli.py run feedsim_dlrm_mini
+```
+
+### Run with run-feedsim-multi.sh
+
+Run the script directly when you need the shortest run and the smallest memory
+footprint, for example on an emulator: it skips benchpress's start-up, hooks
+and result handling. Run it with the job's arguments, as root:
+
+```
+cd <path_to_DCPerf>
+./benchmarks/feedsim/run-feedsim-multi.sh -n 1 -t 0 -q 100 -d 10 -w 10 -r -1 \
+  -x -1 -D 1 -R 42 -C 42 -N --depth=2 | tee mini.log
+```
+
+The output includes a JSON object. The score is `final_achieved_qps` in its
+`overall` section divide by 57. For example:
+
+```
+  "overall": {
+    "final_requested_qps": 100.00,
+    "final_achieved_qps": 88.18,
+```
+
+In this example, the score is 88.18 / 57 = 1.547.
+
+### Use less memory
+
+Run fewer thrift threads with `thrift_threads` (`-t` for the script). Each
+thread keeps its own copy of the dataset, about 0.33 GB; the default, 0, starts
+one per usable core. With 8 threads, the job uses about 3.3 GB:
 
 ```
 ./benchpress_cli.py run feedsim_dlrm_mini -i '{"thrift_threads": "8"}'
 ```
-
-| `thrift_threads` | Peak memory (measured, Grace) |
-|------------------|-------------------------------|
-| 6                | ~2.7GB                        |
-| 8                | ~3.3GB                        |
-| 16               | ~5.4GB                        |
-
-`thrift_threads=8` is the recommended value to stay under a 4GB budget.
 
 ## Advanced usage
 

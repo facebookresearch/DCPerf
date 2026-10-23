@@ -175,43 +175,56 @@ When JIT monitoring is enabled, the following files will be generated in the out
 - TC dumps can be large, so ensure sufficient disk space is available when using the `-D` option
 - The default monitoring interval of 1 second provides granular data but may generate large CSV files for long-running benchmarks
 
-### Running Mediawiki mini
+### Mediawiki Mini
 
-Mediawiki mini is a shrunken version of Mediawiki
- that aims to reduce execution time to less than two minutes.
- Mediawiki mini includes a few new options that
-  allow user to customize the benchmarking process:
+`oss_performance_mediawiki_mini` is the Mini version of
+`oss_performance_mediawiki`. It warms up HHVM, then measures for 30 seconds.
+On 16 cores, it takes about 3 minutes and peak memory is about 1 GiB. All DCPerf
+Mini jobs are listed in [README_mini.md](../../README_mini.md).
 
-- Reuse the temporary folder between runs.
-- Adjust the load generator seed.
-- Configure load generation durations for warmup.
-- Set the interval for JIT retranslation.
-- Specify a deterministic number of warmup iterations.
-- Record the measured phase in `breakdown.csv` (`run.sh -b`), so PerfPub
-  averages only the measured window. `-b` cannot be combined with
-  `--exec-after-warmup` or `--exec-after-benchmark` in the extra arguments.
+#### Run with benchpress
 
-To run the mini version of
-Mediawiki, please follow these steps:
+Install HHVM and Mediawiki first, and check the prerequisites (see
+[Installing HHVM](#installing-hhvm), [Installing Mediawiki](#installing-mediawiki)
+and [Prerequisites](#prerequisites)), then run:
 
-1. Make sure that you get the latest version of DCPerf and check out
-the latest commit in the `v2-beta` branch.
-If you've installed Mediawiki with an older version of DCPerf,
-we recommend that you clean and re-install Mediawiki.
-
-2. Run the `oss_performance_mediawiki_mini` job with the following command:
-
-```bash
-./benchpress run oss_performance_mediawiki_mini
+```
+./benchpress_cli.py run oss_performance_mediawiki_mini
 ```
 
-3. To further reduce execution time by reusing the temporary directory, please run the
-`oss_performance_mediawiki_mini` job once, locate the path to the temp folder in the log output
-(named like `/tmp/hhvm-nginxXXXXX`), then specify `temp_dir` parameter in the subsequent run:
+#### Run with run.sh
 
-```bash
-./benchpress run oss_performance_mediawiki_mini -i '{"temp_dir":"/tmp/hhvm-nginxtIdDIr"}'
+Run the script directly when you need the shortest run and the smallest memory
+footprint, for example on an emulator: it skips benchpress's start-up, hooks
+and result handling. Run it with the job's arguments, as root:
+
 ```
+cd <path_to_DCPerf>
+./packages/mediawiki/run.sh -r/usr/local/hphpi/legacy/bin/hhvm -nnginx -L wrk \
+  -s benchmarks/oss_performance_mediawiki/wrk/wrk -T default_no_temp_dir -U 1 \
+  -p -b -- --mediawiki --client-duration=30s --client-timeout=120s \
+  --run-as-root --i-am-not-benchmarking --shorten-health-check \
+  --skip-single-request-warmup --skip-sleep-between-warmups \
+  --hhvm-extra-arguments="-vEval.JitRetranslateAllSeconds=45" \
+  --num-multi-req-warmups=-1 --first-multi-warmup-duration=25 \
+  --subseq-multi-warmup-duration=5 --load-gen-seed=1000 | tee mini.log
+```
+
+The output ends with a JSON object. The score is `Wrk RPS` in its `Combined`
+section divide by 1,280, for example:
+
+```
+    "Combined": {
+        "Wrk requests": 45226,
+        "Wrk wall sec": 30.08,
+        "Wrk RPS": 1503.31,
+```
+
+In this example, the score is 1503.31 / 1280 = 1.174.
+
+#### Use less memory
+
+The Mini job uses about 1 GiB, so it needs no memory tuning.
 
 ### Reporting
 
