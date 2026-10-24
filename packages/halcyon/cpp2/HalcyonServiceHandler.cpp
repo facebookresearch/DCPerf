@@ -15,7 +15,7 @@
 #include <thread>
 #include <unordered_set>
 
-#include <folly/Format.h>
+#include <fmt/format.h>
 #include <folly/coro/Task.h>
 #include <folly/hash/Checksum.h>
 #include <folly/hash/FnvHash.h>
@@ -95,7 +95,7 @@ halcyon::MetadataBackend toEngineBackend(cea::halcyon::MetadataBackend b) {
 // /sys/devices/system/cpu/cpuN/topology/thread_siblings_list, whose format
 // is either "N,M" or "N-M" for two-thread cores.
 int htSibling(int cpu) {
-  auto path = folly::sformat(
+  auto path = fmt::format(
       "/sys/devices/system/cpu/cpu{}/topology/thread_siblings_list", cpu);
   std::ifstream f(path);
   if (!f) {
@@ -143,7 +143,7 @@ Task<unique_ptr<HalcyonResponse>> HalcyonServiceHandler::co_setPartner(
     unique_ptr<string> hostname) {
   LOG(INFO) << "got setPartner thrift call";
   partner_ = *hostname.get();
-  LOG(INFO) << sformat("partner hostname is {}", partner_);
+  LOG(INFO) << fmt::format("partner hostname is {}", partner_);
   auto resp = std::make_unique<HalcyonResponse>();
   *resp->return_code() = HalcyonReturnCode::Success;
   *resp->message() = "partner set successfully";
@@ -176,13 +176,14 @@ std::pair<int, int> readFilesetManifest(const std::string& mountpoint) {
   const std::string path = mountpoint + "/manifest";
   std::ifstream f(path);
   if (!f) {
-    throw std::runtime_error(sformat("no manifest at {}", path));
+    throw std::runtime_error(fmt::format("no manifest at {}", path));
   }
   int dirs = 0, files = 0;
   f >> dirs >> files;
   if (dirs <= 0 || files <= 0) {
     throw std::runtime_error(
-        sformat("manifest {} has bogus dirs={} files={}", path, dirs, files));
+        fmt::format(
+            "manifest {} has bogus dirs={} files={}", path, dirs, files));
   }
   return {dirs, files};
 }
@@ -228,7 +229,7 @@ void HalcyonServiceHandler::initRequestResponseState() {
     for (int i = 0; i < numFiles; ++i) {
       const int d = i / files;
       const int f = i - d * files;
-      const std::string path = sformat("{}/d{}/f{}", mp, d, f);
+      const std::string path = fmt::format("{}/d{}/f{}", mp, d, f);
       // Read-only, no O_DIRECT: pread returns page-cached data straight to a
       // malloc'd buffer we hand to IOBuf. First-cut correctness > speed.
       const int fd = ::open(path.c_str(), O_RDONLY);
@@ -237,13 +238,13 @@ void HalcyonServiceHandler::initRequestResponseState() {
           ::close(f2);
         }
         throw std::runtime_error(
-            sformat("RR init: open {} failed (errno {})", path, errno));
+            fmt::format("RR init: open {} failed (errno {})", path, errno));
       }
       fds.push_back(fd);
     }
     rrFds_.push_back(std::move(fds));
   }
-  LOG(INFO) << sformat(
+  LOG(INFO) << fmt::format(
       "RequestResponse server state: {} mounts, {} total files opened",
       rrMappers_.size(),
       std::accumulate(
@@ -623,16 +624,17 @@ HalcyonServiceHandler::co_setBenchmarkConfiguration(
     co_return resp;
   }
   LOG(INFO) << "Configuration Parameters";
-  LOG(INFO) << sformat("Read Percentage: {:.2f}%", 100 * readPercentage_);
-  LOG(INFO) << sformat("Threads Per Disk: {}", threadsPerDisk_);
-  LOG(INFO) << sformat("Warmup (seconds): {}", warmup_);
-  LOG(INFO) << sformat("Runtime (seconds): {}", runtime_);
-  LOG(INFO) << sformat("Reporting Interval (seconds): {}", reportingInterval_);
-  LOG(INFO) << sformat("QPS (0 = unthrottled): {}", qps_);
+  LOG(INFO) << fmt::format("Read Percentage: {:.2f}%", 100 * readPercentage_);
+  LOG(INFO) << fmt::format("Threads Per Disk: {}", threadsPerDisk_);
+  LOG(INFO) << fmt::format("Warmup (seconds): {}", warmup_);
+  LOG(INFO) << fmt::format("Runtime (seconds): {}", runtime_);
+  LOG(INFO) << fmt::format(
+      "Reporting Interval (seconds): {}", reportingInterval_);
+  LOG(INFO) << fmt::format("QPS (0 = unthrottled): {}", qps_);
   if (!doDirectIo_) {
-    LOG(INFO) << sformat("Direct I/O is disabled");
+    LOG(INFO) << fmt::format("Direct I/O is disabled");
   } else {
-    LOG(INFO) << sformat("Direct I/O is enabled");
+    LOG(INFO) << fmt::format("Direct I/O is enabled");
   }
   auto resp = make_unique<HalcyonResponse>();
   *resp->return_code() = HalcyonReturnCode::Success;
@@ -774,20 +776,20 @@ Task<unique_ptr<HalcyonResponse>> HalcyonServiceHandler::co_startBenchmark() {
           poolCfg.idleSpinCores.push_back(c);
         }
         if (htSkipped > 0) {
-          LOG(INFO) << sformat(
+          LOG(INFO) << fmt::format(
               "--fill-idle-cores: skipped {} cores whose HT sibling is a "
               "busy reactor/qflush thread (cache-safe filter)",
               htSkipped);
         }
       }
       if (reactorCoreCount < numReactors) {
-        LOG(WARNING) << sformat(
+        LOG(WARNING) << fmt::format(
             "Reactor demand ({}) exceeds available pin slots ({}); reactors "
             "will round-robin and oversubscribe cores",
             numReactors,
             reactorCoreCount);
       }
-      LOG(INFO) << sformat(
+      LOG(INFO) << fmt::format(
           "Pinning enabled ({}): nCpus={} reactor_cores=[0,{}) "
           "qio_pool_cores=[{},{}) qflush_cores=[{},{}) idle_spin_cores={} ({})",
           qioCoresCount_ > 0 ? "manual" : "auto",
@@ -818,7 +820,7 @@ Task<unique_ptr<HalcyonResponse>> HalcyonServiceHandler::co_startBenchmark() {
           }
         }));
       }
-      LOG(INFO) << sformat(
+      LOG(INFO) << fmt::format(
           "--fill-idle-cores: spawned {} pinned idle-spin threads",
           idleSpinThreads_.size());
     }
@@ -908,7 +910,7 @@ Task<unique_ptr<HalcyonResponse>> HalcyonServiceHandler::co_startBenchmark() {
       bufferPool_ = std::make_unique<halcyon::IoBufferPool>(
           poolBuffers, static_cast<size_t>(halcyon::kMaxFileSize));
       engineConfig.bufferPool = bufferPool_.get();
-      LOG(INFO) << sformat(
+      LOG(INFO) << fmt::format(
           "PairRole::{}: sendQueue capacity={} entries, bufferPool={} buffers "
           "x {} bytes",
           role_ == PairRole::SendDiskBoth ? "SendDiskBoth" : "SendDiskReads",
@@ -927,7 +929,7 @@ Task<unique_ptr<HalcyonResponse>> HalcyonServiceHandler::co_startBenchmark() {
           std::max<size_t>(static_cast<size_t>(threadsPerDisk_) * n * 4, 512);
       recvQueue_ = std::make_unique<halcyon::RecvDataQueue>(recvQueueCapacity);
       engineConfig.recvQueue = recvQueue_.get();
-      LOG(INFO) << sformat(
+      LOG(INFO) << fmt::format(
           "PairRole::SendDiskBoth: recvQueue capacity={} entries",
           recvQueueCapacity);
     }

@@ -24,7 +24,7 @@
 #include <thread>
 #include <vector>
 
-#include <folly/Format.h>
+#include <fmt/format.h>
 #include <folly/ScopeGuard.h>
 #include <folly/String.h>
 #include <folly/futures/Future.h>
@@ -178,12 +178,12 @@ DEFINE_int32(
 DEFINE_validator(cache_window, &validateZeroOrPositiveInt);
 
 void signalHandler(int signum) {
-  LOG(INFO) << sformat("Got signal {}", signum);
+  LOG(INFO) << fmt::format("Got signal {}", signum);
   pleaseStop = true;
 }
 
 void printIntervalHeader() {
-  cout << sformat(
+  cout << fmt::format(
       "{0:>7s} {1:>7s} {2:>7s} {3:>7s} {4:>7s} {5:>7s} {6:>11s}\n",
       "Time(s)",
       "QPS",
@@ -197,7 +197,7 @@ void printIntervalHeader() {
 
 string printResultsHeader() {
   string result;
-  result = sformat(
+  result = fmt::format(
       "{0:16s} {1:19s} {2:21s} {3:21s} {4:21s} {5:21s} {6:12s} {7:13s}\n",
       "",
       "         QPS       ",
@@ -207,7 +207,7 @@ string printResultsHeader() {
       "Chksum Lat (usec)",
       "CPU Util (%)",
       "Disk Util (%)");
-  result += sformat(
+  result += fmt::format(
       "{0:16s} {1:>8s} {2:>8s} {3:>10s}{4:>10s} {5:>10s}{6:>10s} {7:>10s}{8:>10s}"
       " {9:>10s}{10:>10s}\n",
       "Mount point",
@@ -258,7 +258,7 @@ void doCreate(
   uint64_t total_files = dirs * files * n;
   uint64_t total_bytes = total_files * kMaxFileSize;
   vector<std::future<int>> cfuts;
-  LOG(INFO) << sformat(
+  LOG(INFO) << fmt::format(
       "Creating fileset: {} files, {} bytes, {} mount points\n",
       prettyPrint(total_files, PRETTY_UNITS_METRIC),
       prettyPrint(total_bytes, PRETTY_BYTES_METRIC),
@@ -311,7 +311,7 @@ void doCreate(
     double mbps = elapsed > 0 ? mb / elapsed : 0;
     double perc = 100 * currFiles / static_cast<double>(total_files);
     if (timeToReport && currFiles > 0) {
-      LOG(INFO) << sformat(
+      LOG(INFO) << fmt::format(
           "{0:d}/{1:d} ({2:.2f}%) [{3:.2f} MB/s] files complete",
           currFiles,
           total_files,
@@ -330,13 +330,13 @@ void doCreate(
     totalErrors += e.get();
   }
   if (totalErrors > 0) {
-    LOG(ERROR) << sformat("{} errors during fileset creation", totalErrors);
+    LOG(ERROR) << fmt::format("{} errors during fileset creation", totalErrors);
     exit(1);
   } else {
     // write manifest file
-    string manifestData = sformat("{} {}\n", dirs, files);
+    string manifestData = fmt::format("{} {}\n", dirs, files);
     for (int i = 0; i < n; i++) {
-      string fname = sformat("{}/manifest", config.mountPoints.at(i));
+      string fname = fmt::format("{}/manifest", config.mountPoints.at(i));
       ofstream manifest(fname);
       manifest << manifestData;
       manifest.close();
@@ -367,12 +367,12 @@ void doBenchmark(
     MetadataBackend backend) {
   LOG(INFO) << "Starting I/O on " << n << " mount points";
   unique_ptr<PerfStats> perfStats(new PerfStats(n, threadsPerDisk));
-  LOG(INFO) << sformat(
+  LOG(INFO) << fmt::format(
       "QIOThread pool size={}, pinning={}",
       poolConfig.qioThreads,
       poolConfig.pinEnabled ? "on" : "off");
   if (poolConfig.qflushThreads > 0) {
-    LOG(INFO) << sformat("QFlush pool size={}", poolConfig.qflushThreads);
+    LOG(INFO) << fmt::format("QFlush pool size={}", poolConfig.qflushThreads);
   }
   HalcyonPools pools = buildPools(poolConfig);
 
@@ -431,7 +431,7 @@ void doBenchmark(
   uint64_t ts = startTime;
   int pollingTime = MAX(kMinBenchmarkPollingSecs, reportingInterval);
   if (pollingTime < reportingInterval) {
-    LOG(INFO) << sformat("Setting polling time to {}.", pollingTime);
+    LOG(INFO) << fmt::format("Setting polling time to {}.", pollingTime);
   }
   int waitTime = runtime + warmup - pollingTime;
   IoStats lastStats;
@@ -463,7 +463,7 @@ void doBenchmark(
     uint64_t currQioCpuNs =
         pools.getCpuNs(PoolRole::Reactor) + pools.getCpuNs(PoolRole::QIOThread);
     double qioCpuMs = (currQioCpuNs - lastQioCpuNs) / 1e6;
-    cout << sformat(
+    cout << fmt::format(
         "{0:>7d} {1:>7.1f} {2:>7.1f} {3:>7.1f} {4:>7.2f} {5:>7.2f} {6:>11.2f}\n",
         static_cast<int>(seconds),
         rate,
@@ -528,7 +528,7 @@ void doBenchmark(
     writeCLat = (mountCStats.writeCount > 0)
         ? mountCStats.writeNanos / 1e3 / mountCStats.writeCount
         : 0;
-    out << sformat(
+    out << fmt::format(
         "{0:16s} {1:8.1f} {2:8.1f} {3:10.2f} {4:10.2f} {5:10.2f}"
         " {6:10.2f} {7:10.2f} {8:10.2f} {9:10.2f} {10:10.2f}\n",
         config.mountPoints.at(i),
@@ -569,7 +569,7 @@ void doBenchmark(
       : 0;
   double diskUtil = diskMon.getUtilizationFromBeginning();
   double cpuUtil = cpuMon.getUtilizationFromBeginning();
-  out << sformat(
+  out << fmt::format(
       "{0:16s} {1:8.1f} {2:8.1f} {3:10.2f} {4:10.2f} {5:10.2f}"
       " {6:10.2f} {7:10.2f} {8:10.2f} {9:10.2f} {10:10.2f}"
       " {11:12.2f} {12:13.2f}\n",
@@ -595,7 +595,7 @@ void doBenchmark(
   // backend) the chunk-map put + WAL-sync cost shows here instead of inline
   // write_puts.
   double qflushTotalCpuMs = pools.getCpuNs(PoolRole::QFlush) / 1e6;
-  out << sformat(
+  out << fmt::format(
       "\nPer-pool CPU (total): qio_total_cpu_ms={:.2f}"
       " qio_checksum_cpu_ms={:.2f} qflush_total_cpu_ms={:.2f}\n",
       qioTotalCpuMs,
@@ -609,7 +609,7 @@ void doBenchmark(
   double writeMetaLat = (totalMStats.writeCount > 0)
       ? totalMStats.writeNanos / 1e3 / totalMStats.writeCount
       : 0;
-  out << sformat(
+  out << fmt::format(
       "Metadata path (total): read_lookups={} (avg {:.2f} usec)"
       " write_puts={} (avg {:.2f} usec)\n",
       totalMStats.readCount,
@@ -621,7 +621,7 @@ void doBenchmark(
   double cacheHitRate = (totalMStats.readCount > 0)
       ? 100.0 * totalMStats.readHits / totalMStats.readCount
       : 0;
-  out << sformat(
+  out << fmt::format(
       "Metadata cache (total): read_hits={} read_misses={} hit_rate={:.2f}%\n",
       totalMStats.readHits,
       totalMStats.readMisses,
@@ -630,7 +630,7 @@ void doBenchmark(
   uint64_t totalIos = totalIStats.readIos + totalIStats.writeIos;
   uint64_t totalUsec = totalIStats.readUsec + totalIStats.writeUsec;
   double totalLat = totalIos > 0 ? totalUsec / totalIos / 1e3 : 0;
-  cout << sformat(
+  cout << fmt::format(
       "{0:>7s} {1:>7.1f} {2:>7.1f} {3:>7.1f} {4:>7.2f} {5:>7.2f}\n",
       "Total",
       totalIos / elapsed,
@@ -638,7 +638,7 @@ void doBenchmark(
       totalLat,
       diskUtil,
       cpuUtil);
-  LOG(INFO) << sformat("Full results in {}", outputFile);
+  LOG(INFO) << fmt::format("Full results in {}", outputFile);
 }
 
 int main(int argc, char** argv) {

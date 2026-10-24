@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include <fmt/format.h>
 #include <folly/Random.h>
 
 #include "Common.h" // IoSizeRange, getIoSize, geometry consts
@@ -71,7 +72,7 @@ int createFileset(
   createStats->inProgress = true;
   createStats->stats.at(operatorID).at(threadID).start = current_nano();
   for (int d = threadID; d < dirs; d += threadsPerDir) {
-    string subDir = sformat("{}/d{}", baseDir, d);
+    string subDir = fmt::format("{}/d{}", baseDir, d);
     if (!directoryExists(subDir)) {
       if (mkdir(subDir.c_str(), 0755) == -1) {
         LOG(ERROR) << "Error creating " << subDir;
@@ -80,12 +81,12 @@ int createFileset(
       }
     }
     for (int j = 0; j < files; j++) {
-      string fname = sformat("{}/f{}", subDir, j);
+      string fname = fmt::format("{}/f{}", subDir, j);
       fd = open(fname.c_str(), O_CREAT | O_WRONLY | O_DIRECT | O_SYNC, 0644);
       int bytesWritten = 0;
       if ((bytesWritten = write(fd, writeBuffer, kMaxFileSize)) !=
           kMaxFileSize) {
-        LOG(ERROR) << sformat(
+        LOG(ERROR) << fmt::format(
             "Write error on file {} from thread {}: {} bytes written",
             fname,
             threadID,
@@ -192,11 +193,11 @@ int Fileset::create(CreateStats* createStats) {
     createErrors += t.get();
   }
   if (createErrors > 0) {
-    LOG(INFO) << sformat("{} errors during fileset creation", createErrors);
+    LOG(INFO) << fmt::format("{} errors during fileset creation", createErrors);
   } else {
     // write manifest file
-    string manifestData = sformat("{} {}\n", dirs_, files_);
-    string fname = sformat("{}/manifest", baseDir_);
+    string manifestData = fmt::format("{} {}\n", dirs_, files_);
+    string fname = fmt::format("{}/manifest", baseDir_);
     ofstream manifest(fname);
     manifest << manifestData;
     manifest.close();
