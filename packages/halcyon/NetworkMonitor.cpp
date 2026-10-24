@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include <folly/Format.h>
+#include <fmt/format.h>
 #include <folly/String.h>
 #include <re2/re2.h>
 
@@ -22,7 +22,7 @@ NetworkMonitor::NetworkMonitor(const string& device) {
   linkSpeed = 0;
   NetworkMonitor::clearCounters();
   // Determine link speed
-  ifstream netSpeedFile(sformat("/sys/class/net/{}/speed", interface));
+  ifstream netSpeedFile(fmt::format("/sys/class/net/{}/speed", interface));
   string contents(
       (istreambuf_iterator<char>(netSpeedFile)), (istreambuf_iterator<char>()));
   linkSpeed = stoi(contents);
@@ -30,7 +30,7 @@ NetworkMonitor::NetworkMonitor(const string& device) {
     LOG(WARNING) << "Could not get link speed, assuming 25000 Mb/s";
     linkSpeed = 25'000;
   } else {
-    LOG(INFO) << sformat("Link speed is {} Mb/s", linkSpeed);
+    LOG(INFO) << fmt::format("Link speed is {} Mb/s", linkSpeed);
   }
 }
 

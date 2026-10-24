@@ -10,6 +10,7 @@
 
 #include <cctype>
 
+#include <fmt/format.h>
 #include <folly/Random.h>
 #include <folly/String.h>
 #include <folly/hash/Checksum.h>
@@ -73,7 +74,7 @@ IoSizeRange parseIoSize(string text, double perc) {
     result.upperBound = humanToInt(v.at(1).toString());
   }
   if (result.upperBound == 0) {
-    LOG(ERROR) << sformat("Got 0 I/O size upper bound for {}", text);
+    LOG(ERROR) << fmt::format("Got 0 I/O size upper bound for {}", text);
     exit(1);
   }
   return result;
