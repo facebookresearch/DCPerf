@@ -35,7 +35,7 @@ from benchpress.lib.util import (
 )
 
 try:
-    from diagnosis_utils import DiagnosisRecorder  # pyre-ignore[21]
+    from diagnosis_utils import DiagnosisRecorder
 except ImportError:
     # When running from source (not via BUCK), diagnosis_utils is under
     # packages/common/ which isn't on sys.path by default.
@@ -43,7 +43,7 @@ except ImportError:
         0,
         os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "common"),
     )
-    from diagnosis_utils import DiagnosisRecorder  # pyre-ignore[21]
+    from diagnosis_utils import DiagnosisRecorder
 
 from .command import BenchpressCommand
 
