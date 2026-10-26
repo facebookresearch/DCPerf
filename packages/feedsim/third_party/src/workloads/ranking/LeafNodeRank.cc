@@ -2250,7 +2250,7 @@ int main(int argc, char** argv) {
   int fake_argc = 1;
   char* fake_argv[2] = {const_cast<char*>("./LeafNodeRank"), nullptr};
   char** sargv = static_cast<char**>(fake_argv);
-  folly::init(&fake_argc, &sargv);
+  const folly::Init init(&fake_argc, &sargv);
 
   // Phase 4: production-shaped thread pools. Names (visible in
   // /proc/$pid/task/*/comm and profilers) match a production aggregator's

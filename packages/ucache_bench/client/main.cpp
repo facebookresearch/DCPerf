@@ -42,7 +42,7 @@ DEFINE_uint32(
 using namespace facebook::ucachebench;
 
 int main(int argc, char** argv) {
-  folly::init(&argc, &argv, true);
+  const folly::Init init(&argc, &argv, true);
 
   if (FLAGS_verbose) {
     printf(
