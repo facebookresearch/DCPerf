@@ -404,7 +404,7 @@ std::unique_ptr<UcacheBenchRpcServer> makeAndStartUcacheBenchRpcServer(
 } // namespace
 
 int main(int argc, char** argv) {
-  folly::init(&argc, &argv, true);
+  const folly::Init init(&argc, &argv, true);
 
   // Initialize logging with reasonable defaults
   folly::initLogging("INFO");
