@@ -386,3 +386,22 @@ Again, due to the fundamental change in software architecture and threading mode
 the legacy PageRank-based v1 job has become inaccurate and will not be supported here. If you would like to
 run it, please check out the [main branch](https://github.com/facebookresearch/DCPerf/tree/main/packages/feedsim)
 for Github users or the `v1` folder under the DCPerf root for internal users.
+
+## Mock-service connection retries
+
+MockServicesClient creates a fresh connection for each attempt and probes
+`getStatus` before accepting it. The default is one initial attempt plus five
+retries, with 100, 200, 400, 800 and 1,000 ms delays. Exceptions are rethrown
+only after retries are exhausted; successful initialization starts keepalive.
+
+| Benchpress parameter | run.sh option | Default |
+| --- | --- | --- |
+| `mock_connect_retries` | `--mock-connect-retries` | 5 |
+| `mock_connect_initial_backoff_ms` | `--mock-connect-initial-backoff-ms` | 100 |
+| `mock_connect_max_backoff_ms` | `--mock-connect-max-backoff-ms` | 1000 |
+| `mock_connect_timeout_ms` | `--mock-connect-timeout-ms` | 30000 per attempt |
+
+LeafNodeRank accepts the corresponding underscore options, such as
+`--mock_connect_retries=0` to disable retries. Backoff intervals and probe
+timeout must be positive, and maximum backoff must be at least the initial
+backoff. The probe timeout bounds each attempt, not the entire retry sequence.
