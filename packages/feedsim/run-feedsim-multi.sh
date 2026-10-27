@@ -276,9 +276,26 @@ SKIP_MOCK_SERVICES=0
 if [ "${LEAFNODE_USE_LEGACY_SLEEP:-0}" = "1" ]; then
     echo "Skipping mock_services startup (LEAFNODE_USE_LEGACY_SLEEP=1)"
     SKIP_MOCK_SERVICES=1
-else
-    trap stop_mock_services EXIT INT TERM
 fi
+
+FEEDSIM_COORDINATION_DIR=$(mktemp -d "${FEEDSIM_ROOT}/tuning-coordination.XXXXXX") || exit 1
+export FEEDSIM_COORDINATION_DIR
+cleanup_multi() {
+    local status=$?
+    trap - EXIT INT TERM
+    if [ "$status" -ne 0 ]; then
+        local instance
+        for ((instance=1; instance<=NUM_INSTANCES; instance++)); do
+            touch "$FEEDSIM_COORDINATION_DIR/failed.$instance"
+        done
+    fi
+    stop_mock_services
+    # shellcheck disable=SC2317
+    rm -rf -- "$FEEDSIM_COORDINATION_DIR"
+}
+trap cleanup_multi EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 function get_cpu_range() {
     total_instances="$1"
@@ -322,7 +339,7 @@ echo > $BREPS_LFILE
 # The instances share breakdown.csv, so clear it here rather than in run.sh. A
 # variance rerun keeps the phases of the run that triggered it.
 if [[ -z "$IS_RERUN" ]]; then
-    rm -f "${FEEDSIM_ROOT}/breakdown.csv"
+    rm -f "${FEEDSIM_ROOT}/breakdown.csv" "${FEEDSIM_ROOT}/feedsim_debug_metrics.log"
 fi
 # shellcheck disable=SC2086
 for i in $(seq 1 ${NUM_INSTANCES}); do
@@ -346,10 +363,11 @@ for i in $(seq 1 ${NUM_INSTANCES}); do
         start_mock_services "$MOCK_PORT" "$CORE_RANGE" "$MOCK_LOG" "$MOCK_IO_THREADS"
     fi
 
-    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
+    rm -f "${FEEDSIM_ROOT}/feedsim_results_${FIXQPS_SUFFIX}${i}.txt"
+    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} FEEDSIM_INSTANCE_ID=${i} MOCK_SERVICES_PORT=${MOCK_PORT} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
     echo "$CMD" > "${FEEDSIM_LOG_PREFIX}${i}.log"
     # shellcheck disable=SC2068,SC2069
-    IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
+    IS_AUTOSCALE_RUN=${NUM_INSTANCES} FEEDSIM_INSTANCE_ID=${i} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
     PIDS+=("$!")
     PHY_CORE_ID=$((PHY_CORE_ID + CORES_PER_INST))
     SMT_ID=$((SMT_ID + CORES_PER_INST))
@@ -357,25 +375,34 @@ for i in $(seq 1 ${NUM_INSTANCES}); do
 done
 
 RUN_STATUS=0
-for pid in "${PIDS[@]}"; do
-    if ! wait "$pid"; then
-        echo "ERROR: feedsim instance process $pid failed" >&2
-        RUN_STATUS=1
-    fi
+while [ "${#PIDS[@]}" -gt 0 ]; do
+    pending=()
+    for pid in "${PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            pending+=("$pid")
+        elif ! wait "$pid"; then
+            echo "ERROR: feedsim instance process $pid failed" >&2
+            RUN_STATUS=1
+            for ((instance=1; instance<=NUM_INSTANCES; instance++)); do
+                touch "$FEEDSIM_COORDINATION_DIR/failed.$instance"
+            done
+        fi
+    done
+    PIDS=("${pending[@]}")
+    [ "${#PIDS[@]}" -eq 0 ] || sleep 0.1
 done
 if [ "$RUN_STATUS" -ne 0 ]; then
     echo "ERROR: one or more FeedSim instances failed; see ${FEEDSIM_LOG_PREFIX}*.log" >&2
-    exit "$RUN_STATUS"
 fi
 
-BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
-BC_MIN_FN='define min (a, b) { if (a <= b) return (a); return (b); }'
 function analyze_and_print_results() {
     python3 "${FEEDSIM_ROOT}/feedsim_report.py" \
         --log-prefix "$FEEDSIM_LOG_PREFIX" \
         --csv-prefix "${FEEDSIM_ROOT}/feedsim_results_${FIXQPS_SUFFIX}" \
         --instances "$NUM_INSTANCES" \
+        --debug-log "${FEEDSIM_ROOT}/feedsim_debug_metrics.log" \
         --fixed-qps "$IS_FIXED_QPS" \
+        --run-status "$RUN_STATUS" \
         --dr-trace "${DCPERF_DR_TRACE:-0}"
 
 }
@@ -399,4 +426,10 @@ if [[ "$is_unstable_run" = 1 ]] && [[ "$IS_FIXED_QPS" = 0 ]] && [[ -z "$IS_RERUN
     # shellcheck disable=SC2068
     sleep 60
     IS_RERUN=1 $THIS_CMD -q "${max_req_qps}"
+    exit "$?"
 fi
+
+if [ "$RUN_STATUS" -ne 0 ]; then
+    exit "$RUN_STATUS"
+fi
+exit "$is_unstable_run"
