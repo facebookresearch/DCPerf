@@ -44,6 +44,22 @@ links `libaegis` and `libsodium` as fizz crypto backends.
 
 ---
 
+## Mock-service readiness and response flushing
+
+`mock_services` uses a zero write batching interval from startup. Responses
+flush through Rocket's existing event-loop batching path.
+
+The `checkReady` RPC completes directly on the connection's I/O EventBase.
+Its handler calls `callback->done()` and performs no blocking work or payload
+generation. `MockServicesClient` calls this RPC after TCP/TLS connectivity
+succeeds and before starting keepalive. The startup runner uses the same RPC
+and waits for readiness before starting the Leaf server.
+
+The twenty simulated workload methods retain their payload generation,
+latency shaping and executor behavior. Keepalive retains `getStatus`.
+
+---
+
 ## Thread pools inside `LeafNodeRank`
 
 `LeafNodeRank` is where all the interesting CPU work lives. It uses four

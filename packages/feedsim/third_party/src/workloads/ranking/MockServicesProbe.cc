@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
             std::chrono::milliseconds(FLAGS_initial_backoff_ms),
             std::chrono::milliseconds(FLAGS_max_backoff_ms),
             std::chrono::milliseconds(FLAGS_timeout_ms)});
-    std::cout << "mock_services getStatus succeeded" << std::endl;
+    std::cout << "mock_services checkReady succeeded" << std::endl;
     return EXIT_SUCCESS;
   } catch (const std::exception& e) {
     std::cerr << "mock_services readiness probe failed: " << e.what()

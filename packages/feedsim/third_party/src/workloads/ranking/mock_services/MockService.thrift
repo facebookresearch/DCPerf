@@ -33,9 +33,14 @@
 // attribution — which is what we are calibrating — and would multiply
 // scaffolding for no measurable difference in the categories of interest.
 
+include "thrift/annotation/cpp.thrift"
+
 namespace cpp2 mock_services
 
 service MockService {
+  @cpp.ProcessInEbThreadUnsafe
+  void checkReady();
+
   binary mcGet(1: binary request, 2: i32 latency_us);
   binary mcLeaseGet(1: binary request, 2: i32 latency_us);
   binary mcSet(1: binary request, 2: i32 latency_us);

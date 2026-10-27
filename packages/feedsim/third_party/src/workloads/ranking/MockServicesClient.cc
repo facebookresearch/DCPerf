@@ -309,27 +309,10 @@ MockServicesClient::MockServicesClient(
             std::move(channel));
       });
 
-      // Synchronously verify connectivity by issuing a tiny probe RPC against
-      // getStatus (lightest method per rpc_dist.json: p05 ~259us, smallest
-      // payloads). folly::AsyncSocket(evb, addr) only *initiates* an async
-      // connect -- it does NOT throw on connect refused / host unreachable,
-      // so without this probe a misconfigured deployment would silently leave
-      // mock_client non-null and every per-RPC future would fail at request
-      // time, getting swallowed to 0 by the .thenError handler in
-      // issueOutboundFanout (LeafNodeRank.cc). That bypasses I/O simulation
-      // entirely. Probing here surfaces the failure as a constructor
-      // exception, which the existing try/catch in ThreadStartup
-      // (LeafNodeRank.cc) catches to reset mock_client and fall back to the
-      // legacy folly::futures::sleep path.
-      //
-      // Dispatch on the channel's EventBase, but wait on the startup worker.
-      // Rocket's send path is thread-affine; waiting on the EventBase would
-      // prevent it from driving the socket connection and handshake.
-      std::string probe(4, '\0');
-      writeBigEndianResponseSize(probe.data(), 4);
-      auto response = folly::makeSemiFuture(std::string{});
-      evb_->runInEventBaseThreadAndWait([this, &probe, &response]() {
-        response = client_->semifuture_getStatus(probe, /*latency_us=*/0);
+      // Dispatch on the channel's EventBase and wait on the startup worker.
+      auto response = folly::makeSemiFuture();
+      evb_->runInEventBaseThreadAndWait([this, &response]() {
+        response = client_->semifuture_checkReady();
       });
       auto result = std::move(response)
                         .within(connection_options.probe_timeout)

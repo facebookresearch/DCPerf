@@ -149,6 +149,15 @@ class ConnectionsTest(unittest.TestCase):
                 wrong_protocol = self.probe(port, not tls)
                 self.assertNotEqual(wrong_protocol.returncode, 0)
 
+    def test_isolated_readiness_without_background_load(self):
+        for tls in (False, True):
+            with self.subTest(tls=tls), self.mock_server(tls) as port:
+                self.wait_ready(port, tls)
+                for _ in range(30):
+                    result = self.probe(port, tls)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("checkReady succeeded", result.stdout)
+
     def test_tls_waits_for_delayed_handshake(self):
         with self.mock_server(tls=True) as target:
             self.wait_ready(target, tls=True)

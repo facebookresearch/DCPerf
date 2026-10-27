@@ -62,6 +62,11 @@ DEFINE_int32(
 
 namespace mock_services {
 
+void MockServiceHandler::async_eb_checkReady(
+    apache::thrift::HandlerCallbackPtr<void> callback) {
+  callback->done();
+}
+
 // Debug histograms exposed to MockServiceMain so it can dump them on
 // a periodic timer. Defined in this TU because runSimulatedRpc records
 // into them on every call. requested_us = the latency_us argument
