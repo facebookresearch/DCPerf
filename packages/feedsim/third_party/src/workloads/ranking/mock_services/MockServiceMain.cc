@@ -109,6 +109,11 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
 
+  // Bound Rocket response flushing even when a probe is the only traffic.
+  // The pinned transport's end-of-loop batching can otherwise leave an
+  // isolated response queued until the next socket event, with or without TLS.
+  server->setWriteBatchingInterval(std::chrono::milliseconds(1));
+
   LOG(INFO) << "mock_services listening on port " << FLAGS_port
             << " with " << io_threads << " IO worker threads"
             << "; Silesia corpus from " << FLAGS_silesia_dir
