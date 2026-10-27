@@ -7,11 +7,27 @@
 MW_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 BENCHPRESS_ROOT="$(readlink -f "$MW_ROOT/../..")"
 
-# Function to detect if running in Docker container
+# Detects any container, not just Docker -- the name is kept for the callers.
+# Tupperware runs LXC, which has no /.dockerenv. Keep this in sync with the
+# copies in run.sh and install_oss_performance_mediawiki.sh.
 is_docker_container() {
-  # Check for .dockerenv file (most reliable method)
+  # Docker
   if [ -f /.dockerenv ]; then
     return 0
+  fi
+  # Podman / other OCI runtimes
+  if [ -f /run/.containerenv ]; then
+    return 0
+  fi
+  # Tupperware sets both of these in the task environment (container=lxc)
+  if [ -n "${TUPD_CONTAINER:-}" ] || [ -n "${container:-}" ]; then
+    return 0
+  fi
+  # Fallback: systemd's own detection covers lxc, docker, podman, ...
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    if systemd-detect-virt --container --quiet; then
+      return 0
+    fi
   fi
   return 1
 }

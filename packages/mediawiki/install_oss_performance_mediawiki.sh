@@ -11,18 +11,55 @@ BENCHPRESS_ROOT="$(readlink -f "$TEMPLATES_DIR/../..")"
 HHVM="/usr/local/hphpi/legacy/bin/hhvm"
 HHVM_VERSION="3.30.12"
 MARIADB_PWD="password"
+MARIADB_DATADIR="/var/lib/mysql"
+MARIADB_SOCKET="$MARIADB_DATADIR/mysql.sock"
+MARIADB_ERRLOG="/var/log/mariadb-benchpress.err"
+# Set to 1 when this run initialises the data directory from scratch (see
+# start_mariadb_docker). Gates the empty-password root bootstrap below so a
+# transient connect failure against an already-initialised DB does not trigger
+# it.
+MARIADB_FRESH_INIT=0
 WRK_VERSION="4.2.0"
 LINUX_DIST_ID="$(awk -F "=" '/^ID=/ {print $2}' /etc/os-release | tr -d '"')"
 OLD_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH="/opt/local/hhvm-3.30/lib:$LD_LIBRARY_PATH"
 
-# Function to detect if running in Docker container
+# Detects any container, not just Docker -- the name is kept for the callers.
+# Tupperware runs LXC, which has no /.dockerenv. Keep this in sync with the
+# copies in run.sh and cleanup_oss_performance_mediawiki.sh.
 is_docker_container() {
-  # Check for .dockerenv file
+  # Docker
   if [ -f /.dockerenv ]; then
     return 0
   fi
+  # Podman / other OCI runtimes
+  if [ -f /run/.containerenv ]; then
+    return 0
+  fi
+  # Tupperware sets both of these in the task environment (container=lxc)
+  if [ -n "${TUPD_CONTAINER:-}" ] || [ -n "${container:-}" ]; then
+    return 0
+  fi
+  # Fallback: systemd's own detection covers lxc, docker, podman, ...
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    if systemd-detect-virt --container --quiet; then
+      return 0
+    fi
+  fi
   return 1
+}
+
+# Print whatever mariadbd recorded about its own failure. Called from every
+# path that gives up on the server, so a failed start can no longer surface as
+# a bare "can't connect through socket" with nothing attached.
+mariadb_dump_errlog() {
+  if [ -s "$MARIADB_ERRLOG" ]; then
+    echo >&2 "--- last 50 lines of $MARIADB_ERRLOG ---"
+    tail -n 50 "$MARIADB_ERRLOG" >&2
+    echo >&2 "--- end of $MARIADB_ERRLOG ---"
+  else
+    echo >&2 "(mariadbd wrote nothing to $MARIADB_ERRLOG)"
+  fi
 }
 
 # Function to start MariaDB in Docker container
@@ -32,17 +69,34 @@ start_mariadb_docker() {
   chown mysql:mysql /run/mysqld
   chmod 755 /run/mysqld
 
-  mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock &
+  # A container image ships the mariadb package but not an initialised data
+  # directory. On bare metal the systemd unit does this for us, which is why
+  # only this branch needs it. Without it mariadbd creates its socket and then
+  # exits because the system tables are missing, so the socket appears, every
+  # connect is refused, and nothing says why.
+  if [ ! -d "$MARIADB_DATADIR/mysql" ]; then
+    echo "Initializing MariaDB data directory at $MARIADB_DATADIR..."
+    mkdir -p "$MARIADB_DATADIR"
+    chown mysql:mysql "$MARIADB_DATADIR"
+    if command -v mariadb-install-db > /dev/null 2>&1; then
+      mariadb-install-db --user=mysql --datadir="$MARIADB_DATADIR" > /dev/null
+    else
+      mysql_install_db --user=mysql --datadir="$MARIADB_DATADIR" > /dev/null
+    fi
+    MARIADB_FRESH_INIT=1
+  fi
 
-  while ! pgrep -f mysql > /dev/null; do
-    echo "Waiting for MariaDB to start..."
-    sleep 1
-  done
+  # Give mariadbd an error log of its own. Its stderr is otherwise interleaved
+  # with the installer's and routinely swallowed by the caller.
+  : > "$MARIADB_ERRLOG"
+  chown mysql:mysql "$MARIADB_ERRLOG"
+  mariadbd --user=mysql --socket="$MARIADB_SOCKET" \
+    --log-error="$MARIADB_ERRLOG" &
+  mariadb_pid=$!
 
-  # Wait for the socket file to be created and MariaDB to be ready
   echo "Waiting for MariaDB socket file to be created..."
   for i in {1..30}; do
-    if [ -S /var/lib/mysql/mysql.sock ]; then
+    if [ -S "$MARIADB_SOCKET" ]; then
       echo "MariaDB socket file found, waiting for server to be ready..."
       sleep 5  # Give MariaDB additional time to initialize
       break
@@ -51,8 +105,18 @@ start_mariadb_docker() {
     sleep 2
   done
 
-  if ! [ -S /var/lib/mysql/mysql.sock ]; then
-    echo "ERROR: MariaDB socket file not found after waiting. Check MariaDB logs for errors."
+  if ! [ -S "$MARIADB_SOCKET" ]; then
+    echo >&2 "ERROR: MariaDB socket file not found after waiting."
+    mariadb_dump_errlog
+    exit 1
+  fi
+
+  # The socket existing is not proof the server is up: mariadbd creates it
+  # before it finishes starting, and leaves it behind when it dies. Check the
+  # daemon itself rather than trusting the inode.
+  if ! kill -0 "$mariadb_pid" 2> /dev/null; then
+    echo >&2 "ERROR: mariadbd exited during startup."
+    mariadb_dump_errlog
     exit 1
   fi
 }
@@ -71,8 +135,14 @@ restart_mariadb_docker() {
   while pgrep -f mariadb > /dev/null; do
     sleep 1
   done
+  # Mirror start_mariadb_docker: mariadbd running as --user=mysql cannot
+  # create the log file when its directory is root-owned, so create and chown
+  # it before pointing --log-error at it.
+  : > "$MARIADB_ERRLOG"
+  chown mysql:mysql "$MARIADB_ERRLOG"
   # Start MariaDB in the background with nohup to ensure it's fully detached
-  nohup mariadbd --user=mysql --socket=/var/lib/mysql/mysql.sock > /dev/null 2>&1 &
+  nohup mariadbd --user=mysql --socket="$MARIADB_SOCKET" \
+    --log-error="$MARIADB_ERRLOG" > /dev/null 2>&1 &
 }
 
 # Function to restart MariaDB on bare-metal machine
@@ -154,16 +224,18 @@ fi
 
 # Set MySQL connection parameters based on environment
 if is_docker_container; then
-  MYSQL_SOCKET_PARAM="--socket=/var/lib/mysql/mysql.sock"
+  MYSQL_SOCKET_PARAM="--socket=$MARIADB_SOCKET"
 else
   MYSQL_SOCKET_PARAM=""
 fi
 
 # Try to connect multiple times with a delay between attempts
+mysql_success=0
 for i in {1..5}; do
   echo "Attempting to connect to MariaDB (attempt $i/5)..."
   if mysql -u root --password="$MARIADB_PWD" $MYSQL_SOCKET_PARAM -e ";" 2>/dev/null; then
     echo "Successfully connected to MariaDB!"
+    mysql_success=1
     break
   fi
   if [ "$i" -eq 5 ]; then
@@ -173,9 +245,36 @@ for i in {1..5}; do
     sleep 5
   fi
 done
-mysql_success=$?
-if [ "$mysql_success" -ne 0 ]; then
-  mysql -uroot --password="" $MYSQL_SOCKET_PARAM < "${TEMPLATES_DIR}/update_mariadb_pwd.sql"
+
+# A freshly initialised data directory has no root password, so the loop above
+# is expected to fail on a first install and this sets it. (An earlier version
+# read `mysql_success=$?` off the completed for-loop instead of mysql, so the
+# guard was always false and the bootstrap never ran.)
+#
+# Only bootstrap when this run initialised the data directory. If the loop
+# failed against an already-initialised, password-protected DB the failure is
+# transient, and an empty-password connect would just be refused -- running the
+# bootstrap there would abort an otherwise-healthy install.
+if [ "$mysql_success" -ne 1 ] && [ "$MARIADB_FRESH_INIT" = "1" ]; then
+  echo "Bootstrapping the MariaDB root password..."
+  if mysql -uroot --password="" $MYSQL_SOCKET_PARAM < "${TEMPLATES_DIR}/update_mariadb_pwd.sql" && \
+     mysql -u root --password="$MARIADB_PWD" $MYSQL_SOCKET_PARAM -e ";" 2>/dev/null; then
+    mysql_success=1
+  else
+    echo >&2 "ERROR: could not set the MariaDB root password."
+    mariadb_dump_errlog
+    exit 1
+  fi
+fi
+
+# Anything still unconnected here is a genuine failure -- a transient outage
+# against an initialised DB, or a bootstrap that already exited above. Fail
+# loudly with the server log attached instead of running the grant below into
+# a bare connect error.
+if [ "$mysql_success" -ne 1 ]; then
+  echo >&2 "ERROR: could not connect to MariaDB with the configured root password."
+  mariadb_dump_errlog
+  exit 1
 fi
 
 mysql -u root --password="$MARIADB_PWD" $MYSQL_SOCKET_PARAM < "${TEMPLATES_DIR}/grant_privileges.sql"
