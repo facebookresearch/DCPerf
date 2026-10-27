@@ -36,6 +36,13 @@
 
 namespace ranking {
 
+struct MockServicesConnectionOptions {
+  int retries = 5;
+  std::chrono::milliseconds initial_backoff{100};
+  std::chrono::milliseconds max_backoff{1000};
+  std::chrono::milliseconds probe_timeout{30000};
+};
+
 /**
  * MockServicesClient — per-thread wrapper around the generated
  * MockServiceAsyncClient. Each LeafNodeRank worker thread owns one
@@ -60,17 +67,17 @@ class MockServicesClient {
    * RocketClientChannel pinned to `evb`. `evb` must outlive this client
    * (typically a thread from a long-lived IOThreadPoolExecutor).
    *
-   * Throws on connect failure (the rtptest deployment expects the mock
-   * server to be up before LeafNodeRank starts; failing fast surfaces
-   * the misconfiguration immediately rather than producing silent
-   * fallback behavior at request time).
+   * Probes connectivity and retries with fresh connections and capped
+   * exponential backoff. Throws the last exception after retries are
+   * exhausted. Keepalive starts only after a successful probe.
    */
   MockServicesClient(
       folly::EventBase* evb,
       const std::string& host,
       uint16_t port,
       std::chrono::milliseconds keepalive_interval =
-          std::chrono::milliseconds(0));
+          std::chrono::milliseconds(0),
+      const MockServicesConnectionOptions& connection_options = {});
 
   ~MockServicesClient();
 
@@ -93,12 +100,12 @@ class MockServicesClient {
    * (binary -> std::string in the generated cpp2 client), or fails on
    * transport error / RPC exception.
    */
-  folly::SemiFuture<std::string> dispatchByEnum(
-      MethodIdx idx,
-      const std::string& request,
-      int32_t latency_us);
+  folly::SemiFuture<std::string>
+  dispatchByEnum(MethodIdx idx, const std::string& request, int32_t latency_us);
 
-  folly::EventBase* getEventBase() const { return evb_; }
+  folly::EventBase* getEventBase() const {
+    return evb_;
+  }
 
  private:
   // KeepaliveTimer (defined in .cc) fires a fire-and-forget getStatus()

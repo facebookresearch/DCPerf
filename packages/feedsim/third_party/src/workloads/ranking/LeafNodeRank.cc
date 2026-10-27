@@ -561,7 +561,12 @@ void ThreadStartup(
                 args.mock_services_host_arg,
                 static_cast<uint16_t>(args.mock_services_port_arg),
                 std::chrono::milliseconds(
-                    args.mock_keepalive_interval_ms_arg)));
+                    args.mock_keepalive_interval_ms_arg),
+                ranking::MockServicesConnectionOptions{
+                    args.mock_connect_retries_arg,
+                    std::chrono::milliseconds(args.mock_connect_initial_backoff_ms_arg),
+                    std::chrono::milliseconds(args.mock_connect_max_backoff_ms_arg),
+                    std::chrono::milliseconds(args.mock_connect_timeout_ms_arg)}));
       } catch (const std::exception& e) {
         std::cerr << "Failed to connect to mock_services on "
                   << args.mock_services_host_arg << ":"
@@ -2171,6 +2176,13 @@ int main(int argc, char** argv) {
   if (cmdline_parser(argc, argv, &args) != 0) {
     std::cerr << "cmdline_parser failed" << std::endl;
     return 1;
+  }
+  if (args.mock_connect_retries_arg < 0 ||
+      args.mock_connect_initial_backoff_ms_arg <= 0 ||
+      args.mock_connect_max_backoff_ms_arg < args.mock_connect_initial_backoff_ms_arg ||
+      args.mock_connect_timeout_ms_arg <= 0) {
+    std::cerr << "Invalid mock_services connection retry options" << std::endl;
+    return EXIT_FAILURE;
   }
 
   // Logging level is no longer used (oldisim log macros removed).
