@@ -17,11 +17,29 @@ MEMCACHE_THREADS=8
 
 export LD_LIBRARY_PATH=/opt/local/hhvm-3.30/lib
 
-# Function to detect if running in Docker container
+# Detects any container, not just Docker -- the name is kept for the callers.
+# Tupperware runs LXC, which has no /.dockerenv, so the original check returned
+# false there and sent us down the systemctl path. That path cannot work in a
+# TW task: the task user is unprivileged and its sudo allowlist is a single
+# `systemctl kill` entry for its own units.
 is_docker_container() {
-  # Check for .dockerenv file (most reliable method)
+  # Docker
   if [ -f /.dockerenv ]; then
     return 0
+  fi
+  # Podman / other OCI runtimes
+  if [ -f /run/.containerenv ]; then
+    return 0
+  fi
+  # Tupperware sets both of these in the task environment (container=lxc)
+  if [ -n "${TUPD_CONTAINER:-}" ] || [ -n "${container:-}" ]; then
+    return 0
+  fi
+  # Fallback: systemd's own detection covers lxc, docker, podman, ...
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    if systemd-detect-virt --container --quiet; then
+      return 0
+    fi
   fi
   return 1
 }
@@ -456,7 +474,16 @@ function main() {
     fi
   fi
 
-  echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
+  # Host-level tuning. Unavailable to an unprivileged container task, where
+  # /proc/sys is read-only and sudo is not granted -- skip rather than emit a
+  # sudo error on every run.
+  if [ -w /proc/sys/net/ipv4/tcp_tw_reuse ]; then
+    echo 1 > /proc/sys/net/ipv4/tcp_tw_reuse
+  elif sudo -n true 2>/dev/null; then
+    echo 1 | sudo tee /proc/sys/net/ipv4/tcp_tw_reuse
+  else
+    echo "Skipping tcp_tw_reuse tuning: no write access to /proc/sys and no passwordless sudo."
+  fi
 
   if [[ "$db_host" = "" ]]; then
     # Restart MariaDB using appropriate method based on environment
