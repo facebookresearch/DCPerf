@@ -28,10 +28,10 @@ option "compression_data_size" - "Number of bytes to compress per request." int 
 option "node_rank_seed" - "Seed for random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
 option "pointer_chase_seed" - "Seed for PointerChase random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
 option "chase_iterations" - "Number of chases to execute on handler thread." int default="5120"
-option "threads" - "Number of threads to use for serving." int default="1"
 option "cpu_threads" - "Number of threads to use for computation." int default="1"
 option "srv_threads" - "Number of threads for srv computation." int default="1"
-option "io_threads" - "Number of threads to use for IO." int default="1"
+option "io_threads" - "Number of inbound serving and IO threads. 0 = available CPUs." int default="0"
+option "cpu_executor_threads" - "Global CPU executor threads and DLRM states. 0 = available CPUs." int default="0"
 option "ranker_threads" - "Number of threads in the RANKER orchestration pool. Default 0 = auto = max(1, nproc/2)." int default="0"
 option "sr_event_base_threads" - "Number of threads in the SREventBase outbound EventBase pool. Default 0 = auto = max(1, (nproc * 7) / 10)." int default="0"
 option "timekeeper_threads" - "Number of threads to use for timekeepers." int default="1"

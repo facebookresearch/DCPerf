@@ -104,7 +104,17 @@ MOCK_SERVICES_PIDS=()
 # Keep the full client pool and partition local TCP tuples across source IPs.
 export MOCK_SERVICES_HOST="${MOCK_SERVICES_HOST:-127.0.0.1}"
 if [ "$MOCK_SERVICES_HOST" = "127.0.0.1" ] && [ -z "${MOCK_CONNECT_BIND_IPS+x}" ]; then
-    export MOCK_CONNECT_BIND_IPS="127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5"
+    read -r port_low port_high < /proc/sys/net/ipv4/ip_local_port_range
+    ports_per_ip=$((port_high - port_low + 1))
+    cpu_count=$(nproc)
+    source_count=$(((cpu_count * cpu_count * 7 / 10 + ports_per_ip - 1) / ports_per_ip + 1))
+    [ "$source_count" -ge 4 ] || source_count=4
+    source_ips=()
+    for ((source_index=2; source_index<source_count+2; source_index++)); do
+        source_ips+=("127.0.$((source_index / 256)).$((source_index % 256))")
+    done
+    MOCK_CONNECT_BIND_IPS=$(IFS=,; echo "${source_ips[*]}")
+    export MOCK_CONNECT_BIND_IPS
 fi
 echo "Mock-service connectivity: host=$MOCK_SERVICES_HOST bind_ips=${MOCK_CONNECT_BIND_IPS:-OS-selected}"
 
