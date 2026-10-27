@@ -532,7 +532,8 @@
     server's throughput at that depth. Lower fixed_qps to drive a specific rate.
   args:
     - '-n 1'
-    - '-t {thrift_threads}'
+    - '--io-threads={io_threads}'
+    - '--cpu-executor-threads={cpu_executor_threads}'
     - '-q {fixed_qps}'
     - '-d {fixed_qps_duration}'
     - '-w {warmup_time}'
@@ -550,7 +551,8 @@
     - '--mock-connect-failure-policy={mock_connect_failure_policy}'
     - '{extra_args}'
   vars:
-    - 'thrift_threads=0'
+    - 'io_threads=0'
+    - 'cpu_executor_threads=0'
     - 'fixed_qps=100'
     - 'fixed_qps_duration=10'
     - 'warmup_time=10'

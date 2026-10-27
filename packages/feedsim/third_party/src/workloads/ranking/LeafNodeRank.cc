@@ -2285,8 +2285,15 @@ int main(int argc, char** argv) {
   // per-request construct+destruct chain.
   initResponseTemplatePool(args.num_objects_arg);
 
-  int fake_argc = 1;
-  char* fake_argv[2] = {const_cast<char*>("./LeafNodeRank"), nullptr};
+  if (args.cpu_executor_threads_arg < 0 || args.io_threads_arg < 0) {
+    std::cerr << "CPU executor and I/O thread counts must be nonnegative" << std::endl;
+    return 1;
+  }
+  std::string cpu_executor_flag = "--folly_global_cpu_executor_threads=" +
+      std::to_string(args.cpu_executor_threads_arg);
+  int fake_argc = 2;
+  char* fake_argv[3] = {
+      const_cast<char*>("./LeafNodeRank"), cpu_executor_flag.data(), nullptr};
   char** sargv = static_cast<char**>(fake_argv);
   const folly::Init init(&fake_argc, &sargv);
 
@@ -2294,6 +2301,8 @@ int main(int argc, char** argv) {
   // /proc/$pid/task/*/comm and profilers) match a production aggregator's
   // thread profile: ThriftSrv.IO, RANKER, SREventBase, GlobalCPUThread.
   const unsigned int nproc = folly::available_concurrency();
+  const int ioThreads = args.io_threads_arg > 0
+      ? args.io_threads_arg : static_cast<int>(nproc);
 
   // GlobalCPUThread: shared folly singleton. DLRM inference, feature
   // extraction, and compression all dispatch here. DO NOT construct a
@@ -2301,6 +2310,12 @@ int main(int argc, char** argv) {
   // global executor (folly/executors/GlobalExecutor.cpp) already has that
   // name and is sized to nproc by default.
   auto globalCpuKa = folly::getGlobalCPUExecutor();
+  const auto cpuExecutorThreads =
+      folly::getGlobalCPUExecutorCounters().numThreads;
+  if (cpuExecutorThreads == 0) {
+    std::cerr << "CPU executor has no inference threads" << std::endl;
+    return 1;
+  }
   folly::Executor* globalCpuRaw = globalCpuKa.get();
   auto globalCpuKaPtr =
       std::make_shared<folly::Executor::KeepAlive<>>(std::move(globalCpuKa));
@@ -2319,7 +2334,7 @@ int main(int argc, char** argv) {
 
   // ThriftSrv.IO: inbound RPC IO loop. Renamed (was anonymous folly default).
   auto ioThreadPool = std::make_shared<folly::IOThreadPoolExecutor>(
-      args.io_threads_arg,
+      ioThreads,
       std::make_shared<folly::NamedThreadFactory>("ThriftSrv.IO"));
 
   // SREventBase: outbound-RPC EventBase pool. Carries the
@@ -2335,10 +2350,10 @@ int main(int argc, char** argv) {
       std::make_shared<folly::NamedThreadFactory>("SREventBase"));
 
   std::cout << "Thread pools (nproc=" << nproc << "): "
-            << "GlobalCPUThread (folly singleton), "
+            << "GlobalCPUThread=" << cpuExecutorThreads << ", "
             << "RANKER=" << rankerThreads << ", "
             << "SREventBase=" << srEventBaseThreads << ", "
-            << "ThriftSrv.IO=" << args.io_threads_arg << std::endl;
+            << "ThriftSrv.IO=" << ioThreads << std::endl;
 
   auto timekeeperPool =
       std::make_shared<ranking::TimekeeperPool>(args.timekeeper_threads_arg);
@@ -2401,7 +2416,7 @@ int main(int argc, char** argv) {
   }
   std::cout << "Thread pool warmup complete" << std::endl;
 
-  std::vector<ThreadData> thread_data(args.threads_arg);
+  std::vector<ThreadData> thread_data(ioThreads);
 
   // Initialize the shared DLRM model.
   if (!args.dlrm_model_path_given) {
@@ -2421,7 +2436,9 @@ int main(int argc, char** argv) {
   // Create shared DLRM model (thread-safe for inference)
   std::shared_ptr<ranking::dwarfs::DLRM> shared_dlrm_ranker =
       std::make_shared<ranking::dwarfs::DLRM>(
-          dlrm_params, args.threads_arg, dlrm_seed);
+          dlrm_params, cpuExecutorThreads, dlrm_seed);
+  std::cout << "DLRM states=" << cpuExecutorThreads
+            << " CPU executor threads=" << cpuExecutorThreads << std::endl;
 
   // Warm up DLRM model to stabilize inference latency
   // JIT compilation and memory allocation happen on first few inferences
@@ -2486,7 +2503,7 @@ int main(int argc, char** argv) {
             thread_id, context, thread_data);
       });
 
-  server.setNumThreads(args.threads_arg);
+  server.setNumThreads(ioThreads);
   server.setThreadPinning(args.noaffinity_given == 0u);
   server.setThreadLoadBalancing(args.noloadbalance_given == 0u);
 

@@ -173,48 +173,44 @@ breakdown at `benchmark_metrics_<run_id>/breakdown.csv`.
 
 `feedsim_dlrm_mini` is the Mini version of `feedsim_dlrm`. After a short warmup,
 it drives a fixed load for 10 seconds and reports the QPS the server sustains.
-On 16 cores, it takes about 28 s and peak memory is about 7 GiB.
 
 ### Run with benchpress
 
 Install the benchmark first (see [Install](#install)), then run:
 
-```
+```bash
 ./benchpress_cli.py run feedsim_dlrm_mini
 ```
 
 ### Run with run-feedsim-multi.sh
 
-Run the script directly when you need the shortest run and the smallest memory
-footprint, for example on an emulator: it skips benchpress's start-up, hooks
-and result handling. Run it with the job's arguments, as root:
+Run the script directly for short runs on an emulator, as root:
 
-```
+```bash
 cd <path_to_DCPerf>
-./benchmarks/feedsim/run-feedsim-multi.sh -n 1 -t 0 -q 100 -d 10 -w 10 -r -1 \
+./benchmarks/feedsim/run-feedsim-multi.sh -n 1 -q 100 -d 10 -w 10 -r -1 \
   -x -1 -D 1 -R 42 -C 42 -N --depth=2 | tee mini.log
 ```
 
 The output includes a JSON object. The score is `final_achieved_qps` in its
-`overall` section divide by 57. For example:
+`overall` section divided by 57. For example, 88.18 QPS gives 1.547.
 
+### Bound the thread pools and memory footprint
+
+The retired `thrift_threads` / `run.sh -t` / Leaf `--threads` controls
+are replaced by `io_threads` and `cpu_executor_threads`. Both default to
+0 (available CPUs). DLRM allocates exactly one state per configured global
+CPU executor thread, independently of the inbound I/O thread count.
+
+For a smaller Mini footprint, bound both pools, for example:
+
+```bash
+./benchpress run feedsim_dlrm_mini -i '{"io_threads":8,"cpu_executor_threads":8}'
 ```
-  "overall": {
-    "final_requested_qps": 100.00,
-    "final_achieved_qps": 88.18,
-```
 
-In this example, the score is 88.18 / 57 = 1.547.
-
-### Use less memory
-
-Run fewer thrift threads with `thrift_threads` (`-t` for the script). Each
-thread keeps its own copy of the dataset, about 0.33 GB; the default, 0, starts
-one per usable core. With 8 threads, the job uses about 3.3 GB:
-
-```
-./benchpress_cli.py run feedsim_dlrm_mini -i '{"thrift_threads": "8"}'
-```
+The old memory measurements do not apply to the revised pool sizing. A CPU
+cpuset also bounds the automatic defaults. `run.sh` accepts `--io-threads`
+and `--cpu-executor-threads`; Leaf accepts their underscore spellings.
 
 ## Advanced usage
 
@@ -413,7 +409,7 @@ backoff. The probe timeout bounds each attempt, not the entire retry sequence.
 A worker creates a client for every SREventBase. On large hosts this exceeds
 one source IP's ephemeral-port capacity (for example, 216 workers ×176
 SREventBases =38,016 connections versus 32,768 ports in 32768–65535). The multi-instance runner defaults
-its mock-service host to `127.0.0.1` and uses four loopback source IPs:
+its mock-service host to `127.0.0.1` and uses multiple loopback source IPs:
 `127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5`. It retains the full client pool.
 
 `MOCK_SERVICES_HOST` overrides the host used by the Leaf and readiness probe.

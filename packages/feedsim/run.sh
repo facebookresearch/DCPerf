@@ -22,7 +22,6 @@ function benchreps_tell_state () {
 
 # Function for BC
 BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
-BC_MIN_FN='define min (a, b) { if (a <= b) return (a); return (b); }'
 
 # Constants
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
@@ -42,12 +41,9 @@ fi
 # Source runtime breakdown utilities
 source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
-# Thrift threads: scale with logical CPUs till 216. Having more than that
-# will risk running out of memory and getting killed
 # smt/active is absent on non-SMT architectures (e.g. ARM) and in some
 # containers; default to 0 instead of failing under `set -e`.
 IS_SMT_ON="$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo 0)"
-THRIFT_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc), 216)" | bc)"
 EVENTBASE_THREADS_DEFAULT="$(nproc)"  # nproc threads so the ThriftSrv.IO pool isn't a 4-EB bottleneck. Each EB owns its own MockServicesClient so outbound RPC fanout (issueOutboundFanout) actually spreads across the SREventBase pool instead of serializing through 4 EBs.
 SRV_THREADS_DEFAULT=8        # 8 should also suffice for most purposes
 if [[ "$IS_SMT_ON" = 1 ]]; then
@@ -66,7 +62,8 @@ cat <<EOF
 Usage: ${0##*/} [OPTION]...
 
     -h Display this help and exit
-    -t Number of threads to use for thrift serving. Large dataset kept per thread. 0 = use the default. Default: $THRIFT_THREADS_DEFAULT
+    --io-threads Number of serving and I/O threads. 0 = available CPUs.
+    --cpu-executor-threads Number of CPU executor threads and DLRM states. 0 = available CPUs.
     -c Number of threads to use for fanout ranking work. Heavy CPU work. Default: $RANKING_THREADS_DEFAULT
     -l Number of threads to use for load generation in the drivers. Default: $DRIVER_THREADS
     -a When searching for the optimal QPS, automatically adjust the number of client driver threads by
@@ -139,8 +136,8 @@ die() {
 }
 
 main() {
-    local thrift_threads
-    thrift_threads="$THRIFT_THREADS_DEFAULT"
+    local io_threads="$EVENTBASE_THREADS_DEFAULT"
+    local cpu_executor_threads=0
 
     local ranking_cpu_threads
     ranking_cpu_threads="$RANKING_THREADS_DEFAULT"
@@ -292,13 +289,19 @@ main() {
 
     while [ $# -ne 0 ]; do
         case $1 in
-            -t)
-                # 0 keeps THRIFT_THREADS_DEFAULT, so a job can request the
-                # core-scaled default and still expose -t for overriding.
-                if [ "$2" != "0" ]; then
-                    thrift_threads="$2"
-                fi
+            --io-threads)
+                io_threads="$2"
                 shift
+                ;;
+            --io-threads=*)
+                io_threads="${1#*=}"
+                ;;
+            --cpu-executor-threads)
+                cpu_executor_threads="$2"
+                shift
+                ;;
+            --cpu-executor-threads=*)
+                cpu_executor_threads="${1#*=}"
                 ;;
             -c)
                 ranking_cpu_threads="$2"
@@ -608,6 +611,13 @@ main() {
         shift # pop the previously read argument
     done
 
+    for option in io_threads cpu_executor_threads; do
+        value="${!option}"
+        if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -gt 2147483647 ]; then
+            die "Invalid ${option//_/-}: must be a nonnegative integer <= 2147483647"
+        fi
+    done
+
     # Validate long option arguments
     if [ "$async_io" = "1" ]; then
         if [ "$io_latency_distribution" != "fixed" ] && [ "$io_latency_distribution" != "exponential" ] && [ "$io_latency_distribution" != "lognormal" ]; then
@@ -844,14 +854,18 @@ main() {
         mkdir -p "${DR_TRACE_OUTDIR:-/tmp/drmemtrace_out}"
     fi
 
+    if [ "$io_threads" = "0" ]; then
+        io_threads="$(nproc)"
+    fi
+
     # shellcheck disable=SC2086
     env $preload_env OMP_NUM_THREADS=1 MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
         --monitor_port="$monitor_port" \
-        --threads="$thrift_threads" \
+        --cpu_executor_threads="$cpu_executor_threads" \
         --cpu_threads="$ranking_cpu_threads" \
         --timekeeper_threads=2 \
-        --io_threads="$EVENTBASE_THREADS_DEFAULT" \
+        --io_threads="$io_threads" \
         --srv_threads="$SRV_THREADS_DEFAULT" \
         --num_objects=2000 \
         --noaffinity \
@@ -883,7 +897,7 @@ main() {
             workers_ready=1
         else
             ready_workers=$(grep -c 'mock_services worker .* clients ready;' "$BREPS_LFILE" || true)
-            if [ "${ready_workers:-0}" -ge "$thrift_threads" ]; then
+            if [ "${ready_workers:-0}" -ge "$io_threads" ]; then
                 workers_ready=1
             fi
         fi
