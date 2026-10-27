@@ -390,7 +390,9 @@ for Github users or the `v1` folder under the DCPerf root for internal users.
 ## Mock-service connection retries
 
 MockServicesClient creates a fresh connection for each attempt and probes
-`getStatus` before accepting it. The default is one initial attempt plus five
+`getStatus` before accepting it. TCP/TLS connection completion is awaited
+before creating the Rocket channel, so a pending TLS handshake cannot expose
+an invalid socket state to its read callback. The default is one initial attempt plus five
 retries, with 100, 200, 400, 800 and 1,000 ms delays. Exceptions are rethrown
 only after retries are exhausted; successful initialization starts keepalive.
 
@@ -405,6 +407,23 @@ LeafNodeRank accepts the corresponding underscore options, such as
 `--mock_connect_retries=0` to disable retries. Backoff intervals and probe
 timeout must be positive, and maximum backoff must be at least the initial
 backoff. The probe timeout bounds each attempt, not the entire retry sequence.
+
+### Local connection capacity
+
+A worker creates a client for every SREventBase. On large hosts this exceeds
+one source IP's ephemeral-port capacity (for example, 216 workers ×176
+SREventBases =38,016 connections versus 32,768 ports in 32768–65535). The multi-instance runner defaults
+its mock-service host to `127.0.0.1` and uses four loopback source IPs:
+`127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5`. It retains the full client pool.
+
+`MOCK_SERVICES_HOST` overrides the host used by the Leaf and readiness probe.
+`MOCK_CONNECT_BIND_IPS` sets comma-separated numeric source IPs, selected
+round-robin once per logical client. Source and destination must use the same
+IP family. Set it to an empty string for normal OS-selected binding. Direct
+MockServicesClient callers use normal binding unless the variable is set.
+The automatic four-IP default applies only to the runner's IPv4 loopback
+host. Larger pools may require more IPs; port range, reserved ports and
+TIME_WAIT reuse also affect available capacity.
 
 ### Connection failure policy
 
@@ -426,5 +445,39 @@ benchmark validity requires all mock-service clients to connect:
 ./benchpress run feedsim_dlrm -i '{"mock_connect_failure_policy":"abort"}' -k perf
 ```
 
-A worker logs its ready-client count after initialization. Startup failure
-policies do not add reconnection after the worker begins serving requests.
+A worker logs its ready-client count after initialization. `run.sh` waits
+for every worker report and the listening port before starting the driver,
+so a late startup failure cannot begin a QPS search. The existing 120-second
+Leaf startup deadline still applies. Startup policies do not add reconnection
+after the worker begins serving requests.
+
+### Mock-service readiness and regression tests
+
+`run-feedsim-multi.sh` waits for a successful Rocket `getStatus` RPC using
+`mock_services_probe` before starting each main FeedSim program. The probe
+uses the same client and TLS settings as mock-service connections. It has a
+100 ms per-attempt timeout, and failed probes are followed by a 100 ms wait.
+The default readiness deadline is 30 seconds, configurable with
+`FEEDSIM_MOCK_READY_TIMEOUT_SECS`. A dead service or expired deadline fails
+the run; failed FeedSim instance processes also return nonzero to Benchpress.
+Readiness diagnostics are written to `mock_services_N.log.readiness`.
+Mock services use a 1 ms write-batching timer to bound response flushing
+for isolated probes; the pinned Thrift/Folly end-of-loop flush can otherwise
+wait for another socket event, including with TLS. Actual delay is subject
+to the Thrift timer resolution (approximately 10 ms in the pinned build),
+so this also bounds flushing during benchmark RPCs.
+
+Run the network regression tests after installation, with the installed
+build's library paths configured as for `run-feedsim-multi.sh`:
+
+```bash
+python3 packages/feedsim/test_mock_connections.py \
+  --feedsim-root "$PWD/benchmarks/feedsim" -v
+```
+
+The tests exercise real plaintext/TLS Rocket endpoints, reject TCP-only and
+wrong-TLS endpoints, verify source-IP binding and capped backoff, delayed-start recovery and delayed TLS handshakes, and
+force one successful client followed by a refused connection to distinguish
+all three failure policies. They also verify runner readiness and failure
+propagation. Run tests before benchmarks because the runner tests use the
+normal FeedSim ports.
