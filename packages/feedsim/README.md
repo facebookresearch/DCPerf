@@ -386,3 +386,45 @@ Again, due to the fundamental change in software architecture and threading mode
 the legacy PageRank-based v1 job has become inaccurate and will not be supported here. If you would like to
 run it, please check out the [main branch](https://github.com/facebookresearch/DCPerf/tree/main/packages/feedsim)
 for Github users or the `v1` folder under the DCPerf root for internal users.
+
+## Mock-service connection retries
+
+MockServicesClient creates a fresh connection for each attempt and probes
+`getStatus` before accepting it. The default is one initial attempt plus five
+retries, with 100, 200, 400, 800 and 1,000 ms delays. Exceptions are rethrown
+only after retries are exhausted; successful initialization starts keepalive.
+
+| Benchpress parameter | run.sh option | Default |
+| --- | --- | --- |
+| `mock_connect_retries` | `--mock-connect-retries` | 5 |
+| `mock_connect_initial_backoff_ms` | `--mock-connect-initial-backoff-ms` | 100 |
+| `mock_connect_max_backoff_ms` | `--mock-connect-max-backoff-ms` | 1000 |
+| `mock_connect_timeout_ms` | `--mock-connect-timeout-ms` | 30000 per attempt |
+
+LeafNodeRank accepts the corresponding underscore options, such as
+`--mock_connect_retries=0` to disable retries. Backoff intervals and probe
+timeout must be positive, and maximum backoff must be at least the initial
+backoff. The probe timeout bounds each attempt, not the entire retry sequence.
+
+### Connection failure policy
+
+`--mock-connect-failure-policy` (`mock_connect_failure_policy` in Benchpress)
+selects what a server worker does after connection retries are exhausted:
+
+| Policy | Behavior |
+| --- | --- |
+| `fallback` (default) | Clear all clients for that worker, stop constructing clients, and use the legacy I/O sleep path. |
+| `abort` | Print the connection error and terminate LeafNodeRank with a nonzero exit status. |
+| `continue` | Warn, retain successful clients, and construct clients for the remaining EventBases. |
+
+In `continue` mode, outbound RPCs use the successful clients that remain.
+If every connection fails, the empty client list still selects legacy sleep.
+Both `fallback` and `continue` can change benchmark work. Use `abort` when
+benchmark validity requires all mock-service clients to connect:
+
+```bash
+./benchpress run feedsim_dlrm -i '{"mock_connect_failure_policy":"abort"}' -k perf
+```
+
+A worker logs its ready-client count after initialization. Startup failure
+policies do not add reconnection after the worker begins serving requests.
