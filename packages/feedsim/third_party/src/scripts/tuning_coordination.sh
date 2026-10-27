@@ -25,10 +25,9 @@ coordination_init() {
         exit 1
     fi
     COORD_ENABLED=1
-    printf '%s\n' "$$" > "$FEEDSIM_COORDINATION_DIR/worker.$FEEDSIM_INSTANCE_ID"
-    trap 'coordination_cleanup $?' EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
+    printf '%s\n' "$$" > "$FEEDSIM_COORDINATION_DIR/worker.$FEEDSIM_INSTANCE_ID.pending"
+    mv "$FEEDSIM_COORDINATION_DIR/worker.$FEEDSIM_INSTANCE_ID.pending" \
+        "$FEEDSIM_COORDINATION_DIR/worker.$FEEDSIM_INSTANCE_ID"
 }
 
 coordination_stop_driver() {
@@ -108,6 +107,10 @@ coordination_probe_end() {
 
 coordination_finish_tuning() {
     [ "$COORD_ENABLED" -eq 1 ] || return 0
+    if [ -z "${command:-}" ] || [ -z "${adaptive_depth_arg:-}" ]; then
+        echo "ERROR: missing hold driver command or depth" >&2
+        exit 1
+    fi
     local threads_arg
     threads_arg=$(driver_thread_args "$cur_qps")
     local hold_log="${output_csv_file}.coordination-hold.log"
@@ -116,7 +119,14 @@ coordination_finish_tuning() {
     COORD_DRIVER_PID=$!
     printf 'coordination: instance=%s hold_start pid=%s qps=%s depth=%s log=%s\n' \
         "$FEEDSIM_INSTANCE_ID" "$COORD_DRIVER_PID" "$cur_qps" "$adaptive_depth_arg" "$hold_log"
-    sleep 7
+    local hold_deadline=$((SECONDS + 7))
+    while [ "$SECONDS" -lt "$hold_deadline" ]; do
+        if ! kill -0 "$COORD_DRIVER_PID" 2>/dev/null; then
+            echo "ERROR: hold driver failed to stay running; see $hold_log" >&2
+            exit 1
+        fi
+        sleep 0.1
+    done
     coordination_barrier tuned
     coordination_stop_driver
     coordination_barrier final_ready

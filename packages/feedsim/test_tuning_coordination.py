@@ -14,7 +14,7 @@ MODULE = Path(__file__).parent / "third_party/src/scripts/tuning_coordination.sh
 
 
 class TuningCoordinationTest(unittest.TestCase):
-    def worker(self, directory, instance, body, timeout=30):
+    def worker(self, directory, instance, body, timeout=30, setup=""):
         env = dict(
             os.environ,
             FEEDSIM_COORDINATION_DIR=str(directory),
@@ -23,7 +23,18 @@ class TuningCoordinationTest(unittest.TestCase):
             FEEDSIM_COORDINATION_TIMEOUT_SECS=str(timeout),
         )
         return subprocess.Popen(
-            ["bash", "-c", 'source "$1"; coordination_init; ' + body, "_", str(MODULE)],
+            [
+                "bash",
+                "-c",
+                'source "$1"; '
+                + setup
+                + " coordination_init; "
+                + "trap 'coordination_cleanup $?' EXIT; "
+                + "trap 'exit 130' INT; trap 'exit 143' TERM; "
+                + body,
+                "_",
+                str(MODULE),
+            ],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -87,6 +98,21 @@ class TuningCoordinationTest(unittest.TestCase):
             self.assertNotEqual(waiter.returncode, 0)
             self.assertIn("failed", error)
 
+    def test_slow_pid_publication_does_not_fail_peer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            body = "coordination_barrier startup; COORD_COMPLETE=1"
+            waiter = self.worker(directory, 1, body)
+            slow = self.worker(
+                directory,
+                2,
+                body,
+                setup='printf() { sleep .3; builtin printf "$@"; };',
+            )
+            for worker in [waiter, slow]:
+                output = worker.communicate(timeout=5)
+                self.assertEqual(worker.returncode, 0, output)
+
     def test_missing_peer_times_out(self):
         with tempfile.TemporaryDirectory() as temporary:
             waiter = self.worker(
@@ -95,6 +121,41 @@ class TuningCoordinationTest(unittest.TestCase):
             _, error = waiter.communicate(timeout=5)
             self.assertNotEqual(waiter.returncode, 0)
             self.assertIn("timed out", error)
+
+    def test_dead_hold_driver_fails_promptly_with_diagnostic(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            worker = self.worker(
+                Path(temporary),
+                1,
+                """
+                command=false; adaptive_depth_arg=--depth=2; cur_qps=10
+                driver_thread_args() { echo ''; }
+                output_csv_file="$FEEDSIM_COORDINATION_DIR/result"
+                coordination_finish_tuning
+            """,
+            )
+            _, error = worker.communicate(timeout=5)
+            self.assertNotEqual(worker.returncode, 0)
+            self.assertIn("hold driver failed to stay running", error)
+
+    def test_init_preserves_callers_exit_trap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "caller_cleanup"
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'source "$1"; trap \'touch "$2"\' EXIT; IS_AUTOSCALE_RUN=2; FEEDSIM_COORDINATION_DIR=$3; FEEDSIM_INSTANCE_ID=1; coordination_init',
+                    "_",
+                    str(MODULE),
+                    str(marker),
+                    temporary,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(marker.exists())
 
     def test_single_instance_needs_no_coordinator(self):
         result = subprocess.run(
