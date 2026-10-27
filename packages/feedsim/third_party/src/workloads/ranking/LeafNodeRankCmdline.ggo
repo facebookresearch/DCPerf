@@ -28,10 +28,10 @@ option "compression_data_size" - "Number of bytes to compress per request." int 
 option "node_rank_seed" - "Seed for random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
 option "pointer_chase_seed" - "Seed for PointerChase random number generator. Default 42 for deterministic runs; pass -1 for a time-based (non-deterministic) seed." long optional
 option "chase_iterations" - "Number of chases to execute on handler thread." int default="5120"
-option "threads" - "Number of threads to use for serving." int default="1"
 option "cpu_threads" - "Number of threads to use for computation." int default="1"
 option "srv_threads" - "Number of threads for srv computation." int default="1"
-option "io_threads" - "Number of threads to use for IO." int default="1"
+option "io_threads" - "Number of inbound serving and IO threads. 0 = available CPUs." int default="0"
+option "cpu_executor_threads" - "Global CPU executor threads and DLRM states. 0 = available CPUs." int default="0"
 option "ranker_threads" - "Number of threads in the RANKER orchestration pool. Default 0 = auto = max(1, nproc/2)." int default="0"
 option "sr_event_base_threads" - "Number of threads in the SREventBase outbound EventBase pool. Default 0 = auto = max(1, (nproc * 7) / 10)." int default="0"
 option "timekeeper_threads" - "Number of threads to use for timekeepers." int default="1"
@@ -77,6 +77,11 @@ option "silesia_dir" - "Path to Silesia corpus directory. When set, server-side 
 option "rpc_dist_path" - "Path to rpc_dist.json. When set, request handlers fan out real RPCs to mock_services." string typestr="filename" default=""
 option "mock_services_host" - "Hostname for mock_services Thrift server." string default="127.0.0.1"
 option "mock_services_port" - "Port for mock_services Thrift server (matches mock_services --port)." int default="21222"
+option "mock_connect_retries" - "Connection retries after the initial mock_services attempt. 0 disables retries." int default="5"
+option "mock_connect_initial_backoff_ms" - "Initial mock_services retry delay in milliseconds." int default="100"
+option "mock_connect_max_backoff_ms" - "Maximum mock_services exponential retry delay in milliseconds." int default="1000"
+option "mock_connect_timeout_ms" - "Timeout for each mock_services connectivity probe in milliseconds." int default="30000"
+option "mock_connect_failure_policy" - "Action after mock_services retries are exhausted: clear clients and use sleep, abort server, or retain clients and continue initialization." string values="fallback","abort","continue" default="fallback"
 option "rpc_fanout_scale" - "Scale factor applied to per-session fanout counts. Default 0.10 yields ~376 RPCs/session (vs ~3742 at scale=1.0); calibrated to raise outbound RPC volume so Encryption/RPC-Compression/RPC-AsyncIO shares match a production aggregator profile." double default="0.10"
 # Diagnostic / isolation knob. When set, request handlers take the legacy
 # folly::futures::sleep path even if --rpc_dist_path is supplied, and the

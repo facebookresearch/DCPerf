@@ -97,7 +97,26 @@ PIDS=()
 # manual runs and with --mock_services_port=21222 in run.sh defaults.)
 MOCK_SERVICES_PORT_BASE=21222
 MOCK_SERVICES_BIN="${FEEDSIM_ROOT}/src/build/workloads/ranking/mock_services/mock_services"
+MOCK_SERVICES_PROBE="${FEEDSIM_ROOT}/src/build/workloads/ranking/mock_services_probe"
 MOCK_SERVICES_PIDS=()
+
+# A large worker/EventBase matrix exceeds one loopback source IP's port range.
+# Keep the full client pool and partition local TCP tuples across source IPs.
+export MOCK_SERVICES_HOST="${MOCK_SERVICES_HOST:-127.0.0.1}"
+if [ "$MOCK_SERVICES_HOST" = "127.0.0.1" ] && [ -z "${MOCK_CONNECT_BIND_IPS+x}" ]; then
+    read -r port_low port_high < /proc/sys/net/ipv4/ip_local_port_range
+    ports_per_ip=$((port_high - port_low + 1))
+    cpu_count=$(nproc)
+    source_count=$(((cpu_count * cpu_count * 7 / 10 + ports_per_ip - 1) / ports_per_ip + 1))
+    [ "$source_count" -ge 4 ] || source_count=4
+    source_ips=()
+    for ((source_index=2; source_index<source_count+2; source_index++)); do
+        source_ips+=("127.0.$((source_index / 256)).$((source_index % 256))")
+    done
+    MOCK_CONNECT_BIND_IPS=$(IFS=,; echo "${source_ips[*]}")
+    export MOCK_CONNECT_BIND_IPS
+fi
+echo "Mock-service connectivity: host=$MOCK_SERVICES_HOST bind_ips=${MOCK_CONNECT_BIND_IPS:-OS-selected}"
 
 # Resolve --silesia-dir from forwarded args ($@); fall back to the default
 # install layout (./silesia next to run.sh). mock_services requires Silesia
@@ -140,6 +159,10 @@ function start_mock_services() {
 
     if [ ! -x "$MOCK_SERVICES_BIN" ]; then
         echo "ERROR: mock_services binary not found at $MOCK_SERVICES_BIN" >&2
+        exit 1
+    fi
+    if [ ! -x "$MOCK_SERVICES_PROBE" ]; then
+        echo "ERROR: mock_services readiness probe not found at $MOCK_SERVICES_PROBE" >&2
         exit 1
     fi
     if [ ! -d "$SILESIA_DIR_ABS" ]; then
@@ -186,23 +209,34 @@ function start_mock_services() {
     local pid=$!
     MOCK_SERVICES_PIDS+=("$pid")
 
-    # TCP-poll readiness (mirrors the LeafNodeRank wait loop in run.sh).
-    local max_attempts=30
-    local attempt=0
-    while [ "$attempt" -lt "$max_attempts" ]; do
-        if (echo > /dev/tcp/localhost/"$port") 2>/dev/null; then
-            echo "mock_services is ready on port $port (pid=$pid)"
-            return 0
-        fi
+    local ready_timeout="${FEEDSIM_MOCK_READY_TIMEOUT_SECS:-30}"
+    if ! [[ "$ready_timeout" =~ ^[0-9]+$ ]] || [ "$ready_timeout" -le 0 ] || [ "$ready_timeout" -gt 2147483647 ]; then
+        echo "ERROR: invalid FEEDSIM_MOCK_READY_TIMEOUT_SECS: $ready_timeout" >&2
+        exit 1
+    fi
+    local deadline=$((SECONDS + ready_timeout))
+    local probe_log="${log_path}.readiness"
+    while [ "$SECONDS" -lt "$deadline" ]; do
         if ! kill -0 "$pid" 2>/dev/null; then
             echo "ERROR: mock_services died during startup. Tail of $log_path:" >&2
             tail -40 "$log_path" >&2
             exit 1
         fi
-        attempt=$((attempt + 1))
-        sleep 1
+        if MOCK_TLS="${FEEDSIM_TLS:-1}" "$MOCK_SERVICES_PROBE" \
+            --host="$MOCK_SERVICES_HOST" --port="$port" --timeout_ms=100 \
+            > "$probe_log" 2>&1; then
+            echo "mock_services RPC is ready on port $port (pid=$pid)"
+            return 0
+        fi
+        sleep 0.1
     done
-    echo "ERROR: mock_services failed to become ready within ${max_attempts}s on port $port" >&2
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "ERROR: mock_services died during startup. Tail of $log_path:" >&2
+        tail -40 "$log_path" >&2
+        exit 1
+    fi
+    echo "ERROR: mock_services failed RPC readiness within ${ready_timeout}s on port $port" >&2
+    tail -20 "$probe_log" >&2
     tail -40 "$log_path" >&2
     kill -SIGTERM "$pid" 2>/dev/null || true
     exit 1
@@ -242,9 +276,26 @@ SKIP_MOCK_SERVICES=0
 if [ "${LEAFNODE_USE_LEGACY_SLEEP:-0}" = "1" ]; then
     echo "Skipping mock_services startup (LEAFNODE_USE_LEGACY_SLEEP=1)"
     SKIP_MOCK_SERVICES=1
-else
-    trap stop_mock_services EXIT INT TERM
 fi
+
+FEEDSIM_COORDINATION_DIR=$(mktemp -d "${FEEDSIM_ROOT}/tuning-coordination.XXXXXX") || exit 1
+export FEEDSIM_COORDINATION_DIR
+cleanup_multi() {
+    local status=$?
+    trap - EXIT INT TERM
+    if [ "$status" -ne 0 ]; then
+        local instance
+        for ((instance=1; instance<=NUM_INSTANCES; instance++)); do
+            touch "$FEEDSIM_COORDINATION_DIR/failed.$instance"
+        done
+    fi
+    stop_mock_services
+    # shellcheck disable=SC2317
+    rm -rf -- "$FEEDSIM_COORDINATION_DIR"
+}
+trap cleanup_multi EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 function get_cpu_range() {
     total_instances="$1"
@@ -288,7 +339,7 @@ echo > $BREPS_LFILE
 # The instances share breakdown.csv, so clear it here rather than in run.sh. A
 # variance rerun keeps the phases of the run that triggered it.
 if [[ -z "$IS_RERUN" ]]; then
-    rm -f "${FEEDSIM_ROOT}/breakdown.csv"
+    rm -f "${FEEDSIM_ROOT}/breakdown.csv" "${FEEDSIM_ROOT}/feedsim_debug_metrics.log"
 fi
 # shellcheck disable=SC2086
 for i in $(seq 1 ${NUM_INSTANCES}); do
@@ -312,80 +363,48 @@ for i in $(seq 1 ${NUM_INSTANCES}); do
         start_mock_services "$MOCK_PORT" "$CORE_RANGE" "$MOCK_LOG" "$MOCK_IO_THREADS"
     fi
 
-    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
+    rm -f "${FEEDSIM_ROOT}/feedsim_results_${FIXQPS_SUFFIX}${i}.txt"
+    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} FEEDSIM_INSTANCE_ID=${i} MOCK_SERVICES_PORT=${MOCK_PORT} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
     echo "$CMD" > "${FEEDSIM_LOG_PREFIX}${i}.log"
     # shellcheck disable=SC2068,SC2069
-    IS_AUTOSCALE_RUN=${NUM_INSTANCES} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
+    IS_AUTOSCALE_RUN=${NUM_INSTANCES} FEEDSIM_INSTANCE_ID=${i} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
     PIDS+=("$!")
     PHY_CORE_ID=$((PHY_CORE_ID + CORES_PER_INST))
     SMT_ID=$((SMT_ID + CORES_PER_INST))
     PORT=$((PORT + 1))
 done
 
-child_failure=0
-for pid in "${PIDS[@]}"; do
-    if ! wait "$pid"; then
-        child_failure=1
-    fi
+RUN_STATUS=0
+while [ "${#PIDS[@]}" -gt 0 ]; do
+    pending=()
+    for pid in "${PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            pending+=("$pid")
+        elif ! wait "$pid"; then
+            echo "ERROR: feedsim instance process $pid failed" >&2
+            RUN_STATUS=1
+            for ((instance=1; instance<=NUM_INSTANCES; instance++)); do
+                touch "$FEEDSIM_COORDINATION_DIR/failed.$instance"
+            done
+        fi
+    done
+    PIDS=("${pending[@]}")
+    [ "${#PIDS[@]}" -eq 0 ] || sleep 0.1
 done
-if [ "$child_failure" -ne 0 ]; then
+if [ "$RUN_STATUS" -ne 0 ]; then
     echo "ERROR: one or more FeedSim instances failed; see ${FEEDSIM_LOG_PREFIX}*.log" >&2
-    exit 1
 fi
 
-BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
-BC_MIN_FN='define min (a, b) { if (a <= b) return (a); return (b); }'
 function analyze_and_print_results() {
-    echo "{"
-    total_req_qps=0.0
-    total_actual_qps=0.0
-    avg_latency=0.0
-    successful_insts=0
-    target_percentile=""
-    target_latency=0.0
-    min_qps=99999.9
-    max_qps=0.0
-    max_req_qps=0.0
+    python3 "${FEEDSIM_ROOT}/feedsim_report.py" \
+        --log-prefix "$FEEDSIM_LOG_PREFIX" \
+        --csv-prefix "${FEEDSIM_ROOT}/feedsim_results_${FIXQPS_SUFFIX}" \
+        --instances "$NUM_INSTANCES" \
+        --debug-log "${FEEDSIM_ROOT}/feedsim_debug_metrics.log" \
+        --fixed-qps "$IS_FIXED_QPS" \
+        --run-status "$RUN_STATUS" \
+        --dr-trace "${DCPERF_DR_TRACE:-0}"
 
-    # shellcheck disable=SC2086
-    for i in $(seq 1 ${NUM_INSTANCES}); do
-        final_requested_qps="$(grep -oP 'final requested_qps = \K[0-9.]+' "${FEEDSIM_LOG_PREFIX}${i}.log")"
-        if [ -z "$final_requested_qps" ]; then
-            min_qps=0.0
-            continue
-        fi
-        successful_insts="$((successful_insts + 1))"
-        measured_qps="$(grep -oP 'final.*measured_qps = \K[0-9.]+' "${FEEDSIM_LOG_PREFIX}${i}.log")"
-        latency="$(grep -oP 'final.*latency = \K[0-9.]+' "${FEEDSIM_LOG_PREFIX}${i}.log")"
-        target_percentile="$(grep -oP 'Searching for QPS where \K[0-9p]+' "${FEEDSIM_LOG_PREFIX}${i}.log")"
-        target_latency="$(grep -oP 'Searching for.*latency <= \K[0-9]+(?= msec)' "${FEEDSIM_LOG_PREFIX}${i}.log")"
-        echo "    \"${i}\": {\"final_requested_qps\": ${final_requested_qps}, \"final_achieved_qps\": ${measured_qps}, \"final_latency_msec\": ${latency}},"
-        total_req_qps="$(echo "${total_req_qps} + ${final_requested_qps}" | bc)"
-        total_actual_qps="$(echo "${total_actual_qps} + ${measured_qps}" | bc)"
-        avg_latency="$(echo "${avg_latency} + ${latency}" | bc)"
-        min_qps="$(echo "${BC_MIN_FN}; min(${min_qps}, ${measured_qps})" | bc)"
-        max_qps="$(echo "${BC_MAX_FN}; max(${max_qps}, ${measured_qps})" | bc)"
-        max_req_qps="$(echo "${BC_MAX_FN}; max(${max_req_qps}, ${final_requested_qps})" | bc)"
-    done
-
-    avg_latency="$(echo "scale=2; 1.0 * ${avg_latency} / ${successful_insts}" | bc)"
-    echo "    \"overall\": {\"final_requested_qps\": ${total_req_qps}, \"final_achieved_qps\": ${total_actual_qps}, \"average_latency_msec\": ${avg_latency}},"
-    echo "    \"target_percentile\": \"${target_percentile}\","
-    echo "    \"target_latency_msec\": \"${target_latency}\","
-    echo "    \"spawned_instances\": \"${NUM_INSTANCES}\","
-    echo "    \"successful_instances\": ${successful_insts},"
-    echo "    \"min_qps\": ${min_qps},"
-    echo "    \"max_qps\": ${max_qps},"
-    echo "    \"is_fixed_qps\": ${IS_FIXED_QPS},"
-    echo "    \"dr_trace\": ${DCPERF_DR_TRACE:-0}"
-    echo "}"
-    if [[ "$(echo "${min_qps} < 0.8 * ${max_qps}" | bc)" = "1" ]]; then
-        # ceil(max_req_qps)
-        echo "(${max_req_qps} + 1) / 1" | bc  > /tmp/max_req_qps
-        return 1
-    else
-        return 0
-    fi
 }
 
 is_unstable_run=0
@@ -407,4 +426,10 @@ if [[ "$is_unstable_run" = 1 ]] && [[ "$IS_FIXED_QPS" = 0 ]] && [[ -z "$IS_RERUN
     # shellcheck disable=SC2068
     sleep 60
     IS_RERUN=1 $THIS_CMD -q "${max_req_qps}"
+    exit "$?"
 fi
+
+if [ "$RUN_STATUS" -ne 0 ]; then
+    exit "$RUN_STATUS"
+fi
+exit "$is_unstable_run"

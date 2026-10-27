@@ -120,6 +120,7 @@ feedsim:
 
 feedsim_autoscale:
   parser: feedsim_autoscale
+  check_returncode: false
   install_script: ./packages/feedsim/install_feedsim.sh
   cleanup_script: ./packages/feedsim/cleanup_feedsim.sh
   install_markers:

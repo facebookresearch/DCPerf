@@ -95,6 +95,15 @@ void enqueueTlsResponse(
 } // namespace
 
 void RequestContext::sendResponse(const void* data, uint32_t data_length) {
+  sendResponseImpl(data, data_length, false);
+}
+
+void RequestContext::sendErrorResponse() {
+  sendResponseImpl(nullptr, 0, true);
+}
+
+void RequestContext::sendResponseImpl(
+    const void* data, uint32_t data_length, bool failed) {
   if (!impl_ || impl_->response_sent) return;
   impl_->response_sent = true;
 
@@ -102,7 +111,7 @@ void RequestContext::sendResponse(const void* data, uint32_t data_length) {
   uint64_t processing_time = now - impl_->received_time;
 
   ResponsePacketHeader hdr;
-  hdr.type = type;
+  hdr.type = type | (failed ? kResponseErrorFlag : 0);
   hdr.request_id = request_id;
   hdr.start_time = start_time;
   hdr.processing_time = processing_time;
