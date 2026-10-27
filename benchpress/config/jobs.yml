@@ -483,6 +483,11 @@
   args:
     - '-n 1'
     - '--depth={depth}'
+    - '--mock-connect-retries={mock_connect_retries}'
+    - '--mock-connect-initial-backoff-ms={mock_connect_initial_backoff_ms}'
+    - '--mock-connect-max-backoff-ms={mock_connect_max_backoff_ms}'
+    - '--mock-connect-timeout-ms={mock_connect_timeout_ms}'
+    - '--mock-connect-failure-policy={mock_connect_failure_policy}'
     - '{extra_args}'
   vars:
     # Driver pipeline depth (max outstanding requests per driver connection).
@@ -491,6 +496,11 @@
     # high-perf ARM cores. With adaptive depth on (the default), this is the
     # starting floor the peak search raises from; see README "Driver depth".
     - 'depth=1'
+    - 'mock_connect_retries=5'
+    - 'mock_connect_initial_backoff_ms=100'
+    - 'mock_connect_max_backoff_ms=1000'
+    - 'mock_connect_timeout_ms=30000'
+    - 'mock_connect_failure_policy=fallback'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
@@ -504,6 +514,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/mock_services*.log*'
           - 'benchmarks/feedsim/src/perf.data'
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
@@ -532,6 +543,11 @@
     - '-C {pointer_chase_seed}'
     - '-N'
     - '--depth={depth}'
+    - '--mock-connect-retries={mock_connect_retries}'
+    - '--mock-connect-initial-backoff-ms={mock_connect_initial_backoff_ms}'
+    - '--mock-connect-max-backoff-ms={mock_connect_max_backoff_ms}'
+    - '--mock-connect-timeout-ms={mock_connect_timeout_ms}'
+    - '--mock-connect-failure-policy={mock_connect_failure_policy}'
     - '{extra_args}'
   vars:
     - 'thrift_threads=0'
@@ -546,6 +562,11 @@
     # Driver pipeline depth for both the warmup and the measured window. The
     # fixed-QPS path has no adaptive depth.
     - 'depth=2'
+    - 'mock_connect_retries=5'
+    - 'mock_connect_initial_backoff_ms=100'
+    - 'mock_connect_max_backoff_ms=1000'
+    - 'mock_connect_timeout_ms=30000'
+    - 'mock_connect_failure_policy=fallback'
     - 'extra_args='
   hooks:
     - hook: copymove
@@ -554,6 +575,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/mock_services*.log*'
           - 'benchmarks/feedsim/src/perf.data'
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
@@ -570,10 +592,20 @@
     keeping 95th percentile latency <= 700ms.
   args:
     - '--depth={depth}'
+    - '--mock-connect-retries={mock_connect_retries}'
+    - '--mock-connect-initial-backoff-ms={mock_connect_initial_backoff_ms}'
+    - '--mock-connect-max-backoff-ms={mock_connect_max_backoff_ms}'
+    - '--mock-connect-timeout-ms={mock_connect_timeout_ms}'
+    - '--mock-connect-failure-policy={mock_connect_failure_policy}'
     - '{extra_args}'
   vars:
     # See feedsim_dlrm for depth guidance; often raised on high-perf ARM cores.
     - 'depth=1'
+    - 'mock_connect_retries=5'
+    - 'mock_connect_initial_backoff_ms=100'
+    - 'mock_connect_max_backoff_ms=1000'
+    - 'mock_connect_timeout_ms=30000'
+    - 'mock_connect_failure_policy=fallback'
     - 'extra_args='
   hooks:
     - hook: cpu-mpstat
@@ -587,6 +619,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/mock_services*.log*'
           - 'benchmarks/feedsim/src/perf.data'
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
@@ -619,6 +652,11 @@
     - '--mock-tls={mock_tls}'
     - '--mock-zstd-frac={mock_zstd_frac}'
     - '--mock-keepalive-interval-ms={mock_keepalive_interval_ms}'
+    - '--mock-connect-retries={mock_connect_retries}'
+    - '--mock-connect-initial-backoff-ms={mock_connect_initial_backoff_ms}'
+    - '--mock-connect-max-backoff-ms={mock_connect_max_backoff_ms}'
+    - '--mock-connect-timeout-ms={mock_connect_timeout_ms}'
+    - '--mock-connect-failure-policy={mock_connect_failure_policy}'
     - '--rpc-fanout-scale={rpc_fanout_scale}'
     - '--server-zstd={server_zstd}'
     - '--sla-p95-ms={sla_p95_ms}'
@@ -644,6 +682,11 @@
     - 'mock_tls=1'
     - 'mock_zstd_frac=0.9'
     - 'mock_keepalive_interval_ms=200'
+    - 'mock_connect_retries=5'
+    - 'mock_connect_initial_backoff_ms=100'
+    - 'mock_connect_max_backoff_ms=1000'
+    - 'mock_connect_timeout_ms=30000'
+    - 'mock_connect_failure_policy=fallback'
     - 'rpc_fanout_scale=0.10'
     - 'server_zstd=1'
     - 'sla_p95_ms=700'
@@ -661,6 +704,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/mock_services*.log*'
           - 'benchmarks/feedsim/src/perf.data'
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'

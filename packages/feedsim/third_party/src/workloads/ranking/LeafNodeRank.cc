@@ -24,6 +24,7 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -550,8 +551,12 @@ void ThreadStartup(
   this_thread.rpc_registry = g_rpc_registry.get();
   this_thread.rpc_silesia = g_rpc_silesia;
   this_thread.rpc_rng.seed(detRngSeedTid(0x2C519A00u, thread_id));
-  if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
+  const bool has_mock_clients =
+      this_thread.rpc_registry != nullptr && srEventBasePool != nullptr;
+  size_t expected_mock_clients = 0;
+  if (has_mock_clients) {
     auto evbs = srEventBasePool->getAllEventBases();
+    expected_mock_clients = evbs.size();
     this_thread.mock_clients.reserve(evbs.size());
     for (size_t i = 0; i < evbs.size(); ++i) {
       try {
@@ -561,14 +566,33 @@ void ThreadStartup(
                 args.mock_services_host_arg,
                 static_cast<uint16_t>(args.mock_services_port_arg),
                 std::chrono::milliseconds(
-                    args.mock_keepalive_interval_ms_arg)));
+                    args.mock_keepalive_interval_ms_arg),
+                ranking::MockServicesConnectionOptions{
+                    args.mock_connect_retries_arg,
+                    std::chrono::milliseconds(args.mock_connect_initial_backoff_ms_arg),
+                    std::chrono::milliseconds(args.mock_connect_max_backoff_ms_arg),
+                    std::chrono::milliseconds(args.mock_connect_timeout_ms_arg)}));
       } catch (const std::exception& e) {
         std::cerr << "Failed to connect to mock_services on "
                   << args.mock_services_host_arg << ":"
                   << args.mock_services_port_arg
                   << " (thread " << thread_id << ", evb " << i << "): "
-                  << e.what()
-                  << ". Falling back to legacy folly::futures::sleep path."
+                  << e.what() << std::endl;
+        const std::string policy = args.mock_connect_failure_policy_arg;
+        if (policy == "abort") {
+          std::cerr << "ERROR: mock_services connection retries exhausted; "
+                    << "aborting LeafNodeRank (thread " << thread_id
+                    << ", evb " << i << ")" << std::endl;
+          // Other workers may still be initializing thread-affine resources.
+          std::_Exit(EXIT_FAILURE);
+        }
+        if (policy == "continue") {
+          std::cerr << "WARNING: retaining " << this_thread.mock_clients.size()
+                    << " mock_services clients for thread " << thread_id
+                    << " and continuing initialization" << std::endl;
+          continue;
+        }
+        std::cerr << "WARNING: Falling back to legacy folly::futures::sleep path."
                   << std::endl;
         this_thread.mock_clients.clear();
         break;
@@ -654,6 +678,13 @@ void ThreadStartup(
   } else {
     this_thread.io_latency_dist_type = IOLatencyDistType::FIXED;
   }
+
+  std::ostringstream ready;
+  ready << "mock_services worker " << thread_id << ": "
+        << this_thread.mock_clients.size() << "/" << expected_mock_clients
+        << " clients ready; failure_policy="
+        << args.mock_connect_failure_policy_arg << "\n";
+  std::cerr << ready.str();
 }
 
 #ifdef BENCHPRESS_INTERNAL
@@ -2171,6 +2202,13 @@ int main(int argc, char** argv) {
   if (cmdline_parser(argc, argv, &args) != 0) {
     std::cerr << "cmdline_parser failed" << std::endl;
     return 1;
+  }
+  if (args.mock_connect_retries_arg < 0 ||
+      args.mock_connect_initial_backoff_ms_arg <= 0 ||
+      args.mock_connect_max_backoff_ms_arg < args.mock_connect_initial_backoff_ms_arg ||
+      args.mock_connect_timeout_ms_arg <= 0) {
+    std::cerr << "Invalid mock_services connection retry options" << std::endl;
+    return EXIT_FAILURE;
   }
 
   // Logging level is no longer used (oldisim log macros removed).
