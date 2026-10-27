@@ -293,7 +293,10 @@ run_loadtest() {
     printf '%d,%d,%.2f,%.2f,' "$total_bytes_rx" "$total_bytes_tx" "$rx_mbps" "$tx_mbps" >> $output_csv_file
     printf '%.3f,%.3f,%.3f,%.3f,' "$min_ms" "$avg_ms" "$p50_ms" "$p90_ms" >> $output_csv_file
     printf '%.3f,%.3f,%.3f,' "$p95_ms" "$p99_ms" "$p99_9_ms" >> $output_csv_file
-    printf '%.3f,%.3f,%.3f,%.3f\n' "$fs_p50_ms" "$fs_p90_ms" "$fs_p95_ms" "$fs_p99_ms" >> $output_csv_file
+    printf '%.3f,%.3f,%.3f,%.3f,' "$fs_p50_ms" "$fs_p90_ms" "$fs_p95_ms" "$fs_p99_ms" >> $output_csv_file
+    local outcomes
+    outcomes=$(awk '/^  request_outcomes:/ {for (i=2; i<=NF; i++) {split($i,a,"="); printf "%s%s", (i==2 ? "" : ","), a[2]}}' "$tmp_file")
+    printf '%s\n' "${outcomes:-,,,,,,}" >> "$output_csv_file"
 
   fi
 
@@ -509,7 +512,14 @@ avg_ms,\
 fs_50p_ms,\
 fs_90p_ms,\
 fs_95p_ms,\
-fs_99p_ms"
+fs_99p_ms,\
+sent_requests,\
+successful_requests,\
+failed_requests,\
+pending_requests,\
+server_errors,\
+transport_errors,\
+elapsed_secs"
 
   echo $header > $output_csv_file
 fi

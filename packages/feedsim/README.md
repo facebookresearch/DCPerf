@@ -477,3 +477,34 @@ force one successful client followed by a refused connection to distinguish
 all three failure policies. They also verify runner readiness and failure
 propagation. Run tests before benchmarks because the runner tests use the
 normal FeedSim ports.
+
+## Request outcomes and measurement validity
+
+Achieved QPS now counts successful completed requests, rather than requests sent.
+Latency percentiles cover successful responses. Error responses carry an explicit
+wire flag, so valid empty responses remain successes. Failed futures stop the
+normal session continuation; they are not delivered as successful empty data.
+
+Each measurement CSV records `sent_requests`, `successful_requests`,
+`failed_requests`, `pending_requests`, `server_errors`, `transport_errors` and
+`elapsed_secs`. Counts reconcile as sent = successful + failed + pending.
+Pending requests at measurement shutdown are reported separately from failures.
+Responses to requests sent before a stats reset are excluded from the new window.
+
+The JSON report exposes success/failure QPS, counts and rates. Success/failure
+rates use completed requests as their denominator; completion and pending rates
+use sent requests. The final measurement is independently checked for request
+failures and, during QPS search, the target SLA. Invalid runs retain their raw
+measurements and receive a zero score; `benchmark_valid` and `validity_flags`
+explain their status. Fixed-QPS experiments report achieved latency without an
+implicit SLA requirement. Historical sent-request QPS is not identical to this
+successful-completion metric.
+
+### Request diagnostics
+
+The benchmark JSON keeps the stock FeedSim metrics fields. QPS counts successful
+completed requests. Detailed request counts, success/failure/pending rates, and
+validity flags are recorded in `feedsim_debug_metrics.log`, with one JSON object
+per measurement attempt. The `copymove` hook moves this log into the run's
+`benchmark_metrics_*` folder. Failed request accounting or a final SLA miss
+returns a nonzero status and a zero score; inspect the diagnostic log for details.
