@@ -32,6 +32,9 @@ class MockServiceHandler
   explicit MockServiceHandler(std::shared_ptr<ranking::SilesiaLoader> silesia);
   ~MockServiceHandler() override = default;
 
+  void async_eb_checkReady(
+      apache::thrift::HandlerCallbackPtr<void> callback) override;
+
   folly::SemiFuture<std::unique_ptr<std::string>> semifuture_mcGet(
       std::unique_ptr<std::string> request,
       int32_t latency_us) override;
