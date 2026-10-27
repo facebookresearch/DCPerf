@@ -11,6 +11,9 @@
 
 namespace feedsim {
 
+// The response type reserves its high bit for explicit server failure.
+constexpr uint32_t kResponseErrorFlag = uint32_t{1} << 31;
+
 // Wire protocol structs — binary compatible with oldisim's Query.h / Response.h
 // All fields are big-endian on the wire.
 

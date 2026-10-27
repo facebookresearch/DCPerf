@@ -1253,7 +1253,7 @@ void DLRMRequestHandler(
     apache::thrift::CompactSerializer::deserialize(&buf, request);
   } catch (const std::exception& e) {
     std::cerr << "Failed to deserialize RankingRequest: " << e.what() << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -1426,7 +1426,7 @@ void DLRMRequestHandler(
                  [context_ptr](const std::exception& e) {
                    std::cerr << "DLRM request handler error: " << e.what()
                              << std::endl;
-                   context_ptr->sendResponse(nullptr, 0);
+                   context_ptr->sendErrorResponse();
                  });
 }
 
@@ -1689,7 +1689,7 @@ void CreateAndPrimeSessionRequestHandler(
   } catch (const std::exception& e) {
     std::cerr << "CreateAndPrimeSession: deserialize failed: " << e.what()
               << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -1758,7 +1758,7 @@ void GetStoriesUncompressedRequestHandler(
   } catch (const std::exception& e) {
     std::cerr << "GetStoriesUncompressed: deserialize failed: " << e.what()
               << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -1889,7 +1889,7 @@ void GetStoriesUncompressedRequestHandler(
           [context_ptr](const std::exception& e) {
             std::cerr << "GetStoriesUncompressed handler error: " << e.what()
                       << std::endl;
-            context_ptr->sendResponse(nullptr, 0);
+            context_ptr->sendErrorResponse();
           });
 }
 
@@ -1920,7 +1920,7 @@ void GetAllStoriesRequestHandler(
     apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
   } catch (const std::exception& e) {
     std::cerr << "GetAllStories: deserialize failed: " << e.what() << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -1987,7 +1987,7 @@ void GetAllStoriesRequestHandler(
           [context_ptr](const std::exception& e) {
             std::cerr << "GetAllStories handler error: " << e.what()
                       << std::endl;
-            context_ptr->sendResponse(nullptr, 0);
+            context_ptr->sendErrorResponse();
           });
 }
 
@@ -2016,7 +2016,7 @@ void StreamDataRequestHandler(
     apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
   } catch (const std::exception& e) {
     std::cerr << "StreamData: deserialize failed: " << e.what() << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -2087,7 +2087,7 @@ void StreamIfrPriorityRankingRequestHandler(
   } catch (const std::exception& e) {
     std::cerr << "StreamIfrPriorityRanking: deserialize failed: " << e.what()
               << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -2194,7 +2194,7 @@ void StreamIfrPriorityRankingRequestHandler(
           [context_ptr](const std::exception& e) {
             std::cerr << "StreamIfrPriorityRanking handler error: " << e.what()
                       << std::endl;
-            context_ptr->sendResponse(nullptr, 0);
+            context_ptr->sendErrorResponse();
           });
 }
 
