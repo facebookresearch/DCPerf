@@ -35,7 +35,9 @@ class DriverStats {
   explicit DriverStats(int bins = 1000);
 
   void logRequest(uint32_t type, uint32_t packet_size);
-  void logResponse(uint32_t type, uint64_t latency_ns, uint32_t packet_size);
+  void logResponse(
+      uint32_t type, uint64_t latency_ns, uint32_t packet_size, bool failed = false);
+  void logTransportFailures(uint64_t count);
   // Phase 6: record the first-story latency for one session (driver
   // measures "send getStoriesUncompressed" -> "receive its response").
   void logFirstStoryLatency(uint64_t latency_ns);
@@ -75,6 +77,8 @@ class DriverStats {
   uint64_t rx_bytes_ = 0;
   uint64_t query_count_ = 0;
   uint64_t completed_count_ = 0;
+  uint64_t failed_responses_ = 0;
+  uint64_t transport_failures_ = 0;
   uint64_t session_count_ = 0;
 };
 

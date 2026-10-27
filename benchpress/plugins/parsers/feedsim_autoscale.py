@@ -34,8 +34,11 @@ class FeedSimAutoscaleParser(Parser):
             metrics = json.loads(output)
             if "overall" in metrics and "final_achieved_qps" in metrics["overall"]:
                 final_qps = metrics["overall"]["final_achieved_qps"]
-                metrics["score"] = float(final_qps) / FEEDSIM_BASELINE
+                metrics["score"] = (
+                    float(final_qps) / FEEDSIM_BASELINE if returncode == 0 else 0.0
+                )
             return metrics
         except json.JSONDecodeError as e:
             logger.warning("Couldn't parse feedsim_autoscale output: " + str(e))
             logger.warning("Collected output: " + output)
+            raise ValueError("FeedSim did not produce valid result JSON") from e

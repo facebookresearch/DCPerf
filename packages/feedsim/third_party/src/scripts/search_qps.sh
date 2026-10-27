@@ -25,6 +25,8 @@ BENCHPRESS_ROOT="$(readlink -f "$SCRIPT_DIR/../../../..")"
 
 BREPS_LFILE=/tmp/feedsim_log.txt
 
+source "$SCRIPT_DIR/tuning_coordination.sh"
+
 SCRIPT_NAME="$(basename "$0")"
 echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
 
@@ -128,6 +130,35 @@ mutilate (EuroSys \'14) [https://github.com/leverich/mutilate]
 EOF
 }
 
+driver_thread_args() {
+  local threads_arg=""
+  # check if we want auto-adjusted worker thread counts
+  if [ "$auto_driver_threads" = "1" ]; then
+      local max_driver_threads=""
+      local req_qps="$1"
+      local num_connections=4
+      local num_threads=""
+      bc_max='define max (a, b) { if (a >= b) return (a); return (b); }'
+      max_driver_threads="$(echo "scale=2; $(nproc) / 5.0 + 0.5 " | bc )"
+      max_driver_threads="${max_driver_threads%.*}"
+      max_driver_threads="$(echo "${bc_max}; max(${max_driver_threads:-0}, 4)" | bc )" # At least 4 threads.
+
+      if [ -n "$req_qps" ]; then
+          num_threads=$(echo "$req_qps / $num_connections" | bc)
+      else
+          num_threads=${max_driver_threads}
+      fi
+      if [ "$num_threads" -lt 1 ]; then
+          num_threads=1
+      elif [ "$num_threads" -gt "$max_driver_threads" ]; then
+          num_threads="$max_driver_threads"
+      fi
+      threads_arg="--threads=$num_threads --connections=4"
+  fi
+
+  echo "$threads_arg"
+}
+
 # Run the load test and pull results
 # run_loadtest output_qps output_latency target_qps operation_name
 # Note: target_qps and operation_name can be empty strings
@@ -144,29 +175,7 @@ run_loadtest() {
     qps_arg="--qps=$target_qps"
   fi
 
-  # check if we want auto-adjusted worker thread counts
-  if [ "$auto_driver_threads" = "1" ]; then
-      local max_driver_threads=""
-      local req_qps="$3"
-      local num_connections=4
-      local num_threads=""
-      bc_max='define max (a, b) { if (a >= b) return (a); return (b); }'
-      max_driver_threads="$(echo "scale=2; $(nproc) / 5.0 + 0.5 " | bc )"
-      max_driver_threads="${max_driver_threads%.*}"
-      max_driver_threads="$(echo "${bc_max}; max(${max_driver_threads:-0}, 4)" | bc )" # At least 4 threads.
-
-      if [ -n "$qps_arg" ]; then
-          num_threads=$(echo "$req_qps / $num_connections" | bc)
-      else
-          num_threads=${max_driver_threads}
-      fi
-      if [ "$num_threads" -lt 1 ]; then
-          num_threads=1
-      elif [ "$num_threads" -gt "$max_driver_threads" ]; then
-          num_threads="$max_driver_threads"
-      fi
-      threads_arg="--threads=$num_threads --connections=4"
-  fi
+  threads_arg=$(driver_thread_args "$target_qps")
 
   for r in $(seq 1 $load_test_retries); do
     # run the command, saving result to tmpfile
@@ -185,6 +194,8 @@ run_loadtest() {
     fi
   done
 
+  coordination_probe_start
+
   # wait for time
   # Log the start of the main benchmark experiment
   if [ -n "$operation_name" ]; then
@@ -197,6 +208,8 @@ run_loadtest() {
     log_end "$breakdown_folder" "$operation_name" "$breakdown_pid"
   fi
   benchreps_tell_state "after sleeping for experiment_time=${experiment_time} seconds"
+
+  coordination_probe_end
 
   # send SIGINT to the command
   kill -SIGINT $LOADTEST_PID
@@ -293,8 +306,15 @@ run_loadtest() {
     printf '%d,%d,%.2f,%.2f,' "$total_bytes_rx" "$total_bytes_tx" "$rx_mbps" "$tx_mbps" >> $output_csv_file
     printf '%.3f,%.3f,%.3f,%.3f,' "$min_ms" "$avg_ms" "$p50_ms" "$p90_ms" >> $output_csv_file
     printf '%.3f,%.3f,%.3f,' "$p95_ms" "$p99_ms" "$p99_9_ms" >> $output_csv_file
-    printf '%.3f,%.3f,%.3f,%.3f\n' "$fs_p50_ms" "$fs_p90_ms" "$fs_p95_ms" "$fs_p99_ms" >> $output_csv_file
+    printf '%.3f,%.3f,%.3f,%.3f,' "$fs_p50_ms" "$fs_p90_ms" "$fs_p95_ms" "$fs_p99_ms" >> $output_csv_file
+    local outcomes
+    outcomes=$(awk '/^  request_outcomes:/ {for (i=2; i<=NF; i++) {split($i,a,"="); printf "%s%s", (i==2 ? "" : ","), a[2]}}' "$tmp_file")
+    printf '%s\n' "${outcomes:-,,,,,,}" >> "$output_csv_file"
 
+  fi
+
+  if [ "$COORD_ENABLED" -eq 1 ]; then
+    coordination_stop_driver
   fi
 
   eval $__output_qps="'$qps'"
@@ -509,7 +529,14 @@ avg_ms,\
 fs_50p_ms,\
 fs_90p_ms,\
 fs_95p_ms,\
-fs_99p_ms"
+fs_99p_ms,\
+sent_requests,\
+successful_requests,\
+failed_requests,\
+pending_requests,\
+server_errors,\
+transport_errors,\
+elapsed_secs"
 
   echo $header > $output_csv_file
 fi
@@ -519,6 +546,13 @@ if [[ -z "$fixed_qps" ]]; then
   echo "Searching for QPS where $latency_type latency <= $latency_target msec"
 else
   echo "Running an experiment with QPS fixed at $fixed_qps and returns $latency_type latency"
+fi
+
+coordination_init
+if [ "$COORD_ENABLED" -eq 1 ]; then
+    trap 'coordination_cleanup $?' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 fi
 
 # warm-up trials
@@ -604,6 +638,7 @@ if [[ -n "$fixed_qps" ]]; then
       sleep 15 # wait between iterations (increased from 7 to allow async requests to drain)
     done
   fi
+  COORD_COMPLETE=1
   exit 0
 fi
 
@@ -769,25 +804,7 @@ if [[ $loop_cond -eq 1 ]]; then
 fi
 benchreps_tell_state "after gap_qps"
 
-if [[ -n "$IS_AUTOSCALE_RUN" ]] && [[ "$IS_AUTOSCALE_RUN" -gt 1 ]]; then
-    NUM_INSTANCES=$IS_AUTOSCALE_RUN
-    num_ready_inst=$(grep --count "after gap_qps" "$BREPS_LFILE")
-    num_failed_inst=$(grep --count "gap_qps_failed" "$BREPS_LFILE")
-    if [[ $num_ready_inst -lt $NUM_INSTANCES ]] && [[ $num_failed_inst -eq 0 ]]; then
-        result_filename=$(basename "$output_csv_file")
-        current_inst_num=$(echo "$result_filename" | sed -E "s/feedsim_results_(fixqps-)?([0-9]+)\.txt/\2/")
-        benchreps_tell_state "[Instance $current_inst_num] Waiting for other instances to finish \"gap_qps\" stage."
-        while [[ $num_ready_inst -lt $NUM_INSTANCES ]] && [[ $num_failed_inst -eq 0 ]]; do
-            sleep 1
-            num_ready_inst=$(grep --count "after gap_qps" "$BREPS_LFILE")
-            num_failed_inst=$(grep --count "gap_qps_failed" "$BREPS_LFILE")
-        done
-    fi
-    if [[ $num_failed_inst -gt 0 ]]; then
-        printf "error: another FeedSim instance failed gap tuning.\n" >&2
-        exit 1
-    fi
-fi
+coordination_finish_tuning
 
 # do final measurement — this is the actual reported experiment window; log it
 # as main_benchmark in breakdown.csv so perfpub sees a valid time window (the
@@ -808,5 +825,7 @@ if [ "$n_iters" -ge "$max_iters" ]; then
     printf "error: binary search iterated %d times but latency still could not converge to target.\n" "$n_iters"
 fi
 benchreps_tell_state "after final_qps"
+
+COORD_COMPLETE=1
 
 # End of file
