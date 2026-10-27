@@ -405,3 +405,26 @@ LeafNodeRank accepts the corresponding underscore options, such as
 `--mock_connect_retries=0` to disable retries. Backoff intervals and probe
 timeout must be positive, and maximum backoff must be at least the initial
 backoff. The probe timeout bounds each attempt, not the entire retry sequence.
+
+### Connection failure policy
+
+`--mock-connect-failure-policy` (`mock_connect_failure_policy` in Benchpress)
+selects what a server worker does after connection retries are exhausted:
+
+| Policy | Behavior |
+| --- | --- |
+| `fallback` (default) | Clear all clients for that worker, stop constructing clients, and use the legacy I/O sleep path. |
+| `abort` | Print the connection error and terminate LeafNodeRank with a nonzero exit status. |
+| `continue` | Warn, retain successful clients, and construct clients for the remaining EventBases. |
+
+In `continue` mode, outbound RPCs use the successful clients that remain.
+If every connection fails, the empty client list still selects legacy sleep.
+Both `fallback` and `continue` can change benchmark work. Use `abort` when
+benchmark validity requires all mock-service clients to connect:
+
+```bash
+./benchpress run feedsim_dlrm -i '{"mock_connect_failure_policy":"abort"}' -k perf
+```
+
+A worker logs its ready-client count after initialization. Startup failure
+policies do not add reconnection after the worker begins serving requests.
