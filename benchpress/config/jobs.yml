@@ -514,6 +514,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/mock_services*.log*'
           - 'benchmarks/feedsim/src/perf.data'
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
@@ -574,6 +575,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/mock_services*.log*'
           - 'benchmarks/feedsim/src/perf.data'
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
@@ -617,6 +619,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/mock_services*.log*'
           - 'benchmarks/feedsim/src/perf.data'
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
@@ -701,6 +704,7 @@
         after:
           - 'benchmarks/feedsim/feedsim_results*.txt'
           - 'benchmarks/feedsim/feedsim-multi-inst-*.log'
+          - 'benchmarks/feedsim/mock_services*.log*'
           - 'benchmarks/feedsim/src/perf.data'
           - 'benchmarks/feedsim/breakdown.csv'
           - '/tmp/feedsim_log.txt'
