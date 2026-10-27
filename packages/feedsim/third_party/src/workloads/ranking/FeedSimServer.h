@@ -40,8 +40,10 @@ class RequestContext {
   const void* payload;
 
   void sendResponse(const void* data, uint32_t data_length);
+  void sendErrorResponse();
 
  private:
+  void sendResponseImpl(const void* data, uint32_t data_length, bool failed);
   struct Impl;
   std::unique_ptr<Impl> impl_;
 

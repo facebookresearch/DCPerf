@@ -109,6 +109,8 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
 
+  server->setWriteBatchingInterval(std::chrono::milliseconds::zero());
+
   LOG(INFO) << "mock_services listening on port " << FLAGS_port
             << " with " << io_threads << " IO worker threads"
             << "; Silesia corpus from " << FLAGS_silesia_dir

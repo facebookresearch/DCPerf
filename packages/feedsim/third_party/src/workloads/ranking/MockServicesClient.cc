@@ -14,10 +14,15 @@
 
 #include "MockServicesClient.h"
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
+#include <iostream>
+#include <sstream>
 #include <stdexcept>
+#include <vector>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include <cstdlib>
@@ -36,6 +41,19 @@
 #include "mock_services/gen-cpp2/MockServiceAsyncClient.h"
 
 namespace {
+class MockConnectCallback final : public folly::AsyncSocket::ConnectCallback {
+ public:
+  folly::Promise<folly::Unit> promise;
+
+  void connectSuccess() noexcept override {
+    promise.setValue(folly::unit);
+  }
+
+  void connectErr(const folly::AsyncSocketException& error) noexcept override {
+    promise.setException(error);
+  }
+};
+
 // LeafNodeRank uses gengetopt (not gflags) for CLI parsing, so we cannot add
 // CLI flags here. Read knobs from env vars instead. Set MOCK_TLS=1 to use
 // AsyncSSLSocket (with ALPN "rs" so the server routes the connection into
@@ -118,7 +136,9 @@ class MockServicesClient::KeepaliveTimer : public folly::AsyncTimeout {
 
   // Caller must invoke from the EventBase thread (or via
   // runInEventBaseThread). scheduleTimeout itself is thread-affine.
-  void start() { scheduleTimeout(interval_); }
+  void start() {
+    scheduleTimeout(interval_);
+  }
 
   void timeoutExpired() noexcept override {
     // Reschedule first so we don't drop the next tick if dispatch throws.
@@ -152,11 +172,19 @@ MockServicesClient::MockServicesClient(
     folly::EventBase* evb,
     const std::string& host,
     uint16_t port,
-    std::chrono::milliseconds keepalive_interval)
+    std::chrono::milliseconds keepalive_interval,
+    const MockServicesConnectionOptions& connection_options)
     : evb_(evb) {
   if (evb_ == nullptr) {
     throw std::invalid_argument(
         "MockServicesClient: EventBase must not be null");
+  }
+  if (connection_options.retries < 0 ||
+      connection_options.initial_backoff.count() <= 0 ||
+      connection_options.max_backoff < connection_options.initial_backoff ||
+      connection_options.probe_timeout.count() <= 0) {
+    throw std::invalid_argument(
+        "Invalid mock_services connection retry options");
   }
 
   // RocketClientChannel must be created on the EventBase thread. Use
@@ -173,90 +201,142 @@ MockServicesClient::MockServicesClient(
   const int frac_bucket = static_cast<int>(kZstdFrac * 100);
   const bool use_zstd = (my_idx % 100) < static_cast<std::size_t>(frac_bucket);
   LOG_FIRST_N(INFO, 1) << "MockServicesClient: ZSTD fraction = " << kZstdFrac
-                       << " (per-channel deterministic enable, "
-                       << frac_bucket << " of every 100 channels)";
-  evb_->runInEventBaseThreadAndWait([this, &host, port, use_tls, use_zstd]() {
-    folly::SocketAddress addr(host, port, /*allowNameLookup=*/true);
+                       << " (per-channel deterministic enable, " << frac_bucket
+                       << " of every 100 channels)";
+  // Optional local source IPs partition ephemeral-port capacity while keeping
+  // one logical client per worker/EventBase. Select once so retries preserve
+  // the client index, source partition and compression choice.
+  std::string source_ip;
+  const char* source_ips = std::getenv("MOCK_CONNECT_BIND_IPS");
+  if (source_ips != nullptr && source_ips[0] != '\0') {
+    std::istringstream input(source_ips);
+    std::vector<std::string> addresses;
+    std::string address;
+    while (std::getline(input, address, ',')) {
+      if (address.empty()) {
+        throw std::invalid_argument("Empty IP in MOCK_CONNECT_BIND_IPS");
+      }
+      folly::SocketAddress parsed(address, 0, /*allowNameLookup=*/false);
+      addresses.push_back(parsed.getAddressStr());
+    }
+    if (addresses.empty()) {
+      throw std::invalid_argument("MOCK_CONNECT_BIND_IPS must contain IPs");
+    }
+    source_ip = addresses[my_idx % addresses.size()];
+  }
+  folly::SocketAddress addr(host, port, /*allowNameLookup=*/true);
+  folly::SocketAddress bind_address;
+  if (!source_ip.empty()) {
+    bind_address.setFromIpPort(source_ip, 0);
+    if (bind_address.getFamily() != addr.getFamily()) {
+      throw std::invalid_argument(
+          "MOCK_CONNECT_BIND_IPS and mock host must use the same IP family");
+    }
+  }
+  auto backoff = connection_options.initial_backoff;
+  for (int attempt = 0;; ++attempt) {
+    MockConnectCallback connect_callback;
     folly::AsyncSocket::UniquePtr socket;
-    if (use_tls) {
-      auto ssl_ctx = std::make_shared<folly::SSLContext>();
-      // Benchmark-only: skip peer cert verification so example certs work.
-      ssl_ctx->authenticate(/*checkPeerCert=*/false, /*checkPeerName=*/false);
-      ssl_ctx->setVerificationOption(
-          folly::SSLContext::SSLVerifyPeerEnum::NO_VERIFY);
-      // ALPN "rs" tells the server to route this TLS connection into the
-      // Rocket transport (matches `RocketOverSSLNoALPN` test pattern in
-      // pinned fbthrift v2026.01.05.00). Without ALPN, the server may
-      // reject the connection or fall back to the header-upgrade path.
-      ssl_ctx->setAdvertisedNextProtocols({"rs"});
-      // Restrict the offered ciphers to AES-GCM so the connection negotiates
-      // hardware AES, matching prod's cipher. Without this, OpenSSL may pick
-      // ChaCha20-Poly1305, a cipher with no hardware-AES path, which runs the
-      // AEAD un-accelerated.
-      SSL_CTX_set_ciphersuites(
-          ssl_ctx->getSSLCtx(),
-          "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256"); // TLS 1.3
-      ssl_ctx->setCiphersOrThrow(
-          "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
-          "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"); // TLS 1.2
-      folly::AsyncSSLSocket::UniquePtr ssl_sock(
-          new folly::AsyncSSLSocket(ssl_ctx, evb_));
-      // AsyncSSLSocket buffers writes until the TLS handshake completes,
-      // so RocketClientChannel's setup frame goes out only AFTER TLS is
-      // negotiated. Passing nullptr connect-callback is the canonical
-      // fbthrift pattern (see RocketOverSSLNoALPN in ThriftServerTest.cpp).
-      ssl_sock->connect(/*callback=*/nullptr, addr);
-      socket = std::move(ssl_sock);
-    } else {
-      socket.reset(new folly::AsyncSocket(evb_, addr));
-    }
-    auto channel =
-        apache::thrift::RocketClientChannel::newChannel(std::move(socket));
-    if (use_zstd) {
-      apache::thrift::CompressionConfig compressionConfig;
-      compressionConfig.codecConfig().ensure().set_zstdConfig();
-      channel->setDesiredCompressionConfig(compressionConfig);
-    }
-    client_ =
-        std::make_unique<mock_services::MockServiceAsyncClient>(
+    try {
+      auto connected = connect_callback.promise.getSemiFuture();
+      evb_->runInEventBaseThreadAndWait([this,
+                                         &addr,
+                                         &bind_address,
+                                         use_tls,
+                                         &socket,
+                                         &source_ip,
+                                         &connect_callback,
+                                         &connection_options]() {
+        if (use_tls) {
+          auto ssl_ctx = std::make_shared<folly::SSLContext>();
+          // Benchmark-only: skip peer cert verification so example certs work.
+          ssl_ctx->authenticate(/*checkPeerCert=*/false,
+                                /*checkPeerName=*/false);
+          ssl_ctx->setVerificationOption(
+              folly::SSLContext::SSLVerifyPeerEnum::NO_VERIFY);
+          // ALPN "rs" tells the server to route this TLS connection into the
+          // Rocket transport (matches `RocketOverSSLNoALPN` test pattern in
+          // pinned fbthrift v2026.01.05.00). Without ALPN, the server may
+          // reject the connection or fall back to the header-upgrade path.
+          ssl_ctx->setAdvertisedNextProtocols({"rs"});
+          // Restrict the offered ciphers to AES-GCM so the connection
+          // negotiates hardware AES, matching prod's cipher. Without this,
+          // OpenSSL may pick ChaCha20-Poly1305, a cipher with no hardware-AES
+          // path, which runs the AEAD un-accelerated.
+          SSL_CTX_set_ciphersuites(
+              ssl_ctx->getSSLCtx(),
+              "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256"); // TLS 1.3
+          ssl_ctx->setCiphersOrThrow(
+              "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
+              "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"); // TLS 1.2
+          folly::AsyncSSLSocket::UniquePtr ssl_sock(
+              new folly::AsyncSSLSocket(ssl_ctx, evb_));
+          socket = std::move(ssl_sock);
+        } else {
+          socket.reset(new folly::AsyncSocket(evb_));
+        }
+        const int timeout_ms =
+            static_cast<int>(connection_options.probe_timeout.count());
+        if (source_ip.empty()) {
+          socket->connect(&connect_callback, addr, timeout_ms);
+        } else {
+          socket->connect(
+              &connect_callback,
+              addr,
+              timeout_ms,
+              folly::emptySocketOptionMap,
+              bind_address);
+        }
+      });
+      // AsyncSSLSocket's connectSuccess fires after the TLS handshake.
+      // Rocket must not install its read callback on a connecting socket.
+      auto connected_result = std::move(connected)
+                                  .within(connection_options.probe_timeout)
+                                  .getTry();
+      if (connected_result.hasException()) {
+        std::rethrow_exception(
+            connected_result.exception().to_exception_ptr());
+      }
+      evb_->runInEventBaseThreadAndWait([this, &socket, use_zstd]() {
+        auto channel =
+            apache::thrift::RocketClientChannel::newChannel(std::move(socket));
+        if (use_zstd) {
+          apache::thrift::CompressionConfig compressionConfig;
+          compressionConfig.codecConfig().ensure().set_zstdConfig();
+          channel->setDesiredCompressionConfig(compressionConfig);
+        }
+        client_ = std::make_unique<mock_services::MockServiceAsyncClient>(
             std::move(channel));
-  });
+      });
 
-  // Synchronously verify connectivity by issuing a tiny probe RPC against
-  // getStatus (lightest method per rpc_dist.json: p05 ~259us, smallest
-  // payloads). folly::AsyncSocket(evb, addr) only *initiates* an async
-  // connect -- it does NOT throw on connect refused / host unreachable,
-  // so without this probe a misconfigured deployment would silently leave
-  // mock_client non-null and every per-RPC future would fail at request
-  // time, getting swallowed to 0 by the .thenError handler in
-  // issueOutboundFanout (LeafNodeRank.cc). That bypasses I/O simulation
-  // entirely. Probing here surfaces the failure as a constructor
-  // exception, which the existing try/catch in ThreadStartup
-  // (LeafNodeRank.cc) catches to reset mock_client and fall back to the
-  // legacy folly::futures::sleep path.
-  //
-  // CRITICAL: the probe MUST be issued from the constructor's caller
-  // thread, NOT from inside runInEventBaseThreadAndWait. The EventBase
-  // thread is the only thread that can drive socket connect/IO events
-  // and the Rocket handshake; if we block it via getTry() inside the
-  // EventBase loop, the connect POLLOUT and handshake events never get
-  // processed and the probe deadlocks until the within() timer fires
-  // from the separate folly timer wheel. RequestChannel's send-path
-  // auto-dispatches the call onto the channel's EventBase
-  // (fbcode/thrift/lib/cpp2/async/RequestChannel.h:415-424), so calling
-  // semifuture_getStatus() from any thread is safe; only the wait must
-  // be on a different thread than the EventBase.
-  std::string probe(4, '\0');
-  writeBigEndianResponseSize(probe.data(), 4);
-  auto result = client_->semifuture_getStatus(probe, /*latency_us=*/0)
-                    .within(std::chrono::seconds(30))
-                    .getTry();
-  if (result.hasException()) {
-    // Reset client_ on the EventBase thread before throwing, so the
-    // partially-constructed AsyncClient is destroyed on the correct
-    // thread (channel/socket are thread-affine).
-    evb_->runInEventBaseThreadAndWait([this]() { client_.reset(); });
-    std::rethrow_exception(result.exception().to_exception_ptr());
+      // Dispatch on the channel's EventBase and wait on the startup worker.
+      auto response = folly::makeSemiFuture();
+      evb_->runInEventBaseThreadAndWait([this, &response]() {
+        response = client_->semifuture_checkReady();
+      });
+      auto result = std::move(response)
+                        .within(connection_options.probe_timeout)
+                        .getTry();
+      if (result.hasException()) {
+        std::rethrow_exception(result.exception().to_exception_ptr());
+      }
+      break;
+    } catch (const std::exception& e) {
+      // Destroy a pending socket on its EventBase while the callback is alive.
+      evb_->runInEventBaseThreadAndWait([this, &socket]() {
+        client_.reset();
+        socket.reset();
+      });
+      if (attempt == connection_options.retries) {
+        throw;
+      }
+      std::cerr << "WARNING: mock_services connection to " << host << ":" << port
+                   << " failed: " << e.what() << "; retry " << attempt + 1
+                   << "/" << connection_options.retries << " in "
+                   << backoff.count() << " ms" << std::endl;
+      std::this_thread::sleep_for(backoff);
+      backoff = std::min(connection_options.max_backoff, backoff * 2);
+    }
   }
 
   // Start keepalive timer if requested. Must be constructed and started
@@ -290,7 +370,9 @@ MockServicesClient::~MockServicesClient() {
 }
 
 folly::SemiFuture<std::string> MockServicesClient::dispatchByEnum(
-    MethodIdx idx, const std::string& request, int32_t latency_us) {
+    MethodIdx idx,
+    const std::string& request,
+    int32_t latency_us) {
   // Compile-time switch over MethodIdx. Each case calls the named
   // generated semifuture_<method>() so Strobelight sees distinct
   // AsyncClient::send_<method> symbols — the whole reason we declared

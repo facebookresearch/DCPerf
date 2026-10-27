@@ -24,6 +24,7 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -550,8 +551,12 @@ void ThreadStartup(
   this_thread.rpc_registry = g_rpc_registry.get();
   this_thread.rpc_silesia = g_rpc_silesia;
   this_thread.rpc_rng.seed(detRngSeedTid(0x2C519A00u, thread_id));
-  if (this_thread.rpc_registry != nullptr && srEventBasePool != nullptr) {
+  const bool has_mock_clients =
+      this_thread.rpc_registry != nullptr && srEventBasePool != nullptr;
+  size_t expected_mock_clients = 0;
+  if (has_mock_clients) {
     auto evbs = srEventBasePool->getAllEventBases();
+    expected_mock_clients = evbs.size();
     this_thread.mock_clients.reserve(evbs.size());
     for (size_t i = 0; i < evbs.size(); ++i) {
       try {
@@ -561,14 +566,33 @@ void ThreadStartup(
                 args.mock_services_host_arg,
                 static_cast<uint16_t>(args.mock_services_port_arg),
                 std::chrono::milliseconds(
-                    args.mock_keepalive_interval_ms_arg)));
+                    args.mock_keepalive_interval_ms_arg),
+                ranking::MockServicesConnectionOptions{
+                    args.mock_connect_retries_arg,
+                    std::chrono::milliseconds(args.mock_connect_initial_backoff_ms_arg),
+                    std::chrono::milliseconds(args.mock_connect_max_backoff_ms_arg),
+                    std::chrono::milliseconds(args.mock_connect_timeout_ms_arg)}));
       } catch (const std::exception& e) {
         std::cerr << "Failed to connect to mock_services on "
                   << args.mock_services_host_arg << ":"
                   << args.mock_services_port_arg
                   << " (thread " << thread_id << ", evb " << i << "): "
-                  << e.what()
-                  << ". Falling back to legacy folly::futures::sleep path."
+                  << e.what() << std::endl;
+        const std::string policy = args.mock_connect_failure_policy_arg;
+        if (policy == "abort") {
+          std::cerr << "ERROR: mock_services connection retries exhausted; "
+                    << "aborting LeafNodeRank (thread " << thread_id
+                    << ", evb " << i << ")" << std::endl;
+          // Other workers may still be initializing thread-affine resources.
+          std::_Exit(EXIT_FAILURE);
+        }
+        if (policy == "continue") {
+          std::cerr << "WARNING: retaining " << this_thread.mock_clients.size()
+                    << " mock_services clients for thread " << thread_id
+                    << " and continuing initialization" << std::endl;
+          continue;
+        }
+        std::cerr << "WARNING: Falling back to legacy folly::futures::sleep path."
                   << std::endl;
         this_thread.mock_clients.clear();
         break;
@@ -654,6 +678,13 @@ void ThreadStartup(
   } else {
     this_thread.io_latency_dist_type = IOLatencyDistType::FIXED;
   }
+
+  std::ostringstream ready;
+  ready << "mock_services worker " << thread_id << ": "
+        << this_thread.mock_clients.size() << "/" << expected_mock_clients
+        << " clients ready; failure_policy="
+        << args.mock_connect_failure_policy_arg << "\n";
+  std::cerr << ready.str();
 }
 
 #ifdef BENCHPRESS_INTERNAL
@@ -1222,7 +1253,7 @@ void DLRMRequestHandler(
     apache::thrift::CompactSerializer::deserialize(&buf, request);
   } catch (const std::exception& e) {
     std::cerr << "Failed to deserialize RankingRequest: " << e.what() << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -1395,7 +1426,7 @@ void DLRMRequestHandler(
                  [context_ptr](const std::exception& e) {
                    std::cerr << "DLRM request handler error: " << e.what()
                              << std::endl;
-                   context_ptr->sendResponse(nullptr, 0);
+                   context_ptr->sendErrorResponse();
                  });
 }
 
@@ -1658,7 +1689,7 @@ void CreateAndPrimeSessionRequestHandler(
   } catch (const std::exception& e) {
     std::cerr << "CreateAndPrimeSession: deserialize failed: " << e.what()
               << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -1727,7 +1758,7 @@ void GetStoriesUncompressedRequestHandler(
   } catch (const std::exception& e) {
     std::cerr << "GetStoriesUncompressed: deserialize failed: " << e.what()
               << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -1858,7 +1889,7 @@ void GetStoriesUncompressedRequestHandler(
           [context_ptr](const std::exception& e) {
             std::cerr << "GetStoriesUncompressed handler error: " << e.what()
                       << std::endl;
-            context_ptr->sendResponse(nullptr, 0);
+            context_ptr->sendErrorResponse();
           });
 }
 
@@ -1889,7 +1920,7 @@ void GetAllStoriesRequestHandler(
     apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
   } catch (const std::exception& e) {
     std::cerr << "GetAllStories: deserialize failed: " << e.what() << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -1956,7 +1987,7 @@ void GetAllStoriesRequestHandler(
           [context_ptr](const std::exception& e) {
             std::cerr << "GetAllStories handler error: " << e.what()
                       << std::endl;
-            context_ptr->sendResponse(nullptr, 0);
+            context_ptr->sendErrorResponse();
           });
 }
 
@@ -1985,7 +2016,7 @@ void StreamDataRequestHandler(
     apache::thrift::CompactSerializer::deserialize(&buf, typed_req);
   } catch (const std::exception& e) {
     std::cerr << "StreamData: deserialize failed: " << e.what() << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -2056,7 +2087,7 @@ void StreamIfrPriorityRankingRequestHandler(
   } catch (const std::exception& e) {
     std::cerr << "StreamIfrPriorityRanking: deserialize failed: " << e.what()
               << std::endl;
-    context.sendResponse(nullptr, 0);
+    context.sendErrorResponse();
     return;
   }
 
@@ -2163,7 +2194,7 @@ void StreamIfrPriorityRankingRequestHandler(
           [context_ptr](const std::exception& e) {
             std::cerr << "StreamIfrPriorityRanking handler error: " << e.what()
                       << std::endl;
-            context_ptr->sendResponse(nullptr, 0);
+            context_ptr->sendErrorResponse();
           });
 }
 
@@ -2171,6 +2202,13 @@ int main(int argc, char** argv) {
   if (cmdline_parser(argc, argv, &args) != 0) {
     std::cerr << "cmdline_parser failed" << std::endl;
     return 1;
+  }
+  if (args.mock_connect_retries_arg < 0 ||
+      args.mock_connect_initial_backoff_ms_arg <= 0 ||
+      args.mock_connect_max_backoff_ms_arg < args.mock_connect_initial_backoff_ms_arg ||
+      args.mock_connect_timeout_ms_arg <= 0) {
+    std::cerr << "Invalid mock_services connection retry options" << std::endl;
+    return EXIT_FAILURE;
   }
 
   // Logging level is no longer used (oldisim log macros removed).
@@ -2247,8 +2285,15 @@ int main(int argc, char** argv) {
   // per-request construct+destruct chain.
   initResponseTemplatePool(args.num_objects_arg);
 
-  int fake_argc = 1;
-  char* fake_argv[2] = {const_cast<char*>("./LeafNodeRank"), nullptr};
+  if (args.cpu_executor_threads_arg < 0 || args.io_threads_arg < 0) {
+    std::cerr << "CPU executor and I/O thread counts must be nonnegative" << std::endl;
+    return 1;
+  }
+  std::string cpu_executor_flag = "--folly_global_cpu_executor_threads=" +
+      std::to_string(args.cpu_executor_threads_arg);
+  int fake_argc = 2;
+  char* fake_argv[3] = {
+      const_cast<char*>("./LeafNodeRank"), cpu_executor_flag.data(), nullptr};
   char** sargv = static_cast<char**>(fake_argv);
   const folly::Init init(&fake_argc, &sargv);
 
@@ -2256,6 +2301,8 @@ int main(int argc, char** argv) {
   // /proc/$pid/task/*/comm and profilers) match a production aggregator's
   // thread profile: ThriftSrv.IO, RANKER, SREventBase, GlobalCPUThread.
   const unsigned int nproc = folly::available_concurrency();
+  const int ioThreads = args.io_threads_arg > 0
+      ? args.io_threads_arg : static_cast<int>(nproc);
 
   // GlobalCPUThread: shared folly singleton. DLRM inference, feature
   // extraction, and compression all dispatch here. DO NOT construct a
@@ -2263,6 +2310,12 @@ int main(int argc, char** argv) {
   // global executor (folly/executors/GlobalExecutor.cpp) already has that
   // name and is sized to nproc by default.
   auto globalCpuKa = folly::getGlobalCPUExecutor();
+  const auto cpuExecutorThreads =
+      folly::getGlobalCPUExecutorCounters().numThreads;
+  if (cpuExecutorThreads == 0) {
+    std::cerr << "CPU executor has no inference threads" << std::endl;
+    return 1;
+  }
   folly::Executor* globalCpuRaw = globalCpuKa.get();
   auto globalCpuKaPtr =
       std::make_shared<folly::Executor::KeepAlive<>>(std::move(globalCpuKa));
@@ -2281,7 +2334,7 @@ int main(int argc, char** argv) {
 
   // ThriftSrv.IO: inbound RPC IO loop. Renamed (was anonymous folly default).
   auto ioThreadPool = std::make_shared<folly::IOThreadPoolExecutor>(
-      args.io_threads_arg,
+      ioThreads,
       std::make_shared<folly::NamedThreadFactory>("ThriftSrv.IO"));
 
   // SREventBase: outbound-RPC EventBase pool. Carries the
@@ -2297,10 +2350,10 @@ int main(int argc, char** argv) {
       std::make_shared<folly::NamedThreadFactory>("SREventBase"));
 
   std::cout << "Thread pools (nproc=" << nproc << "): "
-            << "GlobalCPUThread (folly singleton), "
+            << "GlobalCPUThread=" << cpuExecutorThreads << ", "
             << "RANKER=" << rankerThreads << ", "
             << "SREventBase=" << srEventBaseThreads << ", "
-            << "ThriftSrv.IO=" << args.io_threads_arg << std::endl;
+            << "ThriftSrv.IO=" << ioThreads << std::endl;
 
   auto timekeeperPool =
       std::make_shared<ranking::TimekeeperPool>(args.timekeeper_threads_arg);
@@ -2363,7 +2416,7 @@ int main(int argc, char** argv) {
   }
   std::cout << "Thread pool warmup complete" << std::endl;
 
-  std::vector<ThreadData> thread_data(args.threads_arg);
+  std::vector<ThreadData> thread_data(ioThreads);
 
   // Initialize the shared DLRM model.
   if (!args.dlrm_model_path_given) {
@@ -2383,7 +2436,9 @@ int main(int argc, char** argv) {
   // Create shared DLRM model (thread-safe for inference)
   std::shared_ptr<ranking::dwarfs::DLRM> shared_dlrm_ranker =
       std::make_shared<ranking::dwarfs::DLRM>(
-          dlrm_params, args.threads_arg, dlrm_seed);
+          dlrm_params, cpuExecutorThreads, dlrm_seed);
+  std::cout << "DLRM states=" << cpuExecutorThreads
+            << " CPU executor threads=" << cpuExecutorThreads << std::endl;
 
   // Warm up DLRM model to stabilize inference latency
   // JIT compilation and memory allocation happen on first few inferences
@@ -2448,7 +2503,7 @@ int main(int argc, char** argv) {
             thread_id, context, thread_data);
       });
 
-  server.setNumThreads(args.threads_arg);
+  server.setNumThreads(ioThreads);
   server.setThreadPinning(args.noaffinity_given == 0u);
   server.setThreadLoadBalancing(args.noloadbalance_given == 0u);
 
