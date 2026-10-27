@@ -285,6 +285,22 @@ target_link_libraries(FeedSimFramework
 # Build mock_services standalone Thrift server (Phase 5)
 add_subdirectory(mock_services)
 
+add_executable(mock_services_probe
+    MockServicesProbe.cc
+    MockServicesClient.cc
+)
+add_dependencies(mock_services_probe fbthrift folly libaegis MockService-cpp2-target)
+target_include_directories(mock_services_probe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${FOLLY_INCLUDE_DIR}
+    ${FBTHRIFT_INCLUDE_DIR}
+)
+get_target_property(MOCK_SERVICES_LINK_LIBS mock_services LINK_LIBRARIES)
+target_link_libraries(mock_services_probe PRIVATE
+    ${MOCK_SERVICES_LINK_LIBS}
+    ${GFLAGS_TARGET}
+)
+
 # Build LeafNodeRank binary
 #
 # Phase 5: MockServicesClient.cc is compiled into LeafNodeRank so the
