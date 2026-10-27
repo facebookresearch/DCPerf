@@ -173,48 +173,44 @@ breakdown at `benchmark_metrics_<run_id>/breakdown.csv`.
 
 `feedsim_dlrm_mini` is the Mini version of `feedsim_dlrm`. After a short warmup,
 it drives a fixed load for 10 seconds and reports the QPS the server sustains.
-On 16 cores, it takes about 28 s and peak memory is about 7 GiB.
 
 ### Run with benchpress
 
 Install the benchmark first (see [Install](#install)), then run:
 
-```
+```bash
 ./benchpress_cli.py run feedsim_dlrm_mini
 ```
 
 ### Run with run-feedsim-multi.sh
 
-Run the script directly when you need the shortest run and the smallest memory
-footprint, for example on an emulator: it skips benchpress's start-up, hooks
-and result handling. Run it with the job's arguments, as root:
+Run the script directly for short runs on an emulator, as root:
 
-```
+```bash
 cd <path_to_DCPerf>
-./benchmarks/feedsim/run-feedsim-multi.sh -n 1 -t 0 -q 100 -d 10 -w 10 -r -1 \
+./benchmarks/feedsim/run-feedsim-multi.sh -n 1 -q 100 -d 10 -w 10 -r -1 \
   -x -1 -D 1 -R 42 -C 42 -N --depth=2 | tee mini.log
 ```
 
 The output includes a JSON object. The score is `final_achieved_qps` in its
-`overall` section divide by 57. For example:
+`overall` section divided by 57. For example, 88.18 QPS gives 1.547.
 
+### Bound the thread pools and memory footprint
+
+The retired `thrift_threads` / `run.sh -t` / Leaf `--threads` controls
+are replaced by `io_threads` and `cpu_executor_threads`. Both default to
+0 (available CPUs). DLRM allocates exactly one state per configured global
+CPU executor thread, independently of the inbound I/O thread count.
+
+For a smaller Mini footprint, bound both pools, for example:
+
+```bash
+./benchpress run feedsim_dlrm_mini -i '{"io_threads":8,"cpu_executor_threads":8}'
 ```
-  "overall": {
-    "final_requested_qps": 100.00,
-    "final_achieved_qps": 88.18,
-```
 
-In this example, the score is 88.18 / 57 = 1.547.
-
-### Use less memory
-
-Run fewer thrift threads with `thrift_threads` (`-t` for the script). Each
-thread keeps its own copy of the dataset, about 0.33 GB; the default, 0, starts
-one per usable core. With 8 threads, the job uses about 3.3 GB:
-
-```
-./benchpress_cli.py run feedsim_dlrm_mini -i '{"thrift_threads": "8"}'
-```
+The old memory measurements do not apply to the revised pool sizing. A CPU
+cpuset also bounds the automatic defaults. `run.sh` accepts `--io-threads`
+and `--cpu-executor-threads`; Leaf accepts their underscore spellings.
 
 ## Advanced usage
 
@@ -386,3 +382,98 @@ Again, due to the fundamental change in software architecture and threading mode
 the legacy PageRank-based v1 job has become inaccurate and will not be supported here. If you would like to
 run it, please check out the [main branch](https://github.com/facebookresearch/DCPerf/tree/main/packages/feedsim)
 for Github users or the `v1` folder under the DCPerf root for internal users.
+
+## Mock-service connection retries
+
+MockServicesClient creates a fresh connection for each attempt and probes
+`getStatus` before accepting it. TCP/TLS connection completion is awaited
+before creating the Rocket channel, so a pending TLS handshake cannot expose
+an invalid socket state to its read callback. The default is one initial attempt plus five
+retries, with 100, 200, 400, 800 and 1,000 ms delays. Exceptions are rethrown
+only after retries are exhausted; successful initialization starts keepalive.
+
+| Benchpress parameter | run.sh option | Default |
+| --- | --- | --- |
+| `mock_connect_retries` | `--mock-connect-retries` | 5 |
+| `mock_connect_initial_backoff_ms` | `--mock-connect-initial-backoff-ms` | 100 |
+| `mock_connect_max_backoff_ms` | `--mock-connect-max-backoff-ms` | 1000 |
+| `mock_connect_timeout_ms` | `--mock-connect-timeout-ms` | 30000 per attempt |
+
+LeafNodeRank accepts the corresponding underscore options, such as
+`--mock_connect_retries=0` to disable retries. Backoff intervals and probe
+timeout must be positive, and maximum backoff must be at least the initial
+backoff. The probe timeout bounds each attempt, not the entire retry sequence.
+
+### Local connection capacity
+
+A worker creates a client for every SREventBase. On large hosts this exceeds
+one source IP's ephemeral-port capacity (for example, 216 workers ×176
+SREventBases =38,016 connections versus 32,768 ports in 32768–65535). The multi-instance runner defaults
+its mock-service host to `127.0.0.1` and uses multiple loopback source IPs:
+`127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5`. It retains the full client pool.
+
+`MOCK_SERVICES_HOST` overrides the host used by the Leaf and readiness probe.
+`MOCK_CONNECT_BIND_IPS` sets comma-separated numeric source IPs, selected
+round-robin once per logical client. Source and destination must use the same
+IP family. Set it to an empty string for normal OS-selected binding. Direct
+MockServicesClient callers use normal binding unless the variable is set.
+The automatic four-IP default applies only to the runner's IPv4 loopback
+host. Larger pools may require more IPs; port range, reserved ports and
+TIME_WAIT reuse also affect available capacity.
+
+### Connection failure policy
+
+`--mock-connect-failure-policy` (`mock_connect_failure_policy` in Benchpress)
+selects what a server worker does after connection retries are exhausted:
+
+| Policy | Behavior |
+| --- | --- |
+| `fallback` (default) | Clear all clients for that worker, stop constructing clients, and use the legacy I/O sleep path. |
+| `abort` | Print the connection error and terminate LeafNodeRank with a nonzero exit status. |
+| `continue` | Warn, retain successful clients, and construct clients for the remaining EventBases. |
+
+In `continue` mode, outbound RPCs use the successful clients that remain.
+If every connection fails, the empty client list still selects legacy sleep.
+Both `fallback` and `continue` can change benchmark work. Use `abort` when
+benchmark validity requires all mock-service clients to connect:
+
+```bash
+./benchpress run feedsim_dlrm -i '{"mock_connect_failure_policy":"abort"}' -k perf
+```
+
+A worker logs its ready-client count after initialization. `run.sh` waits
+for every worker report and the listening port before starting the driver,
+so a late startup failure cannot begin a QPS search. The existing 120-second
+Leaf startup deadline still applies. Startup policies do not add reconnection
+after the worker begins serving requests.
+
+### Mock-service readiness and regression tests
+
+`run-feedsim-multi.sh` waits for a successful Rocket `getStatus` RPC using
+`mock_services_probe` before starting each main FeedSim program. The probe
+uses the same client and TLS settings as mock-service connections. It has a
+100 ms per-attempt timeout, and failed probes are followed by a 100 ms wait.
+The default readiness deadline is 30 seconds, configurable with
+`FEEDSIM_MOCK_READY_TIMEOUT_SECS`. A dead service or expired deadline fails
+the run; failed FeedSim instance processes also return nonzero to Benchpress.
+Readiness diagnostics are written to `mock_services_N.log.readiness`.
+Mock services use a 1 ms write-batching timer to bound response flushing
+for isolated probes; the pinned Thrift/Folly end-of-loop flush can otherwise
+wait for another socket event, including with TLS. Actual delay is subject
+to the Thrift timer resolution (approximately 10 ms in the pinned build),
+so this also bounds flushing during benchmark RPCs.
+
+Run the network regression tests after installation, with the installed
+build's library paths configured as for `run-feedsim-multi.sh`:
+
+```bash
+python3 packages/feedsim/test_mock_connections.py \
+  --feedsim-root "$PWD/benchmarks/feedsim" -v
+```
+
+The tests exercise real plaintext/TLS Rocket endpoints, reject TCP-only and
+wrong-TLS endpoints, verify source-IP binding and capped backoff, delayed-start recovery and delayed TLS handshakes, and
+force one successful client followed by a refused connection to distinguish
+all three failure policies. They also verify runner readiness and failure
+propagation. Run tests before benchmarks because the runner tests use the
+normal FeedSim ports.

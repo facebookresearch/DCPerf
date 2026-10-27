@@ -97,7 +97,26 @@ PIDS=()
 # manual runs and with --mock_services_port=21222 in run.sh defaults.)
 MOCK_SERVICES_PORT_BASE=21222
 MOCK_SERVICES_BIN="${FEEDSIM_ROOT}/src/build/workloads/ranking/mock_services/mock_services"
+MOCK_SERVICES_PROBE="${FEEDSIM_ROOT}/src/build/workloads/ranking/mock_services_probe"
 MOCK_SERVICES_PIDS=()
+
+# A large worker/EventBase matrix exceeds one loopback source IP's port range.
+# Keep the full client pool and partition local TCP tuples across source IPs.
+export MOCK_SERVICES_HOST="${MOCK_SERVICES_HOST:-127.0.0.1}"
+if [ "$MOCK_SERVICES_HOST" = "127.0.0.1" ] && [ -z "${MOCK_CONNECT_BIND_IPS+x}" ]; then
+    read -r port_low port_high < /proc/sys/net/ipv4/ip_local_port_range
+    ports_per_ip=$((port_high - port_low + 1))
+    cpu_count=$(nproc)
+    source_count=$(((cpu_count * cpu_count * 7 / 10 + ports_per_ip - 1) / ports_per_ip + 1))
+    [ "$source_count" -ge 4 ] || source_count=4
+    source_ips=()
+    for ((source_index=2; source_index<source_count+2; source_index++)); do
+        source_ips+=("127.0.$((source_index / 256)).$((source_index % 256))")
+    done
+    MOCK_CONNECT_BIND_IPS=$(IFS=,; echo "${source_ips[*]}")
+    export MOCK_CONNECT_BIND_IPS
+fi
+echo "Mock-service connectivity: host=$MOCK_SERVICES_HOST bind_ips=${MOCK_CONNECT_BIND_IPS:-OS-selected}"
 
 # Resolve --silesia-dir from forwarded args ($@); fall back to the default
 # install layout (./silesia next to run.sh). mock_services requires Silesia
@@ -140,6 +159,10 @@ function start_mock_services() {
 
     if [ ! -x "$MOCK_SERVICES_BIN" ]; then
         echo "ERROR: mock_services binary not found at $MOCK_SERVICES_BIN" >&2
+        exit 1
+    fi
+    if [ ! -x "$MOCK_SERVICES_PROBE" ]; then
+        echo "ERROR: mock_services readiness probe not found at $MOCK_SERVICES_PROBE" >&2
         exit 1
     fi
     if [ ! -d "$SILESIA_DIR_ABS" ]; then
@@ -186,23 +209,34 @@ function start_mock_services() {
     local pid=$!
     MOCK_SERVICES_PIDS+=("$pid")
 
-    # TCP-poll readiness (mirrors the LeafNodeRank wait loop in run.sh).
-    local max_attempts=30
-    local attempt=0
-    while [ "$attempt" -lt "$max_attempts" ]; do
-        if (echo > /dev/tcp/localhost/"$port") 2>/dev/null; then
-            echo "mock_services is ready on port $port (pid=$pid)"
-            return 0
-        fi
+    local ready_timeout="${FEEDSIM_MOCK_READY_TIMEOUT_SECS:-30}"
+    if ! [[ "$ready_timeout" =~ ^[0-9]+$ ]] || [ "$ready_timeout" -le 0 ] || [ "$ready_timeout" -gt 2147483647 ]; then
+        echo "ERROR: invalid FEEDSIM_MOCK_READY_TIMEOUT_SECS: $ready_timeout" >&2
+        exit 1
+    fi
+    local deadline=$((SECONDS + ready_timeout))
+    local probe_log="${log_path}.readiness"
+    while [ "$SECONDS" -lt "$deadline" ]; do
         if ! kill -0 "$pid" 2>/dev/null; then
             echo "ERROR: mock_services died during startup. Tail of $log_path:" >&2
             tail -40 "$log_path" >&2
             exit 1
         fi
-        attempt=$((attempt + 1))
-        sleep 1
+        if MOCK_TLS="${FEEDSIM_TLS:-1}" "$MOCK_SERVICES_PROBE" \
+            --host="$MOCK_SERVICES_HOST" --port="$port" --timeout_ms=100 \
+            > "$probe_log" 2>&1; then
+            echo "mock_services RPC is ready on port $port (pid=$pid)"
+            return 0
+        fi
+        sleep 0.1
     done
-    echo "ERROR: mock_services failed to become ready within ${max_attempts}s on port $port" >&2
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "ERROR: mock_services died during startup. Tail of $log_path:" >&2
+        tail -40 "$log_path" >&2
+        exit 1
+    fi
+    echo "ERROR: mock_services failed RPC readiness within ${ready_timeout}s on port $port" >&2
+    tail -20 "$probe_log" >&2
     tail -40 "$log_path" >&2
     kill -SIGTERM "$pid" 2>/dev/null || true
     exit 1
@@ -322,15 +356,16 @@ for i in $(seq 1 ${NUM_INSTANCES}); do
     PORT=$((PORT + 1))
 done
 
-child_failure=0
+RUN_STATUS=0
 for pid in "${PIDS[@]}"; do
     if ! wait "$pid"; then
-        child_failure=1
+        echo "ERROR: feedsim instance process $pid failed" >&2
+        RUN_STATUS=1
     fi
 done
-if [ "$child_failure" -ne 0 ]; then
+if [ "$RUN_STATUS" -ne 0 ]; then
     echo "ERROR: one or more FeedSim instances failed; see ${FEEDSIM_LOG_PREFIX}*.log" >&2
-    exit 1
+    exit "$RUN_STATUS"
 fi
 
 BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'

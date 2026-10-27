@@ -22,7 +22,6 @@ function benchreps_tell_state () {
 
 # Function for BC
 BC_MAX_FN='define max (a, b) { if (a >= b) return (a); return (b); }'
-BC_MIN_FN='define min (a, b) { if (a <= b) return (a); return (b); }'
 
 # Constants
 FEEDSIM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
@@ -42,12 +41,9 @@ fi
 # Source runtime breakdown utilities
 source "${BENCHPRESS_ROOT}/packages/common/runtime_breakdown_utils.sh"
 
-# Thrift threads: scale with logical CPUs till 216. Having more than that
-# will risk running out of memory and getting killed
 # smt/active is absent on non-SMT architectures (e.g. ARM) and in some
 # containers; default to 0 instead of failing under `set -e`.
 IS_SMT_ON="$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo 0)"
-THRIFT_THREADS_DEFAULT="$(echo "${BC_MIN_FN}; min($(nproc), 216)" | bc)"
 EVENTBASE_THREADS_DEFAULT="$(nproc)"  # nproc threads so the ThriftSrv.IO pool isn't a 4-EB bottleneck. Each EB owns its own MockServicesClient so outbound RPC fanout (issueOutboundFanout) actually spreads across the SREventBase pool instead of serializing through 4 EBs.
 SRV_THREADS_DEFAULT=8        # 8 should also suffice for most purposes
 if [[ "$IS_SMT_ON" = 1 ]]; then
@@ -66,7 +62,8 @@ cat <<EOF
 Usage: ${0##*/} [OPTION]...
 
     -h Display this help and exit
-    -t Number of threads to use for thrift serving. Large dataset kept per thread. 0 = use the default. Default: $THRIFT_THREADS_DEFAULT
+    --io-threads Number of serving and I/O threads. 0 = available CPUs.
+    --cpu-executor-threads Number of CPU executor threads and DLRM states. 0 = available CPUs.
     -c Number of threads to use for fanout ranking work. Heavy CPU work. Default: $RANKING_THREADS_DEFAULT
     -l Number of threads to use for load generation in the drivers. Default: $DRIVER_THREADS
     -a When searching for the optimal QPS, automatically adjust the number of client driver threads by
@@ -106,6 +103,11 @@ Usage: ${0##*/} [OPTION]...
     --mock-tls Enable TLS on outbound MockServicesClient channels (0=off, 1=on). Default: 1.
     --mock-zstd-frac Fraction in [0.0, 1.0] of MockServicesClient channels with ZSTD enabled. Default: 0.9.
     --mock-keepalive-interval-ms Per-MockServicesClient keepalive ping interval (ms). 0=disabled. Default: 200.
+    --mock-connect-retries MockServicesClient connection retries. Default: 5.
+    --mock-connect-initial-backoff-ms MockServicesClient connection initial backoff ms. Default: 100.
+    --mock-connect-max-backoff-ms MockServicesClient connection max backoff ms. Default: 1000.
+    --mock-connect-timeout-ms MockServicesClient connection timeout ms. Default: 30000.
+    --mock-connect-failure-policy Action after retry exhaustion: fallback, abort, or continue. Default: fallback.
     --rpc-fanout-scale Scale factor applied to per-session fanout counts. Default: 0.10.
     --server-zstd Enable ZSTD compression on server-side response payloads (0=off, 1=on). Default: 1.
     --sla-p95-ms search_qps SLA target (95th percentile latency in ms). Default: 700.
@@ -134,8 +136,8 @@ die() {
 }
 
 main() {
-    local thrift_threads
-    thrift_threads="$THRIFT_THREADS_DEFAULT"
+    local io_threads="$EVENTBASE_THREADS_DEFAULT"
+    local cpu_executor_threads=0
 
     local ranking_cpu_threads
     ranking_cpu_threads="$RANKING_THREADS_DEFAULT"
@@ -258,6 +260,13 @@ main() {
     local mock_keepalive_interval_ms
     mock_keepalive_interval_ms="200"
 
+    local mock_connect_retries="${FEEDSIM_MOCK_CONNECT_RETRIES:-5}"
+    local mock_connect_initial_backoff_ms="${FEEDSIM_MOCK_CONNECT_INITIAL_BACKOFF_MS:-100}"
+    local mock_connect_max_backoff_ms="${FEEDSIM_MOCK_CONNECT_MAX_BACKOFF_MS:-1000}"
+    local mock_connect_timeout_ms="${FEEDSIM_MOCK_CONNECT_TIMEOUT_MS:-30000}"
+
+    local mock_connect_failure_policy="${FEEDSIM_MOCK_CONNECT_FAILURE_POLICY:-fallback}"
+
     local rpc_fanout_scale
     rpc_fanout_scale="0.10"
 
@@ -280,13 +289,19 @@ main() {
 
     while [ $# -ne 0 ]; do
         case $1 in
-            -t)
-                # 0 keeps THRIFT_THREADS_DEFAULT, so a job can request the
-                # core-scaled default and still expose -t for overriding.
-                if [ "$2" != "0" ]; then
-                    thrift_threads="$2"
-                fi
+            --io-threads)
+                io_threads="$2"
                 shift
+                ;;
+            --io-threads=*)
+                io_threads="${1#*=}"
+                ;;
+            --cpu-executor-threads)
+                cpu_executor_threads="$2"
+                shift
+                ;;
+            --cpu-executor-threads=*)
+                cpu_executor_threads="${1#*=}"
                 ;;
             -c)
                 ranking_cpu_threads="$2"
@@ -522,6 +537,41 @@ main() {
             --mock-keepalive-interval-ms=*)
                 mock_keepalive_interval_ms="${1#*=}"
                 ;;
+            --mock-connect-retries)
+                mock_connect_retries="$2"
+                shift
+                ;;
+            --mock-connect-retries=*)
+                mock_connect_retries="${1#*=}"
+                ;;
+            --mock-connect-initial-backoff-ms)
+                mock_connect_initial_backoff_ms="$2"
+                shift
+                ;;
+            --mock-connect-initial-backoff-ms=*)
+                mock_connect_initial_backoff_ms="${1#*=}"
+                ;;
+            --mock-connect-max-backoff-ms)
+                mock_connect_max_backoff_ms="$2"
+                shift
+                ;;
+            --mock-connect-max-backoff-ms=*)
+                mock_connect_max_backoff_ms="${1#*=}"
+                ;;
+            --mock-connect-timeout-ms)
+                mock_connect_timeout_ms="$2"
+                shift
+                ;;
+            --mock-connect-timeout-ms=*)
+                mock_connect_timeout_ms="${1#*=}"
+                ;;
+            --mock-connect-failure-policy)
+                mock_connect_failure_policy="$2"
+                shift
+                ;;
+            --mock-connect-failure-policy=*)
+                mock_connect_failure_policy="${1#*=}"
+                ;;
             --rpc-fanout-scale)
                 rpc_fanout_scale="$2"
                 shift
@@ -561,12 +611,33 @@ main() {
         shift # pop the previously read argument
     done
 
+    for option in io_threads cpu_executor_threads; do
+        value="${!option}"
+        if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -gt 2147483647 ]; then
+            die "Invalid ${option//_/-}: must be a nonnegative integer <= 2147483647"
+        fi
+    done
+
     # Validate long option arguments
     if [ "$async_io" = "1" ]; then
         if [ "$io_latency_distribution" != "fixed" ] && [ "$io_latency_distribution" != "exponential" ] && [ "$io_latency_distribution" != "lognormal" ]; then
             die "Invalid --io-dist value '$io_latency_distribution'. Must be 'fixed', 'exponential', or 'lognormal'."
         fi
     fi
+
+    for value in "$mock_connect_retries" "$mock_connect_initial_backoff_ms" "$mock_connect_max_backoff_ms" "$mock_connect_timeout_ms"; do
+        if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -gt 2147483647 ]; then
+            die "Invalid mock_services connection option: $value"
+        fi
+    done
+    if [ "$mock_connect_initial_backoff_ms" -le 0 ] || [ "$mock_connect_max_backoff_ms" -lt "$mock_connect_initial_backoff_ms" ] || [ "$mock_connect_timeout_ms" -le 0 ]; then
+        die "Connection backoff/timeout must be positive; maximum backoff must be at least the initial backoff"
+    fi
+
+    case "$mock_connect_failure_policy" in
+        fallback|abort|continue) ;;
+        *) die "Invalid mock_services failure policy: $mock_connect_failure_policy" ;;
+    esac
 
     create_breakdown_csv "$BREAKDOWN_FOLDER"
     # Phase timeline (per-instance, shared CSV in $BREAKDOWN_FOLDER):
@@ -695,10 +766,15 @@ main() {
     # std::getenv at thread/server startup.
     local mock_port="${MOCK_SERVICES_PORT:-21222}"
     local mock_services_opts="--rpc_dist_path=$rpc_dist_json"
-    mock_services_opts="$mock_services_opts --mock_services_host=localhost"
+    mock_services_opts="$mock_services_opts --mock_services_host=${MOCK_SERVICES_HOST:-localhost}"
     mock_services_opts="$mock_services_opts --mock_services_port=${mock_port}"
     mock_services_opts="$mock_services_opts --rpc_fanout_scale=${rpc_fanout_scale}"
     mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${mock_keepalive_interval_ms}"
+    mock_services_opts="$mock_services_opts --mock_connect_retries=${mock_connect_retries}"
+    mock_services_opts="$mock_services_opts --mock_connect_initial_backoff_ms=${mock_connect_initial_backoff_ms}"
+    mock_services_opts="$mock_services_opts --mock_connect_max_backoff_ms=${mock_connect_max_backoff_ms}"
+    mock_services_opts="$mock_services_opts --mock_connect_timeout_ms=${mock_connect_timeout_ms}"
+    mock_services_opts="$mock_services_opts --mock_connect_failure_policy=${mock_connect_failure_policy}"
     # MOCK_TLS env consumed by MockServicesClient::ctor (envBoolTrue("MOCK_TLS", false)).
     # When the user-facing --mock-tls flag is set to 1 (default), we export
     # both MOCK_TLS=1 (client side) and let FEEDSIM_TLS default to 1 so
@@ -778,14 +854,18 @@ main() {
         mkdir -p "${DR_TRACE_OUTDIR:-/tmp/drmemtrace_out}"
     fi
 
+    if [ "$io_threads" = "0" ]; then
+        io_threads="$(nproc)"
+    fi
+
     # shellcheck disable=SC2086
     env $preload_env OMP_NUM_THREADS=1 MALLOC_CONF=narenas:20,dirty_decay_ms:5000 build/workloads/ranking/LeafNodeRank \
         --port="$port" \
         --monitor_port="$monitor_port" \
-        --threads="$thrift_threads" \
+        --cpu_executor_threads="$cpu_executor_threads" \
         --cpu_threads="$ranking_cpu_threads" \
         --timekeeper_threads=2 \
-        --io_threads="$EVENTBASE_THREADS_DEFAULT" \
+        --io_threads="$io_threads" \
         --srv_threads="$SRV_THREADS_DEFAULT" \
         --num_objects=2000 \
         --noaffinity \
@@ -800,18 +880,36 @@ main() {
 
     LEAF_PID=$!
 
-    # Wait for server to be fully ready by checking if data port is accepting connections
+    # The listening socket can open before worker initialization finishes.
+    # Wait for every worker's connection policy to finish before starting QPS search.
     echo "Waiting for LeafNodeRank server to be ready on port $port..."
     max_attempts=120
     attempt=0
     while [ $attempt -lt $max_attempts ]; do
-        if (echo > /dev/tcp/localhost/$port) 2>/dev/null; then
-            echo "LeafNodeRank server is ready (port $port accepting connections)"
+        if ! kill -0 "$LEAF_PID" 2>/dev/null; then
+            echo "ERROR: LeafNodeRank exited during startup. Recent server logs:" >&2
+            tail -40 "$BREPS_LFILE" >&2
+            exit 1
+        fi
+        local ready_workers=0
+        local workers_ready=0
+        if [ "${LEAFNODE_USE_LEGACY_SLEEP:-0}" = "1" ]; then
+            workers_ready=1
+        else
+            ready_workers=$(grep -c 'mock_services worker .* clients ready;' "$BREPS_LFILE" || true)
+            if [ "${ready_workers:-0}" -ge "$io_threads" ]; then
+                workers_ready=1
+            fi
+        fi
+        if [ "$workers_ready" -eq 1 ] && (echo > "/dev/tcp/localhost/$port") 2>/dev/null; then
+            echo "LeafNodeRank server is ready (port $port; workers ready=${ready_workers:-0})"
             break
         fi
         attempt=$((attempt + 1))
         if [ $attempt -eq $max_attempts ]; then
-            echo "ERROR: Server failed to become ready within $max_attempts seconds"
+            echo "ERROR: Server failed to become ready within $max_attempts seconds" >&2
+            tail -40 "$BREPS_LFILE" >&2
+            kill -SIGTERM "$LEAF_PID" 2>/dev/null || true
             exit 1
         fi
         sleep 1
