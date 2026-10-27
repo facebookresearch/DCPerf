@@ -134,10 +134,19 @@ void DriverStats::logRequest(uint32_t /*type*/, uint32_t packet_size) {
 }
 
 void DriverStats::logResponse(uint32_t /*type*/, uint64_t latency_ns,
-                              uint32_t packet_size) {
-  sampler_->sample(static_cast<double>(latency_ns));
+                              uint32_t packet_size, bool failed) {
+  if (failed) {
+    failed_responses_++;
+  } else {
+    sampler_->sample(static_cast<double>(latency_ns));
+  }
   rx_bytes_ += packet_size;
   completed_count_++;
+}
+
+void DriverStats::logTransportFailures(uint64_t count) {
+  transport_failures_ += count;
+  completed_count_ += count;
 }
 
 void DriverStats::logFirstStoryLatency(uint64_t latency_ns) {
@@ -155,6 +164,8 @@ void DriverStats::accumulate(const DriverStats& other) {
   rx_bytes_ += other.rx_bytes_;
   query_count_ += other.query_count_;
   completed_count_ += other.completed_count_;
+  failed_responses_ += other.failed_responses_;
+  transport_failures_ += other.transport_failures_;
   session_count_ += other.session_count_;
 }
 
@@ -165,6 +176,8 @@ void DriverStats::reset() {
   rx_bytes_ = 0;
   query_count_ = 0;
   completed_count_ = 0;
+  failed_responses_ = 0;
+  transport_failures_ = 0;
   session_count_ = 0;
   start_time_ = getTimeNano();
 }
@@ -181,8 +194,16 @@ void DriverStats::printStats(uint32_t type, double elapsed_secs) const {
          rx_bytes_ / elapsed_secs / 1024 / 1024, rx_bytes_);
   printf("   TX: %.2f MB/sec (%lu bytes)\n",
          tx_bytes_ / elapsed_secs / 1024 / 1024, tx_bytes_);
+  const uint64_t failed = failed_responses_ + transport_failures_;
+  const uint64_t successful = completed_count_ - failed;
+  const uint64_t pending = query_count_ > completed_count_
+      ? query_count_ - completed_count_ : 0;
   printf("    #: %.2f QPS (%lu queries)\n",
-         query_count_ / elapsed_secs, query_count_);
+         successful / elapsed_secs, successful);
+  printf("  request_outcomes: sent=%lu successful=%lu failed=%lu pending=%lu "
+         "server_errors=%lu transport_errors=%lu elapsed_secs=%.6f\n",
+         query_count_, successful, failed, pending, failed_responses_,
+         transport_failures_, elapsed_secs);
   printf("  min: %.3f ms\n", sampler_->minimum() / 1000000);
   printf("  avg: %.3f ms\n", sampler_->average() / 1000000);
   printf("  50p: %.3f ms\n", sampler_->get_nth(50) / 1000000);
@@ -269,8 +290,7 @@ SSL_CTX* getDriverSslCtxOrNull() {
 
 class DriverConnection {
  public:
-  DriverConnection(event_base* base, const addrinfo* addr, bool no_delay)
-      : num_outstanding_(0) {
+  DriverConnection(event_base* base, const addrinfo* addr, bool no_delay) {
     int sockfd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
     if (sockfd < 0) {
       std::cerr << "Error: Could not create socket" << std::endl;
@@ -331,17 +351,30 @@ class DriverConnection {
     if (length > 0) {
       bufferevent_write(bev_, payload, length);
     }
-    num_outstanding_++;
+    outstanding_requests_.emplace(request_id, static_cast<uint64_t>(hdr.start_time));
   }
 
-  int getNumOutstanding() const { return num_outstanding_; }
-  void decrementOutstanding() { num_outstanding_--; }
+  int getNumOutstanding() const { return outstanding_requests_.size(); }
+  bool completeOutstanding(uint64_t request_id) {
+    return outstanding_requests_.erase(request_id) == 1;
+  }
+  uint64_t failOutstanding(uint64_t measurement_start) {
+    uint64_t count = 0;
+    for (const auto& entry : outstanding_requests_) {
+      count += entry.second >= measurement_start;
+    }
+    outstanding_requests_.clear();
+    bufferevent_disable(bev_, EV_READ | EV_WRITE);
+    return count;
+  }
 
   bufferevent* getBev() { return bev_; }
 
  private:
   bufferevent* bev_;
-  int num_outstanding_;
+  // Inline entries reuse the bounded table rather than allocating a heap node
+  // between the large payload buffers for every request.
+  folly::F14FastMap<uint64_t, uint64_t> outstanding_requests_;
 };
 
 // ─── TestDriver::Impl ───────────────────────────────────────────────────────
@@ -377,7 +410,8 @@ struct TestDriver::Impl {
   // is cheap and lets shutdown drain the map cleanly from another
   // thread without racing readCb).
   std::mutex pending_mutex;
-  folly::F14FastMap<uint64_t, folly::Promise<std::string>> pending_promises;
+  folly::F14FastMap<uint64_t, std::pair<int, folly::Promise<std::string>>>
+      pending_promises;
 
   // Phase 6 (Issue 3 fix): atomic running flag so async session
   // continuations on g_session_pool can bail out of touching the
@@ -456,10 +490,21 @@ void TestDriver::Impl::readCb(struct bufferevent* bev, void* arg) {
           input, payload_bytes.data(), hdr.payload_length);
     }
 
+    auto& conn = *impl.connections[impl.connection_positions[conn_id]].second;
+    if (!conn.completeOutstanding(hdr.request_id)) {
+      std::cerr << "Ignoring unmatched FeedSim response: connection=" << conn_id
+                << " request_id=" << hdr.request_id << std::endl;
+      continue;
+    }
+
     // Log latency
     uint64_t now = getTimeNano();
     uint64_t latency = now - hdr.start_time;
-    impl.current_stats.logResponse(hdr.type, latency, total);
+    const bool failed = (hdr.type & kResponseErrorFlag) != 0;
+    hdr.type &= ~kResponseErrorFlag;
+    if (hdr.start_time >= impl.current_stats.getStartTimeNano()) {
+      impl.current_stats.logResponse(hdr.type, latency, total, failed);
+    }
 
     // Phase 6: try to fulfill the matching promise. Move the promise
     // out of the map under the lock, drop the lock, then setValue —
@@ -471,19 +516,20 @@ void TestDriver::Impl::readCb(struct bufferevent* bev, void* arg) {
       std::lock_guard<std::mutex> lk(impl.pending_mutex);
       auto it = impl.pending_promises.find(hdr.request_id);
       if (it != impl.pending_promises.end()) {
-        promise = std::move(it->second);
+        promise = std::move(it->second.second);
         impl.pending_promises.erase(it);
         have_promise = true;
       }
     }
     if (have_promise) {
-      promise.setValue(std::move(payload_bytes));
+      if (failed) {
+        promise.setException(std::runtime_error("FeedSim server request failed"));
+      } else {
+        promise.setValue(std::move(payload_bytes));
+      }
     }
 
     // Connection slot freed
-    auto& conn = *impl.connections[impl.connection_positions[conn_id]].second;
-    conn.decrementOutstanding();
-
     if (!impl.isConnectionReady(conn_id)) {
       impl.markConnectionReady(conn_id);
     }
@@ -510,14 +556,28 @@ void TestDriver::Impl::eventCb(struct bufferevent* /*bev*/, int16_t events,
   if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
     if (ctx == nullptr) return;
     auto& impl = *ctx->first->impl_;
-    folly::F14FastMap<uint64_t, folly::Promise<std::string>> drained;
+    const int conn_id = ctx->second;
+    if (impl.isConnectionReady(conn_id)) {
+      impl.markConnectionNotReady(conn_id);
+    }
+    auto& connection = *impl.connections[impl.connection_positions[conn_id]].second;
+    impl.current_stats.logTransportFailures(
+        connection.failOutstanding(impl.current_stats.getStartTimeNano()));
+    std::vector<folly::Promise<std::string>> drained;
     {
       std::lock_guard<std::mutex> lk(impl.pending_mutex);
-      drained.swap(impl.pending_promises);
+      for (auto it = impl.pending_promises.begin(); it != impl.pending_promises.end();) {
+        if (it->second.first == conn_id) {
+          drained.push_back(std::move(it->second.second));
+          it = impl.pending_promises.erase(it);
+        } else {
+          ++it;
+        }
+      }
     }
-    // Promise destructors break the promises automatically; clear is
-    // explicit so the map's storage is released.
-    drained.clear();
+    for (auto& promise : drained) {
+      promise.setException(std::runtime_error("FeedSim connection failed"));
+    }
   }
 }
 
@@ -588,9 +648,14 @@ void TestDriver::sendRequest(uint32_t type, const void* payload,
                              uint32_t length,
                              uint64_t next_request_delay_us) {
   int index = impl_->getNextConnectionIndex();
+  if (index < 0) return;
   auto& conn = *impl_->connections[index].second;
   int conn_id = impl_->connections[index].first;
 
+  if (conn.getNumOutstanding() >= impl_->max_connection_depth) {
+    impl_->markConnectionNotReady(conn_id);
+    return;
+  }
   conn.issueRequest(
       type, impl_->next_request_id.fetch_add(1), payload, length);
   impl_->current_stats.logRequest(
@@ -631,27 +696,18 @@ void sendOnLibeventThread(evutil_socket_t, int16_t, void* arg) {
   std::unique_ptr<SendCtx> ctx(reinterpret_cast<SendCtx*>(arg));
   auto& impl = *ctx->driver->impl_;
 
-  // Insert the promise into the pending map BEFORE writing on the wire,
-  // so a fast server reply can never observe the response before the
-  // promise is registered.
-  {
-    std::lock_guard<std::mutex> lk(impl.pending_mutex);
-    impl.pending_promises.emplace(
-        ctx->request_id, std::move(ctx->promise));
-  }
-
   int index = impl.getNextConnectionIndex();
   if (index < 0) {
-    // No ready connection — pop the promise back out and break it so
-    // the caller observes the failure instead of hanging. This is rare
-    // (the libevent thread is the one that marks connections ready and
-    // not-ready) but worth guarding against.
-    std::lock_guard<std::mutex> lk(impl.pending_mutex);
-    impl.pending_promises.erase(ctx->request_id);
+    ctx->promise.setException(std::runtime_error("No ready FeedSim connection"));
     return;
   }
   auto& conn = *impl.connections[index].second;
   int conn_id = impl.connections[index].first;
+  {
+    std::lock_guard<std::mutex> lk(impl.pending_mutex);
+    impl.pending_promises.emplace(
+        ctx->request_id, std::make_pair(conn_id, std::move(ctx->promise)));
+  }
   conn.issueRequest(
       ctx->type, ctx->request_id,
       ctx->payload.empty() ? nullptr : ctx->payload.data(),
@@ -1164,7 +1220,7 @@ void FeedSimDriver::shutdown() {
   //         dispatch onto.
   for (auto& dt : impl_->threads) {
     auto& drv_impl = *dt->driver->impl_;
-    folly::F14FastMap<uint64_t, folly::Promise<std::string>> drained;
+    decltype(drv_impl.pending_promises) drained;
     {
       std::lock_guard<std::mutex> lk(drv_impl.pending_mutex);
       drained.swap(drv_impl.pending_promises);
