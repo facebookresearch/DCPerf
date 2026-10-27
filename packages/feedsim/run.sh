@@ -106,6 +106,10 @@ Usage: ${0##*/} [OPTION]...
     --mock-tls Enable TLS on outbound MockServicesClient channels (0=off, 1=on). Default: 1.
     --mock-zstd-frac Fraction in [0.0, 1.0] of MockServicesClient channels with ZSTD enabled. Default: 0.9.
     --mock-keepalive-interval-ms Per-MockServicesClient keepalive ping interval (ms). 0=disabled. Default: 200.
+    --mock-connect-retries MockServicesClient connection retries. Default: 5.
+    --mock-connect-initial-backoff-ms MockServicesClient connection initial backoff ms. Default: 100.
+    --mock-connect-max-backoff-ms MockServicesClient connection max backoff ms. Default: 1000.
+    --mock-connect-timeout-ms MockServicesClient connection timeout ms. Default: 30000.
     --rpc-fanout-scale Scale factor applied to per-session fanout counts. Default: 0.10.
     --server-zstd Enable ZSTD compression on server-side response payloads (0=off, 1=on). Default: 1.
     --sla-p95-ms search_qps SLA target (95th percentile latency in ms). Default: 700.
@@ -257,6 +261,11 @@ main() {
 
     local mock_keepalive_interval_ms
     mock_keepalive_interval_ms="200"
+
+    local mock_connect_retries="${FEEDSIM_MOCK_CONNECT_RETRIES:-5}"
+    local mock_connect_initial_backoff_ms="${FEEDSIM_MOCK_CONNECT_INITIAL_BACKOFF_MS:-100}"
+    local mock_connect_max_backoff_ms="${FEEDSIM_MOCK_CONNECT_MAX_BACKOFF_MS:-1000}"
+    local mock_connect_timeout_ms="${FEEDSIM_MOCK_CONNECT_TIMEOUT_MS:-30000}"
 
     local rpc_fanout_scale
     rpc_fanout_scale="0.10"
@@ -522,6 +531,34 @@ main() {
             --mock-keepalive-interval-ms=*)
                 mock_keepalive_interval_ms="${1#*=}"
                 ;;
+            --mock-connect-retries)
+                mock_connect_retries="$2"
+                shift
+                ;;
+            --mock-connect-retries=*)
+                mock_connect_retries="${1#*=}"
+                ;;
+            --mock-connect-initial-backoff-ms)
+                mock_connect_initial_backoff_ms="$2"
+                shift
+                ;;
+            --mock-connect-initial-backoff-ms=*)
+                mock_connect_initial_backoff_ms="${1#*=}"
+                ;;
+            --mock-connect-max-backoff-ms)
+                mock_connect_max_backoff_ms="$2"
+                shift
+                ;;
+            --mock-connect-max-backoff-ms=*)
+                mock_connect_max_backoff_ms="${1#*=}"
+                ;;
+            --mock-connect-timeout-ms)
+                mock_connect_timeout_ms="$2"
+                shift
+                ;;
+            --mock-connect-timeout-ms=*)
+                mock_connect_timeout_ms="${1#*=}"
+                ;;
             --rpc-fanout-scale)
                 rpc_fanout_scale="$2"
                 shift
@@ -566,6 +603,15 @@ main() {
         if [ "$io_latency_distribution" != "fixed" ] && [ "$io_latency_distribution" != "exponential" ] && [ "$io_latency_distribution" != "lognormal" ]; then
             die "Invalid --io-dist value '$io_latency_distribution'. Must be 'fixed', 'exponential', or 'lognormal'."
         fi
+    fi
+
+    for value in "$mock_connect_retries" "$mock_connect_initial_backoff_ms" "$mock_connect_max_backoff_ms" "$mock_connect_timeout_ms"; do
+        if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -gt 2147483647 ]; then
+            die "Invalid mock_services connection option: $value"
+        fi
+    done
+    if [ "$mock_connect_initial_backoff_ms" -le 0 ] || [ "$mock_connect_max_backoff_ms" -lt "$mock_connect_initial_backoff_ms" ] || [ "$mock_connect_timeout_ms" -le 0 ]; then
+        die "Connection backoff/timeout must be positive; maximum backoff must be at least the initial backoff"
     fi
 
     create_breakdown_csv "$BREAKDOWN_FOLDER"
@@ -695,10 +741,14 @@ main() {
     # std::getenv at thread/server startup.
     local mock_port="${MOCK_SERVICES_PORT:-21222}"
     local mock_services_opts="--rpc_dist_path=$rpc_dist_json"
-    mock_services_opts="$mock_services_opts --mock_services_host=localhost"
+    mock_services_opts="$mock_services_opts --mock_services_host=${MOCK_SERVICES_HOST:-localhost}"
     mock_services_opts="$mock_services_opts --mock_services_port=${mock_port}"
     mock_services_opts="$mock_services_opts --rpc_fanout_scale=${rpc_fanout_scale}"
     mock_services_opts="$mock_services_opts --mock_keepalive_interval_ms=${mock_keepalive_interval_ms}"
+    mock_services_opts="$mock_services_opts --mock_connect_retries=${mock_connect_retries}"
+    mock_services_opts="$mock_services_opts --mock_connect_initial_backoff_ms=${mock_connect_initial_backoff_ms}"
+    mock_services_opts="$mock_services_opts --mock_connect_max_backoff_ms=${mock_connect_max_backoff_ms}"
+    mock_services_opts="$mock_services_opts --mock_connect_timeout_ms=${mock_connect_timeout_ms}"
     # MOCK_TLS env consumed by MockServicesClient::ctor (envBoolTrue("MOCK_TLS", false)).
     # When the user-facing --mock-tls flag is set to 1 (default), we export
     # both MOCK_TLS=1 (client side) and let FEEDSIM_TLS default to 1 so
