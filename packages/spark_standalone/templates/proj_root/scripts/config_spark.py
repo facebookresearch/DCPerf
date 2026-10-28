@@ -4,6 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 import socket
 from typing import Dict
 
@@ -100,6 +101,7 @@ def init_configs(aggressive=0, use_ipv4=False):
         "spark.shuffle.merge.enabled": "false",
         "spark.shuffle.service.enabled": "true",
         "spark.sql.crossJoin.enabled": "true",
+        "spark.sql.shuffle.partitions": str(3 * os.cpu_count()),
     }
     for x in PLATFORMS:
         STANDALONE_CONFIGS[x] = STANDALONE_CONFIGS["default-default"].copy()
