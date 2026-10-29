@@ -1,7 +1,7 @@
 diff --git a/.github/scripts/fbgemm_build.bash b/.github/scripts/fbgemm_build.bash
 --- a/.github/scripts/fbgemm_build.bash
 +++ b/.github/scripts/fbgemm_build.bash
-@@ -23,7 +23,7 @@ __configure_fbgemm_build_cmake () {
+@@ -23,7 +23,7 @@
  
    # shellcheck disable=SC2206
    build_args=(
@@ -10,3 +10,12 @@ diff --git a/.github/scripts/fbgemm_build.bash b/.github/scripts/fbgemm_build.ba
      -DFBGEMM_LIBRARY_TYPE=${fbgemm_library_type}
      -DPYTHON_EXECUTABLE=${python_path}
    )
+@@ -73,7 +73,7 @@
+   echo "[BUILD] Running the build ..."
+   # shellcheck disable=SC2086
+   (print_exec conda run --no-capture-output ${env_prefix} \
+-    make -j VERBOSE=1) || return 1
++    make -j "${FBGEMM_BUILD_JOBS:-4}" VERBOSE=1) || return 1
+ 
+   cd - || return 1
+ }

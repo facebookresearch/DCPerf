@@ -18,13 +18,18 @@ BENCHMARKS_DIR="$(pwd)/benchmarks/ai_wdl/fbgemm"
 MINICONDA_PREFIX=$(pwd)/build/miniconda
 
 # Version of FBGEMM to install
-# This is set to a recent commit for now, as the latest release doesn't include the arm-related CMake files fix.
-# This will be updated to the latest release once the fix is included.
-FBGEMM_VERSION=fd32631d837b41251311099c393af7d7be5cfbf5
+FBGEMM_VERSION=b2e9a325e546aa9793a48d99475a2ba561cd709d
 FBGEMM_DISABLE_ASAN_PATCH="$(pwd)/packages/ai_wdl/fbgemm/disable_fbgemm_asan.patch"
+FBGEMM_SPMDM8_SMOKE_PATCH="$(pwd)/packages/ai_wdl/fbgemm/spmdm8_smoke.patch"
+FBGEMM_BUILD_JOBS="${FBGEMM_BUILD_JOBS:-4}"
+if ! [[ "${FBGEMM_BUILD_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[ERROR] FBGEMM_BUILD_JOBS must be a positive integer." >&2
+  exit 1
+fi
+export FBGEMM_BUILD_JOBS
 
 # Version of PyTorch to install
-PYTORCH_VERSION=2.8.0
+PYTORCH_VERSION=2.15.0
 
 # Version of GCC to use for building
 export GCC_VERSION=14.1.0
@@ -786,6 +791,15 @@ generate_standalone_executable () {
     return 1
   fi
 
+  # FBGEMM reads this metadata at import time to select its build target and
+  # load the corresponding operators. PyInstaller cannot infer this data file
+  # from Python imports, despite its .py suffix.
+  local target_metadata="${install_lib_dir}/docs/target.default.json.py"
+  if [ ! -f "${target_metadata}" ]; then
+    echo "[ERROR] FBGEMM build-target metadata not found at ${target_metadata}"
+    return 1
+  fi
+
   # Clang-linked extensions require the LLVM OpenMP runtime after the temporary
   # build environment is removed, so include it in the standalone bundle.
   local libomp_path="${MINICONDA_PREFIX}/envs/${BUILD_ENV}/lib/libomp.so"
@@ -802,6 +816,7 @@ generate_standalone_executable () {
   # shellcheck disable=SC2046,SC2086
   ${CONDA_ENV_BIN}/pyinstaller --onefile --distpath "$DIST_DIR" "$SCRIPT_PATH" \
     --add-binary "${libomp_path}:." \
+    --add-data "${target_metadata}:fbgemm_gpu/docs" \
     $(echo $SHARED_LIBS | xargs -n 1 echo --add-binary)
 
   # Notify the user that the build is complete
@@ -913,16 +928,22 @@ install_pytorch() {
   test_network_connection || return 1
 
   # Install the CPU variant of PyTorch using PIP
-  # NOTE: Using ${CONDA_PIP} directly to avoid conda run bug that installs to base env
+  # Use the target environment interpreter rather than conda run pip.
   echo "[SETUP] Installing PyTorch CPU variant..."
-  ${CONDA_PIP} install torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu/ || \
-  ${CONDA_PIP} install --pre torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu/ || \
-  ${CONDA_PIP} install torch --index-url https://download.pytorch.org/whl/cpu/
+  "${CONDA_PYTHON}" -m pip install "torch==${PYTORCH_VERSION}" \
+    --index-url https://download.pytorch.org/whl/cpu/
 
   # Verify PyTorch is properly installed in the conda env
   echo "[CHECK] Testing PyTorch installation..."
-  ${CONDA_PYTHON} -c "import torch; print('PyTorch version:', torch.__version__)" || {
-    echo "[ERROR] PyTorch installation failed! torch not importable."
+  "${CONDA_PYTHON}" - "${PYTORCH_VERSION}" <<'PY' || {
+import sys
+import torch
+
+print('PyTorch version:', torch.__version__)
+assert torch.__version__.split('+')[0] == sys.argv[1], torch.__version__
+assert torch.version.cuda is None, 'Expected a CPU-only PyTorch build'
+PY
+    echo "[ERROR] PyTorch installation failed or differs from the requested CPU version."
     return 1
   }
 
@@ -935,6 +956,13 @@ install_pytorch() {
 # symbols required by fbgemm_gpu_tbe_inference.so.
 apply_avx_compile_check_fix() {
   local find_avx="fbgemm_${FBGEMM_VERSION}/cmake/modules/FindAVX.cmake"
+
+  if grep -Fqx 'INCLUDE(CheckSourceCompiles)' "${find_avx}" && \
+      grep -Fq 'CHECK_SOURCE_COMPILES' "${find_avx}" && \
+      ! grep -Fq 'CHECK_SOURCE_RUNS' "${find_avx}"; then
+    echo "[SETUP] FindAVX.cmake already uses compiler-only checks."
+    return 0
+  fi
 
   if ! grep -Fqx 'INCLUDE(CheckSourceRuns)' "${find_avx}" || \
       ! grep -Fq 'CHECK_SOURCE_RUNS' "${find_avx}"; then
@@ -967,10 +995,9 @@ clone_fbgemm_repo() {
   # Clone the FBGEMM repository along with its submodules
   # We specify the version tag to ensure we get the correct version
   echo "[SETUP] Cloning repository with submodules..."
-  git clone --recursive https://github.com/pytorch/FBGEMM.git fbgemm_${FBGEMM_VERSION}
+  git clone https://github.com/pytorch/FBGEMM.git fbgemm_${FBGEMM_VERSION}
   git -C fbgemm_${FBGEMM_VERSION} checkout ${FBGEMM_VERSION}
- # Cherry-pick the latest commit from the FBGEMM main branch to fix issue https://github.com/pytorch/FBGEMM/pull/5037
-  git -C fbgemm_${FBGEMM_VERSION} cherry-pick 9df97a7090c2c5edecea4fd08bad11ab8a23284c
+  git -C fbgemm_${FBGEMM_VERSION} submodule update --init --recursive
 
   apply_avx_compile_check_fix || return 1
 
@@ -987,6 +1014,15 @@ clone_fbgemm_repo() {
   else
     git -C fbgemm_${FBGEMM_VERSION} apply \
       "${FBGEMM_DISABLE_ASAN_PATCH}" || return 1
+  fi
+
+  echo "[SETUP] Adding the SpMDM8 small-input smoke option..."
+  if git -C fbgemm_${FBGEMM_VERSION} apply --reverse --check \
+      "${FBGEMM_SPMDM8_SMOKE_PATCH}" 2>/dev/null; then
+    echo "[SETUP] SpMDM8 smoke patch already applied."
+  else
+    git -C fbgemm_${FBGEMM_VERSION} apply \
+      "${FBGEMM_SPMDM8_SMOKE_PATCH}" || return 1
   fi
 
   # Disable the postbuild script to prevent race conditions during linking
@@ -1026,19 +1062,6 @@ install_fbgemm_cpu() {
   # Set the Python platform name for Linux
   # This specifies the minimum glibc version required
   export python_plat_name="manylinux_2_28_${ARCH}"
-
-  # Extract the number of CPU cores on the system
-  # shellcheck disable=SC2155
-  local core=$(lscpu | grep "Core(s)" | awk '{print $NF}') && echo "core = ${core}" || echo "core not found"
-  # shellcheck disable=SC2155
-  local sockets=$(lscpu | grep "Socket(s)" | awk '{print $NF}') && echo "sockets = ${sockets}" || echo "sockets not found"
-  local re='^[0-9]+$'
-
-  local run_multicore=""
-  if [[ $core =~ $re && $sockets =~ $re ]]; then
-    local n_core=$((core * sockets))
-    run_multicore="-j ${n_core}"
-  fi
 
   # Build and install the FBGEMM library into the Conda environment
   # We specify the CPU variant to build without CUDA support
@@ -1104,10 +1127,12 @@ install_fbgemm() {
   local sockets=$(lscpu | grep "Socket(s)" | awk '{print $NF}') && echo "sockets = ${sockets}" || echo "sockets not found"
   local re='^[0-9]+$'
 
-  local run_multicore=""
+  local run_multicore="-j ${FBGEMM_BUILD_JOBS}"
   if [[ $core =~ $re && $sockets =~ $re ]]; then
     local n_core=$((core * sockets))
-    run_multicore="-j ${n_core}"
+    if [ "${n_core}" -lt "${FBGEMM_BUILD_JOBS}" ]; then
+      run_multicore="-j ${n_core}"
+    fi
   fi
 
   # Build and install the FBGEMM library into the Conda environment
@@ -1115,10 +1140,10 @@ install_fbgemm() {
   echo "[BUILD] Building and installing FBGEMM..."
   local fbgemm_ldflags="-fopenmp=libomp${LDFLAGS:+ ${LDFLAGS}}"
   local fbgemm_install_rpath='$ORIGIN;$ORIGIN/torch/lib;$ORIGIN/../torch/lib'
-  echo "+ env LDFLAGS=${fbgemm_ldflags} ${CONDA_PYTHON} setup.py ${run_multicore} install --build-variant=cpu -DCMAKE_INSTALL_RPATH=${fbgemm_install_rpath}"
+  echo "+ env LDFLAGS=${fbgemm_ldflags} ${CONDA_PYTHON} setup.py ${run_multicore} install --build-variant=cpu --build-target=default -DCMAKE_INSTALL_RPATH=${fbgemm_install_rpath}"
   # shellcheck disable=SC2086
   env LDFLAGS="${fbgemm_ldflags}" \
-    "${CONDA_PYTHON}" setup.py ${run_multicore} install --build-variant=cpu \
+    "${CONDA_PYTHON}" setup.py ${run_multicore} install --build-variant=cpu --build-target=default \
     "-DCMAKE_INSTALL_RPATH=${fbgemm_install_rpath}" || {
     echo "[ERROR] FBGEMM build failed!"
     return 1

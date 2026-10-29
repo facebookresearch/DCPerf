@@ -8,6 +8,10 @@ The benchmark closely mimics the hotspot functions in table-based embedding (TBE
 `fbgemm_cpu_spmdm8` is a C++ based micro-benchmark with some simple parameters and it benchmarks the TBE kernel. It's used for quick prototyping and performance validation.
 
 ## Installation
+The installer pins FBGEMM to `b2e9a325e546aa9793a48d99475a2ba561cd709d`
+and CPU-only PyTorch to `2.15.0`. Builds use four concurrent jobs by default;
+set `FBGEMM_BUILD_JOBS` to a positive integer to change the limit.
+
 To install the FBGEMM benchmarks, execute one of the following command:
 ```bash
 ./benchpress -b ai install fbgemm_embedding_a_single
@@ -20,6 +24,19 @@ To install the FBGEMM benchmarks, execute one of the following command:
 ```
 
 ## Run FBGEMM Benchmarks
+After installation, run the CI smoke checks with:
+
+```bash
+python3 .github/scripts/dcperf_verify_fbgemm.py
+```
+
+These checks run the installed FP16 and SpMDM8 executables and small TBE
+workloads covering both command forms, INT4/INT8, and two worker processes.
+SpMDM8 uses an opt-in `--smoke` flag with small tables; its default benchmark
+input grid is unchanged. Each invocation has a ten-minute timeout. Logs are saved under
+`ci_logs/fbgemm`; an unsuccessful process or invalid metrics fails the check.
+Timeouts terminate the benchmark's process group and include partial log output.
+
 ### Job - `fbgemm_embedding_a_single`
 `fbgemm_embedding_a_single` simulates the Model A workload using a single representative embedding table.
 This benchmark is designed to evaluate performance with a simplified embedding configuration.

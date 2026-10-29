@@ -1,0 +1,94 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: DCPerf FBGEMM CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/ai_wdl/fbgemm/**'
+      - '.github/scripts/dcperf_install_fbgemm.bash'
+      - 'packages/ai_wdl/fbgemm/test_ci_verifier.py'
+      - '.github/scripts/dcperf_verify_fbgemm.py'
+      - '.github/scripts/utils_system.bash'
+      - '.github/workflows/dcperf_ci_fbgemm.yml'
+      - 'benchpress/config/benchmarks_ai.yml'
+      - 'benchpress/config/jobs_ai.yml'
+      - 'benchpress/plugins/parsers/fbgemm.py'
+      - 'scripts/install-deps.sh'
+  push:
+    branches: [main, v2-beta]
+    paths:
+      - 'packages/ai_wdl/fbgemm/**'
+      - '.github/scripts/dcperf_install_fbgemm.bash'
+      - 'packages/ai_wdl/fbgemm/test_ci_verifier.py'
+      - '.github/scripts/dcperf_verify_fbgemm.py'
+      - '.github/scripts/utils_system.bash'
+      - '.github/workflows/dcperf_ci_fbgemm.yml'
+      - 'benchpress/config/benchmarks_ai.yml'
+      - 'benchpress/config/jobs_ai.yml'
+      - 'benchpress/plugins/parsers/fbgemm.py'
+      - 'scripts/install-deps.sh'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install_and_smoke:
+    runs-on: ${{ matrix.host.instance }}
+    timeout-minutes: 180
+    env:
+      FBGEMM_BUILD_JOBS: '2'
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ${{ matrix.host.container }}
+      options: --user root --privileged --pid=host
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - {arch: x86_64, instance: ubuntu-latest, container: 'ubuntu:22.04'}
+          - {arch: aarch64, instance: ubuntu-24.04-arm, container: 'ubuntu:22.04'}
+          - {arch: x86_64, instance: ubuntu-latest, container: 'ubuntu:24.04'}
+          - {arch: aarch64, instance: ubuntu-24.04-arm, container: 'ubuntu:24.04'}
+          - {arch: x86_64, instance: ubuntu-latest, container: 'quay.io/centos/centos:stream9'}
+          - {arch: aarch64, instance: ubuntu-24.04-arm, container: 'quay.io/centos/centos:stream9'}
+          - {arch: x86_64, instance: ubuntu-latest, container: 'quay.io/centos/centos:stream10'}
+          - {arch: aarch64, instance: ubuntu-24.04-arm, container: 'quay.io/centos/centos:stream10'}
+    steps:
+      - name: Install checkout tools
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            apt-get install -y git sudo wget curl python3
+          else
+            dnf install -y git sudo wget python3
+            if ! command -v curl >/dev/null; then
+              dnf install -y curl
+            fi
+          fi
+      - uses: actions/checkout@v4
+      - name: Free disk space on host
+        run: |
+          source .github/scripts/utils_system.bash
+          free_disk_space_on_host
+      - name: Install FBGEMM benchmarks
+        run: bash .github/scripts/dcperf_install_fbgemm.bash
+      - name: Test smoke verification
+        run: PYTHONPATH=.github/scripts /usr/bin/python3 packages/ai_wdl/fbgemm/test_ci_verifier.py
+      - name: Execute installed benchmarks
+        run: /usr/bin/python3 .github/scripts/dcperf_verify_fbgemm.py
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fbgemm-${{ matrix.host.arch }}-${{ strategy.job-index }}
+          path: ci_logs/fbgemm
+          if-no-files-found: ignore
