@@ -1,0 +1,40 @@
+--- a/bench/EmbeddingSpMDM8BitBenchmark.cc
++++ b/bench/EmbeddingSpMDM8BitBenchmark.cc
+@@ -20,6 +20,7 @@
+ #include <numeric>
+ #include <random>
+ #include <set>
++#include <string>
+ #include <vector>
+ 
+ #include "./BenchUtils.h"
+@@ -40,7 +41,10 @@
+ }
+ */
+ 
+-static vector<vector<int>> GetInputs_() {
++static vector<vector<int>> GetInputs_(bool smoke) {
++  if (smoke) {
++    return {{2, 256, 64, 2}, {2, 256, 128, 2}};
++  }
+   vector<vector<int>> input_dims = {
+       // batch size, number of rows of table, emb dim , avg lengthl
+       // TODO: Add more inputs
+@@ -368,10 +372,15 @@
+   return 0;
+ }
+ 
+-int main() {
++int main(int argc, char** argv) {
++  bool smoke = argc == 2 && string(argv[1]) == "--smoke";
++  if (argc > 1 && !smoke) {
++    cerr << "Usage: " << argv[0] << " [--smoke]\n";
++    return 1;
++  }
+   bool stress_multi_threading = false;
+ 
+-  vector<vector<int>> inputs(GetInputs_());
++  vector<vector<int>> inputs(GetInputs_(smoke));
+   benchmarkTimes.resize(fbgemm_get_max_threads());
+ 
+   for (auto& input : inputs) {
