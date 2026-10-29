@@ -21,6 +21,7 @@ MINICONDA_PREFIX=$(pwd)/build/miniconda
 FBGEMM_VERSION=b2e9a325e546aa9793a48d99475a2ba561cd709d
 FBGEMM_DISABLE_ASAN_PATCH="$(pwd)/packages/ai_wdl/fbgemm/disable_fbgemm_asan.patch"
 FBGEMM_SPMDM8_SMOKE_PATCH="$(pwd)/packages/ai_wdl/fbgemm/spmdm8_smoke.patch"
+FBGEMM_CACHE_EVICT_PATCH="$(pwd)/packages/ai_wdl/fbgemm/0001-cache-evict-dummy.patch"
 FBGEMM_BUILD_JOBS="${FBGEMM_BUILD_JOBS:-4}"
 if ! [[ "${FBGEMM_BUILD_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "[ERROR] FBGEMM_BUILD_JOBS must be a positive integer." >&2
@@ -1000,6 +1001,18 @@ clone_fbgemm_repo() {
   git -C fbgemm_${FBGEMM_VERSION} submodule update --init --recursive
 
   apply_avx_compile_check_fix || return 1
+
+  # Add the cache-eviction dummy computation used by the benchmark.
+  echo "[SETUP] Applying FBGEMM cache-eviction patch..."
+  if [ ! -f "${FBGEMM_CACHE_EVICT_PATCH}" ]; then
+    echo "[ERROR] Cache-eviction patch not found: ${FBGEMM_CACHE_EVICT_PATCH}"
+    return 1
+  fi
+  if git -C fbgemm_${FBGEMM_VERSION} apply --reverse --check "${FBGEMM_CACHE_EVICT_PATCH}" 2>/dev/null; then
+    echo "[SETUP] Cache-eviction patch already applied."
+  else
+    git -C fbgemm_${FBGEMM_VERSION} apply "${FBGEMM_CACHE_EVICT_PATCH}" || return 1
+  fi
 
   # The upstream helper enables AddressSanitizer by default. Disable it for
   # production performance benchmarks so instrumentation does not skew scores.
