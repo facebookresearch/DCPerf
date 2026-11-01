@@ -9,7 +9,6 @@
 #include <stdexcept>
 
 #include <fmt/format.h>
-#include <folly/Format.h>
 #include <folly/Random.h>
 
 #include <rocksdb/cache.h>

@@ -20,7 +20,6 @@
 #include <utility>
 #include <vector>
 
-#include <folly/Format.h>
 #include <folly/stats/Histogram.h>
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

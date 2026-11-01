@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include <folly/Format.h>
 #include <folly/String.h>
 #include <re2/re2.h>
 

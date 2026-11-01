@@ -30,7 +30,6 @@
 
 #include <folly/Benchmark.h>
 #include <folly/FileUtil.h>
-#include <folly/Format.h>
 #include <folly/Portability.h>
 #include <folly/Range.h>
 #include <folly/String.h>

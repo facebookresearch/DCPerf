@@ -26,7 +26,6 @@
 #include <thread>
 #include <vector>
 
-#include <folly/Format.h>
 #include <gflags/gflags.h>
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/synchronization/Baton.h"
