@@ -5,7 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#include <folly/Format.h>
 #include <folly/init/Init.h>
 #include <folly/portability/GFlags.h>
 #include <stdexcept>
