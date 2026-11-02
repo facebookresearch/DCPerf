@@ -24,7 +24,7 @@ cd "$HEALTH_ROOT"
 # mm-mem: memory latency and bandwidth benchmark
 git clone "https://github.com/pkuwangh/mm-mem.git"
 cd mm-mem
-./scripts/install_deps.py
+./scripts/install_deps_sudo.sh
 make
 cd ..
 
