@@ -32,7 +32,7 @@ export FBGEMM_BUILD_JOBS
 PYTORCH_VERSION=2.15.0
 
 # Version of GCC to use for building
-export GCC_VERSION=14.1.0
+export GCC_VERSION=14.2.0
 
 # Name of the conda environment to create
 BUILD_ENV=fbgemm_build_oss_env
@@ -355,9 +355,9 @@ __conda_install_clang () {
   # shellcheck disable=SC2155
   local env_prefix=$(env_name_or_prefix "${env_name}")
 
-  # Get the LLVM version from environment variable or use default 16.0.6
+  # Get the LLVM version from environment variable or use default 23.1.4
   # shellcheck disable=SC2155
-  local llvm_version="${LLVM_VERSION:-16.0.6}"
+  local llvm_version="${LLVM_VERSION:-23.1.4}"
 
   # Install Clang and related LLVM libraries
   echo "[INSTALL] Installing Clang (${llvm_version}, ${COMPILER_ARCHNAME}) and relevant libraries through Conda ..."
