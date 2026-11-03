@@ -12,7 +12,7 @@ To install Adsim, execute the following command:
 ## Run Adsim
 ### Job - `adsim_inference_a`
 
-The `adsim_inference_a` job simulates the inference workload for Model A. Its server pipeline runs the `TensorDeser`, `TorchScriptOps`, `DenseFP32`, `Rebatch`, `GpuSpinWait`, decoding `Decompress`, and `FakeIO` kernels. The `TorchScriptOps` kernels run ATen operators through libtorch, so the server is `adsim_server_torch` (`--server-binary adsim_server_torch`), which the install builds next to `adsim_server`. To configure the client-server benchmark, follow these steps:
+The `adsim_inference_a` job simulates the inference workload for Model A. Its server pipeline runs the `TensorDeser`, `TorchScriptOps`, `DenseFP32`, `Rebatch`, `GpuSpinWait`, decoding `Decompress`, and `BatchFakeIO` kernels. `BatchFakeIO` stands in for the GPU: requests that arrive within 22 ms form a batch, and each batch takes a time that grows with its size, so latency rises with load. The `TorchScriptOps` kernels run ATen operators through libtorch, so the server is `adsim_server_torch` (`--server-binary adsim_server_torch`), which the install builds next to `adsim_server`. To configure the client-server benchmark, follow these steps:
 1. Start the server
 ~~~bash
 # Setup the server

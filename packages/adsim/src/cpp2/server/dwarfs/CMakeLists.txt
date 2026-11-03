@@ -157,6 +157,10 @@ add_library(densefp32 DenseFP32.h DenseFP32Impl.h)
 target_link_libraries(densefp32 data_objects kernel fbgemm)
 target_compile_options(densefp32 PRIVATE ${COROUTINES_FLAG})
 
+add_library(batchfakeio BatchFakeIO.h BatchFakeIOImpl.h)
+target_link_libraries(batchfakeio data_objects kernel)
+target_compile_options(batchfakeio PRIVATE ${COROUTINES_FLAG})
+
 add_library(gpuspinwait GpuSpinWait.h GpuSpinWaitImpl.h)
 target_link_libraries(gpuspinwait data_objects kernel)
 target_compile_options(gpuspinwait PRIVATE ${COROUTINES_FLAG})
@@ -177,6 +181,7 @@ target_compile_options(shape PRIVATE ${COROUTINES_FLAG})
 
 add_library(dwarfs Dwarfs.cc Dwarfs.h)
 target_link_libraries(dwarfs
+    batchfakeio
     compress
     concurrenthashmap
     rebatch
