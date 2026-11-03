@@ -19,6 +19,7 @@
 #include <folly/MapUtil.h>
 #include <folly/dynamic.h>
 
+#include <cea/chips/adsim/cpp2/server/dwarfs/BatchFakeIO.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Compress.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/DeepCopy.h>
@@ -58,6 +59,7 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"TensorDeser", TensorDeser::config},
     {"DenseFP32", DenseFP32::config},
     {"GpuSpinWait", GpuSpinWait::config},
+    {"BatchFakeIO", BatchFakeIO::config},
 #ifdef ADSIM_TORCHSCRIPT_OPS
     {"TorchScriptOps", TorchScriptOps::config},
 #endif
