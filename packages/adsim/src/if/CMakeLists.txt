@@ -1,67 +1,26 @@
-set(THRIFT1 ${CMAKE_PREFIX_PATH}/bin/thrift1)
-set(THRIFTCPP2 ${CMAKE_PREFIX_PATH}/lib/libthriftcpp2.a)
-include(ThriftLibrary)
-
-thrift_library(
-    "fb303"
-    "FacebookService"
-    "cpp2"
-    "frozen2,reflection"
-    "${CMAKE_CURRENT_LIST_DIR}"
-    "${CMAKE_CURRENT_LIST_DIR}"
-    "${CMAKE_CURRENT_LIST_DIR}"
-    THRIFT_INCLUDE_DIRECTORIES
-        "${CMAKE_PREFIX_PATH}/include/thrift-files"
-        "${CMAKE_PREFIX_PATH}/include"
-)
-
-add_dependencies(fb303-cpp2-target FBThrift::thriftcpp2 fb303::fb303)
-
-target_include_directories(fb303-cpp2-obj PRIVATE
-    ${CMAKE_PREFIX_PATH}/include
-)
-
-thrift_library(
-    "AdSim"
-    "AdSim"
-    "cpp2"
-    ""
-    "${CMAKE_CURRENT_LIST_DIR}"
-    "${CMAKE_CURRENT_LIST_DIR}"
-    "${CMAKE_CURRENT_LIST_DIR}"
-    THRIFT_INCLUDE_DIRECTORIES
-        "${CMAKE_PREFIX_PATH}/include/thrift-files"
-        "${CMAKE_PREFIX_PATH}/include"
-)
-
-add_dependencies(AdSim-cpp2-target FBThrift::thriftcpp2 fb303-cpp2)
-target_include_directories(AdSim-cpp2-obj PRIVATE
-    ${CMAKE_PREFIX_PATH}/include
-)
-
-set_target_properties(
-        AdSim-cpp2-obj
-        PROPERTIES POSITION_INDEPENDENT_CODE True
-)
-
-target_link_libraries(AdSim-cpp2
-    FBThrift::thriftcpp2
+thrift_add_library(
     fb303-cpp2
-    fb303::fb303
+    fb303.thrift
+    LANGUAGE cpp2
+    SERVICES FacebookService
+    INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR} ${FB303_INCLUDE_DIR}/thrift-files
+    INCLUDE_PREFIX cea/chips/adsim/if
 )
+target_link_libraries(fb303-cpp2 PUBLIC fb303::fb303 fb303::fb303_thrift_cpp)
 
-thrift_library(
-    "Serialize"
-    ""
-    "cpp2"
-    ""
-    "${CMAKE_CURRENT_LIST_DIR}"
-    "${CMAKE_CURRENT_LIST_DIR}"
-    "${CMAKE_CURRENT_LIST_DIR}"
+thrift_add_library(
+    AdSim-cpp2
+    AdSim.thrift
+    LANGUAGE cpp2
+    SERVICES AdSim
+    DEPENDS fb303-cpp2
+    INCLUDE_PREFIX cea/chips/adsim/if
 )
-add_dependencies(Serialize-cpp2-target FBThrift::thriftcpp2)
-target_include_directories(Serialize-cpp2-obj PRIVATE
-    ${CMAKE_PREFIX_PATH}/include
-)
+set_target_properties(AdSim-cpp2 PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
-target_link_libraries(Serialize-cpp2 FBThrift::thriftcpp2)
+thrift_add_library(
+    Serialize-cpp2
+    Serialize.thrift
+    LANGUAGE cpp2
+    INCLUDE_PREFIX cea/chips/adsim/if
+)

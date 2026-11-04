@@ -26,7 +26,7 @@ target_link_libraries(data_objects
         AdSim-cpp2
         fb303-cpp2
         fb303::fb303
-        FBThrift::thriftcpp2
+        thrift::rpc
         Folly::folly
 )
 
@@ -45,7 +45,7 @@ target_link_libraries(server_handlers
         fb303-cpp2
         fb303::fb303
         fb303::fb303_thrift_cpp
-        FBThrift::thriftcpp2
+        thrift::rpc
         Folly::folly
 )
 
@@ -71,7 +71,7 @@ foreach(server IN LISTS ADSIM_SERVERS)
             fb303-cpp2
             fb303::fb303
             fb303::fb303_thrift_cpp
-            FBThrift::thriftcpp2
+            thrift::rpc
             Folly::folly
             Atomic::Atomic
             ${FMT_LIBRARIES}

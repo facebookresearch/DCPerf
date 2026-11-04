@@ -54,6 +54,7 @@ find_package(fb303 CONFIG REQUIRED)
 find_package(fizz CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(wangle CONFIG REQUIRED)
+# FBThrift rather than thrift: fb303's exported targets link FBThrift::thrift-cpp.
 find_package(FBThrift CONFIG REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(fbgemmLibrary CONFIG REQUIRED
