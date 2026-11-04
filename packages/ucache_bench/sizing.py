@@ -587,6 +587,7 @@ def recommend(
         "lru_rebalance_interval_sec": 1,
         "lru_rebalancing_hits_min_age_sec": 60,
         "lru_rebalancing_hits_max_age_sec": 7200,
+        "nic_channel_ratio": 1.0,
         "duration_seconds": 240,
         "warmup_seconds": 720,
         "timeout_seconds": 2400,
