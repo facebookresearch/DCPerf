@@ -290,6 +290,11 @@ workload, and calibration formulas are documented in
 
 ## Runtime contract
 
+Generated parameters and the job defaults enable production request-path
+overhead and reply compression (`production_features=1`,
+`zstd_compress_pct=100`) and disable simulated downstream I/O
+(`io_latency_us=0`). Keep these values when comparing with published results.
+
 Generated open-loop configurations use:
 
 - 60 seconds for connection activation;

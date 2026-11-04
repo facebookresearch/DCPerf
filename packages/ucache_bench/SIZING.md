@@ -199,6 +199,24 @@ use_distribution = 1
 distribution_config = "./packages/ucache_bench/traffic_dist.json"
 ```
 
+The server request path uses the same fixed settings as the accepted
+cross-platform campaign:
+
+```text
+production_features = 1
+zstd_compress_pct = 100
+zstd_level = 1
+io_latency_us = 0
+rpc_socket_max_reads_per_event = 16
+lru_rebalance_interval_sec = 1
+lru_rebalancing_hits_min_age_sec = 60
+lru_rebalancing_hits_max_age_sec = 7200
+```
+
+The `ucache_bench_memory` job uses the same values as its defaults, so a run
+that passes only the sizing-dependent parameters still exercises the
+validated request path.
+
 Open-loop protection uses fixed workload bounds rather than a hardware profile:
 
 ```text

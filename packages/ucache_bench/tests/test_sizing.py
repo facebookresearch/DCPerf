@@ -413,6 +413,14 @@ class SizingTest(unittest.TestCase):
             "connection_ramp_seconds": 60,
             "full_load_stabilization_seconds": 60,
             "open_loop_refill_on_miss": 0,
+            "rpc_socket_max_reads_per_event": 16,
+            "production_features": 1,
+            "zstd_compress_pct": 100,
+            "zstd_level": 1,
+            "io_latency_us": 0,
+            "lru_rebalance_interval_sec": 1,
+            "lru_rebalancing_hits_min_age_sec": 60,
+            "lru_rebalancing_hits_max_age_sec": 7200,
         }
         for key, value in common.items():
             with self.subTest(key=key):
