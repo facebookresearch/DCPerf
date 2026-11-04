@@ -26,6 +26,7 @@ set(SERVER_HEADERS
     UcacheBenchThreadLoopCallback.h
     CpuManager.h
     UcacheBenchAdminServer.h
+    EgressTracker.h
 )
 
 add_executable(ucachebench_server ${SERVER_SOURCES} ${SERVER_HEADERS})

@@ -24,10 +24,13 @@
 #include <mutex>
 #include <string>
 #include <thread>
+
 #ifdef OSS_BUILD
+#include "EgressTracker.h"
 #include "UcacheBenchMessages.h"
 #else
 #include "cea/chips/benchpress/packages/ucache_bench/protocol/gen/UcacheBenchMessages.h"
+#include "cea/chips/benchpress/packages/ucache_bench/server/EgressTracker.h"
 #endif
 
 namespace facebook {
@@ -358,15 +361,6 @@ class UcacheBenchServer {
   void runHotKeyDetection(uint64_t keyHash);
 
   // Egress rate limiting simulation (matches NetworkOverloadProtector)
-  // Production tracks per-key egress via ConcurrentLRUHashMap with
-  // SlidingWindowCounter + DynamicTokenBucket per entry.
-  // We simulate with a thread-local F14 map doing hash lookups + counter
-  // updates.
-  struct EgressTracker {
-    folly::F14FastMap<uint64_t, std::pair<uint64_t, uint64_t>> keyEgress;
-    uint64_t totalBytes{0};
-    uint32_t cleanupCounter{0};
-  };
   folly::ThreadLocal<EgressTracker> egressTrackers_;
   void runEgressRateLimiting(uint64_t keyHash, size_t responseSize);
 

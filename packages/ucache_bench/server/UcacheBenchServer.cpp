@@ -465,41 +465,7 @@ void UcacheBenchServer::runHotKeyDetection(uint64_t keyHash) {
 void UcacheBenchServer::runEgressRateLimiting(
     uint64_t keyHash,
     size_t responseSize) {
-  auto& tracker = *egressTrackers_;
-
-  // Simulate ConcurrentLRUHashMap::find + potential insert
-  auto it = tracker.keyEgress.find(keyHash);
-  if (it == tracker.keyEgress.end()) {
-    // Simulate insert with SlidingWindowCounter + TokenBucket allocation
-    tracker.keyEgress[keyHash] = {responseSize, 1};
-  } else {
-    // Simulate sliding window read (sum across buckets)
-    auto& [totalBytes, count] = it->second;
-    uint64_t windowValue = totalBytes;
-    folly::doNotOptimizeAway(windowValue);
-
-    // Simulate token bucket consume check
-    bool hasTokens = (count < 10000); // simplified rate check
-    folly::doNotOptimizeAway(hasTokens);
-
-    // Simulate sliding window write
-    totalBytes += responseSize;
-    count++;
-  }
-
-  tracker.totalBytes += responseSize;
-
-  // Periodic cleanup matching LRU eviction (every 8192 requests)
-  if (++tracker.cleanupCounter >= 8192) {
-    tracker.cleanupCounter = 0;
-    // Simulate LRU eviction: remove entries exceeding maxKeysToTrack
-    if (tracker.keyEgress.size() > 4096) {
-      auto eraseIt = tracker.keyEgress.begin();
-      for (size_t i = 0; i < 1024 && eraseIt != tracker.keyEgress.end(); i++) {
-        eraseIt = tracker.keyEgress.erase(eraseIt);
-      }
-    }
-  }
+  egressTrackers_->record(keyHash, responseSize);
 }
 
 // Vocabulary used to synthesize the ZSTD dictionary. Production trains its
