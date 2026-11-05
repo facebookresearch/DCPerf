@@ -68,13 +68,15 @@ run_silo_smoke_test () {
   # shellcheck disable=SC2155
   local env_prefix=$(env_name_or_prefix "${env_name}")
 
+  # --ignore-sys-specs-errors: CI containers lack numactl/lshw, so
+  # system-specs collection must warn and continue instead of aborting.
   echo "[SMOKE] Running Silo TPC-C smoke test ..."
   (print_exec conda run --no-capture-output ${env_prefix} \
-    python ./benchpress_cli.py -b mem run silo_default) || return 1
+    python ./benchpress_cli.py -b mem run silo_default --ignore-sys-specs-errors) || return 1
 
   echo "[SMOKE] Running Silo YCSB-C smoke test ..."
   (print_exec conda run --no-capture-output ${env_prefix} \
-    python ./benchpress_cli.py -b mem run silo_ycsb_c) || return 1
+    python ./benchpress_cli.py -b mem run silo_ycsb_c --ignore-sys-specs-errors) || return 1
 
   echo "[SMOKE] Checking Silo metrics artifacts ..."
   python3 - <<'PY' || return 1
