@@ -13,7 +13,7 @@
 #
 # We install into ${BENCHPRESS_ROOT}/benchmarks/silo/dbtest so the binary
 # sits in its own subdirectory (matching the graph500/gapbs layout) and
-# `install_markers` in benchmarks_internal.yml can detect a completed
+# `install_markers` in benchmarks_mem.yml can detect a completed
 # install.
 
 set -Eeuo pipefail
