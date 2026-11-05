@@ -21,15 +21,20 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 BENCHPRESS_ROOT="$(readlink -f "${SCRIPT_DIR}/../..")"
 
-# System deps. fb-fwdproxy-config provides the fwdproxy-config helper used
-# below to give git access to public github through fwdproxy. autoconf /
-# automake / libtool are required because masstree's build runs
-# `autoreconf -i`. zlib-devel is required for dbtest's `-lz` link step.
+# System deps. autoconf / automake / libtool are required because
+# masstree's build runs `autoreconf -i`. zlib-devel is required for
+# dbtest's `-lz` link step.
 # `mysql-devel` conflicts with the preinstalled `fb-mysql-libs-universal`
 # on AArch64 hosts, and Silo's embedded-MySQL wrapper is not used by any
 # benchpress job (see MYSQL=0 below), so it is only installed on x86_64.
+# `fb-fwdproxy-config` only exists inside Meta; install it only when dnf
+# can see it, and use plain git on public builders (see GIT_PROXY_ARGS
+# below). Git access through fwdproxy is only needed inside Meta.
+if command -v dnf >/dev/null 2>&1 \
+    && dnf info fb-fwdproxy-config >/dev/null 2>&1; then
+  dnf install -y fb-fwdproxy-config
+fi
 DNF_DEPS=(
-    fb-fwdproxy-config
     autoconf
     automake
     libtool
@@ -67,16 +72,21 @@ cd silo_build
 
 "${BENCHPRESS_ROOT}"/install_remove_git.sh install
 
-# shellcheck disable=SC2046
-git $(fwdproxy-config --git-command git) clone "$SILO_GIT_REPO_URL"
+# Git through fwdproxy when the helper exists (internal hosts); plain
+# git on public builders where it does not.
+GIT_PROXY_ARGS=()
+if command -v fwdproxy-config >/dev/null 2>&1; then
+  read -ra GIT_PROXY_ARGS <<<"$(fwdproxy-config --git-command git)" || true
+fi
+
+git "${GIT_PROXY_ARGS[@]}" clone "$SILO_GIT_REPO_URL"
 cd silo
 git checkout -b benchpress "${SILO_GIT_COMMIT_TAG}"
 
 # The masstree submodule's .gitmodules pins git:// URLs that github no
 # longer serves. Rewrite to https:// before recursing.
 sed -i 's|git://|https://|g' .gitmodules
-# shellcheck disable=SC2046
-git $(fwdproxy-config --git-command git) submodule update --init --recursive
+git "${GIT_PROXY_ARGS[@]}" submodule update --init --recursive
 
 # Apply the cgroup-cpuset-awareness + no-NUMA patch (authored against the pinned
 # commit above). It (a) removes Silo's explicit NUMA memory hint so DB-pool
@@ -105,13 +115,26 @@ git apply --check "${LOADER_PATCH}" && git apply "${LOADER_PATCH}"
 # On AArch64 the build also drops the embedded-MySQL wrapper (MYSQL=0):
 # its headers/library are not installable there (see above) and no
 # benchpress job runs the `mysql` bench.
-MAKE_EXTRA_ARGS=()
+DROP_MYSQL_WRAPPER=0
 if [[ "${ARCH}" == "aarch64" || "${ARCH}" == "arm64" ]]; then
   SILO_AARCH64_PATCH="${SCRIPT_DIR}/patches/silo-aarch64.patch"
   git apply --check "${SILO_AARCH64_PATCH}" && git apply "${SILO_AARCH64_PATCH}"
   MASSTREE_AARCH64_PATCH="${SCRIPT_DIR}/patches/masstree-aarch64.patch"
   git -C masstree apply --check "${MASSTREE_AARCH64_PATCH}" \
     && git -C masstree apply "${MASSTREE_AARCH64_PATCH}"
+  DROP_MYSQL_WRAPPER=1
+fi
+
+# Also drop the embedded-MySQL wrapper when its library is absent: no
+# benchpress job runs the `mysql` bench, and `-lmysqld` is not shipped
+# by public MySQL 8 packages (the headers alone are not enough to link).
+# This covers public x86_64 builders; internal hosts that ship the
+# library keep the wrapper.
+if ! ls /usr/lib/mysql/libmysqld.* /usr/lib64/mysql/libmysqld.* >/dev/null 2>&1; then
+  DROP_MYSQL_WRAPPER=1
+fi
+MAKE_EXTRA_ARGS=()
+if [[ "${DROP_MYSQL_WRAPPER}" == "1" ]]; then
   MAKE_EXTRA_ARGS+=(MYSQL=0)
 fi
 
