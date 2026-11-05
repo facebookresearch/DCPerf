@@ -1,0 +1,265 @@
+diff --git a/compiler.hh b/compiler.hh
+index 03aa077..c8ada1b 100644
+--- a/compiler.hh
++++ b/compiler.hh
+@@ -59,7 +59,7 @@
+ #define PREFER_X86 1
+ #define ALLOW___SYNC_BUILTINS 1
+ 
+-#if !defined(HAVE_INDIFFERENT_ALIGMENT) && (__i386__ || __x86_64__ || __arch_um__)
++#if !defined(HAVE_INDIFFERENT_ALIGMENT) && (__i386__ || __x86_64__ || __arch_um__ || defined(__aarch64__))
+ # define HAVE_INDIFFERENT_ALIGNMENT 1
+ #endif
+ 
+@@ -103,12 +103,20 @@ inline void release_fence() {
+ 
+     Use this in spinloops, for example. */
+ inline void relax_fence() {
++#if defined(__aarch64__)
++    asm volatile("yield" : : : "memory"); // spin-loop hint, cf. x86 "pause"
++#else
+     asm volatile("pause" : : : "memory"); // equivalent to "rep; nop"
++#endif
+ }
+ 
+ /** @brief Full memory fence. */
+ inline void memory_fence() {
++#if defined(__aarch64__)
++    asm volatile("dmb ish" : : : "memory");
++#else
+     asm volatile("mfence" : : : "memory");
++#endif
+ }
+ 
+ /** @brief Do-nothing function object. */
+@@ -157,10 +165,16 @@ template <int SIZE, typename BARRIER> struct sized_compiler_operations;
+ template <typename B> struct sized_compiler_operations<1, B> {
+     typedef char type;
+     static inline type xchg(type* object, type new_value) {
++#if __x86__
+         asm volatile("xchgb %0,%1"
+                      : "+q" (new_value), "+m" (*object));
+         B()();
+         return new_value;
++#else
++        type old = __sync_lock_test_and_set(object, new_value);
++        B()();
++        return old;
++#endif
+     }
+     static inline type val_cmpxchg(type* object, type expected, type desired) {
+ #if __x86__ && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
+@@ -176,13 +190,15 @@ template <typename B> struct sized_compiler_operations<1, B> {
+     static inline bool bool_cmpxchg(type* object, type expected, type desired) {
+ #if HAVE___SYNC_BOOL_COMPARE_AND_SWAP && ALLOW___SYNC_BUILTINS
+         return __sync_bool_compare_and_swap(object, expected, desired);
+-#else
++#elif __x86__
+         bool result;
+         asm volatile("lock; cmpxchgb %3,%1; sete %b2"
+                      : "+a" (expected), "+m" (*object), "=q" (result)
+                      : "q" (desired) : "cc");
+         B()();
+         return result;
++#else
++        return __sync_bool_compare_and_swap(object, expected, desired);
+ #endif
+     }
+     static inline type fetch_and_add(type *object, type addend) {
+@@ -213,10 +229,16 @@ template <typename B> struct sized_compiler_operations<2, B> {
+     typedef int16_t type;
+ #endif
+     static inline type xchg(type* object, type new_value) {
++#if __x86__
+         asm volatile("xchgw %0,%1"
+                      : "+r" (new_value), "+m" (*object));
+         B()();
+         return new_value;
++#else
++        type old = __sync_lock_test_and_set(object, new_value);
++        B()();
++        return old;
++#endif
+     }
+     static inline type val_cmpxchg(type* object, type expected, type desired) {
+ #if __x86__ && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
+@@ -232,13 +254,15 @@ template <typename B> struct sized_compiler_operations<2, B> {
+     static inline bool bool_cmpxchg(type* object, type expected, type desired) {
+ #if HAVE___SYNC_BOOL_COMPARE_AND_SWAP && ALLOW___SYNC_BUILTINS
+         return __sync_bool_compare_and_swap(object, expected, desired);
+-#else
++#elif __x86__
+         bool result;
+         asm volatile("lock; cmpxchgw %3,%1; sete %b2"
+                      : "+a" (expected), "+m" (*object), "=q" (result)
+                      : "r" (desired) : "cc");
+         B()();
+         return result;
++#else
++        return __sync_bool_compare_and_swap(object, expected, desired);
+ #endif
+     }
+     static inline type fetch_and_add(type* object, type addend) {
+@@ -269,10 +293,16 @@ template <typename B> struct sized_compiler_operations<4, B> {
+     typedef int32_t type;
+ #endif
+     static inline type xchg(type* object, type new_value) {
++#if __x86__
+         asm volatile("xchgl %0,%1"
+                      : "+r" (new_value), "+m" (*object));
+         B()();
+         return new_value;
++#else
++        type old = __sync_lock_test_and_set(object, new_value);
++        B()();
++        return old;
++#endif
+     }
+     static inline type val_cmpxchg(type* object, type expected, type desired) {
+ #if __x86__ && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP)
+@@ -288,13 +318,15 @@ template <typename B> struct sized_compiler_operations<4, B> {
+     static inline bool bool_cmpxchg(type* object, type expected, type desired) {
+ #if HAVE___SYNC_BOOL_COMPARE_AND_SWAP && ALLOW___SYNC_BUILTINS
+         return __sync_bool_compare_and_swap(object, expected, desired);
+-#else
++#elif __x86__
+         bool result;
+         asm volatile("lock; cmpxchgl %3,%1; sete %b2"
+                      : "+a" (expected), "+m" (*object), "=q" (result)
+                      : "r" (desired) : "cc");
+         B()();
+         return result;
++#else
++        return __sync_bool_compare_and_swap(object, expected, desired);
+ #endif
+     }
+     static inline type fetch_and_add(type *object, type addend) {
+@@ -326,14 +358,18 @@ template <typename B> struct sized_compiler_operations<8, B> {
+ #else
+     typedef int64_t type;
+ #endif
+-#if __x86_64__
+     static inline type xchg(type* object, type new_value) {
++#if __x86_64__
+         asm volatile("xchgq %0,%1"
+                      : "+r" (new_value), "+m" (*object));
+         B()();
+         return new_value;
+-    }
++#else
++        type old = __sync_lock_test_and_set(object, new_value);
++        B()();
++        return old;
+ #endif
++    }
+     static inline type val_cmpxchg(type* object, type expected, type desired) {
+ #if __x86_64__ && (PREFER_X86 || !HAVE___SYNC_VAL_COMPARE_AND_SWAP_8)
+         asm volatile("lock; cmpxchgq %2,%1"
+@@ -351,6 +387,12 @@ template <typename B> struct sized_compiler_operations<8, B> {
+         return ((uint64_t) expected_high << 32) | expected_low;
+ #elif HAVE___SYNC_VAL_COMPARE_AND_SWAP_8
+         return __sync_val_compare_and_swap(object, expected, desired);
++#else
++        // No configure-provided HAVE___SYNC_VAL_COMPARE_AND_SWAP_8 (e.g.
++        // config.h was not generated): the builtin still exists on
++        // 64-bit GCC/Clang targets, so use it rather than falling off
++        // the end of a non-void function.
++        return __sync_val_compare_and_swap(object, expected, desired);
+ #endif
+     }
+     static inline bool bool_cmpxchg(type* object, type expected, type desired) {
+@@ -363,7 +405,7 @@ template <typename B> struct sized_compiler_operations<8, B> {
+                      : "r" (desired) : "cc");
+         B()();
+         return result;
+-#else
++#elif __i386__
+         uint32_t expected_low(expected), expected_high(expected >> 32),
+             desired_low(desired), desired_high(desired >> 32);
+         bool result;
+@@ -373,9 +415,10 @@ template <typename B> struct sized_compiler_operations<8, B> {
+                      : "b" (desired_low), "c" (desired_high) : "cc");
+         B()();
+         return result;
++#else
++        return __sync_bool_compare_and_swap(object, expected, desired);
+ #endif
+     }
+-#if __x86_64__ || HAVE___SYNC_FETCH_AND_ADD_8
+     static inline type fetch_and_add(type* object, type addend) {
+ # if __x86_64__ && (PREFER_X86 || !HAVE___SYNC_FETCH_AND_ADD_8)
+         asm volatile("lock; xaddq %0,%1"
+@@ -386,8 +429,6 @@ template <typename B> struct sized_compiler_operations<8, B> {
+         return __sync_fetch_and_add(object, addend);
+ # endif
+     }
+-#endif
+-#if __x86_64__ || HAVE___SYNC_FETCH_AND_OR_8
+     static inline void atomic_or(type* object, type addend) {
+ #if __x86_64__
+         asm volatile("lock; orq %0,%1"
+@@ -397,7 +438,6 @@ template <typename B> struct sized_compiler_operations<8, B> {
+         __sync_fetch_and_or(object, addend);
+ #endif
+     }
+-#endif
+ };
+ 
+ template<typename T>
+@@ -567,6 +607,8 @@ inline void atomic_or(unsigned long* object, int addend) {
+ inline void prefetch(const void *ptr) {
+ #ifdef NOPREFETCH
+     (void) ptr;
++#elif defined(__aarch64__)
++    __builtin_prefetch(ptr, 0, 3);
+ #else
+     typedef struct { char x[CACHE_LINE_SIZE]; } cacheline_t;
+     asm volatile("prefetcht0 %0" : : "m" (*(const cacheline_t *)ptr));
+@@ -577,6 +619,8 @@ inline void prefetch(const void *ptr) {
+ inline void prefetchnta(const void *ptr) {
+ #ifdef NOPREFETCH
+     (void) ptr;
++#elif defined(__aarch64__)
++    __builtin_prefetch(ptr, 0, 0);
+ #else
+     typedef struct { char x[CACHE_LINE_SIZE]; } cacheline_t;
+     asm volatile("prefetchnta %0" : : "m" (*(const cacheline_t *)ptr));
+@@ -612,6 +656,8 @@ inline uint64_t ntohq(uint64_t val) {
+     asm("bswapl %0; bswapl %1; xchgl %0,%1"
+         : "+r" (v.s.a), "+r" (v.s.b));
+     return v.u;
++#elif defined(__aarch64__)
++    return __builtin_bswap64(val);
+ #else /* __i386__ */
+     asm("bswapq %0" : "+r" (val));
+     return val;
+@@ -962,16 +1008,29 @@ inline T read_in_net_order(const uint8_t* s) {
+ 
+ 
+ inline uint64_t read_pmc(uint32_t ecx) {
++#if defined(__aarch64__)
++    // No userspace-readable performance counter on AArch64; callers in
++    // this tree (none in the dbtest build) must not rely on the value.
++    (void) ecx;
++    return 0;
++#else
+     uint32_t a, d;
+     __asm __volatile("rdpmc" : "=a"(a), "=d"(d) : "c"(ecx));
+     return ((uint64_t)a) | (((uint64_t)d) << 32);
++#endif
+ }
+ 
+ inline uint64_t read_tsc(void)
+ {
++#if defined(__aarch64__)
++    uint64_t v;
++    __asm volatile("mrs %0, cntvct_el0" : "=r" (v));
++    return v;
++#else
+     uint32_t low, high;
+     asm volatile("rdtsc" : "=a" (low), "=d" (high));
+     return ((uint64_t)low) | (((uint64_t)high) << 32);
++#endif
+ }
+ 
+ template <typename T>
