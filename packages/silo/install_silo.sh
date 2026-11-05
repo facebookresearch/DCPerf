@@ -46,8 +46,13 @@ DNF_DEPS=(
     zlib-devel
 )
 ARCH="$(uname -m)"
-if [[ "${ARCH}" != "aarch64" && "${ARCH}" != "arm64" ]]; then
-    DNF_DEPS+=(mysql-devel)
+# `mysql-devel` is not shipped on CentOS Stream 10 ("Unable to find a
+# match"), and on AArch64 it conflicts with `fb-mysql-libs-universal`.
+# Install it only on x86_64 hosts where dnf can see it; the libmysqld
+# check below drops the wrapper when the library is absent anyway.
+if [[ "${ARCH}" != "aarch64" && "${ARCH}" != "arm64" ]] \
+    && dnf info mysql-devel >/dev/null 2>&1; then
+  DNF_DEPS+=(mysql-devel)
 fi
 dnf install -y "${DNF_DEPS[@]}"
 
@@ -70,7 +75,16 @@ rm -rf silo_build
 mkdir -p silo_build
 cd silo_build
 
-"${BENCHPRESS_ROOT}"/install_remove_git.sh install
+# install_remove_git.sh exists only inside Meta; on public builders git
+# is provided by the environment (the GitHub workflow installs it), so
+# only invoke the helper when it is present.
+if [[ -f "${BENCHPRESS_ROOT}/install_remove_git.sh" ]]; then
+  "${BENCHPRESS_ROOT}"/install_remove_git.sh install
+fi
+command -v git >/dev/null 2>&1 || {
+  echo "git is required to clone Silo but was not found." >&2
+  exit 1
+}
 
 # Git through fwdproxy when the helper exists (internal hosts); plain
 # git on public builders where it does not.
@@ -104,6 +118,15 @@ git apply --check "${SILO_PATCH}" && git apply "${SILO_PATCH}"
 # loaders already do. Applied on all architectures.
 LOADER_PATCH="${SCRIPT_DIR}/patches/silo-ycsb-loader-remainder.patch"
 git apply --check "${LOADER_PATCH}" && git apply "${LOADER_PATCH}"
+
+# Strict two-phase name lookup (GCC 14 / Clang) rejects format_list()
+# streaming elements whose operator<< is declared later in util.h (the
+# pair/vector/tuple printers sit after namespace util). Move the
+# printers before namespace util. Applied on all architectures and
+# compilers; GCC 11 accepted the old order, so this changes no behavior
+# there.
+UTIL_PATCH="${SCRIPT_DIR}/patches/silo-util-printer-decl-order.patch"
+git apply --check "${UTIL_PATCH}" && git apply "${UTIL_PATCH}"
 
 # AArch64: Silo and Masstree contain x86-only inline asm (`pause`, `rdtsc`,
 # `prefetcht0`, `bswapq`, `mfence`, `xchg`/`cmpxchg`). The patches below

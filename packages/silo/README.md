@@ -163,6 +163,7 @@ txn_breakdown: Read=23280692
 - The install script `sed`-patches Silo's `Makefile` to drop `-Werror` from the `MODE=perf` branch. Without this, modern GCC (≥ 11 on EL9) escalates warnings in `masstree/string_base.hh` (`-Wformat-truncation` on a `snprintf` size mismatch) and `btree.cc` (`-Wmaybe-uninitialized` on a `memcmp` of stack-constructed varkey) to fatal errors that the existing `-Wno-error=maybe-uninitialized` flag cannot fully suppress.
 - The masstree `.so` is dynamically linked at runtime — do not delete `./silo_build/` if you want to keep running the binary. The cleanup script removes both the binary and the build tree.
 - The YCSB loader fix (`silo-ycsb-loader-remainder.patch`, applied on all architectures) gives the last sequential loader the `nkeys % nthreads` remainder keys. Upstream drops them, so readers abort on keys that were never loaded whenever the key count does not divide evenly by the thread count (e.g. scale-factor 1 over 16 threads). The parallel loaders already handled the remainder.
+- The printer-order fix (`silo-util-printer-decl-order.patch`, applied on all architectures) moves the `std::pair`/`std::vector`/`std::tuple` pretty printers in `util.h` before `format_list()`. Strict two-phase name lookup (GCC 14 / Clang) rejects the upstream order; GCC 11 accepted it.
 
 ### AArch64 support
 
@@ -194,4 +195,5 @@ Silo represents the **in-memory OLTP database** workload class: many-core scalin
 | `patches/silo-aarch64.patch` | AArch64 replacements for Silo's x86 asm, applied only on AArch64 |
 | `patches/masstree-aarch64.patch` | AArch64 replacements for Masstree's x86 asm, applied only on AArch64 (inside the `masstree/` submodule) |
 | `patches/silo-ycsb-loader-remainder.patch` | YCSB loader remainder-key fix, applied on all architectures |
+| `patches/silo-util-printer-decl-order.patch` | `util.h` printer declaration order for GCC 14 / Clang, applied on all architectures |
 | `README.md` | This file |
