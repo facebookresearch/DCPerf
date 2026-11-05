@@ -4,33 +4,33 @@
 
 This benchpress package builds `dbtest` from upstream at a pinned commit and wraps it with the standard install / cleanup / run interface.
 
-> **Note:** Silo lives in `benchpress/config/benchmarks_internal.yml` / `jobs_internal.yml`. It is part of Meta's internal benchpress suite and not shipped in the public DCPerf release.
+> **Note:** Silo lives in the `mem` benchpress suite (`benchpress/config/benchmarks_mem.yml` / `jobs_mem.yml`); select it with `-b mem`.
 
 ## System requirements
 
 | Item | Detail |
 |---|---|
 | OS | RHEL/CentOS 9 (tested), Ubuntu 22.04 (untested) |
-| CPU | Any x86_64 with multiple cores. Validated on 56-core Intel and AMD hosts. Silo is designed to scale to many cores. |
+| CPU | x86_64 with multiple cores, or AArch64 (Neoverse-V2 / NVIDIA Grace, via the AArch64 patches below). Validated on 56-core Intel and AMD hosts and on a Grace host. Silo is designed to scale to many cores. |
 | Memory | At least 8 GB; ~5 GB per warehouse for TPC-C scale-factor sweeps |
 | Compiler | GCC 11+ (the install script patches the upstream Makefile to tolerate modern `-Werror` defaults) |
-| Network | Outbound HTTPS to github.com via `fwdproxy` (the install script wires this up automatically with `fwdproxy-config`) |
+| Network | Outbound HTTPS to github.com (via `fwdproxy-config` inside Meta; direct git access on public builders) |
 | Privileges | `sudo` for the initial `dnf install` of build dependencies |
 
-The install script declares the dnf deps it needs, but for reference: `jemalloc-devel`, `numactl-devel`, `libdb-cxx-devel`, `mysql-devel`, `libaio-devel`, `openssl-devel`, `zlib-devel`, `autoconf`, `automake`, `libtool`, `fb-fwdproxy-config`.
+The install script declares the dnf deps it needs, but for reference: `jemalloc-devel`, `numactl-devel`, `libdb-cxx-devel`, `mysql-devel` (x86_64 only), `libaio-devel`, `openssl-devel`, `zlib-devel`, `autoconf`, `automake`, `libtool`, plus `fb-fwdproxy-config` inside Meta.
 
 ## Install Silo
 
 ```bash
-./benchpress_cli.py install silo_default
+./benchpress_cli.py -b mem install silo_default
 ```
 
-This (a) installs build dependencies via `dnf`, (b) clones `stephentu/silo` and its `masstree` submodule via `fwdproxy`, (c) builds `dbtest` in `MODE=perf` with `jemalloc`, and (d) places the binary at `./benchmarks/silo/dbtest`.
+This (a) installs build dependencies via `dnf`, (b) clones `stephentu/silo` and its `masstree` submodule (via `fwdproxy` inside Meta), (c) builds `dbtest` in `MODE=perf` with `jemalloc`, and (d) places the binary at `./benchmarks/silo/dbtest`.
 
 The install is idempotent — re-running re-clones and rebuilds, then overwrites the binary. To uninstall:
 
 ```bash
-./benchpress_cli.py clean silo_default
+./benchpress_cli.py -b mem clean silo_default
 ```
 
 ## Run Silo
@@ -68,7 +68,7 @@ The workload mix is passed via Silo's `--bench-opts '--workload-mix=READ,RMW,WRI
 
 ```bash
 for t in 1 2 4 8 16 32 64; do
-    ./benchpress_cli.py run silo_tpcc_sweep_${t}t
+    ./benchpress_cli.py -b mem run silo_tpcc_sweep_${t}t
 done
 ```
 
@@ -85,7 +85,7 @@ done
 Example: pin to NUMA node 0 for a single-socket TPC-C scan:
 
 ```bash
-SILO_NUMA_NODE=0 ./benchpress_cli.py run silo_tpcc_allcores
+SILO_NUMA_NODE=0 ./benchpress_cli.py -b mem run silo_tpcc_allcores
 ```
 
 ### cgroup-cpuset awareness (`--cgroup-aware`)
@@ -162,6 +162,22 @@ txn_breakdown: Read=23280692
 - The masstree submodule's `.gitmodules` pins `git://` URLs that github no longer serves; the install script rewrites these to `https://`.
 - The install script `sed`-patches Silo's `Makefile` to drop `-Werror` from the `MODE=perf` branch. Without this, modern GCC (≥ 11 on EL9) escalates warnings in `masstree/string_base.hh` (`-Wformat-truncation` on a `snprintf` size mismatch) and `btree.cc` (`-Wmaybe-uninitialized` on a `memcmp` of stack-constructed varkey) to fatal errors that the existing `-Wno-error=maybe-uninitialized` flag cannot fully suppress.
 - The masstree `.so` is dynamically linked at runtime — do not delete `./silo_build/` if you want to keep running the binary. The cleanup script removes both the binary and the build tree.
+- The YCSB loader fix (`silo-ycsb-loader-remainder.patch`, applied on all architectures) gives the last sequential loader the `nkeys % nthreads` remainder keys. Upstream drops them, so readers abort on keys that were never loaded whenever the key count does not divide evenly by the thread count (e.g. scale-factor 1 over 16 threads). The parallel loaders already handled the remainder.
+
+### AArch64 support
+
+Silo and Masstree contain x86-only inline assembly. On AArch64 hosts the install script applies two additional patches (only on AArch64; the x86_64 build is unchanged):
+
+| Patch | What it replaces |
+|---|---|
+| `silo-aarch64.patch` | `pause` → `yield`, `rdtsc` → `CNTVCT_EL0`, `prefetcht0` → `__builtin_prefetch` (`amd64.h`, `prefetch.h`) |
+| `masstree-aarch64.patch` | `pause` → `yield`, `mfence` → `dmb ish`, `prefetcht0`/`prefetchnta` → `__builtin_prefetch`, `bswapq` → `__builtin_bswap64`, `rdtsc` → `CNTVCT_EL0`, unconditional `xchg`/`cmpxchg` asm → `__sync_*` builtins (Masstree's `configure` already detects the `__sync_*` builtins and most atomic operations fall back to them; the remaining sites had no fallback). AArch64 is also added to `HAVE_INDIFFERENT_ALIGNMENT`, matching the codebase's existing assumption that unaligned accesses are OK. |
+
+AArch64 build differences:
+
+- `MYSQL=0`: the embedded-MySQL wrapper is not built. `mysql-devel` conflicts with the preinstalled `fb-mysql-libs-universal` on AArch64 hosts, and no benchpress job runs the `mysql` bench.
+- The perf-counter path (`scopedperf.hh`, `USE_PERF_CTRS`) remains x86-only; it is disabled in the stock build.
+- Validated on a Grace host (Neoverse-V2, 72 CPUs with 16 online, single NUMA node): TPC-C, all YCSB mixes, and the `queue` microbenchmark complete and the Silo parser extracts all metric groups from the output.
 
 ## Representativeness
 
@@ -174,4 +190,8 @@ Silo represents the **in-memory OLTP database** workload class: many-core scalin
 | `install_silo.sh` | Clones stephentu/silo at the pinned commit, builds `dbtest` with `MODE=perf USE_MALLOC_MODE=1`, installs the binary to `./benchmarks/silo/dbtest` |
 | `cleanup_silo.sh` | Removes `./benchmarks/silo/` and the `silo_build/` tree |
 | `run.sh` | Wrapper used as the benchmark `path:` — forwards all args to `dbtest`, rewrites `--num-threads 0` to `$(nproc)`, supports `SILO_NUMA_NODE` / `SILO_CPUS` / `SILO_BIN` |
+| `patches/silo-cgroup-aware-no-numa.patch` | Removes the explicit NUMA memory hint; adds the `--cgroup-aware` flag (see above) |
+| `patches/silo-aarch64.patch` | AArch64 replacements for Silo's x86 asm, applied only on AArch64 |
+| `patches/masstree-aarch64.patch` | AArch64 replacements for Masstree's x86 asm, applied only on AArch64 (inside the `masstree/` submodule) |
+| `patches/silo-ycsb-loader-remainder.patch` | YCSB loader remainder-key fix, applied on all architectures |
 | `README.md` | This file |

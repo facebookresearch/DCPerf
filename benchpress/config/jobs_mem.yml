@@ -180,3 +180,354 @@
     # extra_args is passed verbatim, e.g. "--eps 0.01", "--ccx",
     # "--mem-nodes 0,1" (DRAM+CXL), or "--no-cgroup" (taskset-only, no limits).
     - "extra_args="
+
+- benchmark: silo
+  name: silo_default
+  description: defaults for silo
+  args:
+    verbose: true
+    bench: tpcc
+    num-threads: 1
+    scale-factor: 1
+    runtime: 1
+
+# ---------------------------------------------------------------------------
+# Silo TPC-C jobs. Silo recommends one warehouse per worker thread for good
+# behavior, so scale-factor mostly tracks num-threads.
+# ---------------------------------------------------------------------------
+
+- benchmark: silo
+  name: silo_tpcc_1t
+  description: Silo TPC-C, single-threaded, 30s run (baseline)
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=1'
+    - 'scale_factor=1'
+    - 'runtime=30'
+
+- benchmark: silo
+  name: silo_tpcc_allcores
+  description: Silo TPC-C across all cores (num-threads 0 is rewritten to $(nproc) by run.sh), 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=0'
+    - 'scale_factor=32'
+    - 'runtime=30'
+
+- benchmark: silo
+  name: silo_tpcc_scale10
+  description: Silo TPC-C, 8 threads x 10 warehouses, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=8'
+    - 'scale_factor=10'
+    - 'runtime=30'
+
+# ---------------------------------------------------------------------------
+# Silo YCSB jobs. The workload mix is "read,rmw,write,scan" percentages
+# summing to 100, passed via dbtest's --bench-opts.
+# ---------------------------------------------------------------------------
+
+- benchmark: silo
+  name: silo_ycsb_a
+  description: 'Silo YCSB workload A (50% read, 50% update), all cores, 30s'
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'ycsb'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+    - '--bench-opts'
+    - '--workload-mix={workload_mix}'
+  vars:
+    - 'num_threads=0'
+    - 'scale_factor=1'
+    - 'runtime=30'
+    - 'workload_mix=50,0,50,0'
+
+- benchmark: silo
+  name: silo_ycsb_b
+  description: 'Silo YCSB workload B (95% read, 5% update), all cores, 30s'
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'ycsb'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+    - '--bench-opts'
+    - '--workload-mix={workload_mix}'
+  vars:
+    - 'num_threads=0'
+    - 'scale_factor=1'
+    - 'runtime=30'
+    - 'workload_mix=95,0,5,0'
+
+- benchmark: silo
+  name: silo_ycsb_c
+  description: 'Silo YCSB workload C (100% read), all cores, 30s'
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'ycsb'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+    - '--bench-opts'
+    - '--workload-mix={workload_mix}'
+  vars:
+    - 'num_threads=0'
+    - 'scale_factor=1'
+    - 'runtime=30'
+    - 'workload_mix=100,0,0,0'
+
+- benchmark: silo
+  name: silo_ycsb_e
+  description: 'Silo YCSB workload E (95% scan, 5% insert via update slot), all cores, 30s'
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'ycsb'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+    - '--bench-opts'
+    - '--workload-mix={workload_mix}'
+  vars:
+    - 'num_threads=0'
+    - 'scale_factor=1'
+    - 'runtime=30'
+    - 'workload_mix=0,0,5,95'
+
+- benchmark: silo
+  name: silo_ycsb_f
+  description: 'Silo YCSB workload F (50% read, 50% read-modify-write), all cores, 30s'
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'ycsb'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+    - '--bench-opts'
+    - '--workload-mix={workload_mix}'
+  vars:
+    - 'num_threads=0'
+    - 'scale_factor=1'
+    - 'runtime=30'
+    - 'workload_mix=50,50,0,0'
+
+# ---------------------------------------------------------------------------
+# Silo microbenchmark: the `queue` workload is dbtest's simplest enqueue/
+# dequeue test, useful as a pure key-value get/put stressor.
+# ---------------------------------------------------------------------------
+
+- benchmark: silo
+  name: silo_queue
+  description: Silo `queue` microbenchmark (simple KV insert/delete), all cores, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'queue'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=0'
+    - 'scale_factor=1'
+    - 'runtime=30'
+
+# ---------------------------------------------------------------------------
+# TPC-C thread-count sweep. One warehouse per worker thread.
+# run.sh rewrites --num-threads 0 (used elsewhere) to nproc; here we use
+# explicit thread counts so the sweep is reproducible across hosts. Jobs
+# whose thread count exceeds nproc will oversubscribe.
+# ---------------------------------------------------------------------------
+
+- benchmark: silo
+  name: silo_tpcc_sweep_1t
+  description: Silo TPC-C sweep, 1 thread / 1 warehouse, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=1'
+    - 'scale_factor=1'
+    - 'runtime=30'
+
+- benchmark: silo
+  name: silo_tpcc_sweep_2t
+  description: Silo TPC-C sweep, 2 threads / 2 warehouses, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=2'
+    - 'scale_factor=2'
+    - 'runtime=30'
+
+- benchmark: silo
+  name: silo_tpcc_sweep_4t
+  description: Silo TPC-C sweep, 4 threads / 4 warehouses, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=4'
+    - 'scale_factor=4'
+    - 'runtime=30'
+
+- benchmark: silo
+  name: silo_tpcc_sweep_8t
+  description: Silo TPC-C sweep, 8 threads / 8 warehouses, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=8'
+    - 'scale_factor=8'
+    - 'runtime=30'
+
+- benchmark: silo
+  name: silo_tpcc_sweep_16t
+  description: Silo TPC-C sweep, 16 threads / 16 warehouses, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=16'
+    - 'scale_factor=16'
+    - 'runtime=30'
+
+- benchmark: silo
+  name: silo_tpcc_sweep_32t
+  description: Silo TPC-C sweep, 32 threads / 32 warehouses, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=32'
+    - 'scale_factor=32'
+    - 'runtime=30'
+
+- benchmark: silo
+  name: silo_tpcc_sweep_64t
+  description: Silo TPC-C sweep, 64 threads / 64 warehouses, 30s
+  args:
+    - '--verbose'
+    - 'true'
+    - '--bench'
+    - 'tpcc'
+    - '--num-threads'
+    - '{num_threads}'
+    - '--scale-factor'
+    - '{scale_factor}'
+    - '--runtime'
+    - '{runtime}'
+  vars:
+    - 'num_threads=64'
+    - 'scale_factor=64'
+    - 'runtime=30'

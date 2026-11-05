@@ -1,0 +1,18 @@
+diff --git a/benchmarks/ycsb.cc b/benchmarks/ycsb.cc
+index 1003c51..e1ea508 100644
+--- a/benchmarks/ycsb.cc
++++ b/benchmarks/ycsb.cc
+@@ -283,7 +283,12 @@ protected:
+     const size_t nkeysperthd = nkeys / nthreads;
+     for (size_t i = 0; i < nthreads; i++) {
+       const size_t keystart = i * nkeysperthd;
+-      const size_t keyend = min((i + 1) * nkeysperthd, nkeys);
++      // The last loader takes the remainder: integer division drops
++      // nkeys % nthreads keys (e.g. 1000 keys over 16 threads drops
++      // 992..999), which readers then fail to find. The parallel
++      // loaders in make_loaders() below already do this.
++      const size_t keyend = (i + 1 == nthreads) ?
++        nkeys : min((i + 1) * nkeysperthd, nkeys);
+       ycsb_load_keyrange(
+           keystart,
+           keyend,
