@@ -13,7 +13,7 @@
 #
 # We install into ${BENCHPRESS_ROOT}/benchmarks/silo/dbtest so the binary
 # sits in its own subdirectory (matching the graph500/gapbs layout) and
-# `install_markers` in benchmarks_internal.yml can detect a completed
+# `install_markers` in benchmarks_mem.yml can detect a completed
 # install.
 
 set -Eeuo pipefail
@@ -25,18 +25,26 @@ BENCHPRESS_ROOT="$(readlink -f "${SCRIPT_DIR}/../..")"
 # below to give git access to public github through fwdproxy. autoconf /
 # automake / libtool are required because masstree's build runs
 # `autoreconf -i`. zlib-devel is required for dbtest's `-lz` link step.
-dnf install -y \
-    fb-fwdproxy-config \
-    autoconf \
-    automake \
-    libtool \
-    jemalloc-devel \
-    numactl-devel \
-    libdb-cxx-devel \
-    mysql-devel \
-    libaio-devel \
-    openssl-devel \
+# `mysql-devel` conflicts with the preinstalled `fb-mysql-libs-universal`
+# on AArch64 hosts, and Silo's embedded-MySQL wrapper is not used by any
+# benchpress job (see MYSQL=0 below), so it is only installed on x86_64.
+DNF_DEPS=(
+    fb-fwdproxy-config
+    autoconf
+    automake
+    libtool
+    jemalloc-devel
+    numactl-devel
+    libdb-cxx-devel
+    libaio-devel
+    openssl-devel
     zlib-devel
+)
+ARCH="$(uname -m)"
+if [[ "${ARCH}" != "aarch64" && "${ARCH}" != "arm64" ]]; then
+    DNF_DEPS+=(mysql-devel)
+fi
+dnf install -y "${DNF_DEPS[@]}"
 
 SILO_GIT_REPO_URL="https://github.com/stephentu/silo.git"
 # Pinned to the last commit on stephentu/silo master as of the original
@@ -79,6 +87,34 @@ git $(fwdproxy-config --git-command git) submodule update --init --recursive
 SILO_PATCH="${SCRIPT_DIR}/patches/silo-cgroup-aware-no-numa.patch"
 git apply --check "${SILO_PATCH}" && git apply "${SILO_PATCH}"
 
+# Pre-existing upstream bug, not AArch64-specific: the sequential YCSB
+# loader drops the nkeys % nthreads remainder keys, which readers then
+# fail to find (e.g. scale-factor 1 over 16 threads loads 992 of 1000
+# keys and aborts). Give the last loader the remainder, as the parallel
+# loaders already do. Applied on all architectures.
+LOADER_PATCH="${SCRIPT_DIR}/patches/silo-ycsb-loader-remainder.patch"
+git apply --check "${LOADER_PATCH}" && git apply "${LOADER_PATCH}"
+
+# AArch64: Silo and Masstree contain x86-only inline asm (`pause`, `rdtsc`,
+# `prefetcht0`, `bswapq`, `mfence`, `xchg`/`cmpxchg`). The patches below
+# replace those with architected AArch64 equivalents (`yield`, `CNTVCT_EL0`,
+# `__builtin_prefetch`, `__builtin_bswap64`, `dmb ish`, `__sync_*`
+# builtins); every x86 code path is left unchanged behind its guard.
+# Applied only on AArch64 so the x86_64 build is untouched. The Masstree
+# patch lives in the submodule, so it is applied inside `masstree/`.
+# On AArch64 the build also drops the embedded-MySQL wrapper (MYSQL=0):
+# its headers/library are not installable there (see above) and no
+# benchpress job runs the `mysql` bench.
+MAKE_EXTRA_ARGS=()
+if [[ "${ARCH}" == "aarch64" || "${ARCH}" == "arm64" ]]; then
+  SILO_AARCH64_PATCH="${SCRIPT_DIR}/patches/silo-aarch64.patch"
+  git apply --check "${SILO_AARCH64_PATCH}" && git apply "${SILO_AARCH64_PATCH}"
+  MASSTREE_AARCH64_PATCH="${SCRIPT_DIR}/patches/masstree-aarch64.patch"
+  git -C masstree apply --check "${MASSTREE_AARCH64_PATCH}" \
+    && git -C masstree apply "${MASSTREE_AARCH64_PATCH}"
+  MAKE_EXTRA_ARGS+=(MYSQL=0)
+fi
+
 # GCC >= 7 elevates -Wmaybe-uninitialized to a fatal error in masstree's
 # str.hh; suppress just that warning when the compiler supports the flag.
 MAYBE_UNINIT="$(echo | gcc -Wmaybe-uninitialized -E - >/dev/null 2>&1 \
@@ -94,7 +130,7 @@ CXX_CMD="g++ -std=gnu++0x ${MAYBE_UNINIT}"
 # take effect. Idempotent.
 sed -i 's/-Werror -O2/-O2/g' Makefile
 
-CXX="${CXX_CMD}" MODE=perf DEBUG=0 CHECK_INVARIANTS=0 USE_MALLOC_MODE=1 make dbtest
+CXX="${CXX_CMD}" MODE=perf DEBUG=0 CHECK_INVARIANTS=0 USE_MALLOC_MODE=1 make dbtest "${MAKE_EXTRA_ARGS[@]}"
 
 mkdir -p "${SILO_INSTALLATION_PREFIX}"
 mv out-perf.masstree/benchmarks/dbtest "${SILO_BINARY_PATH}"
