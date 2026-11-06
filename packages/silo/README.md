@@ -14,10 +14,10 @@ This benchpress package builds `dbtest` from upstream at a pinned commit and wra
 | CPU | x86_64 with multiple cores, or AArch64 (Neoverse-V2 / NVIDIA Grace, via the AArch64 patches below). Validated on 56-core Intel and AMD hosts and on a Grace host. Silo is designed to scale to many cores. |
 | Memory | At least 8 GB; ~5 GB per warehouse for TPC-C scale-factor sweeps |
 | Compiler | GCC 11+ (the install script patches the upstream Makefile to tolerate modern `-Werror` defaults) |
-| Network | Outbound HTTPS to github.com via `fwdproxy` (the install script wires this up automatically with `fwdproxy-config`) |
+| Network | Outbound HTTPS to github.com (via `fwdproxy-config` inside Meta; direct git access on public builders) |
 | Privileges | `sudo` for the initial `dnf install` of build dependencies |
 
-The install script declares the dnf deps it needs, but for reference: `jemalloc-devel`, `numactl-devel`, `libdb-cxx-devel`, `mysql-devel`, `libaio-devel`, `openssl-devel`, `zlib-devel`, `autoconf`, `automake`, `libtool`, `fb-fwdproxy-config`.
+The install script declares the dnf deps it needs, but for reference: `jemalloc-devel`, `numactl-devel`, `libdb-cxx-devel`, `mysql-devel` (x86_64 only), `libaio-devel`, `openssl-devel`, `zlib-devel`, `autoconf`, `automake`, `libtool`, plus `fb-fwdproxy-config` inside Meta.
 
 ## Install Silo
 
@@ -25,7 +25,7 @@ The install script declares the dnf deps it needs, but for reference: `jemalloc-
 ./benchpress_cli.py -b mem install silo_default
 ```
 
-This (a) installs build dependencies via `dnf`, (b) clones `stephentu/silo` and its `masstree` submodule via `fwdproxy`, (c) builds `dbtest` in `MODE=perf` with `jemalloc`, and (d) places the binary at `./benchmarks/silo/dbtest`.
+This (a) installs build dependencies via `dnf`, (b) clones `stephentu/silo` and its `masstree` submodule (via `fwdproxy` inside Meta), (c) builds `dbtest` in `MODE=perf` with `jemalloc`, and (d) places the binary at `./benchmarks/silo/dbtest`.
 
 The install is idempotent — re-running re-clones and rebuilds, then overwrites the binary. To uninstall:
 
