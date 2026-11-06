@@ -4,7 +4,7 @@
 
 This benchpress package builds `dbtest` from upstream at a pinned commit and wraps it with the standard install / cleanup / run interface.
 
-> **Note:** Silo lives in `benchpress/config/benchmarks_internal.yml` / `jobs_internal.yml`. It is part of Meta's internal benchpress suite and not shipped in the public DCPerf release.
+> **Note:** Silo lives in the `mem` benchpress suite (`benchpress/config/benchmarks_mem.yml` / `jobs_mem.yml`); select it with `-b mem`.
 
 ## System requirements
 
@@ -22,7 +22,7 @@ The install script declares the dnf deps it needs, but for reference: `jemalloc-
 ## Install Silo
 
 ```bash
-./benchpress_cli.py install silo_default
+./benchpress_cli.py -b mem install silo_default
 ```
 
 This (a) installs build dependencies via `dnf`, (b) clones `stephentu/silo` and its `masstree` submodule via `fwdproxy`, (c) builds `dbtest` in `MODE=perf` with `jemalloc`, and (d) places the binary at `./benchmarks/silo/dbtest`.
@@ -30,7 +30,7 @@ This (a) installs build dependencies via `dnf`, (b) clones `stephentu/silo` and 
 The install is idempotent — re-running re-clones and rebuilds, then overwrites the binary. To uninstall:
 
 ```bash
-./benchpress_cli.py clean silo_default
+./benchpress_cli.py -b mem clean silo_default
 ```
 
 ## Run Silo
@@ -68,7 +68,7 @@ The workload mix is passed via Silo's `--bench-opts '--workload-mix=READ,RMW,WRI
 
 ```bash
 for t in 1 2 4 8 16 32 64; do
-    ./benchpress_cli.py run silo_tpcc_sweep_${t}t
+    ./benchpress_cli.py -b mem run silo_tpcc_sweep_${t}t
 done
 ```
 
@@ -85,7 +85,7 @@ done
 Example: pin to NUMA node 0 for a single-socket TPC-C scan:
 
 ```bash
-SILO_NUMA_NODE=0 ./benchpress_cli.py run silo_tpcc_allcores
+SILO_NUMA_NODE=0 ./benchpress_cli.py -b mem run silo_tpcc_allcores
 ```
 
 ### cgroup-cpuset awareness (`--cgroup-aware`)

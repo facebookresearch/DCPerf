@@ -30,7 +30,7 @@ SILO_BIN="${SILO_BIN:-${SILO_DIR}/dbtest}"
 
 if [[ ! -x "${SILO_BIN}" ]]; then
     echo "Silo dbtest binary not found at ${SILO_BIN}." >&2
-    echo "Run \`./benchpress_cli.py install silo_default\` (or any other silo_* job) first." >&2
+    echo "Run \`./benchpress_cli.py -b mem install silo_default\` (or any other silo_* job) first." >&2
     exit 1
 fi
 

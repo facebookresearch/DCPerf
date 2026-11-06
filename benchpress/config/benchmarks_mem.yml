@@ -157,3 +157,38 @@ liblinear_multi:
       - mem
   metrics:
     - train_time_sec
+
+silo:
+  parser: silo
+  install_script: ./packages/silo/install_silo.sh
+  cleanup_script: ./packages/silo/cleanup_silo.sh
+  install_markers:
+    - ./benchmarks/silo/dbtest
+  path: ./packages/silo/run.sh
+  tags:
+    scope:
+      - app
+    component:
+      - cpu
+      - memory
+  metrics:
+    - throughput:
+        - agg_throughput
+        - avg_per_core_throughput
+        - agg_nosync_throughput
+        - agg_persist_throughput
+        - avg_per_core_persist_throughput
+    - latency:
+        - avg_latency
+        - avg_persist_latency
+    - abort:
+        - agg_abort_rate
+        - avg_per_core_abort_rate
+    - memory:
+        - memory_delta
+        - memory_delta_rate
+        - logical_memory_delta
+        - logical_memory_delta_rate
+    - runtime:
+        - runtime_sec
+    - txn_breakdown
