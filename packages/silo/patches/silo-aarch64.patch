@@ -1,0 +1,53 @@
+diff --git a/amd64.h b/amd64.h
+index 6a8c673..1362fc0 100644
+--- a/amd64.h
++++ b/amd64.h
+@@ -4,6 +4,24 @@
+ #include "macros.h"
+ #include <stdint.h>
+ 
++#if defined(__aarch64__) || defined(__arm64__)
++// AArch64 equivalents of the x86 spin-loop hint and cycle counter.
++// `yield` is the spin-loop hint; CNTVCT_EL0 is the architected generic
++// timer counter, readable from userspace (CNTFRQ_EL0 is its frequency).
++inline ALWAYS_INLINE void
++nop_pause()
++{
++  __asm volatile("yield");
++}
++
++inline ALWAYS_INLINE uint64_t
++rdtsc(void)
++{
++  uint64_t v;
++  __asm volatile("mrs %0, cntvct_el0" : "=r" (v));
++  return v;
++}
++#else
+ inline ALWAYS_INLINE void
+ nop_pause()
+ {
+@@ -17,5 +35,6 @@ rdtsc(void)
+   __asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+   return ((uint64_t)lo)|(((uint64_t)hi)<<32);
+ }
++#endif /* __aarch64__ */
+ 
+ #endif /* _AMD64_H_ */
+diff --git a/prefetch.h b/prefetch.h
+index 5e6c1a3..dac0a74 100644
+--- a/prefetch.h
++++ b/prefetch.h
+@@ -11,8 +11,12 @@
+ static inline ALWAYS_INLINE void
+ prefetch(const void *ptr)
+ {
++#if defined(__aarch64__) || defined(__arm64__)
++  __builtin_prefetch(ptr, 0, 3);
++#else
+   typedef struct { char x[CACHELINE_SIZE]; } cacheline_t;
+   asm volatile("prefetcht0 %0" : : "m" (*(const cacheline_t *) ptr));
++#endif
+ }
+ #define PREFETCH_DEFINED 1
+ #endif
