@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <random>
@@ -69,6 +70,7 @@ struct EmbeddingTableSpec {
 // Embedding lookup request with sparse indices and optional weights
 struct EmbeddingRequest {
   std::vector<int64_t> indices;
+  std::vector<int32_t> indices32; // The same indices, when tables use int32
   std::vector<int32_t> offsets;
   std::vector<float> per_sample_weights;
   bool weighted;
@@ -91,10 +93,12 @@ class EmbeddingTable {
   ~EmbeddingTable();
 
   void fill_random_weights();
+  // Writes batch_size x embedding_dim floats, or fp16 values for FP16 output.
   void forward(
       const EmbeddingRequest& request,
-      float* output,
-      PoolingMode pooling_mode = PoolingMode::SUM);
+      void* output,
+      PoolingMode pooling_mode = PoolingMode::SUM,
+      bool int32_indices = false) const;
 
   size_t get_memory_usage() const;
 
@@ -106,13 +110,15 @@ class EmbeddingTable {
 
   void init_table();
   size_t get_fused_embedding_dim() const;
+  template <typename IndexType, typename OutType>
   void embedding_lookup_and_pool(
-      const std::vector<int64_t>& indices,
+      const IndexType* indices,
+      int lengths_sum,
       const std::vector<int32_t>& offsets,
-      const std::vector<float>& weights,
-      float* output,
+      const float* weights,
+      OutType* output,
       bool weighted,
-      PoolingMode pooling_mode = PoolingMode::SUM) const;
+      PoolingMode pooling_mode) const;
 };
 
 // Multi-table embedding kernel for AdSim simulation
@@ -124,7 +130,9 @@ class Embedding : public Kernel {
       int nthreads,
       bool weighted = false,
       PoolingMode pooling_mode = PoolingMode::SUM,
-      int pregenerated_req_num = 10000);
+      int pregenerated_req_num = 10000,
+      bool all_tables = false,
+      bool int32_indices = false);
 
   std::string init(
       std::shared_ptr<AdSimHandleObjs> h_objs,
@@ -135,7 +143,19 @@ class Embedding : public Kernel {
       std::shared_ptr<AdSimRequestObjs> r_objs,
       std::shared_ptr<folly::Executor> pool) override;
 
+  // "all_tables": each fire looks up every table once, in order, instead of
+  // "requests_per_fire" tables drawn by access weight. "index_dtype": "int64"
+  // (default) or "int32" indices. "output_dtype": "fp32" (default) or "fp16".
   static std::shared_ptr<Kernel> config(const folly::dynamic& config_d);
+
+  // Index of the pre-generated request the next fire starts at.
+  size_t next_request() const {
+    return cursor_.load(std::memory_order_relaxed);
+  }
+  // Table that pre-generated request i looks up.
+  int request_table(size_t i) const {
+    return pregenerated_requests_.at(i).table_idx;
+  }
 
  private:
   std::vector<EmbeddingTableSpec> table_specs_;
@@ -147,6 +167,11 @@ class Embedding : public Kernel {
   bool weighted_;
   PoolingMode pooling_mode_;
   int pregenerated_req_num_; // Total number of pre-generated requests
+  // Every fire looks up each table once, as one TBE forward does.
+  bool all_tables_;
+  bool int32_indices_;
+  // Next pre-generated request, so successive fires touch different rows.
+  std::atomic<size_t> cursor_{0};
 
   // Simplified pre-generated request pool
   struct PreGeneratedRequest {
@@ -160,18 +185,11 @@ class Embedding : public Kernel {
   std::vector<PreGeneratedRequest>
       pregenerated_requests_; // Single pool of all requests
 
-  // Per-thread output buffers to avoid repeated allocations
-  size_t max_output_size_; // Maximum output buffer size needed
-  mutable std::unique_ptr<std::unique_ptr<float[]>[]>
-      thread_output_buffers_; // Per-thread output buffers
+  size_t max_output_size_; // Floats in the largest table's output
 
   std::mt19937 generator_;
 
-  void run_embedding_operations(
-      const std::shared_ptr<AdSimHandleObjs>& h_objs,
-      size_t start_idx,
-      size_t end_idx,
-      float* output_buffer);
+  void run_embedding_operations(size_t first, int count);
 
   // Pre-generation methods for runtime efficiency
   void pregenerate_pools();

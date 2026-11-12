@@ -127,27 +127,63 @@ void EmbeddingTable::fill_random_weights() {
 
 void EmbeddingTable::forward(
     const EmbeddingRequest& request,
-    float* output,
-    PoolingMode pooling_mode) {
-  embedding_lookup_and_pool(
-      request.indices,
-      request.offsets,
-      request.per_sample_weights,
-      output,
-      request.weighted,
-      pooling_mode);
+    void* output,
+    PoolingMode pooling_mode,
+    bool int32_indices) const {
+  const float* weights =
+      request.weighted ? request.per_sample_weights.data() : nullptr;
+  const int lengths_sum = static_cast<int>(request.indices.size());
+  const bool fp16 = OutputDtype::FP16 == spec_.output_dtype;
+  if (int32_indices && fp16) {
+    embedding_lookup_and_pool(
+        request.indices32.data(),
+        lengths_sum,
+        request.offsets,
+        weights,
+        static_cast<fbgemm::float16*>(output),
+        request.weighted,
+        pooling_mode);
+  } else if (int32_indices) {
+    embedding_lookup_and_pool(
+        request.indices32.data(),
+        lengths_sum,
+        request.offsets,
+        weights,
+        static_cast<float*>(output),
+        request.weighted,
+        pooling_mode);
+  } else if (fp16) {
+    embedding_lookup_and_pool(
+        request.indices.data(),
+        lengths_sum,
+        request.offsets,
+        weights,
+        static_cast<fbgemm::float16*>(output),
+        request.weighted,
+        pooling_mode);
+  } else {
+    embedding_lookup_and_pool(
+        request.indices.data(),
+        lengths_sum,
+        request.offsets,
+        weights,
+        static_cast<float*>(output),
+        request.weighted,
+        pooling_mode);
+  }
 }
 
 // Perform embedding lookup and pooling using optimized FBGEMM kernels
+template <typename IndexType, typename OutType>
 void EmbeddingTable::embedding_lookup_and_pool(
-    const std::vector<int64_t>& indices,
+    const IndexType* indices,
+    int lengths_sum,
     const std::vector<int32_t>& offsets,
-    const std::vector<float>& weights,
-    float* output,
+    const float* weights,
+    OutType* output,
     bool weighted,
     PoolingMode pooling_mode) const {
   int batch_size = static_cast<int>(offsets.size()) - 1;
-  int lengths_sum = static_cast<int>(indices.size());
 
   bool success = false;
   const bool has_weight = weighted;
@@ -156,15 +192,16 @@ void EmbeddingTable::embedding_lookup_and_pool(
   const int prefetch = 16; // FBGEMM prefetch distance
   const int output_stride = spec_.embedding_dim;
   const int input_stride = static_cast<int>(fused_embedding_dim_);
+  const bool is_bf16_out = false;
 
   // Dispatch to appropriate FBGEMM kernel based on quantization precision
   switch (spec_.weights_precision) {
     case WeightsPrecision::FP32: {
       auto kernel = GenerateEmbeddingSpMDMWithStrides<
           float,
-          int64_t,
+          IndexType,
           int32_t,
-          float,
+          OutType,
           true>(
           spec_.embedding_dim,
           has_weight,
@@ -175,16 +212,16 @@ void EmbeddingTable::embedding_lookup_and_pool(
           output_stride,
           input_stride / sizeof(float),
           false,
-          false);
+          is_bf16_out);
 
       success = kernel(
           batch_size,
           lengths_sum,
           spec_.num_embeddings,
           reinterpret_cast<const float*>(fused_embedding_table_.data()),
-          indices.data(),
+          indices,
           offsets.data(),
-          weighted ? weights.data() : nullptr,
+          weights,
           output);
       break;
     }
@@ -192,9 +229,9 @@ void EmbeddingTable::embedding_lookup_and_pool(
     case WeightsPrecision::FP16: {
       auto kernel = GenerateEmbeddingSpMDMWithStrides<
           fbgemm::float16,
-          int64_t,
+          IndexType,
           int32_t,
-          float,
+          OutType,
           true>(
           spec_.embedding_dim,
           has_weight,
@@ -205,7 +242,7 @@ void EmbeddingTable::embedding_lookup_and_pool(
           output_stride,
           input_stride / sizeof(fbgemm::float16),
           false,
-          false);
+          is_bf16_out);
 
       success = kernel(
           batch_size,
@@ -213,9 +250,9 @@ void EmbeddingTable::embedding_lookup_and_pool(
           spec_.num_embeddings,
           reinterpret_cast<const fbgemm::float16*>(
               fused_embedding_table_.data()),
-          indices.data(),
+          indices,
           offsets.data(),
-          weighted ? weights.data() : nullptr,
+          weights,
           output);
       break;
     }
@@ -223,9 +260,9 @@ void EmbeddingTable::embedding_lookup_and_pool(
     case WeightsPrecision::INT8: {
       auto kernel = GenerateEmbeddingSpMDMWithStrides<
           uint8_t,
-          int64_t,
+          IndexType,
           int32_t,
-          float,
+          OutType,
           true>(
           spec_.embedding_dim,
           has_weight,
@@ -236,43 +273,46 @@ void EmbeddingTable::embedding_lookup_and_pool(
           output_stride,
           input_stride,
           true,
-          false);
+          is_bf16_out);
 
       success = kernel(
           batch_size,
           lengths_sum,
           spec_.num_embeddings,
           fused_embedding_table_.data(),
-          indices.data(),
+          indices,
           offsets.data(),
-          weighted ? weights.data() : nullptr,
+          weights,
           output);
       break;
     }
 
     case WeightsPrecision::INT4: {
       const int bit_rate = 4;
-      auto kernel =
-          GenerateEmbeddingSpMDMNBitWithStrides<int64_t, int32_t, float, true>(
-              bit_rate,
-              spec_.embedding_dim,
-              has_weight,
-              normalize,
-              prefetch,
-              false,
-              true,
-              output_stride,
-              input_stride,
-              true);
+      auto kernel = GenerateEmbeddingSpMDMNBitWithStrides<
+          IndexType,
+          int32_t,
+          OutType,
+          true>(
+          bit_rate,
+          spec_.embedding_dim,
+          has_weight,
+          normalize,
+          prefetch,
+          false,
+          true,
+          output_stride,
+          input_stride,
+          true);
 
       success = kernel(
           batch_size,
           lengths_sum,
           spec_.num_embeddings,
           fused_embedding_table_.data(),
-          indices.data(),
+          indices,
           offsets.data(),
-          weighted ? weights.data() : nullptr,
+          weights,
           output);
       break;
     }
@@ -303,14 +343,25 @@ Embedding::Embedding(
     int nthreads,
     bool weighted,
     PoolingMode pooling_mode,
-    int pregenerated_req_num)
+    int pregenerated_req_num,
+    bool all_tables,
+    bool int32_indices)
     : table_specs_(std::move(table_specs)),
-      requests_per_fire_(requests_per_fire),
+      requests_per_fire_(
+          all_tables ? static_cast<int>(table_specs_.size())
+                     : requests_per_fire),
       nthreads_(nthreads),
       weighted_(weighted),
       pooling_mode_(pooling_mode),
       pregenerated_req_num_(pregenerated_req_num),
+      all_tables_(all_tables),
+      int32_indices_(int32_indices),
       generator_(42) {
+  if (all_tables_) {
+    // Whole rounds over the tables, so every fire starts at table 0
+    const int n = static_cast<int>(table_specs_.size());
+    pregenerated_req_num_ = std::max(n, pregenerated_req_num_ / n * n);
+  }
   // Build cumulative distribution for O(log n) weighted table selection
   cumulative_weights_.resize(table_specs_.size());
   float total_weight = 0.0f;
@@ -383,13 +434,6 @@ Embedding::Embedding(
   }
 
   // Allocate per-thread output buffers to avoid repeated allocations
-  size_t max_threads = std::max(nthreads_, 1);
-  thread_output_buffers_ =
-      std::make_unique<std::unique_ptr<float[]>[]>(max_threads);
-  for (size_t t = 0; t < max_threads; ++t) {
-    thread_output_buffers_[t] = std::make_unique<float[]>(max_output_size_);
-  }
-
   // Pre-generate table selections and requests for runtime efficiency
   pregenerate_pools();
 }
@@ -411,6 +455,9 @@ void Embedding::pregenerate_pools() {
     int table_idx = (it == cumulative_weights_.end())
         ? static_cast<int>(cumulative_weights_.size() - 1)
         : static_cast<int>(std::distance(cumulative_weights_.begin(), it));
+    if (all_tables_) {
+      table_idx = i % static_cast<int>(table_specs_.size());
+    }
 
     const auto& spec = table_specs_[table_idx];
 
@@ -444,13 +491,15 @@ void Embedding::pregenerate_pools() {
     }
 
     // Create pre-generated request with table index
-    pregenerated_requests_.emplace_back(
-        table_idx,
-        EmbeddingRequest(
-            std::move(indices),
-            std::move(offsets),
-            weighted_ ? std::move(weights) : std::vector<float>{},
-            weighted_));
+    EmbeddingRequest request(
+        std::move(indices),
+        std::move(offsets),
+        weighted_ ? std::move(weights) : std::vector<float>{},
+        weighted_);
+    if (int32_indices_) {
+      request.indices32.assign(request.indices.begin(), request.indices.end());
+    }
+    pregenerated_requests_.emplace_back(table_idx, std::move(request));
   }
 
   LOG(INFO) << "Pre-generated " << pregenerated_req_num_ << " requests across "
@@ -484,78 +533,44 @@ std::string Embedding::init(
 
 // Execute benchmark fire operation with multi-threaded coroutine support
 folly::coro::Task<std::string> Embedding::fire(
-    std::shared_ptr<AdSimHandleObjs> h_objs,
-    std::shared_ptr<AdSimRequestObjs> r_objs,
+    std::shared_ptr<AdSimHandleObjs> /* h_objs */,
+    std::shared_ptr<AdSimRequestObjs> /* r_objs */,
     std::shared_ptr<folly::Executor> pool) {
   STATS_embedding_nfired.add(1);
 
-  if (nthreads_ == 0) {
-    // Single-threaded: use entire pool with thread 0's output buffer
-    run_embedding_operations(
-        h_objs,
-        0,
-        pregenerated_requests_.size(),
-        thread_output_buffers_[0].get());
-  } else {
-    // Multi-threaded: partition the request pool into ranges for each thread
-    const size_t pool_size = pregenerated_requests_.size();
-    const size_t requests_per_thread = pool_size / nthreads_;
-
-    std::vector<folly::Future<int>> futures;
-    futures.reserve(nthreads_);
-
-    for (int i = 0; i < nthreads_; ++i) {
-      // Calculate this thread's range
-      size_t start_idx = i * requests_per_thread;
-      size_t end_idx =
-          (i == nthreads_ - 1) ? pool_size : start_idx + requests_per_thread;
-
-      // Get this thread's output buffer
-      float* output_buffer = thread_output_buffers_[i].get();
-
-      auto future = folly::via(
-          pool.get(), [this, h_objs, start_idx, end_idx, output_buffer]() {
-            run_embedding_operations(h_objs, start_idx, end_idx, output_buffer);
-            return 1;
-          });
-      futures.push_back(std::move(future));
-    }
-
-    // Collect and aggregate results from all worker threads
-    auto results = co_await folly::collectAll(futures);
-    [[maybe_unused]] int total = 0;
-    for (auto& result : results) {
-      if (result.hasValue()) {
-        total += result.value();
-      }
-    }
+  const int nslices = std::max(nthreads_, 1);
+  const size_t first = cursor_.fetch_add(
+      static_cast<size_t>(requests_per_fire_) * nslices,
+      std::memory_order_relaxed);
+  if (0 == nthreads_) {
+    run_embedding_operations(first, requests_per_fire_);
+    co_return "";
   }
-
+  std::vector<folly::Future<folly::Unit>> futures;
+  futures.reserve(nthreads_);
+  for (int i = 0; i < nthreads_; ++i) {
+    futures.push_back(folly::via(pool.get(), [this, first, i]() {
+      run_embedding_operations(
+          first + static_cast<size_t>(i) * requests_per_fire_,
+          requests_per_fire_);
+    }));
+  }
+  co_await folly::collectAll(futures);
   co_return "";
 }
 
-// Execute requests_per_fire_ embedding operations using pre-generated pools for
-// efficiency
-void Embedding::run_embedding_operations(
-    const std::shared_ptr<AdSimHandleObjs>& /* h_objs */,
-    size_t start_idx,
-    size_t end_idx,
-    float* output_buffer) {
-  // Execute configurable number of requests per fire operation
-  size_t current_idx = start_idx;
-  for (int req = 0; req < requests_per_fire_; ++req) {
-    // Get pre-generated request from this thread's range
-    const auto& pregenerated_req = pregenerated_requests_[current_idx];
-
-    // Move to next request in this thread's range (wrap around if needed)
-    current_idx++;
-    if (current_idx >= end_idx) {
-      current_idx = start_idx;
-    }
-
-    // Execute request using pre-generated data and passed output buffer
+void Embedding::run_embedding_operations(size_t first, int count) {
+  // One output buffer per thread: concurrent fires do not share it
+  thread_local std::vector<float> output;
+  if (output.size() < max_output_size_) {
+    output.resize(max_output_size_);
+  }
+  const size_t pool_size = pregenerated_requests_.size();
+  for (int req = 0; req < count; ++req) {
+    const auto& pregenerated_req =
+        pregenerated_requests_[(first + req) % pool_size];
     tables_[pregenerated_req.table_idx]->forward(
-        pregenerated_req.request, output_buffer, pooling_mode_);
+        pregenerated_req.request, output.data(), pooling_mode_, int32_indices_);
   }
 }
 
@@ -609,6 +624,14 @@ std::shared_ptr<Kernel> Embedding::config(const folly::dynamic& config_d) {
   bool weighted = config_d.getDefault("weighted", false).asBool();
   int pregenerated_req_num = static_cast<int>(
       config_d.getDefault("pregenerated_req_num", 10000).asInt());
+  bool all_tables = config_d.getDefault("all_tables", false).asBool();
+  const auto index_dtype =
+      config_d.getDefault("index_dtype", "int64").asString();
+  if ("int32" != index_dtype && "int64" != index_dtype) {
+    LOG(ERROR) << "Embedding index_dtype must be int32 or int64, not "
+               << index_dtype;
+    return nullptr;
+  }
 
   auto weights_precision = parse_weights_precision(
       config_d.getDefault("weights_precision", "int4").asString());
@@ -765,7 +788,9 @@ std::shared_ptr<Kernel> Embedding::config(const folly::dynamic& config_d) {
       nthreads,
       weighted,
       pooling_mode,
-      pregenerated_req_num);
+      pregenerated_req_num,
+      all_tables,
+      "int32" == index_dtype);
 }
 
 } // namespace facebook::cea::chips::adsim
