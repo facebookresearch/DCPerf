@@ -4,11 +4,13 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import csv
+from datetime import datetime
 import optparse
 import os
-import subprocess
 import re
 import statistics
+import subprocess
 
 # Concurrent worker count
 WORKERS = 185
@@ -30,6 +32,32 @@ URLS_TEMPLATE_FILE = "urls_template.txt"
 
 # Base URL for the server
 BASE_URL = "http://localhost:8000"
+
+BREAKDOWN_HEADER = [
+    "operation_name",
+    "PID",
+    "timestamp_type",
+    "timestamp",
+    "sub_operation_name",
+]
+
+
+def log_main_benchmark_timestamp(
+    breakdown_file: str | None,
+    timestamp_type: str,
+) -> None:
+    if not breakdown_file:
+        return
+
+    write_header = not os.path.exists(breakdown_file) or os.path.getsize(breakdown_file) == 0
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    with open(breakdown_file, "a", newline="") as csv_file:
+        writer = csv.writer(csv_file, lineterminator="\n")
+        if write_header:
+            writer.writerow(BREAKDOWN_HEADER)
+        writer.writerow(
+            ["main_benchmark", os.getpid(), timestamp_type, timestamp, ""]
+        )
 
 
 def parse_urls(url_file):
@@ -195,20 +223,24 @@ def run_wrk(options):
         # Run wrk and capture output
         try:
             with open(current_file, 'w') as out_file:
+                if i == 0:
+                    log_main_benchmark_timestamp(options.breakdown_file, "start")
                 subprocess.run(cmd, stdout=out_file, stderr=subprocess.STDOUT, check=True)
+                if options.single or i == iterations - 1:
+                    log_main_benchmark_timestamp(options.breakdown_file, "end")
         except subprocess.CalledProcessError as e:
             print(f"\nERROR: wrk command failed with return code {e.returncode}")
             exit(1)
 
         print(" --- DONE")
 
-        # Validate output
-        validate_output(current_file)
-
         # only do one run if the "single" option is set
         if options.single:
             iterations = 1
             break
+
+    for i in range(iterations):
+        validate_output(WRK_OUT_FILE + "_" + str(i + 1))
 
     print()
     parse_results(iterations, url_dict, url_target)
@@ -537,6 +569,12 @@ def main():
                       "repetitions instead of amount of time. This will " +
                       "override DURATION env variable if set to a positive " +
                       "integer.")
+    parser.add_option(
+        "--breakdown-file",
+        dest="breakdown_file",
+        default=None,
+        help="Record the exact wrk execution window in breakdown.csv",
+    )
 
     (options, args) = parser.parse_args()
 
