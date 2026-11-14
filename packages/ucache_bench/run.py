@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import fcntl
 import math
 import os
 import pathlib
@@ -39,6 +40,7 @@ UCACHE_BENCH_DIR: str = os.environ.get(
     os.path.join(BENCHPRESS_ROOT, "benchmarks", "ucache_bench"),
 )
 AFFINITIZE_NIC_SYSTEM_PATH: str = "/usr/local/bin/affinitize_nic"
+NIC_SETUP_LOCK_PATH: str = "/tmp/ucache_bench_nic_setup.lock"
 
 # Constants
 MEM_USAGE_FACTOR = 0.75  # to prevent OOM
@@ -395,6 +397,74 @@ def _clamp_to_nic_max_channels(interface_name: str, n_channels: int) -> int:
     return n_channels
 
 
+def even_rss_channel_count(n_channels: int) -> int:
+    """Largest power of two that does not exceed n_channels (0 if below 1)."""
+    if n_channels < 1:
+        return 0
+    return 1 << (n_channels.bit_length() - 1)
+
+
+def parse_rss_ring_entries(ethtool_x_output: str) -> dict[int, int]:
+    """Count RSS indirection-table entries per RX ring from `ethtool -x`."""
+    entries: dict[int, int] = {}
+    for line in ethtool_x_output.splitlines():
+        match = re.match(r"^\s*\d+:((?:\s+\d+)+)\s*$", line)
+        if match is None:
+            continue
+        for ring in match.group(1).split():
+            entries[int(ring)] = entries.get(int(ring), 0) + 1
+    return entries
+
+
+def _current_nic_channels(interface_name: str) -> int | None:
+    try:
+        result = subprocess.run(
+            ["ethtool", "-l", interface_name],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    sections = result.stdout.split("Current hardware settings")
+    if len(sections) < 2:
+        return None
+    for line in sections[1].split("\n"):
+        if "Combined:" in line:
+            try:
+                return int(line.split(":")[1].strip())
+            except ValueError:
+                return None
+    return None
+
+
+def _report_rss_spread(interface_name: str, n_channels: int) -> None:
+    try:
+        result = subprocess.run(
+            ["ethtool", "-x", interface_name],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"Warning: could not read RSS indirection table: {e}")
+        return
+    entries = parse_rss_ring_entries(result.stdout)
+    if not entries:
+        print("Warning: RSS indirection table not found in ethtool -x output")
+        return
+    low, high = min(entries.values()), max(entries.values())
+    print(
+        f"RSS indirection: {sum(entries.values())} entries over {len(entries)} "
+        f"rings, {low}-{high} entries per ring"
+    )
+    if low != high or len(entries) != n_channels:
+        print(
+            "Warning: RSS indirection table is uneven; the rings with more "
+            "entries receive proportionally more flows"
+        )
+
+
 def affinitize_nic(args: argparse.Namespace) -> None:
     """Configure NIC IRQ affinity to distribute interrupts across CPUs.
 
@@ -417,14 +487,31 @@ def affinitize_nic(args: argparse.Namespace) -> None:
 
     # Query NIC max combined channels to avoid requesting more than supported
     n_channels = _clamp_to_nic_max_channels(args.interface_name, n_channels)
+    even_channels = even_rss_channel_count(n_channels)
+    if even_channels != n_channels:
+        print(
+            f"Rounding NIC channels from {n_channels} to {even_channels} "
+            "(power of two) for an even RSS indirection table"
+        )
+        n_channels = even_channels
 
+    # Client hosts start several benchmark processes at once; serialize setup.
+    with open(NIC_SETUP_LOCK_PATH, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        _configure_nic(args, n_channels)
+
+
+def _configure_nic(args: argparse.Namespace, n_channels: int) -> None:
     # Step 1: Set NIC channel count
-    try:
-        cmd = ["ethtool", "-L", args.interface_name, "combined", str(n_channels)]
-        print(f"Setting NIC channels: {' '.join(cmd)}")
-        subprocess.run(cmd, check=True, capture_output=True)
-    except (subprocess.CalledProcessError, OSError) as e:
-        print(f"Failed to set NIC channels to {n_channels}: {e}")
+    if _current_nic_channels(args.interface_name) == n_channels:
+        print(f"NIC already has {n_channels} combined channels")
+    else:
+        try:
+            cmd = ["ethtool", "-L", args.interface_name, "combined", str(n_channels)]
+            print(f"Setting NIC channels: {' '.join(cmd)}")
+            subprocess.run(cmd, check=True, capture_output=True)
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f"Failed to set NIC channels to {n_channels}: {e}")
 
     # Step 2: Set IRQ affinity
     try:
@@ -450,6 +537,8 @@ def affinitize_nic(args: argparse.Namespace) -> None:
         subprocess.run(cmd, check=True, capture_output=True)
     except (subprocess.CalledProcessError, OSError) as e:
         print(f"Failed to set NIC IRQ affinity: {e}")
+
+    _report_rss_spread(args.interface_name, n_channels)
 
 
 def run_server(args: argparse.Namespace) -> None:  # noqa: C901
@@ -667,6 +756,9 @@ def run_client(args: argparse.Namespace) -> None:  # noqa: C901
 
     Client binary flags are defined in UcacheBenchClient.cpp.
     """
+    if args.interface_name != "lo" and args.nic_channel_ratio > 0:
+        affinitize_nic(args)
+
     print(
         f"Starting UcacheBench client connecting to {args.server_host}:{args.server_port}"
     )
@@ -976,25 +1068,27 @@ def init_parser() -> argparse.ArgumentParser:
     )
 
     # NIC IRQ affinity configuration (ported from TaoBench)
-    server_parser.add_argument(
-        "--nic-channel-ratio",
-        type=float,
-        default=0.0,
-        help="Ratio of NIC channels to logical cores (0.0 = disabled, 0.5 = TaoBench default). "
-        "Sets ethtool combined channels and redistributes IRQ affinity.",
-    )
-    server_parser.add_argument(
-        "--interface-name",
-        type=str,
-        default="eth0",
-        help="Network interface name for NIC IRQ affinity tuning",
-    )
-    server_parser.add_argument(
-        "--hard-binding",
-        type=int,
-        default=0,
-        help="Hard bind NIC channels to specific CPU cores (set to non-zero to enable)",
-    )
+    for role_parser in (server_parser, client_parser):
+        role_parser.add_argument(
+            "--nic-channel-ratio",
+            type=float,
+            default=0.0,
+            help="Ratio of NIC channels to logical cores (0.0 = disabled). "
+            "Sets ethtool combined channels, rounded down to a power of two, "
+            "and redistributes IRQ affinity.",
+        )
+        role_parser.add_argument(
+            "--interface-name",
+            type=str,
+            default="eth0",
+            help="Network interface name for NIC IRQ affinity tuning",
+        )
+        role_parser.add_argument(
+            "--hard-binding",
+            type=int,
+            default=0,
+            help="Hard bind NIC channels to specific CPU cores (set to non-zero to enable)",
+        )
 
     # Navy (hybrid mode) configuration
     server_parser.add_argument(

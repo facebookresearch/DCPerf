@@ -2259,7 +2259,7 @@
         - 'io_latency_us=0'
         - 'bucket_lock_power=0'
         - 'production_features=1'
-        - 'nic_channel_ratio=0.0'
+        - 'nic_channel_ratio=1.0'
         - 'interface_name=eth0'
         - 'hard_binding=0'
         - 'cpu_pinning_enabled=0'
@@ -2316,6 +2316,8 @@
         - '--admin-port={admin_port}'
         - '--process-ramp-seconds={process_ramp_seconds}'
         - '--failures-until-tko={failures_until_tko}'
+        - '--nic-channel-ratio={nic_channel_ratio}'
+        - '--interface-name={interface_name}'
         - '--verbose={verbose}'
         - '--real'
       vars:
@@ -2357,6 +2359,8 @@
         - 'admin_port=0'
         - 'process_ramp_seconds=0'
         - 'failures_until_tko=0'
+        - 'nic_channel_ratio=1.0'
+        - 'interface_name=eth0'
         - 'verbose=0'
   hooks:
     - hook: copymove
