@@ -286,7 +286,6 @@ def load_config(args) -> config.BenchpressConfig:
         else:
             bm_config_path = config.BENCHMARKS_CONFIG_PATH
 
-        # pyre-fixme[16]: `Iterator` has no attribute `__enter__`.
         with bm_config_path as bench_path:
             benchmarks_specs = bench_path.open()
             if args.benchmarks and not override_benchmark:
