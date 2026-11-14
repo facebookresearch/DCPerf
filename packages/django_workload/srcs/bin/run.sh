@@ -335,6 +335,11 @@ run_benchmark() {
   local _urls_path="$4"
   local iterations="$5"
   local reps="$6"
+  local breakdown_file="${7:-}"
+  local breakdown_args=()
+  if [ -n "$breakdown_file" ]; then
+    breakdown_args=(--breakdown-file "$breakdown_file")
+  fi
 
   cd "${SCRIPT_ROOT}/../django-workload/client" || exit
   ./gen-urls-file
@@ -352,7 +357,7 @@ run_benchmark() {
   LOG="$_siege_logs_path" \
   SOURCE="$_urls_path" \
   BASE_URL="http://localhost:8000" \
-  python3 ./run-wrk -i "${iterations}" -r "${reps}"
+  python3 ./run-wrk -i "${iterations}" -r "${reps}" "${breakdown_args[@]}"
 }
 
 load_snapshot(){
@@ -754,15 +759,13 @@ start_client() {
     echo "Workload warmup complete. Full output is available in ${warmup_log}"
   fi
 
+  local breakdown_file=""
   if [ -n "$server_pid" ]; then
-    log_main_benchmark_start "$BREAKDOWN_FOLDER" "$server_pid"
+    breakdown_file="${BREAKDOWN_FOLDER}/breakdown.csv"
   fi
 
-  run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" "${urls_path}" "${iterations}" "${reps}"
-
-  if [ -n "$server_pid" ]; then
-    log_main_benchmark_end "$BREAKDOWN_FOLDER" "$server_pid"
-  fi
+  run_benchmark "${num_client_workers}" "${duration}" "${siege_logs_path}" \
+    "${urls_path}" "${iterations}" "${reps}" "$breakdown_file"
 }
 
 start_clientserver() {
