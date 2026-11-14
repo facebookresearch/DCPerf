@@ -23,6 +23,7 @@ Example:
 import argparse
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -38,6 +39,62 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+NUMA_NODE_ROOT = Path("/sys/devices/system/node")
+
+
+def calculate_haproxy_threads(num_workers: int) -> int:
+    return max(4, num_workers // 32)
+
+
+def discover_cpu_numa_nodes(
+    node_root: Path = NUMA_NODE_ROOT,
+) -> list[int]:
+    nodes = []
+    for node_path in node_root.glob("node[0-9]*"):
+        try:
+            cpulist = (node_path / "cpulist").read_text().strip()
+        except OSError as error:
+            logger.warning(f"Could not read NUMA topology for {node_path}: {error}")
+            continue
+        if cpulist:
+            nodes.append(int(node_path.name.removeprefix("node")))
+    return sorted(nodes)
+
+
+def distribute_workers(num_workers: int, node_ids: list[int]) -> list[tuple[int, int]]:
+    active_nodes = node_ids[:num_workers]
+    if not active_nodes:
+        return []
+    workers_per_node, remainder = divmod(num_workers, len(active_nodes))
+    return [
+        (node_id, workers_per_node + (index < remainder))
+        for index, node_id in enumerate(active_nodes)
+    ]
+
+
+def build_uwsgi_command(
+    config_path: Path,
+    num_workers: int,
+    control_socket: Path,
+    numa_node: int | None = None,
+) -> list[str]:
+    command = []
+    if numa_node is not None:
+        command.extend(
+            ["numactl", f"--cpunodebind={numa_node}", f"--membind={numa_node}"]
+        )
+    command.extend(
+        [
+            "uwsgi",
+            "--ini",
+            str(config_path),
+            "--set",
+            f"workers={num_workers}",
+            "--set",
+            f"control_socket={control_socket}",
+        ]
+    )
+    return command
 
 
 class UWSGIManager:
@@ -90,7 +147,10 @@ class UWSGIManager:
 
         # Process tracking
         self.uwsgi_process: Optional[subprocess.Popen] = None
+        self.uwsgi_processes: List[subprocess.Popen] = []
         self.haproxy_process: Optional[subprocess.Popen] = None
+        self.numa_instances: List[dict] = []
+        self.control_sockets: List[Path] = []
 
         # Log file handles
         self.log_files: List[IO] = []
@@ -121,9 +181,12 @@ class UWSGIManager:
         if not self._uses_unix_sockets():
             return
 
-        self.socket_dir.mkdir(parents=True, exist_ok=True)
-        for worker_id in range(1, self.num_workers + 1):
-            socket_path = self._worker_socket_path(worker_id)
+        self._prepare_worker_socket_dir(self.socket_dir, self.num_workers)
+
+    def _prepare_worker_socket_dir(self, socket_dir: Path, num_workers: int) -> None:
+        socket_dir.mkdir(parents=True, exist_ok=True)
+        for worker_id in range(1, num_workers + 1):
+            socket_path = socket_dir / f"worker{worker_id}.sock"
             if not socket_path.exists():
                 continue
             if socket_path.is_socket() or socket_path.is_file():
@@ -132,21 +195,84 @@ class UWSGIManager:
             raise RuntimeError(f"Refusing to remove non-socket path: {socket_path}")
 
     def _cleanup_socket_dir(self) -> None:
-        if not self._uses_unix_sockets() or not self.socket_dir.exists():
+        if not self._uses_unix_sockets():
             return
 
-        for worker_id in range(1, self.num_workers + 1):
-            socket_path = self._worker_socket_path(worker_id)
+        worker_directories = [(self.socket_dir, self.num_workers)]
+        worker_directories.extend(
+            (instance["socket_dir"], instance["num_workers"])
+            for instance in self.numa_instances
+        )
+        for socket_dir, num_workers in worker_directories:
+            if not socket_dir.exists():
+                continue
+            self._cleanup_worker_socket_dir(socket_dir, num_workers)
+
+    def _cleanup_worker_socket_dir(self, socket_dir: Path, num_workers: int) -> None:
+        for worker_id in range(1, num_workers + 1):
+            socket_path = socket_dir / f"worker{worker_id}.sock"
             if socket_path.exists() and (
                 socket_path.is_socket() or socket_path.is_file()
             ):
                 socket_path.unlink()
         try:
-            self.socket_dir.rmdir()
+            socket_dir.rmdir()
         except OSError:
-            logger.info(
-                "Leaving non-empty socket directory in place: %s", self.socket_dir
-            )
+            logger.info("Leaving non-empty socket directory in place: %s", socket_dir)
+
+    def _build_uwsgi_env(self, socket_dir: Path) -> dict[str, str]:
+        env = os.environ.copy()
+        env["PROXYGEN_THREADS"] = str(self.threads_per_worker)
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PROXYGEN_WORKER_TRANSPORT"] = self.worker_transport
+        if self._uses_unix_sockets():
+            env["PROXYGEN_SOCKET_DIR"] = str(socket_dir)
+        else:
+            env["PROXYGEN_BASE_PORT"] = str(self.base_port)
+        return env
+
+    def _launch_uwsgi_instance(
+        self,
+        config_path: Path,
+        num_workers: int,
+        socket_dir: Path,
+        numa_node: int | None = None,
+    ) -> subprocess.Popen:
+        control_socket = Path(
+            f"/tmp/uwsgi-loadbalanced-{os.getpid()}"
+            f"{'-node' + str(numa_node) if numa_node is not None else ''}.sock"
+        )
+        process = subprocess.Popen(
+            build_uwsgi_command(
+                config_path, num_workers, control_socket, numa_node=numa_node
+            ),
+            env=self._build_uwsgi_env(socket_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        self.uwsgi_processes.append(process)
+        self.control_sockets.append(control_socket)
+
+        log_file = None
+        prefix = "[uWSGI]"
+        log_name = "uwsgi.log"
+        if numa_node is not None:
+            prefix = f"[uWSGI-node{numa_node}]"
+            log_name = f"uwsgi_node{numa_node}.log"
+        if self.log_dir:
+            log_file = open(self.log_dir / log_name, "w")
+            self.log_files.append(log_file)
+
+        log_thread = threading.Thread(
+            target=self._stream_logs,
+            args=(process, prefix, log_file),
+            daemon=True,
+        )
+        log_thread.start()
+        self.log_threads.append(log_thread)
+        return process
 
     def start_uwsgi(self) -> None:
         """Start uWSGI with workers."""
@@ -164,39 +290,66 @@ class UWSGIManager:
 
         logger.info(f"Starting uWSGI with config: {config_path}")
 
-        # Prepare environment variables
-        env = os.environ.copy()
-        env["PROXYGEN_THREADS"] = str(self.threads_per_worker)
-        env["PYTHONUNBUFFERED"] = "1"
-        env["PROXYGEN_WORKER_TRANSPORT"] = self.worker_transport
-        if self._uses_unix_sockets():
-            env["PROXYGEN_SOCKET_DIR"] = str(self.socket_dir)
-        else:
-            env["PROXYGEN_BASE_PORT"] = str(self.base_port)
-
-        # Ensure LD_LIBRARY_PATH is set for Python 3.14 shared library
-        # This is critical for uWSGI workers to find libpython3.14.so
-        if "LD_LIBRARY_PATH" in os.environ:
-            env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]
-            logger.info(f"Using LD_LIBRARY_PATH: {env['LD_LIBRARY_PATH']}")
-
-        # Start uWSGI with config overrides
-        # Use --set to override config variables (standard uWSGI way)
-        self.uwsgi_process = subprocess.Popen(
-            [
-                "uwsgi",
-                "--ini",
-                str(config_path),
-                "--set",
-                f"workers={self.num_workers}",
-            ],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+        numa_requested = os.environ.get("NUMA_PIN_WORKERS", "1") != "0"
+        numa_nodes = discover_cpu_numa_nodes() if numa_requested else []
+        numa_available = shutil.which("numactl") is not None
+        use_numa = (
+            numa_requested
+            and numa_available
+            and self._uses_unix_sockets()
+            and len(numa_nodes) > 1
         )
 
+        if use_numa:
+            assignments = distribute_workers(self.num_workers, numa_nodes)
+            logger.info(
+                "Starting %d NUMA-local uWSGI masters for %d workers",
+                len(assignments),
+                self.num_workers,
+            )
+            for numa_node, num_workers in assignments:
+                socket_dir = Path(f"{self.socket_dir}-node{numa_node}")
+                self._prepare_worker_socket_dir(socket_dir, num_workers)
+                process = self._launch_uwsgi_instance(
+                    config_path,
+                    num_workers,
+                    socket_dir,
+                    numa_node=numa_node,
+                )
+                self.numa_instances.append(
+                    {
+                        "process": process,
+                        "socket_dir": socket_dir,
+                        "node_id": numa_node,
+                        "num_workers": num_workers,
+                    }
+                )
+                logger.info(
+                    "uWSGI node%d started (PID: %d, workers: %d, sockets: %s)",
+                    numa_node,
+                    process.pid,
+                    num_workers,
+                    socket_dir,
+                )
+            self.uwsgi_process = self.uwsgi_processes[0]
+            return
+
+        if numa_requested and not numa_available:
+            logger.warning("numactl is unavailable; starting one unpinned uWSGI master")
+        elif numa_requested and not self._uses_unix_sockets():
+            logger.warning(
+                "NUMA affinity requires Unix worker sockets; starting unpinned"
+            )
+        elif numa_requested and len(numa_nodes) <= 1:
+            logger.info(
+                "A single CPU NUMA node is available; NUMA splitting is unnecessary"
+            )
+
+        self.uwsgi_process = self._launch_uwsgi_instance(
+            config_path,
+            self.num_workers,
+            self.socket_dir,
+        )
         worker_target = (
             f"Unix sockets in {self.socket_dir}"
             if self._uses_unix_sockets()
@@ -209,21 +362,6 @@ class UWSGIManager:
             f"  {worker_target}\n"
             f"  Threads per worker: {self.threads_per_worker}"
         )
-
-        # Start log streaming thread for uWSGI
-        log_file = None
-        if self.log_dir:
-            log_file_path = self.log_dir / "uwsgi.log"
-            log_file = open(log_file_path, "w")
-            self.log_files.append(log_file)
-
-        log_thread = threading.Thread(
-            target=self._stream_logs,
-            args=(self.uwsgi_process, "[uWSGI]", log_file),
-            daemon=True,
-        )
-        log_thread.start()
-        self.log_threads.append(log_thread)
 
     def stop(self) -> None:
         """Stop all processes (uWSGI + HAProxy)."""
@@ -241,15 +379,26 @@ class UWSGIManager:
             except subprocess.TimeoutExpired:
                 self.haproxy_process.kill()
 
-        # Stop uWSGI
-        if self.uwsgi_process:
-            logger.info("Stopping uWSGI (will wait for workers to finish)...")
-            self.uwsgi_process.terminate()
+        if self.uwsgi_processes:
+            logger.info(
+                "Stopping %d uWSGI master process(es)...", len(self.uwsgi_processes)
+            )
+            for process in self.uwsgi_processes:
+                process.terminate()
+            for process in self.uwsgi_processes:
+                try:
+                    process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    logger.warning("uWSGI did not stop gracefully, killing...")
+                    process.kill()
+
+        for control_socket in self.control_sockets:
             try:
-                self.uwsgi_process.wait(timeout=30)  # Longer timeout for uWSGI
-            except subprocess.TimeoutExpired:
-                logger.warning("uWSGI did not stop gracefully, killing...")
-                self.uwsgi_process.kill()
+                control_socket.unlink(missing_ok=True)
+            except OSError as error:
+                logger.warning(
+                    f"Could not remove uWSGI socket {control_socket}: {error}"
+                )
 
         # Wait for log threads to finish
         for thread in self.log_threads:
@@ -273,6 +422,8 @@ class UWSGIManager:
         self, process: subprocess.Popen, prefix: str, log_file: Optional[IO] = None
     ) -> None:
         """Stream logs from a process to stdout and optionally to a file."""
+        if process.stdout is None:
+            return
         try:
             for line in iter(process.stdout.readline, ""):
                 if self.stop_logging.is_set():
@@ -392,25 +543,36 @@ class UWSGIManager:
         """Generate HAProxy configuration dynamically."""
         config_path = self.script_dir / "haproxy_generated.cfg"
 
-        # Generate server entries for all workers
         server_lines = []
-        for i in range(1, self.num_workers + 1):
-            if self._uses_unix_sockets():
-                backend_addr = str(self._worker_socket_path(i))
-            else:
-                backend_addr = f"127.0.0.1:{self.base_port + (i - 1)}"
-            server_lines.append(
-                f"    server worker{i} {backend_addr} "
-                f"check weight 1 maxconn 10000 inter 2s fall 3 rise 2"
-            )
+        if self.numa_instances:
+            for instance in self.numa_instances:
+                node_id = instance["node_id"]
+                socket_dir = instance["socket_dir"]
+                for worker_id in range(1, instance["num_workers"] + 1):
+                    server_lines.append(
+                        f"    server node{node_id}_worker{worker_id} "
+                        f"{socket_dir / f'worker{worker_id}.sock'} "
+                        "check weight 1 maxconn 10000 inter 2s fall 3 rise 2"
+                    )
+        else:
+            for worker_id in range(1, self.num_workers + 1):
+                if self._uses_unix_sockets():
+                    backend_addr = str(self._worker_socket_path(worker_id))
+                else:
+                    backend_addr = f"127.0.0.1:{self.base_port + worker_id - 1}"
+                server_lines.append(
+                    f"    server worker{worker_id} {backend_addr} "
+                    "check weight 1 maxconn 10000 inter 2s fall 3 rise 2"
+                )
 
         servers_config = "\n".join(server_lines)
+        haproxy_threads = calculate_haproxy_threads(self.num_workers)
 
         # HAProxy configuration template
         config_content = f"""global
     log stdout format raw local0 info
     maxconn 100000
-    nbthread 4
+    nbthread {haproxy_threads}
     tune.bufsize 32768
     tune.maxrewrite 1024
 
@@ -468,26 +630,45 @@ listen stats
         logger.info("Waiting for workers to be ready...")
         start_time = time.time()
 
+        targets: list[tuple[socket.AddressFamily, str | tuple[str, int]]] = []
+        if self.numa_instances:
+            for instance in self.numa_instances:
+                targets.extend(
+                    (
+                        socket.AF_UNIX,
+                        str(instance["socket_dir"] / f"worker{worker_id}.sock"),
+                    )
+                    for worker_id in range(1, instance["num_workers"] + 1)
+                )
+        else:
+            for worker_id in range(self.num_workers):
+                if self._uses_unix_sockets():
+                    targets.append(
+                        (
+                            socket.AF_UNIX,
+                            str(self._worker_socket_path(worker_id + 1)),
+                        )
+                    )
+                else:
+                    targets.append(
+                        (socket.AF_INET, ("127.0.0.1", self.base_port + worker_id))
+                    )
+
         while time.time() - start_time < timeout:
             all_ready = True
-
-            for i in range(self.num_workers):
-                if self._uses_unix_sockets():
-                    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                    target = str(self._worker_socket_path(i + 1))
-                else:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    target = ("127.0.0.1", self.base_port + i)
+            for family, target in targets:
+                sock = socket.socket(family, socket.SOCK_STREAM)
                 sock.settimeout(0.5)
 
                 try:
-                    result = sock.connect_ex(target)
-                    if result != 0:
+                    if sock.connect_ex(target) != 0:
                         all_ready = False
                 except Exception:
                     all_ready = False
                 finally:
                     sock.close()
+                if not all_ready:
+                    break
 
             if all_ready:
                 logger.info("All workers are ready!")
@@ -592,9 +773,10 @@ listen stats
                     logger.error("HAProxy died unexpectedly!")
                     break
 
-                if self.uwsgi_process and self.uwsgi_process.poll() is not None:
-                    logger.error("uWSGI died unexpectedly!")
-                    break
+                for process in self.uwsgi_processes:
+                    if process.poll() is not None:
+                        logger.error("uWSGI master %d died unexpectedly!", process.pid)
+                        return
 
                 time.sleep(1)
         except KeyboardInterrupt:
@@ -759,12 +941,13 @@ class ServerManager:
             )
 
         servers_config = "\n".join(server_lines)
+        haproxy_threads = calculate_haproxy_threads(self.num_workers)
 
         # HAProxy configuration template
         config_content = f"""global
     log stdout format raw local0 info
     maxconn 100000
-    nbthread 4
+    nbthread {haproxy_threads}
     tune.bufsize 32768
     tune.maxrewrite 1024
 
@@ -826,6 +1009,8 @@ listen stats
             prefix: Prefix for log lines (e.g., "[Worker-1]")
             log_file: Optional file handle to write logs to
         """
+        if process.stdout is None:
+            return
         try:
             for line in iter(process.stdout.readline, ""):
                 if self.stop_logging.is_set():

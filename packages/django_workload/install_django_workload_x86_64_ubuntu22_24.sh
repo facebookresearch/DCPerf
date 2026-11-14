@@ -38,7 +38,7 @@ echo "====================================================================="
 
 apt install -y memcached libmemcached-dev zlib1g-dev screen \
     rpm libffi-dev \
-    libssl-dev libcrypt-dev haproxy libxxhash-dev \
+    libssl-dev libcrypt-dev haproxy libxxhash-dev numactl \
     perl liburing-dev ninja-build libev4 libev-dev cmake \
     software-properties-common build-essential libbz2-dev libreadline-dev \
     libsqlite3-dev libncurses-dev liblzma-dev wget unzip netcat-openbsd git

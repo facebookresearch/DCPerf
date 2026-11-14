@@ -39,7 +39,7 @@ echo "====================================================================="
 
 dnf groupinstall "Development Tools" -y --exclude="texlive*"
 dnf install -y memcached libmemcached-awesome-devel zlib-devel screen \
-    openssl-devel bzip2-devel libffi-devel wget make xz-devel haproxy \
+    openssl-devel bzip2-devel libffi-devel wget make xz-devel haproxy numactl \
     xxhash-devel perl-FindBin perl-JSON perl-core liburing-devel \
     ninja-build clang libev libev-devel cmake
 which git &>/dev/null || dnf install -y git-core

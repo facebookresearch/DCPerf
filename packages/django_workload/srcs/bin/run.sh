@@ -636,6 +636,7 @@ ${python_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
     # Run the load balanced server with uWSGI + Proxygen + HAProxy
     DJANGO_SETTINGS_MODULE=cluster_settings \
+    NUMA_PIN_WORKERS="${NUMA_PIN_WORKERS:-1}" \
       python start_loadbalanced_server.py \
         --use-uwsgi \
         --workers "${num_server_workers}" \
