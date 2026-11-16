@@ -18,7 +18,7 @@ BENCHMARKS_DIR="$(pwd)/benchmarks/ai_wdl/fbgemm"
 MINICONDA_PREFIX=$(pwd)/build/miniconda
 
 # Version of FBGEMM to install
-FBGEMM_VERSION=b2e9a325e546aa9793a48d99475a2ba561cd709d
+FBGEMM_VERSION=0fe67b6f899c2c0ad9f7d26043ae976444542ed9
 FBGEMM_DISABLE_ASAN_PATCH="$(pwd)/packages/ai_wdl/fbgemm/disable_fbgemm_asan.patch"
 FBGEMM_SPMDM8_SMOKE_PATCH="$(pwd)/packages/ai_wdl/fbgemm/spmdm8_smoke.patch"
 FBGEMM_BUILD_JOBS="${FBGEMM_BUILD_JOBS:-4}"
