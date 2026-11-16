@@ -18,7 +18,7 @@ BENCHMARKS_DIR="$(pwd)/benchmarks/ai_wdl/fbgemm"
 MINICONDA_PREFIX=$(pwd)/build/miniconda
 
 # Version of FBGEMM to install
-FBGEMM_VERSION=b2e9a325e546aa9793a48d99475a2ba561cd709d
+FBGEMM_VERSION=0fe67b6f899c2c0ad9f7d26043ae976444542ed9
 FBGEMM_DISABLE_ASAN_PATCH="$(pwd)/packages/ai_wdl/fbgemm/disable_fbgemm_asan.patch"
 FBGEMM_SPMDM8_SMOKE_PATCH="$(pwd)/packages/ai_wdl/fbgemm/spmdm8_smoke.patch"
 FBGEMM_BUILD_JOBS="${FBGEMM_BUILD_JOBS:-4}"
@@ -27,12 +27,13 @@ if ! [[ "${FBGEMM_BUILD_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 export FBGEMM_BUILD_JOBS
+FBGEMM_AARCH64_NATIVE_BUILD_PATCH="$(pwd)/packages/ai_wdl/fbgemm/enable_aarch64_native_build.patch"
 
 # Version of PyTorch to install
 PYTORCH_VERSION=2.15.0
 
 # Version of GCC to use for building
-export GCC_VERSION=14.1.0
+export GCC_VERSION=14.2.0
 
 # Name of the conda environment to create
 BUILD_ENV=fbgemm_build_oss_env
@@ -355,9 +356,9 @@ __conda_install_clang () {
   # shellcheck disable=SC2155
   local env_prefix=$(env_name_or_prefix "${env_name}")
 
-  # Get the LLVM version from environment variable or use default 16.0.6
+  # Get the LLVM version from environment variable or use default 23.1.4
   # shellcheck disable=SC2155
-  local llvm_version="${LLVM_VERSION:-16.0.6}"
+  local llvm_version="${LLVM_VERSION:-23.1.4}"
 
   # Install Clang and related LLVM libraries
   echo "[INSTALL] Installing Clang (${llvm_version}, ${COMPILER_ARCHNAME}) and relevant libraries through Conda ..."
@@ -1025,6 +1026,21 @@ clone_fbgemm_repo() {
       "${FBGEMM_SPMDM8_SMOKE_PATCH}" || return 1
   fi
 
+  if [[ "$(uname -m)" == "aarch64" ]]; then
+    echo "[SETUP] Enabling native AArch64 FBGEMM build targets..."
+    if [ ! -f "${FBGEMM_AARCH64_NATIVE_BUILD_PATCH}" ]; then
+      echo "[ERROR] AArch64 native-build patch not found: ${FBGEMM_AARCH64_NATIVE_BUILD_PATCH}"
+      return 1
+    fi
+    if git -C fbgemm_${FBGEMM_VERSION} apply --reverse --check \
+        "${FBGEMM_AARCH64_NATIVE_BUILD_PATCH}" 2>/dev/null; then
+      echo "[SETUP] AArch64 native-build patch already applied."
+    else
+      git -C fbgemm_${FBGEMM_VERSION} apply \
+        "${FBGEMM_AARCH64_NATIVE_BUILD_PATCH}" || return 1
+    fi
+  fi
+
   # Disable the postbuild script to prevent race conditions during linking
   # This is a workaround for a known issue in the build process
   echo "[SETUP] Disabling postbuild script..."
@@ -1140,10 +1156,15 @@ install_fbgemm() {
   echo "[BUILD] Building and installing FBGEMM..."
   local fbgemm_ldflags="-fopenmp=libomp${LDFLAGS:+ ${LDFLAGS}}"
   local fbgemm_install_rpath='$ORIGIN;$ORIGIN/torch/lib;$ORIGIN/../torch/lib'
-  echo "+ env LDFLAGS=${fbgemm_ldflags} ${CONDA_PYTHON} setup.py ${run_multicore} install --build-variant=cpu --build-target=default -DCMAKE_INSTALL_RPATH=${fbgemm_install_rpath}"
+  local -a fbgemm_platform_cmake_args=()
+  if [[ "${ARCH}" == "aarch64" ]]; then
+    fbgemm_platform_cmake_args+=("-DFBGEMM_AARCH64_BUILD_NATIVE=ON")
+  fi
+  echo "+ env LDFLAGS=${fbgemm_ldflags} ${CONDA_PYTHON} setup.py ${run_multicore} install --build-target=default --build-variant=cpu ${fbgemm_platform_cmake_args[*]} -DCMAKE_INSTALL_RPATH=${fbgemm_install_rpath}"
   # shellcheck disable=SC2086
   env LDFLAGS="${fbgemm_ldflags}" \
-    "${CONDA_PYTHON}" setup.py ${run_multicore} install --build-variant=cpu --build-target=default \
+    "${CONDA_PYTHON}" setup.py ${run_multicore} install --build-target=default --build-variant=cpu \
+    "${fbgemm_platform_cmake_args[@]}" \
     "-DCMAKE_INSTALL_RPATH=${fbgemm_install_rpath}" || {
     echo "[ERROR] FBGEMM build failed!"
     return 1
