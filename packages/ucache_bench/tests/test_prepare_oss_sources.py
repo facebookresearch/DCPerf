@@ -33,8 +33,14 @@ class PrepareOssSourcesTest(unittest.TestCase):
             )
             transport = source / "UcacheBenchThriftTransport.h"
             transport.write_text(
-                "if (FOLLY_UNLIKELY(request.getKcbIdentity().has_value())) {\n"
+                "if (request.getKcbIdentity().has_value()) [[unlikely]] {\n"
                 "  send(request.getKcbIdentity().value());\n"
+                "}\n"
+                "if (FOLLY_UNLIKELY(request.getPrivacyLibAgenticContext().has_value())) {\n"
+                "  send(request.getPrivacyLibAgenticContext().value());\n"
+                "}\n"
+                "if (request.getClientIdentifier().has_value()) [[unlikely]] {\n"
+                "  send(request.getClientIdentifier().value());\n"
                 "}\n"
             )
 
@@ -47,5 +53,8 @@ class PrepareOssSourcesTest(unittest.TestCase):
             self.assertIn(
                 'include "UcacheBench.thrift"', (output / service.name).read_text()
             )
-            self.assertNotIn("getKcbIdentity", (output / transport.name).read_text())
+            transport_output = (output / transport.name).read_text()
+            self.assertNotIn("getKcbIdentity", transport_output)
+            self.assertNotIn("getPrivacyLibAgenticContext", transport_output)
+            self.assertIn("getClientIdentifier", transport_output)
             self.assertIn("cea/chips/benchpress", messages.read_text())
