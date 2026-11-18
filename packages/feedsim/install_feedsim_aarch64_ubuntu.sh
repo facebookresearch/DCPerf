@@ -35,7 +35,7 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     libunwind-dev bzip2 libbz2-dev libsodium-dev libghc-double-conversion-dev \
     libzstd-dev lz4 liblz4-dev xzip libsnappy-dev libtool libssl-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
-    sysstat jq unzip xxhash libxxhash-dev libboost-all-dev rsync curl git wget python3
+    sysstat jq unzip xxhash libxxhash-dev libboost-all-dev rsync curl git wget numactl python3
 
 # Install liburing >= 2.6 from source. Ubuntu's apt-shipped liburing is
 # older than folly's minimum, so folly's io_uring integration links
