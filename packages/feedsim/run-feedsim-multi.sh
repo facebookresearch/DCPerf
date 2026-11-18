@@ -23,10 +23,27 @@ if [ -d "${FEEDSIM_ROOT}/third_party/libtorch/lib" ]; then
     export LD_LIBRARY_PATH="${FEEDSIM_ROOT}/third_party/libtorch/lib:${LD_LIBRARY_PATH:-}"
 fi
 FEEDSIM_LOG_PREFIX="${FEEDSIM_ROOT}/feedsim-multi-inst-${FIXQPS_SUFFIX}"
+FEEDSIM_SYS_NODE_ROOT="${FEEDSIM_SYS_NODE_ROOT:-/sys/devices/system/node}"
+
+CPU_NUMA_NODES=()
+for node_dir in "${FEEDSIM_SYS_NODE_ROOT}"/node[0-9]*; do
+    [ -d "$node_dir" ] || continue
+    cpu_list="$(cat "${node_dir}/cpulist" 2>/dev/null || true)"
+    cpu_list="${cpu_list//[[:space:]]/}"
+    [ -n "$cpu_list" ] || continue
+    CPU_NUMA_NODES+=("${node_dir##*node}")
+done
+NUM_CPU_NUMA_NODES="${#CPU_NUMA_NODES[@]}"
+if [ "$NUM_CPU_NUMA_NODES" -eq 0 ]; then
+    NUM_CPU_NUMA_NODES=1
+fi
+NUMA_INSTANCE_MODE=0
+
 # Calculate number of instances based on physical cores (1 instance per 50 physical cores).
 # nproc returns logical cores; divide by 2 when SMT is active to get physical cores.
-NCPU="$(nproc)"
-if [ -f /sys/devices/system/cpu/smt/active ] && [ "$(cat /sys/devices/system/cpu/smt/active)" -eq 1 ]; then
+NCPU="${FEEDSIM_NPROC:-$(nproc)}"
+SMT_ACTIVE="${FEEDSIM_SMT_ACTIVE:-$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo 0)}"
+if [ "$SMT_ACTIVE" -eq 1 ]; then
     PHYS_CORES="$(( NCPU / 2 ))"
 else
     PHYS_CORES="$NCPU"
@@ -38,7 +55,8 @@ cat <<EOF
 Usage: ${0##*/} [OPTION]...
 
     -h Display this help and exit
-    -n Number of parallel instances to run. Default: $(( ( PHYS_CORES + 49 ) / 50 ))
+    -n Number of parallel instances to run. Use -1 for one per CPU NUMA node.
+       Default: $(( ( PHYS_CORES + 49 ) / 50 ))
 
 Any remaining arguments are passed to run.sh
 
@@ -52,7 +70,12 @@ echo "${SCRIPT_NAME}: DCPERF_PERF_RECORD=${DCPERF_PERF_RECORD}"
 while [ $# -ne 0 ]; do
     case $1 in
         -n)
-            if [[ "$2" -gt 0 ]]; then
+            if [ "$2" = -1 ]; then
+                NUM_INSTANCES="$NUM_CPU_NUMA_NODES"
+                if [ "${#CPU_NUMA_NODES[@]}" -gt 0 ]; then
+                    NUMA_INSTANCE_MODE=1
+                fi
+            elif [[ "$2" -gt 0 ]]; then
                 NUM_INSTANCES="$2"
             fi
             ;;
@@ -195,8 +218,9 @@ function start_mock_services() {
     fi
 
     echo "Starting mock_services on port ${port} (cores=${core_range}, io_threads=${io_threads}, cap_us=${cap_us}, offset_us=${offset_us}, skip_us=${skip_us}, tls=${FEEDSIM_TLS:-1}, silesia=${SILESIA_DIR_ABS})"
+    configure_binding "$core_range"
     # shellcheck disable=SC2086
-    taskset --cpu-list "$core_range" \
+    "${BINDING_CMD[@]}" \
         "$MOCK_SERVICES_BIN" \
         --port="$port" \
         --mock_io_threads="$io_threads" \
@@ -300,11 +324,15 @@ trap 'exit 143' TERM
 function get_cpu_range() {
     total_instances="$1"
     inst_id="$2"
-    # smt/active is absent on non-SMT architectures (e.g. ARM) and in some
-    # containers; default to 0 (physical cores = logical cores).
-    has_smt="$(cat /sys/devices/system/cpu/smt/active 2>/dev/null || echo 0)"
-
-    NPROC="$(nproc)"
+    if [ "$NUMA_INSTANCE_MODE" -eq 1 ]; then
+        local node="${CPU_NUMA_NODES[$inst_id]}"
+        local cpu_list
+        cpu_list="$(cat "${FEEDSIM_SYS_NODE_ROOT}/node${node}/cpulist")"
+        echo "${cpu_list//[[:space:]]/}"
+        return
+    fi
+    has_smt="$SMT_ACTIVE"
+    NPROC="$NCPU"
     if [ "$has_smt" -eq 1 ]; then
         NCORES="$((NPROC / 2))"
     else
@@ -335,6 +363,74 @@ function get_cpu_range() {
     echo "$RES"
 }
 
+function cpulists_overlap() {
+    local left_list="$1"
+    local right_list="$2"
+    local left_range right_range
+    local left_start left_end right_start right_end
+    local -a left_ranges right_ranges
+
+    IFS=',' read -ra left_ranges <<< "$left_list"
+    IFS=',' read -ra right_ranges <<< "$right_list"
+    for left_range in "${left_ranges[@]}"; do
+        if [[ "$left_range" == *-* ]]; then
+            left_start="${left_range%-*}"
+            left_end="${left_range#*-}"
+        else
+            left_start="$left_range"
+            left_end="$left_range"
+        fi
+        for right_range in "${right_ranges[@]}"; do
+            if [[ "$right_range" == *-* ]]; then
+                right_start="${right_range%-*}"
+                right_end="${right_range#*-}"
+            else
+                right_start="$right_range"
+                right_end="$right_range"
+            fi
+            if [ "$left_start" -le "$right_end" ] && [ "$right_start" -le "$left_end" ]; then
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+function get_numa_nodes_for_cpu_range() {
+    local core_range="$1"
+    local node node_cpu_list
+    local matching_nodes=()
+
+    for node in "${CPU_NUMA_NODES[@]}"; do
+        node_cpu_list="$(cat "${FEEDSIM_SYS_NODE_ROOT}/node${node}/cpulist")"
+        node_cpu_list="${node_cpu_list//[[:space:]]/}"
+        if cpulists_overlap "$core_range" "$node_cpu_list"; then
+            matching_nodes+=("$node")
+        fi
+    done
+    (IFS=,; echo "${matching_nodes[*]}")
+}
+
+function configure_binding() {
+    local core_range="$1"
+    local numa_nodes
+
+    BINDING_CMD=(taskset --cpu-list "$core_range")
+    if [ "$NUM_INSTANCES" -le 1 ] || [ "$NUM_CPU_NUMA_NODES" -le 1 ]; then
+        return
+    fi
+    if ! command -v numactl >/dev/null 2>&1; then
+        echo "WARNING: numactl is unavailable; using CPU-only binding for cores ${core_range}" >&2
+        return
+    fi
+    numa_nodes="$(get_numa_nodes_for_cpu_range "$core_range")"
+    if [ -z "$numa_nodes" ]; then
+        echo "WARNING: no NUMA node contains cores ${core_range}; using CPU-only binding" >&2
+        return
+    fi
+    BINDING_CMD=(numactl "--physcpubind=${core_range}" "--membind=${numa_nodes}")
+}
+
 echo > $BREPS_LFILE
 # The instances share breakdown.csv, so clear it here rather than in run.sh. A
 # variance rerun keeps the phases of the run that triggered it.
@@ -344,6 +440,7 @@ fi
 # shellcheck disable=SC2086
 for i in $(seq 1 ${NUM_INSTANCES}); do
     CORE_RANGE="$(get_cpu_range "${NUM_INSTANCES}" "$((i - 1))")"
+    configure_binding "$CORE_RANGE"
     MOCK_PORT=$((MOCK_SERVICES_PORT_BASE + i - 1))
     MOCK_LOG="${FEEDSIM_ROOT}/mock_services_${i}.log"
 
@@ -364,10 +461,11 @@ for i in $(seq 1 ${NUM_INSTANCES}); do
     fi
 
     rm -f "${FEEDSIM_ROOT}/feedsim_results_${FIXQPS_SUFFIX}${i}.txt"
-    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} FEEDSIM_INSTANCE_ID=${i} MOCK_SERVICES_PORT=${MOCK_PORT} taskset --cpu-list ${CORE_RANGE} ${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
+    printf -v BINDING_DISPLAY '%q ' "${BINDING_CMD[@]}"
+    CMD="IS_AUTOSCALE_RUN=${NUM_INSTANCES} FEEDSIM_INSTANCE_ID=${i} MOCK_SERVICES_PORT=${MOCK_PORT} ${BINDING_DISPLAY}${FEEDSIM_ROOT}/run.sh -p ${PORT} -o feedsim_results_${FIXQPS_SUFFIX}${i}.txt  $*"
     echo "$CMD" > "${FEEDSIM_LOG_PREFIX}${i}.log"
     # shellcheck disable=SC2068,SC2069
-    IS_AUTOSCALE_RUN=${NUM_INSTANCES} FEEDSIM_INSTANCE_ID=${i} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 taskset --cpu-list "${CORE_RANGE}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
+    IS_AUTOSCALE_RUN=${NUM_INSTANCES} FEEDSIM_INSTANCE_ID=${i} MOCK_SERVICES_PORT=${MOCK_PORT} stdbuf -i0 -o0 -e0 "${BINDING_CMD[@]}" "${FEEDSIM_ROOT}"/run.sh -p "${PORT}" -o "feedsim_results_${FIXQPS_SUFFIX}${i}.txt" $@ 2>&1 > "${FEEDSIM_LOG_PREFIX}${i}.log" &
     PIDS+=("$!")
     PHY_CORE_ID=$((PHY_CORE_ID + CORES_PER_INST))
     SMT_ID=$((SMT_ID + CORES_PER_INST))

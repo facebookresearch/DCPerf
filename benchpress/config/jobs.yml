@@ -471,17 +471,15 @@
 - name: feedsim_dlrm
   benchmark: feedsim_autoscale
   description: >
-    Single-instance aggregator workload with DLRM (Deep Learning Recommendation
-    Model) inference. Pinned to ONE feedsim instance per host for cross-platform
-    CPU comparisons (better gen-over-gen correlation than multi-instance — no
-    cross-instance mock_services queue contention or core-range fragmentation).
-    The calibrated recipe is baked into run.sh / LeafNodeRank defaults; only the
-    single-instance override and driver depth are set here. Use
-    feedsim_autoscale_dlrm for max-throughput multi-instance runs, or
-    feedsim_dlrm_custom to override any parameter. Finds maximum QPS the system
-    sustains while keeping 95th percentile latency <= 700ms.
+    NUMA-aware aggregator workload with DLRM (Deep Learning Recommendation Model)
+    inference. Runs one feedsim instance per CPU NUMA node and binds each instance
+    to local CPUs and memory. The calibrated recipe is baked into run.sh /
+    LeafNodeRank defaults; only the NUMA-aware instance override and driver depth
+    are set here. Use feedsim_autoscale_dlrm for core-count-based multi-instance
+    runs, or feedsim_dlrm_custom to override any parameter. Finds maximum QPS the
+    system sustains while keeping 95th percentile latency <= 700ms.
   args:
-    - '-n 1'
+    - '-n -1'
     - '--depth={depth}'
     - '--mock-connect-retries={mock_connect_retries}'
     - '--mock-connect-initial-backoff-ms={mock_connect_initial_backoff_ms}'
@@ -632,11 +630,10 @@
 - name: feedsim_dlrm_custom
   benchmark: feedsim_autoscale
   description: >
-    Advanced/customizable single-instance DLRM aggregator run. Identical default
-    behavior to feedsim_dlrm, but every calibrated parameter is exposed here as an
-    explicit var so it can be overridden with -i without editing run.sh. Use this
-    for parameter sweeps and one-off experiments; use feedsim_dlrm or
-    feedsim_autoscale_dlrm for the standard calibrated runs.
+    Advanced/customizable DLRM aggregator run. Defaults to one instance and
+    exposes every calibrated parameter so it can be overridden with -i without
+    editing run.sh. Use this for parameter sweeps and one-off experiments; use
+    feedsim_dlrm or feedsim_autoscale_dlrm for the standard calibrated runs.
   args:
     - '-n {num_instances}'
     - '--async-io={async_io}'
