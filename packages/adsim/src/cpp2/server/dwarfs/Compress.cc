@@ -105,7 +105,7 @@ std::string CompressBase::init(
   void* buf = malloc(size_ + PAD_SIZE);
   int64_t* buf_i64 = (int64_t*)buf;
   for (int i = 0; (size_ >> 3) > i; ++i) {
-    buf_i64[i] = get_rand();
+    buf_i64[i] = 0 < value_range_ ? get_rand() % value_range_ : get_rand();
   }
   h_objs->set_plain_ptr(input_str_ + ".buf_", buf);
   return folly::to<std::string>(
