@@ -41,6 +41,7 @@ enum class OpKind {
   IndexSelect,
   Cat,
   ToHalf,
+  Linear,
 };
 
 inline OpKind parseOpKind(const std::string& name) {
@@ -56,6 +57,7 @@ inline OpKind parseOpKind(const std::string& name) {
       {"index_select", OpKind::IndexSelect},
       {"cat", OpKind::Cat},
       {"to_half", OpKind::ToHalf},
+      {"linear", OpKind::Linear},
   };
   for (const auto& [n, kind] : kNames) {
     if (n == name) {
@@ -130,6 +132,7 @@ class OpInputs {
       case OpKind::Diff:
       case OpKind::Cat:
       case OpKind::ToHalf:
+      case OpKind::Linear:
         break;
     }
   }
@@ -149,7 +152,8 @@ class OpInputs {
   const int64_t* index(int b) const {
     return index_.data() + b * spec_.rows;
   }
-  // Floats per buffer; LayerNorm's gamma and beta follow the input.
+  // Floats per buffer; LayerNorm's gamma and beta, and Linear's aux x cols
+  // weight and aux bias, follow the input.
   int64_t inputElems() const {
     const int64_t n = spec_.rows * spec_.cols;
     switch (spec_.kind) {
@@ -163,6 +167,8 @@ class OpInputs {
         return spec_.aux * spec_.cols;
       case OpKind::Cat:
         return n * spec_.aux;
+      case OpKind::Linear:
+        return n + spec_.aux * spec_.cols + spec_.aux;
       case OpKind::ClampRangeLengths:
       case OpKind::CompleteCumsum:
         return 1;

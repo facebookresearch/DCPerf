@@ -190,6 +190,14 @@ Ops buildOps(const Inputs& inputs) {
         floats(a + "x", 0, s.rows, s.cols);
         stmt = cat(w, " = ", a, "x[b].half()");
         break;
+      case OpKind::Linear:
+        floats(a + "x", 0, s.rows, s.cols);
+        floats(a + "w", n, s.aux, s.cols);
+        perBuffer(a + "h", [&](int b) {
+          return view(in.f32(b) + n + s.aux * s.cols, {s.aux}, at::kFloat);
+        });
+        stmt = cat(w, " = torch.linear(", a, "x[b], ", a, "w[b], ", a, "h[b])");
+        break;
     }
     ops.ws.push_back(out);
     body << "    for r in range(" << s.reps << "):\n"
