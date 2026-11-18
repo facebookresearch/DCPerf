@@ -44,6 +44,7 @@ class CompressBase : public Kernel {
     this->compressed_size_ = rhs.compressed_size_;
     this->input_str_ = rhs.input_str_;
     this->output_str_ = rhs.output_str_;
+    this->value_range_ = rhs.value_range_;
   }
   CompressBase& operator=(const CompressBase& rhs) {
     this->compressor_ = rhs.compressor_;
@@ -52,6 +53,7 @@ class CompressBase : public Kernel {
     this->compressed_size_ = rhs.compressed_size_;
     this->input_str_ = rhs.input_str_;
     this->output_str_ = rhs.output_str_;
+    this->value_range_ = rhs.value_range_;
     return *this;
   }
   std::string init(
@@ -76,7 +78,9 @@ class CompressBase : public Kernel {
     if (config_d.count("output")) {
       output_str = config_d["output"].asString();
     }
-    return CompressBase(encoder, level, size, input_str, output_str);
+    CompressBase base(encoder, level, size, input_str, output_str);
+    base.value_range_ = config_d.getDefault("value_range", 0).asInt();
+    return CompressBase(base);
   }
 
  protected:
@@ -86,6 +90,9 @@ class CompressBase : public Kernel {
   size_t compressed_size_;
   std::string input_str_;
   std::string output_str_;
+  // Generated input words take this many distinct values; 0 keeps the full
+  // random range. Few values compress into long, regular matches.
+  int64_t value_range_ = 0;
 };
 
 /* A kernel for compression */
