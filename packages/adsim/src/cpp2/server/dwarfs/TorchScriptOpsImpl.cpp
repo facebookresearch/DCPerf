@@ -263,6 +263,8 @@ struct OpTemplate {
   int nin;
   const char* expr;
   bool lowp = true;
+  // Drawn only when GraphSpec::templates names it.
+  bool byName = false;
 };
 
 const std::vector<OpTemplate>& opTemplates() {
@@ -421,6 +423,36 @@ const std::vector<OpTemplate>& opTemplates() {
       {"bmm", 1, "torch.bmm($0.unsqueeze(0), w.unsqueeze(0)).squeeze(0)$B"},
       {"einsum", 1, "torch.einsum('ij,jk->ik', [$0, w])$B"},
       {"trace", 1, "(torch.trace(w) + $0)$B"},
+      // Containers and views: interpreter, IValue, and TensorImpl work with
+      // little math. The index comes from idx's data so it cannot fold.
+      {"list_pick",
+       2,
+       "[$0, $1, $0, $1, $0, $1, $0, $1][int(idx[0]) % 8]",
+       true,
+       true},
+      {"dict_pick",
+       2,
+       "{'a': $0, 'b': $1, 'c': $0, 'd': $1}"
+       "[['a', 'b', 'c', 'd'][int(idx[0]) % 4]]",
+       true,
+       true},
+      {"tuple_list",
+       2,
+       "[($0, $1), ($1, $0), ($0, $0)][int(idx[0]) % 3][1]",
+       true,
+       true},
+      {"unbind_stack", 1, "torch.stack(torch.unbind($0, 0), 0)", true, true},
+      {"split_cat", 1, "torch.cat(list(torch.split($0, 1, 1)), 1)", true, true},
+      {"reshape_chain",
+       1,
+       "$0.reshape([-1]).reshape([$R, $C]).t().t()",
+       true,
+       true},
+      {"alloc_resize",
+       1,
+       "$0.new_empty([0]).resize_([$R, $C]).copy_($0)",
+       true,
+       true},
   };
   return kOps;
 }
@@ -473,7 +505,7 @@ std::string emit(
   return s;
 }
 
-// The templates in `names`, or all of them, that run in `dtype`
+// The templates in `names`, or all but the by-name ones, that run in `dtype`
 std::vector<const OpTemplate*> selectTemplates(
     const std::vector<std::string>& names,
     const DType& dtype) {
@@ -483,7 +515,7 @@ std::vector<const OpTemplate*> selectTemplates(
   }
   std::vector<const OpTemplate*> ops;
   for (const auto& op : opTemplates()) {
-    const bool listed = names.empty() || wanted.erase(op.name);
+    const bool listed = names.empty() ? !op.byName : wanted.erase(op.name);
     if (listed && (op.lowp || !dtype.lowp)) {
       ops.push_back(&op);
     }

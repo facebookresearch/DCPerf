@@ -201,7 +201,8 @@ struct GraphSpec {
   double zipf_s = 0.85; // Skew of op popularity.
   // Draw ops as shuffled passes over the templates instead of by popularity.
   bool cover = false;
-  // Names of the templates to draw from; empty for all of templateNames().
+  // Names of the templates to draw from; empty for all of templateNames()
+  // except the container and view templates, which must be named.
   std::vector<std::string> templates;
   uint64_t seed = 1;
   // Graph copies to cycle through: "float32", "float64", "bfloat16", "float16"

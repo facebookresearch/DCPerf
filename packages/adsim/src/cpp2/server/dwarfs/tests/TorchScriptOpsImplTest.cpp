@@ -546,6 +546,60 @@ TEST(TorchScriptOpsImplTest, EveryTemplateKeepsShapeAndDType) {
   }
 }
 
+const std::vector<std::string> kContainerTemplates = {
+    "list_pick",
+    "dict_pick",
+    "tuple_list",
+    "unbind_stack",
+    "split_cat",
+    "reshape_chain",
+    "alloc_resize"};
+
+// Container and view templates return one of their inputs unchanged
+TEST(TorchScriptOpsImplTest, ContainerTemplatesReturnAnInput) {
+  c10::InferenceMode guard;
+  const int64_t rows = 4;
+  const int64_t cols = 16;
+  std::vector<at::Tensor> values;
+  for (int i = 0; 8 > i; ++i) {
+    values.push_back(at::rand({rows, cols}));
+  }
+  const auto idx = at::randint(rows, {rows}, at::kLong);
+  for (const auto& dtype : kDTypes) {
+    const auto inputs = graphInputs(values, cols, scalarType(dtype));
+    for (const auto& name : kContainerTemplates) {
+      GraphSpec g;
+      g.nops = 1;
+      g.rows = rows;
+      g.cols = cols;
+      g.templates = {name};
+      g.dtypes = {dtype};
+      const auto outs = torch::jit::compile(graphSource(g, /*returnAll=*/true))
+                            ->get_function("graph_" + dtype)({inputs, idx})
+                            .toTensorVector();
+      ASSERT_EQ(outs.size(), size_t{9}) << name << " " << dtype;
+      bool found = false;
+      for (int i = 0; 8 > i; ++i) {
+        found = found || at::equal(outs.back(), outs[i]);
+      }
+      EXPECT_TRUE(found) << name << " " << dtype;
+    }
+  }
+}
+
+// A graph without named templates never draws a container template
+TEST(TorchScriptOpsImplTest, ContainerTemplatesNeedNames) {
+  GraphSpec g;
+  g.rows = 4;
+  g.cols = 16;
+  g.cover = true;
+  g.nops = static_cast<int>(templateNames().size());
+  const std::string source = graphSource(g, /*returnAll=*/false);
+  for (const char* token : {"int(idx[0])", "torch.unbind", "resize_"}) {
+    EXPECT_EQ(source.find(token), std::string::npos) << token;
+  }
+}
+
 // Threads share one program and still match the reference
 TEST(TorchScriptOpsImplTest, ThreadsShareProgram) {
   const std::vector<OpSpec> specs = {
