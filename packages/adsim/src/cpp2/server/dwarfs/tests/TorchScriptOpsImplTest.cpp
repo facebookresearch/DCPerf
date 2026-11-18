@@ -59,6 +59,7 @@ std::vector<OpSpec> everyOp() {
       {OpKind::LayerNorm, 512, 256, 4, 2},
       {OpKind::Add, 512, 256, 4, 2},
       {OpKind::ToHalf, 512, 256, 4, 2},
+      {OpKind::Linear, 16, 64, 32, 2},
   };
 }
 
@@ -180,11 +181,28 @@ std::vector<char> expectedOutput(
       }
       return bytesOf(y);
     }
+    case OpKind::Linear: {
+      const float* weight = x + n;
+      const float* bias = weight + s.aux * s.cols;
+      std::vector<float> y(s.rows * s.aux);
+      for (int64_t r = 0; s.rows > r; ++r) {
+        for (int64_t o = 0; s.aux > o; ++o) {
+          double sum = bias[o];
+          for (int64_t c = 0; s.cols > c; ++c) {
+            sum +=
+                static_cast<double>(x[r * s.cols + c]) * weight[o * s.cols + c];
+          }
+          y[r * s.aux + o] = static_cast<float>(sum);
+        }
+      }
+      return bytesOf(y);
+    }
   }
   return {};
 }
 
-// Compare bit for bit, LayerNorm within 1e-4
+// Compare bit for bit; LayerNorm and Linear, whose sums depend on the kernel's
+// order, within 1e-4 plus 1e-5 of the value
 bool matches(
     OpKind kind,
     const std::vector<char>& got,
@@ -192,13 +210,13 @@ bool matches(
   if (got.size() != want.size()) {
     return false;
   }
-  if (OpKind::LayerNorm != kind) {
+  if (OpKind::LayerNorm != kind && OpKind::Linear != kind) {
     return 0 == std::memcmp(got.data(), want.data(), got.size());
   }
   const auto* g = reinterpret_cast<const float*>(got.data());
   const auto* w = reinterpret_cast<const float*>(want.data());
   for (size_t i = 0; got.size() / sizeof(float) > i; ++i) {
-    if (!(1e-4 > std::abs(g[i] - w[i]))) {
+    if (!(1e-4 + 1e-5 * std::abs(w[i]) > std::abs(g[i] - w[i]))) {
       return false;
     }
   }
