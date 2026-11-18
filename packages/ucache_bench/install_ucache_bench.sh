@@ -717,6 +717,79 @@ if ! grep -q "GenericPiecesBase.cpp" "$CACHELIB_COMMON_CMAKE"; then
     sed -i 's|piecewise/GenericPieces.cpp|piecewise/GenericPieces.cpp\n  piecewise/GenericPiecesBase.cpp|' "$CACHELIB_COMMON_CMAKE"
 fi
 
+# Disable io_uring support in CacheLib (CACHELIB_IOURING_DISABLE).
+# Folly is built above with FOLLY_HAS_LIBURING forced to 0 (see the
+# Liburing.h patch). CacheLib's find_package(uring) still succeeds
+# wherever liburing.a is installed (Ubuntu: "Found uring" in the
+# configure output), so its navy io_uring code is compiled against
+# folly headers where IoUring/IoUringOp are unavailable. CentOS builds
+# only pass because find_package(uring) fails there ("Could NOT find
+# uring") and the disable macro is defined. Define it unconditionally
+# so every distro builds the same configuration. UCacheBench uses RAM
+# cache mode and never requests the io_uring engine.
+CACHELIB_TOP_CMAKE="$DEPS_DIR/CacheLib/cachelib/CMakeLists.txt"
+if [ -f "$CACHELIB_TOP_CMAKE" ] && ! grep -q "NAVI_DISABLE_CACHE_LIB_IOURING" "$CACHELIB_TOP_CMAKE"; then
+    echo "  Patching CacheLib to disable io_uring support..."
+    python3 - "$CACHELIB_TOP_CMAKE" <<'CACHELIB_IOURING_PY' || exit 1
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "find_package(uring)\n"
+if s.count(anchor) != 1:
+    print(f"ERROR: expected exactly one find_package(uring) in {p}", file=sys.stderr)
+    sys.exit(1)
+s = s.replace(anchor, anchor + """# NAVI_DISABLE_CACHE_LIB_IOURING: folly is built with
+# FOLLY_HAS_LIBURING=0 (see the Liburing.h patch above), so CacheLib
+# must not compile its io_uring code paths.
+add_definitions(-DCACHELIB_IOURING_DISABLE)
+""", 1)
+open(p, "w").write(s)
+print("    CacheLib io_uring support disabled")
+CACHELIB_IOURING_PY
+fi
+
+# Guard CacheLib's exception stack-trace printing on folly's ELF/DWARF
+# support. folly declares getCurrentExceptions() only when
+# FOLLY_HAVE_ELF && FOLLY_HAVE_DWARF, which its CMake configure
+# derives from the <elf.h> check; that check fails on CentOS Stream 10
+# ("Setting FOLLY_HAVE_DWARF: FALSE" in the configure output), so the
+# unguarded call in Utils.cpp does not compile there. When the API is
+# unavailable this becomes a no-op; the only callers are diagnostic
+# catch paths in ThreadPoolJobQueue.
+CACHELIB_UTILS_CPP="$DEPS_DIR/CacheLib/cachelib/common/Utils.cpp"
+if [ -f "$CACHELIB_UTILS_CPP" ] && ! grep -q "NAVI_GUARD_EXCEPTION_TRACER" "$CACHELIB_UTILS_CPP"; then
+    echo "  Patching CacheLib to guard exception stack-trace printing..."
+    python3 - "$CACHELIB_UTILS_CPP" <<'CACHELIB_TRACER_PY' || exit 1
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = """void printExceptionStackTraces() {
+  auto exceptions = folly::exception_tracer::getCurrentExceptions();
+  for (auto& exc : exceptions) {
+    std::cerr << exc << std::endl;
+  }
+}
+"""
+new = """void printExceptionStackTraces() {
+  // NAVI_GUARD_EXCEPTION_TRACER: folly declares getCurrentExceptions()
+  // only when FOLLY_HAVE_ELF && FOLLY_HAVE_DWARF; without the guard
+  // this does not compile on systems where that configure check fails.
+#if FOLLY_HAVE_ELF && FOLLY_HAVE_DWARF
+  auto exceptions = folly::exception_tracer::getCurrentExceptions();
+  for (auto& exc : exceptions) {
+    std::cerr << exc << std::endl;
+  }
+#endif
+}
+"""
+if s.count(old) != 1:
+    print("ERROR: printExceptionStackTraces anchor not found exactly once in " + p, file=sys.stderr)
+    sys.exit(1)
+open(p, "w").write(s.replace(old, new, 1))
+print("    CacheLib exception stack-trace printing guarded")
+CACHELIB_TRACER_PY
+fi
+
 # Build CacheLib using cmake
 # Build ONLY the CacheLib libraries UCacheBench links, not `make all`.
 # UCacheBench's server links exactly: cachelib_allocator, cachelib_navy,
