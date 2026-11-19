@@ -11,6 +11,12 @@ from pathlib import Path
 _INTERNAL_PREFIX = "cea/chips/benchpress/packages/ucache_bench/protocol/gen/"
 _INTERNAL_SERVER_PREFIX = "cea/chips/benchpress/packages/ucache_bench/server/"
 _GENERATED_SUFFIXES: frozenset[str] = frozenset({".cpp", ".h", ".thrift"})
+# Carbon emits `if (request.get...) [[unlikely]] {`; the OSS mcrouter sources
+# may still use the older `if (FOLLY_UNLIKELY(request.get...)) {` form.
+_METADATA_BLOCK_PREFIXES: tuple[str, ...] = (
+    "if (request.get",
+    "if (FOLLY_UNLIKELY(request.get",
+)
 
 
 def _remove_internal_metadata_blocks(contents: str) -> str:
@@ -19,7 +25,7 @@ def _remove_internal_metadata_blocks(contents: str) -> str:
     index = 0
     while index < len(lines):
         line = lines[index]
-        if line.lstrip().startswith("if (FOLLY_UNLIKELY(request.get") and (
+        if line.lstrip().startswith(_METADATA_BLOCK_PREFIXES) and (
             "getPrivacyLibAgenticContext" in line or "getKcbIdentity" in line
         ):
             depth = line.count("{") - line.count("}")
