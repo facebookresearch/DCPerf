@@ -421,6 +421,7 @@ class SizingTest(unittest.TestCase):
             "lru_rebalance_interval_sec": 1,
             "lru_rebalancing_hits_min_age_sec": 60,
             "lru_rebalancing_hits_max_age_sec": 7200,
+            "nic_channel_ratio": 1.0,
         }
         for key, value in common.items():
             with self.subTest(key=key):

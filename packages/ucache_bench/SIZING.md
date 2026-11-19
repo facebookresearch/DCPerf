@@ -217,6 +217,20 @@ The `ucache_bench_memory` job uses the same values as its defaults, so a run
 that passes only the sizing-dependent parameters still exercises the
 validated request path.
 
+Both roles also tune the NIC before starting:
+
+```text
+nic_channel_ratio = 1.0
+```
+
+Each server and client process sets the interface's combined channel count to
+the largest power of two that does not exceed `logical CPUs * ratio` or the
+NIC maximum, spreads the queue IRQs with `affinitize_nic`, and logs how many
+RSS indirection entries each RX ring received. Processes on one host take a
+lock and skip `ethtool -L` when the count already matches. The change persists
+after the run; record and restore the host's channel count and IRQ affinity if
+the host is shared.
+
 Open-loop protection uses fixed workload bounds rather than a hardware profile:
 
 ```text

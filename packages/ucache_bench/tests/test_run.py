@@ -14,10 +14,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cea.chips.benchpress.packages.ucache_bench.run import (
+    affinitize_nic,
     ClientSummary,
     CommandResult,
+    even_rss_channel_count,
     init_parser,
     parse_client_summary,
+    parse_rss_ring_entries,
     run_client,
     run_cmd,
     run_server,
@@ -306,6 +309,93 @@ class ParserTest(unittest.TestCase):
         command = run.call_args.args[0]
         self.assertIn("--warmup_max_inflight=32", command)
         self.assertNotIn("--warmup_adaptive_load=false", command)
+
+    def test_even_rss_channel_count_rounds_down_to_power_of_two(self) -> None:
+        cases = {0: 0, 1: 1, 63: 32, 64: 64, 126: 64, 128: 128, 252: 128}
+        for requested, expected in cases.items():
+            with self.subTest(requested=requested):
+                self.assertEqual(even_rss_channel_count(requested), expected)
+
+    def test_parse_rss_ring_entries_counts_wrapped_ring(self) -> None:
+        rows = [
+            f"{start:5}: " + " ".join(f"{(start + i) % 63:5}" for i in range(8))
+            for start in range(0, 64, 8)
+        ]
+        output = "\n".join(
+            ["RX flow hash indirection table for eth0 with 63 RX ring(s):"]
+            + rows
+            + ["RSS hash key:", "75:d7:bd:e5:43:70:df:26", "RSS hash function:"]
+        )
+
+        entries = parse_rss_ring_entries(output)
+
+        self.assertEqual(len(entries), 63)
+        self.assertEqual(sum(entries.values()), 64)
+        self.assertEqual(entries[0], 2)
+        self.assertEqual({entries[ring] for ring in range(1, 63)}, {1})
+
+    def _run_affinitize(
+        self, cpus: int, ratio: float, current_channels: int
+    ) -> list[list[str]]:
+        args = init_parser().parse_args(
+            [
+                "client",
+                "--server-host=cache.example.com",
+                f"--nic-channel-ratio={ratio}",
+            ]
+        )
+        channels = (
+            "Channel parameters for eth0:\nPre-set maximums:\nCombined:\t128\n"
+            f"Current hardware settings:\nCombined:\t{current_channels}\n"
+        )
+        commands: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            commands.append(cmd)
+            stdout = channels if cmd[:2] == ["ethtool", "-l"] else ""
+            return subprocess.CompletedProcess(cmd, 0, stdout, "")
+
+        module = "cea.chips.benchpress.packages.ucache_bench.run"
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch(f"{module}.NIC_SETUP_LOCK_PATH", f"{tmp}/nic.lock"),
+            patch(f"{module}.os.sched_getaffinity", return_value=set(range(cpus))),
+            patch(f"{module}.subprocess.run", side_effect=fake_run),
+        ):
+            affinitize_nic(args)
+        return commands
+
+    def test_affinitize_nic_uses_power_of_two_channels(self) -> None:
+        commands = self._run_affinitize(cpus=252, ratio=0.5, current_channels=63)
+
+        self.assertIn(["ethtool", "-L", "eth0", "combined", "64"], commands)
+        affinitize = next(c for c in commands if "--max-cpus" in c)
+        self.assertEqual(affinitize[affinitize.index("--max-cpus") + 1], "64")
+
+    def test_affinitize_nic_keeps_matching_channel_count(self) -> None:
+        commands = self._run_affinitize(cpus=252, ratio=1.0, current_channels=128)
+
+        self.assertFalse([c for c in commands if c[:2] == ["ethtool", "-L"]])
+        self.assertTrue([c for c in commands if "--max-cpus" in c])
+
+    def test_client_configures_nic_only_when_ratio_is_set(self) -> None:
+        result = CommandResult([], "", 0, False, None)
+        module = "cea.chips.benchpress.packages.ucache_bench.run"
+        for ratio, expected_calls in ((0.0, 0), (1.0, 1)):
+            args = init_parser().parse_args(
+                [
+                    "client",
+                    "--server-host=cache.example.com",
+                    f"--nic-channel-ratio={ratio}",
+                ]
+            )
+            with (
+                self.subTest(ratio=ratio),
+                patch(f"{module}.run_cmd", return_value=result),
+                patch(f"{module}.affinitize_nic") as configure,
+            ):
+                run_client(args)
+                self.assertEqual(configure.call_count, expected_calls)
 
     def test_missing_or_non_executable_binary_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
