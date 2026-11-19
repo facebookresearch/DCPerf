@@ -2,7 +2,7 @@
 
 #include "CpuManager.h"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <folly/FileUtil.h>
 #include <folly/String.h>
 #include <folly/logging/xlog.h>
