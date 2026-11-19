@@ -1,0 +1,26 @@
+diff --git a/aom_dsp/simd/v128_intrinsics_arm.h b/aom_dsp/simd/v128_intrinsics_arm.h
+index 6488de7c49..676d6281d7 100644
+--- a/aom_dsp/simd/v128_intrinsics_arm.h
++++ b/aom_dsp/simd/v128_intrinsics_arm.h
+@@ -57,7 +57,7 @@ SIMD_INLINE void v128_store_unaligned(void *p, v128 r) {
+ SIMD_INLINE v128 v128_align(v128 a, v128 b, unsigned int c) {
+ // The following functions require an immediate.
+ // Some compilers will check this during optimisation, others wont.
+-#if defined(__OPTIMIZE__) && __OPTIMIZE__ && !defined(__clang__)
++#if defined(__OPTIMIZE__) && __OPTIMIZE__ && !defined(__clang__) && !defined(__GNUC__)
+   return c ? vreinterpretq_s64_s8(
+                  vextq_s8(vreinterpretq_s8_s64(b), vreinterpretq_s8_s64(a), c))
+            : b;
+diff --git a/aom_dsp/simd/v64_intrinsics_arm.h b/aom_dsp/simd/v64_intrinsics_arm.h
+index f38af80362..05015d12fd 100644
+--- a/aom_dsp/simd/v64_intrinsics_arm.h
++++ b/aom_dsp/simd/v64_intrinsics_arm.h
+@@ -88,7 +88,7 @@ SIMD_INLINE void v64_store_unaligned(void *p, v64 r) {
+ // The following function requires an immediate.
+ // Some compilers will check this if it's optimising, others wont.
+ SIMD_INLINE v64 v64_align(v64 a, v64 b, unsigned int c) {
+-#if defined(__OPTIMIZE__) && __OPTIMIZE__ && !defined(__clang__)
++#if defined(__OPTIMIZE__) && __OPTIMIZE__ && !defined(__clang__) && !defined(__GNUC__)
+   return c ? vreinterpret_s64_s8(
+                  vext_s8(vreinterpret_s8_s64(b), vreinterpret_s8_s64(a), c))
+            : b;
