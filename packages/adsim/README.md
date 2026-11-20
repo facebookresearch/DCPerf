@@ -30,6 +30,8 @@ The client searches for the QPS whose p99 latency is closest to 150 ms, with req
 
 The server has these options:
 - The server runs on 48 logical CPUs (`num_cpus=48`). It takes whole SMT cores in ascending CPU order from the CPUs that benchpress may use, so `taskset -c <cpus> ./benchpress ...` chooses where the server runs. The server fails to start if fewer CPUs are available. Set `num_cpus=0` to use all of them.
+- The server spans the host's NUMA nodes (`spread_numa_nodes=1`, which passes `--spread-numa-nodes 1` to `run_adsim.py`): it takes an equal share of its CPUs from each NUMA node, in the same order, and interleaves its memory across them with `numactl`. On a two-socket host with one NUMA node per socket, the server gets 12 cores of each socket. Set `spread_numa_nodes=0` to take the CPUs in ascending order with the default memory policy.
+- OpenMP and MKL run on one thread in the server (`omp_threads=1`, which sets `OMP_NUM_THREADS` and `MKL_NUM_THREADS`), so each request thread runs its MKL calls itself. Set `omp_threads=0` to keep their defaults.
 - The server's fbthrift sends replies with `EventBase::runInEventBaseThread` instead of the IO thread's reply queue (`reply_via_event_base=1`, which passes `--thrift_reply_via_event_base` to the server). `build-deps.sh` adds the flag to fbthrift with `patches/fbthrift-reply-via-event-base.patch`. Set `reply_via_event_base=0` to use the reply queue, fbthrift's default.
 
 ## Reporting and Measurement

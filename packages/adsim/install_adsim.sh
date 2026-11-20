@@ -183,6 +183,9 @@ post_build() {
   patchelf --set-rpath "${BENCHMARKS_DIR}/lib" ${BENCHMARKS_DIR}/adsim_server
   patchelf --set-rpath "${BENCHMARKS_DIR}/lib" ${BENCHMARKS_DIR}/adsim_server_torch
   patchelf --set-rpath "${BENCHMARKS_DIR}/lib" ${BENCHMARKS_DIR}/treadmill_adsim
+
+  # run_adsim.py --spread-numa-nodes 1 interleaves the server's memory with numactl
+  install_packages numactl
 }
 
 # Execute build pipeline: setup -> dependencies -> AdSim -> Treadmill -> packaging

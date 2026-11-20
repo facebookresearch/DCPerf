@@ -6,7 +6,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
-from typing import Callable, Iterable, List, Optional, Set
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import adsim_config
 
@@ -225,7 +225,9 @@ ai_req_size_dist = [
 AI_REQUEST_SIZE_MULTIPLIER = 20
 
 
-def run_cmd(cmd: List[str], timeout=None, dryrun=False, verbose=False) -> Optional[int]:
+def run_cmd(
+    cmd: List[str], timeout=None, dryrun=False, verbose=False, env=None
+) -> Optional[int]:
     if verbose or dryrun:
         print(" ".join(cmd))
     if dryrun:
@@ -233,7 +235,7 @@ def run_cmd(cmd: List[str], timeout=None, dryrun=False, verbose=False) -> Option
     if timeout is not None and timeout <= 0:
         timeout = None
 
-    proc = subprocess.Popen(cmd)
+    proc = subprocess.Popen(cmd, env=env)
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -285,11 +287,60 @@ def select_cpus(
     return sorted(selected)
 
 
+def numa_node_cpus() -> Dict[int, Set[int]]:
+    nodes = {}
+    for path in pathlib.Path("/sys/devices/system/node").glob("node[0-9]*"):
+        with open(path / "cpulist") as f:
+            nodes[int(path.name[len("node") :])] = parse_cpu_list(f.read())
+    return nodes
+
+
+def select_cpus_across_nodes(
+    allowed: Iterable[int],
+    num_cpus: int,
+    siblings: Callable[[int], Set[int]],
+    nodes: Dict[int, Set[int]],
+) -> Tuple[List[int], List[int]]:
+    """Split num_cpus evenly across the NUMA nodes with allowed CPUs, picking
+    each node's share as select_cpus does. Returns the CPUs and the nodes."""
+    allowed = set(allowed)
+    used = sorted(node for node, cpus in nodes.items() if cpus & allowed)
+    if not used or num_cpus % len(used) != 0:
+        raise ValueError(
+            f"--num-cpus {num_cpus} does not split evenly across NUMA nodes {used}"
+        )
+    selected = []
+    for node in used:
+        selected += select_cpus(nodes[node] & allowed, num_cpus // len(used), siblings)
+    return sorted(selected), used
+
+
+def server_env(omp_threads: int) -> Optional[Dict[str, str]]:
+    if omp_threads <= 0:
+        return None
+    env = dict(os.environ)
+    env["OMP_NUM_THREADS"] = str(omp_threads)
+    env["MKL_NUM_THREADS"] = str(omp_threads)
+    return env
+
+
 def run_server(args):
     timeout = args.timeout
 
-    if args.num_cpus > 0:
-        cpus = select_cpus(os.sched_getaffinity(0), args.num_cpus, cpu_siblings)
+    allowed = os.sched_getaffinity(0)
+    cpus = None
+    nodes = []
+    if args.spread_numa_nodes:
+        node_cpus = numa_node_cpus()
+        if args.num_cpus > 0:
+            cpus, nodes = select_cpus_across_nodes(
+                allowed, args.num_cpus, cpu_siblings, node_cpus
+            )
+        else:
+            nodes = sorted(node for node, c in node_cpus.items() if c & allowed)
+    elif args.num_cpus > 0:
+        cpus = select_cpus(allowed, args.num_cpus, cpu_siblings)
+    if cpus is not None:
         print(f"Running {args.server_binary} on {len(cpus)} CPUs: {cpus}", flush=True)
         os.sched_setaffinity(0, cpus)
 
@@ -330,8 +381,11 @@ def run_server(args):
     ]
     if args.reply_via_event_base:
         cmd.append("--thrift_reply_via_event_base")
+    if nodes:
+        print(f"Interleaving its memory across NUMA nodes {nodes}", flush=True)
+        cmd = ["numactl", "--interleave=" + ",".join(map(str, nodes))] + cmd
 
-    return run_cmd(cmd, timeout=timeout)
+    return run_cmd(cmd, timeout=timeout, env=server_env(args.omp_threads))
 
 
 def run_client(args):
@@ -411,6 +465,22 @@ def init_parser():
         help="Run the server on this many CPUs from the current affinity mask, "
         + "taking whole SMT cores in ascending CPU order. "
         + "0 uses all CPUs in the mask.",
+    )
+    server_parser.add_argument(
+        "--spread-numa-nodes",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help="1 splits --num-cpus evenly across the NUMA nodes of the affinity "
+        + "mask and interleaves the server's memory across them (numactl). "
+        + "0 takes the CPUs in ascending order and keeps the default memory policy.",
+    )
+    server_parser.add_argument(
+        "--omp-threads",
+        type=int,
+        default=0,
+        help="Run OpenMP and MKL in the server on this many threads "
+        + "(OMP_NUM_THREADS and MKL_NUM_THREADS). 0 keeps their defaults.",
     )
     server_parser.add_argument(
         "--reply-via-event-base",

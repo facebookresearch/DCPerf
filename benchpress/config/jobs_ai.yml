@@ -310,10 +310,14 @@
         - '--auto-config-type adsim_inference_a'
         - '--server-binary adsim_server_torch'
         - '--num-cpus {num_cpus}'
+        - '--spread-numa-nodes {spread_numa_nodes}'
+        - '--omp-threads {omp_threads}'
         - '--reply-via-event-base {reply_via_event_base}'
         - '--timeout {timeout}'
       vars:
         - 'num_cpus=48'
+        - 'spread_numa_nodes=1'
+        - 'omp_threads=1'
         - 'reply_via_event_base=1'
         - 'timeout=0'
     client:
