@@ -9,6 +9,8 @@ To install Adsim, execute the following command:
 ./benchpress -b ai install adsim_inference_a
 ```
 
+On x86_64, the install builds PyTorch's C++ libraries from source as static libraries (`build-libtorch-static.sh`), with the release, compiler version (GCC 13) and build options of the PyPI wheel, and links them and MKL into one `adsim_server_torch` binary. This takes about 6 GB of disk and a few minutes of build time on a large host. The link also wraps MKL's check that the CPU is Intel's, so MKL runs its AVX-512 kernels on AMD CPUs too. On aarch64, the server loads the wheel's shared libraries.
+
 ## Run Adsim
 ### Job - `adsim_inference_a`
 

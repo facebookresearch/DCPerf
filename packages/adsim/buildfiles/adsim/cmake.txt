@@ -212,9 +212,16 @@ echo "Verifying symlink:"
 ls -la cea/chips/
 ls -la cea/chips/adsim/cpp2/server/dwarfs/ | head -5
 
-# Find the torch package in the FBGEMM build environment
-TORCH_ROOT=$("${FBGEMM_STAGING_DIR}/miniconda/envs/fbgemm_build_oss_env/bin/python" -I -c \
-    "import importlib.util; print(importlib.util.find_spec('torch').submodule_search_locations[0])")
+# Link the static libtorch that build-libtorch-static.sh builds on x86_64, else the torch
+# package in the FBGEMM build environment
+if [ -f "${LIBTORCH_STATIC_DIR}/install/lib/libtorch_cpu.a" ]; then
+    TORCH_ROOT="${LIBTORCH_STATIC_DIR}/install"
+    TORCH_STATIC_ARGS=(-DADSIM_STATIC_TORCH=ON "-DTORCH_STATIC_LIB_DIR=${TORCH_ROOT}/lib")
+else
+    TORCH_ROOT=$("${FBGEMM_STAGING_DIR}/miniconda/envs/fbgemm_build_oss_env/bin/python" -I -c \
+        "import importlib.util; print(importlib.util.find_spec('torch').submodule_search_locations[0])")
+    TORCH_STATIC_ARGS=()
+fi
 echo "Using torch: ${TORCH_ROOT}"
 
 cmake \
@@ -230,6 +237,7 @@ cmake \
      -DCMAKE_CXX_FLAGS="-I$(pwd)" \
      -DADSIM_TORCHSCRIPT_OPS=ON \
      -DTORCH_ROOT="${TORCH_ROOT}" \
+     "${TORCH_STATIC_ARGS[@]}" \
      ..
 
 # After cmake generates ICacheBuster.h, link it into the source tree
