@@ -76,6 +76,34 @@ if(ADSIM_TORCHSCRIPT_OPS)
         PATHS "${TORCH_ROOT}/include" NO_DEFAULT_PATH REQUIRED)
 endif()
 
+option(ADSIM_STATIC_TORCH
+    "Link libtorch_cpu, libc10, their dependencies and MKL into adsim_server_torch"
+    OFF)
+if(ADSIM_TORCHSCRIPT_OPS AND ADSIM_STATIC_TORCH)
+    # The static libraries build-libtorch-static.sh gathers, in link order
+    set(TORCH_STATIC_LIB_DIR "" CACHE PATH
+        "Directory with libtorch_cpu.a and the static libraries it needs")
+    set(TORCH_STATIC_DEPS)
+    foreach(lib pthreadpool cpuinfo pytorch_qnnpack nnpack fbgemm ittnotify
+            tensorpipe gloo kineto dnnl jitprofiling clog asmjit tensorpipe_uv
+            onnx onnx_proto protobuf sleef mkl_intel_lp64 mkl_gnu_thread mkl_core)
+        set(path "${TORCH_STATIC_LIB_DIR}/lib${lib}.a")
+        if(NOT EXISTS "${path}")
+            message(FATAL_ERROR "ADSIM_STATIC_TORCH needs ${path}")
+        endif()
+        list(APPEND TORCH_STATIC_DEPS "${path}")
+    endforeach()
+    # One FBGEMM in the process: AdSim's kernels call PyTorch's copy, as
+    # libtorch_cpu.a does; asmjit and cpuinfo must follow it on the link line
+    set_target_properties(fbgemm PROPERTIES
+        IMPORTED_LOCATION_RELEASE "${TORCH_STATIC_LIB_DIR}/libfbgemm.a"
+        IMPORTED_SONAME_RELEASE "")
+    set_property(TARGET fbgemm APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "${TORCH_STATIC_LIB_DIR}/libasmjit.a"
+        "${TORCH_STATIC_LIB_DIR}/libcpuinfo.a"
+        "${TORCH_STATIC_LIB_DIR}/libclog.a")
+endif()
+
 
 include_directories(
     ${FOLLY_INCLUDE_DIR}

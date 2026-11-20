@@ -209,21 +209,40 @@ if(ADSIM_TORCHSCRIPT_OPS)
             ${TORCH_INCLUDE_DIR}
             ${TORCH_INCLUDE_DIR}/torch/csrc/api/include
     )
-    target_link_libraries(torchscriptops
-        data_objects
-        kernel
-        ${TORCH_CPU_LIBRARY}
-        ${C10_LIBRARY})
-    # Link libfbgemm and OpenMP ahead of libtorch_cpu and libc10
-    target_link_options(torchscriptops INTERFACE
-        "LINKER:--push-state,--no-as-needed"
-        "$<TARGET_FILE:fbgemm>"
-        "${OpenMP_omp_LIBRARY}"
-        "LINKER:--pop-state")
+    if(ADSIM_STATIC_TORCH)
+        # libtorch_cpu registers its operators from static initializers, so
+        # nothing references them and only whole archives keep them
+        target_link_libraries(torchscriptops
+            data_objects
+            kernel
+            "-Wl,--whole-archive" ${TORCH_CPU_LIBRARY} ${C10_LIBRARY}
+            "-Wl,--no-whole-archive"
+            "-Wl,--start-group" ${TORCH_STATIC_DEPS} "-Wl,--end-group"
+            ${OpenMP_omp_LIBRARY} numa pthread dl rt m)
+        target_link_options(torchscriptops INTERFACE
+            "LINKER:--wrap=mkl_serv_intel_cpu_true")
+    else()
+        target_link_libraries(torchscriptops
+            data_objects
+            kernel
+            ${TORCH_CPU_LIBRARY}
+            ${C10_LIBRARY})
+        # Link libfbgemm and OpenMP ahead of libtorch_cpu and libc10
+        target_link_options(torchscriptops INTERFACE
+            "LINKER:--push-state,--no-as-needed"
+            "$<TARGET_FILE:fbgemm>"
+            "${OpenMP_omp_LIBRARY}"
+            "LINKER:--pop-state")
+    endif()
     target_compile_options(torchscriptops PRIVATE ${COROUTINES_FLAG})
 
     # Dwarfs.cc with TorchScriptOps in KERNEL_DICT, linked ahead of libdwarfs.a
     add_library(dwarfs_torch OBJECT Dwarfs.cc Dwarfs.h)
+    if(ADSIM_STATIC_TORCH)
+        # An object library is linked whole, so the wrapper is there when the
+        # MKL archives need it
+        target_sources(dwarfs_torch PRIVATE MklIntelCpuTrue.cpp)
+    endif()
     target_compile_definitions(dwarfs_torch PRIVATE ADSIM_TORCHSCRIPT_OPS)
     target_link_libraries(dwarfs_torch dwarfs torchscriptops)
     target_compile_options(dwarfs_torch PRIVATE ${COROUTINES_FLAG})
