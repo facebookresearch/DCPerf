@@ -54,12 +54,14 @@ export CXX="${ADSIM_CXX_COMPILER}"
 # Pin Facebook library versions for reproducible builds
 # Note: Facebook OSS libraries (folly, fizz, wangle, mvfst, fbthrift, fb303) are released
 # together with matching version tags to ensure compatibility
-FOLLY_VERSION=v2026.08.03.00
-FIZZ_VERSION=v2026.08.03.00
-WANGLE_VERSION=v2026.08.03.00
-MVFST_VERSION=v2026.08.03.00
-FBTHRIFT_VERSION=v2026.08.03.00
-FB303_VERSION=v2026.08.03.00
+# folly has no v2026.11.16.00 tag; this is the folly commit the other five libraries' v2026.11.16.00 releases
+# build against (build/deps/github_hashes/facebook/folly-rev.txt)
+FOLLY_VERSION=25bb18ffb2f2082930ed072812719adf29e844a0
+FIZZ_VERSION=v2026.11.16.00
+WANGLE_VERSION=v2026.11.16.00
+MVFST_VERSION=v2026.11.16.00
+FBTHRIFT_VERSION=v2026.11.16.00
+FB303_VERSION=v2026.11.16.00
 
 # fast_float v8.0.0+ is required for folly's allow_leading_plus feature
 FAST_FLOAT_VERSION=v8.0.0
@@ -262,6 +264,9 @@ echo -e "${COLOR_GREEN}Building Boost libraries${COLOR_OFF}"
     install
 
 echo -e "${COLOR_GREEN}Boost ${BOOST_VERSION} is installed${COLOR_OFF}"
+
+# The Thrift compiler that fbthrift installs loads Boost from the staging directory (its runpath has only lib64)
+export LD_LIBRARY_PATH="${ADSIM_STAGING_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 cd "${ADSIM_PROJ_ROOT}" || exit
 
 # Build core Facebook C++ libraries: async runtime, RPC framework, monitoring

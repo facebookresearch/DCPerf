@@ -99,6 +99,10 @@ build_treadmill() {
   # Unlike the patch above, a failure here aborts the install.
   patch -p1 --follow-symlinks --forward < "${BENCHPRESS_ROOT}/packages/adsim/patches/treadmill_request_accounting.patch"
 
+  # StatisticsManager.h uses std::map without including <map>, which folly's headers no longer include for it
+  grep -q '#include <map>' src/StatisticsManager.h ||
+    sed -i 's/#include <memory>/#include <map>\n#include <memory>/' src/StatisticsManager.h
+
   # Make build script executable and compile Treadmill
   sudo chmod u+x build.sh
   ./build.sh

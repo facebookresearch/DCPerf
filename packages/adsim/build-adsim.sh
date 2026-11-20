@@ -44,6 +44,9 @@ pushd third_party/lzbench || exit 1
 patch -p1 --forward < ${ADSIM_PROJ_ROOT}/patches/lzbench.patch
 popd
 
+# The Thrift compiler that generates AdSim's Thrift code loads Boost from the staging directory
+export LD_LIBRARY_PATH="${ADSIM_STAGING_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
 # Execute CMake build process
 pushd build || exit 1
 source cmake.txt
