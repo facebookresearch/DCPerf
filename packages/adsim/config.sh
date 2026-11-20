@@ -14,6 +14,8 @@ export ADSIM_STAGING_DIR="${ADSIM_PROJ_ROOT}/staging"
 # The reason of having a separate staging dir for FBGEMM
 # is that it uses an older version of glog and googletest
 export FBGEMM_STAGING_DIR="${ADSIM_PROJ_ROOT}/fbgemm-build"
+# PyTorch's C++ libraries built from source as static libraries (x86_64)
+export LIBTORCH_STATIC_DIR="${ADSIM_PROJ_ROOT}/libtorch-static"
 
 function quiet_pushd() {
     command pushd "$@" > /dev/null || exit 1

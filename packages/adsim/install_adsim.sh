@@ -74,6 +74,7 @@ build_adsim() {
   cp "${BENCHPRESS_ROOT}/packages/adsim/build-adsim.sh" "${BUILD_DIR}"
   cp "${BENCHPRESS_ROOT}/packages/adsim/install_adsim.sh" "${BUILD_DIR}"
   cp "${BENCHPRESS_ROOT}/packages/adsim/install_fbgemm.sh" "${BUILD_DIR}"
+  cp "${BENCHPRESS_ROOT}/packages/adsim/build-libtorch-static.sh" "${BUILD_DIR}"
 
   # Copy source code, patches, and build configurations
   cp -R "${BENCHPRESS_ROOT}/packages/adsim/src" "${BUILD_DIR}/adsim"
@@ -83,6 +84,9 @@ build_adsim() {
   # Execute dependency build followed by main AdSim compilation
   pushd "${BUILD_DIR}" || exit
   ./build-deps.sh    # Build C++ libraries and FBGEMM
+  if [ "$(uname -m)" = "x86_64" ]; then
+    ./build-libtorch-static.sh  # Build PyTorch's C++ libraries as static libraries
+  fi
   ./build-adsim.sh   # Build AdSim server with compression benchmarks
 }
 
@@ -118,14 +122,16 @@ post_build() {
   cp ${BUILD_DIR}/staging/lib/*.so* "${BENCHMARKS_DIR}/lib/" 2>/dev/null || true
   cp ${BUILD_DIR}/staging/lib64/*.so* "${BENCHMARKS_DIR}/lib/" 2>/dev/null || true
 
-  # Copy the torch libraries adsim_server_torch loads, including torch.libs
+  # Copy the torch libraries adsim_server_torch loads, including torch.libs; with
+  # the static libtorch of build-libtorch-static.sh it loads none
   mapfile -t torch_libs < <(ldd "${BUILD_DIR}/adsim/build/cpp2/server/adsim_server_torch" |
     awk '$3 ~ /\/torch(\/lib|\.libs)\// {print $3}')
-  if [ "${#torch_libs[@]}" -eq 0 ]; then
+  if [ "${#torch_libs[@]}" -gt 0 ]; then
+    cp "${torch_libs[@]}" "${BENCHMARKS_DIR}/lib/"
+  elif [ ! -f "${BUILD_DIR}/libtorch-static/install/lib/libtorch_cpu.a" ]; then
     echo "Error: adsim_server_torch loads no torch libraries"
     exit 1
   fi
-  cp "${torch_libs[@]}" "${BENCHMARKS_DIR}/lib/"
 
   # Copy Boost shared libraries (may be system-wide or in custom locations)
   # These are required by the adsim_server and treadmill_adsim executables
