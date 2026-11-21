@@ -61,12 +61,21 @@ class Batcher {
  public:
   /* Adds a request; returns its batch and whether this request opened it. */
   std::pair<std::shared_ptr<Batch>, bool> join() {
+    return join([](Batch& /*unused*/) {});
+  }
+
+  /* Adds a request and applies update to its batch before the batch can
+   * close; returns the batch and whether this request opened it.
+   */
+  template <typename Update>
+  std::pair<std::shared_ptr<Batch>, bool> join(const Update& update) {
     auto open = open_.wlock();
     const bool opened = !*open;
     if (opened) {
       *open = std::make_shared<Batch>();
     }
     ++(*open)->size;
+    update(**open);
     return {*open, opened};
   }
 

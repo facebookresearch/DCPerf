@@ -20,6 +20,7 @@
 #include <folly/dynamic.h>
 
 #include <cea/chips/adsim/cpp2/server/dwarfs/BatchFakeIO.h>
+#include <cea/chips/adsim/cpp2/server/dwarfs/BatchStage.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/Compress.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/ConcurrentHashMap.h>
 #include <cea/chips/adsim/cpp2/server/dwarfs/DeepCopy.h>
@@ -60,6 +61,9 @@ const folly::F14VectorMap<std::string, CONFIG_F> KERNEL_DICT = {
     {"DenseFP32", DenseFP32::config},
     {"GpuSpinWait", GpuSpinWait::config},
     {"BatchFakeIO", BatchFakeIO::config},
+    {"BatchQueue", BatchQueue::config},
+    {"BatchMerge", BatchMerge::config},
+    {"RequestWork", RequestWork::config},
 #ifdef ADSIM_TORCHSCRIPT_OPS
     {"TorchScriptOps", TorchScriptOps::config},
 #endif
