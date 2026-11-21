@@ -28,6 +28,7 @@ namespace {
 
 struct TestBatch {
   int64_t size = 0;
+  int64_t total = 0;
 };
 
 constexpr Params kParams{
@@ -57,6 +58,15 @@ TEST(BatchFakeIOImplTest, RequestsJoinTheOpenBatchUntilItCloses) {
   EXPECT_EQ(first, second);
   EXPECT_EQ(first, third);
   EXPECT_EQ(batcher.close(first), 3);
+}
+
+TEST(BatchFakeIOImplTest, JoinAppliesItsUpdateToTheBatch) {
+  Batcher<TestBatch> batcher;
+  const auto [batch, opened] = batcher.join([](TestBatch& b) { b.total += 4; });
+  batcher.join([](TestBatch& b) { b.total += 5; });
+
+  EXPECT_EQ(batch->total, 9);
+  EXPECT_EQ(batcher.close(batch), 2);
 }
 
 TEST(BatchFakeIOImplTest, RequestAfterCloseOpensANewBatch) {
