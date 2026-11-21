@@ -235,9 +235,11 @@ git clone https://github.com/RedisLabs/memtier_benchmark memtier_client
 pushd memtier_client
 # Latest commit as of 06/15/2023
 git checkout 7bea7c63c5e95fea061366b95494bf730c5ca0d4
-# Apply the patch
+# Apply the patches
 git apply --check "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_20230615.diff" && \
     git apply "${BPKGS_TAO_BENCH_ROOT}/0005-tao_bench_client_memtier_20230615.diff"
+git apply --check "${BPKGS_TAO_BENCH_ROOT}/0010-tao_bench_client_key_prefix_nul_terminate.diff" && \
+    git apply "${BPKGS_TAO_BENCH_ROOT}/0010-tao_bench_client_key_prefix_nul_terminate.diff"
 # Build and install
 autoreconf --force --install
 PKG_CONFIG_PATH="${TAO_BENCH_DEPS}/lib/pkgconfig" ./configure --enable-tls \
