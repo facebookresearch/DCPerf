@@ -295,6 +295,11 @@ overhead and reply compression (`production_features=1`,
 `zstd_compress_pct=100`) and disable simulated downstream I/O
 (`io_latency_us=0`). Keep these values when comparing with published results.
 
+Generated parameters and the job defaults also set `nic_channel_ratio=1.0` on
+the server and every client: each host's NIC gets a power-of-two channel count
+(capped by the NIC maximum) with spread queue IRQs. This changes host NIC state
+until it is restored; see [SIZING.md](SIZING.md).
+
 Generated open-loop configurations use:
 
 - 60 seconds for connection activation;
