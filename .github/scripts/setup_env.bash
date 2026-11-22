@@ -35,3 +35,5 @@
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_gapbs.bash"
 # shellcheck disable=SC1091,SC2128
 . "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_silo.bash"
+# shellcheck disable=SC1091,SC2128
+. "$( dirname -- "$BASH_SOURCE"; )/dcperf_install_ucache_bench.bash"
