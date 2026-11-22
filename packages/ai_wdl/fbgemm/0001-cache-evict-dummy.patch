@@ -1,0 +1,12 @@
+diff --git a/bench/BenchUtils.h b/bench/BenchUtils.h
+index 95e130e..326de97 100644
+--- a/bench/BenchUtils.h
++++ b/bench/BenchUtils.h
+@@ -88,6 +88,7 @@
+         (char*)&data[i], (char*)(&data[i] + CACHE_LINE_SIZE));
+ #endif
+   }
++  volatile float dummy1 = dummy;
+ 
+   return dummy;
+ }
