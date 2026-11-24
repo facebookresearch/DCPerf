@@ -37,6 +37,11 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
     sysstat jq unzip xxhash libxxhash-dev libboost-all-dev rsync curl git wget numactl python3
 
+FEEDSIM_BUILD_CPUS="$(nproc)"
+export NUM_BUILD_JOBS="${NUM_BUILD_JOBS:-$(( FEEDSIM_BUILD_CPUS > 1 ? FEEDSIM_BUILD_CPUS / 2 : 1 ))}"
+export BP_NINJA_JOBS="${BP_NINJA_JOBS:-${NUM_BUILD_JOBS}}"
+export CMAKE_BUILD_PARALLEL_LEVEL="$NUM_BUILD_JOBS"
+
 # Install liburing >= 2.6 from source. Ubuntu's apt-shipped liburing is
 # older than folly's minimum, so folly's io_uring integration links
 # `-luring` against a nonexistent library. Build tag liburing-2.12 upstream
@@ -53,7 +58,7 @@ if ! ldconfig -p 2>/dev/null | grep -q "liburing.so.2"; then
     (
         cd "${LIBURING_BUILD_DIR}/liburing"
         ./configure --prefix=/usr/local
-        make -j"$(nproc)"
+        make -j"${NUM_BUILD_JOBS}"
         make install
     )
     ldconfig
@@ -131,7 +136,7 @@ if ! git checkout -q "${FAST_FLOAT_VERSION}" 2>/dev/null; then
 fi
 mkdir -p build && cd build
 cmake ..
-make -j"$(nproc)"
+make -j"${NUM_BUILD_JOBS}"
 make install
 cd ../../
 
@@ -144,7 +149,7 @@ if ! [ -d "gengetopt-2.23" ]; then
     tar -xf "gengetopt-2.23.tar.xz"
     cd "gengetopt-2.23"
     ./configure
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -162,7 +167,7 @@ if ! [ -d "gflags-2.2.2" ]; then
     cd "gflags-2.2.2"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release ../
-    make -j8
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../../
 else
@@ -176,7 +181,7 @@ if ! [ -d "glog-0.4.0" ]; then
     cd "glog-0.4.0"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release ../
-    make -j8
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../../
 else
@@ -194,7 +199,7 @@ if ! [ -d "jemalloc-${DEP_JEMALLOC_VERSION}" ]; then
     tar -xvf "jemalloc-${DEP_JEMALLOC_VERSION}.tar"
     cd "jemalloc-${DEP_JEMALLOC_VERSION}"
     ./configure --enable-prof --enable-prof-libunwind
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -208,7 +213,7 @@ if ! [ -d "libevent-${DEP_LIBEVENT_VERSION}" ]; then
     tar -xzf "libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
     cd "libevent-${DEP_LIBEVENT_VERSION}"
     ./configure
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -432,6 +437,7 @@ if [ -d "${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/bin" ] && [ ! -f "${FEEDSIM_THIRD
 fi
 
 cmake -G Ninja \
+    -DBUILD_PARALLEL_JOBS="${NUM_BUILD_JOBS}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/build-deps;${FEEDSIM_THIRD_PARTY_SRC}/libtorch" \
     -DBOOST_ROOT="/usr" \
@@ -452,12 +458,7 @@ cmake -G Ninja \
 # ninja step via ExternalProject_Add. Their build order is declared in
 # third_party/src/CMake/build-*.cmake via add_dependencies() and
 # ExternalProject_Add_StepDependencies(), so ninja respects the DAG under -jN.
-# Use nproc/2 to avoid OOM during heavy template-instantiation steps.
-NINJA_JOBS="${BP_NINJA_JOBS:-$(( $(nproc) / 2 ))}"
-# Guard against non-numeric BP_NINJA_JOBS overrides, which would make the
-# integer comparison below abort the install under `set -e`.
-[[ "$NINJA_JOBS" =~ ^[0-9]+$ ]] || NINJA_JOBS=1
-[ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
+NINJA_JOBS="${BP_NINJA_JOBS}"
 msg "Building FeedSim with ninja -j${NINJA_JOBS} (set BP_NINJA_JOBS to override)"
 ninja -j"${NINJA_JOBS}"
 

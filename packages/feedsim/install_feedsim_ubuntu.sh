@@ -43,6 +43,11 @@ apt install -y bc cmake ninja-build flex bison texinfo binutils-dev \
     zlib1g-dev libdwarf-dev libaio-dev libatomic1 patch perl libiberty-dev \
     sysstat jq xxhash libxxhash-dev unzip rsync curl git wget numactl python3
 
+FEEDSIM_BUILD_CPUS="$(nproc)"
+export NUM_BUILD_JOBS="${NUM_BUILD_JOBS:-$(( FEEDSIM_BUILD_CPUS > 1 ? FEEDSIM_BUILD_CPUS / 2 : 1 ))}"
+export BP_NINJA_JOBS="${BP_NINJA_JOBS:-${NUM_BUILD_JOBS}}"
+export CMAKE_BUILD_PARALLEL_LEVEL="$NUM_BUILD_JOBS"
+
 # Install liburing >= 2.6 from source. Ubuntu's apt-shipped liburing (0.7 on
 # 20.04, 2.1 on 22.04) is older than folly's minimum, so folly's io_uring
 # integration links `-luring` against a nonexistent library. Build tag
@@ -60,7 +65,7 @@ if ! ldconfig -p 2>/dev/null | grep -q "liburing.so.2"; then
     (
         cd "${LIBURING_BUILD_DIR}/liburing"
         ./configure --prefix=/usr/local
-        make -j"$(nproc)"
+        make -j"${NUM_BUILD_JOBS}"
         make install
     )
     ldconfig
@@ -134,8 +139,8 @@ if ! [ -d "cmake-4.0.3" ]; then
     tar -zxf "cmake-4.0.3.tar.gz"
     cd "cmake-4.0.3"
     mkdir staging
-    ./bootstrap --parallel=8 --prefix="$(pwd)/staging"
-    make -j8
+    ./bootstrap --parallel="${NUM_BUILD_JOBS}" --prefix="$(pwd)/staging"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -163,7 +168,7 @@ if ! [ -d "gengetopt-2.23" ]; then
     tar -xf "gengetopt-2.23.tar.xz"
     cd "gengetopt-2.23"
     ./configure
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -176,7 +181,7 @@ if ! [ -d "boost_1_88_0" ]; then
     tar -xzf "boost_1_88_0.tar.gz"
     cd "boost_1_88_0"
     ./bootstrap.sh --without-libraries=python
-    ./b2 install
+    ./b2 -j"${NUM_BUILD_JOBS}" install
     cd ../
 else
     msg "[SKIPPED] boost_1_88_0"
@@ -190,7 +195,7 @@ if ! [ -d "gflags-2.2.2" ]; then
     cd "gflags-2.2.2"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
-    make -j8
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../../
 else
@@ -204,7 +209,7 @@ if ! [ -d "glog-0.4.0" ]; then
     cd "glog-0.4.0"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
-    make -j8
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../../
 else
@@ -221,7 +226,7 @@ if ! [ -d "jemalloc-${JEMALLOC_VERSION}" ]; then
     tar -xvf "jemalloc-${JEMALLOC_VERSION}.tar"
     cd "jemalloc-${JEMALLOC_VERSION}"
     ./configure --enable-prof --enable-prof-libunwind
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -234,7 +239,7 @@ if ! [ -d "libevent-${LIBEVENT_VERSION}" ]; then
     tar -xzf "libevent-${LIBEVENT_VERSION}.tar.gz"
     cd "libevent-${LIBEVENT_VERSION}"
     ./configure
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -416,6 +421,7 @@ BP_CC="${BP_CC:-gcc}"
 BP_CXX="${BP_CXX:-g++}"
 
 cmake -G Ninja \
+    -DBUILD_PARALLEL_JOBS="${NUM_BUILD_JOBS}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER="$BP_CC" \
     -DCMAKE_CXX_COMPILER="$BP_CXX" \
@@ -427,15 +433,7 @@ cmake -G Ninja \
     "${DR_TRACE_FLAGS[@]}" \
     ../
 
-# Dependencies (fmt, folly, fbthrift, etc.) are already installed above via
-# separate make commands in their own build directories. This ninja step only
-# builds FeedSim itself (LeafNodeRank, DriverNodeRank, feature extractors),
-# so parallel builds are safe here. Use nproc/2 to avoid OOM.
-NINJA_JOBS="${BP_NINJA_JOBS:-$(( $(nproc) / 2 ))}"
-# Guard against non-numeric BP_NINJA_JOBS overrides, which would make the
-# integer comparison below abort the install under `set -e`.
-[[ "$NINJA_JOBS" =~ ^[0-9]+$ ]] || NINJA_JOBS=1
-[ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
+NINJA_JOBS="${BP_NINJA_JOBS}"
 msg "Building FeedSim with ninja -j${NINJA_JOBS} (set BP_NINJA_JOBS to override)"
 ninja -j"${NINJA_JOBS}"
 
