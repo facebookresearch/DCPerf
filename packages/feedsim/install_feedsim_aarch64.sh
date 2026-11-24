@@ -53,6 +53,11 @@ dnf install -y bc ninja-build flex bison git texinfo binutils-devel \
     zlib-devel libdwarf libdwarf-devel libaio-devel libatomic patch jq \
     xxhash xxhash-devel unzip rsync liburing-devel numactl
 
+FEEDSIM_BUILD_CPUS="$(nproc)"
+export NUM_BUILD_JOBS="${NUM_BUILD_JOBS:-$(( FEEDSIM_BUILD_CPUS > 1 ? FEEDSIM_BUILD_CPUS / 2 : 1 ))}"
+export BP_NINJA_JOBS="${BP_NINJA_JOBS:-${NUM_BUILD_JOBS}}"
+export CMAKE_BUILD_PARALLEL_LEVEL="$NUM_BUILD_JOBS"
+
 # Creates feedsim directory under benchmarks/
 mkdir -p "${BENCHPRESS_ROOT}/benchmarks/feedsim"
 cd "${BENCHPRESS_ROOT}/benchmarks"
@@ -140,7 +145,7 @@ if ! git checkout -q "${FAST_FLOAT_VERSION}" 2>/dev/null; then
 fi
 mkdir -p build && cd build
 cmake ..
-make -j"$(nproc)"
+make -j"${NUM_BUILD_JOBS}"
 make install
 cd ../../
 
@@ -155,7 +160,7 @@ if ! [ -d "gengetopt-${DEP_GENGOPT_VERSION}" ]; then
     tar -xf "gengetopt-${DEP_GENGOPT_VERSION}.tar.xz"
     cd "gengetopt-${DEP_GENGOPT_VERSION}"
     ./configure
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -170,7 +175,7 @@ if ! [ -d "boost_${DEP_BOOST_VERSION}" ]; then
     tar -xzf "boost_${DEP_BOOST_VERSION}.tar.gz"
     cd "boost_${DEP_BOOST_VERSION}"
     ./bootstrap.sh --without-libraries=python
-    ./b2 -j"$(nproc)" install
+    ./b2 -j"${NUM_BUILD_JOBS}" install
     cd ../
 else
     msg "[SKIPPED] boost_${DEP_BOOST_VERSION}"
@@ -185,7 +190,7 @@ if ! [ -d "gflags-${DEP_GFLAGS_VERSION}" ]; then
     cd "gflags-${DEP_GFLAGS_VERSION}"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../../
 else
@@ -201,7 +206,7 @@ if ! [ -d "glog-${DEP_GFLAGS_VERSION}" ]; then
     cd "glog-${DEP_GFLAGS_VERSION}"
     mkdir -p build && cd build
     cmake -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../../
 else
@@ -221,7 +226,7 @@ if ! [ -d "jemalloc-${DEP_JEMALLOC_VERSION}" ]; then
     tar -xvf "jemalloc-${DEP_JEMALLOC_VERSION}.tar"
     cd "jemalloc-${DEP_JEMALLOC_VERSION}"
     ./configure --enable-prof --enable-prof-libunwind
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -240,7 +245,7 @@ if ! [ -d "libevent-${DEP_LIBEVENT_VERSION}" ]; then
     tar -xzf "libevent-${DEP_LIBEVENT_VERSION}.tar.gz"
     cd "libevent-${DEP_LIBEVENT_VERSION}"
     ./configure
-    make -j"$(nproc)"
+    make -j"${NUM_BUILD_JOBS}"
     make install
     cd ../
 else
@@ -453,6 +458,7 @@ if [ -d "${FEEDSIM_THIRD_PARTY_SRC}/miniconda3/bin" ] && [ ! -f "${FEEDSIM_THIRD
 fi
 
 cmake -G Ninja \
+    -DBUILD_PARALLEL_JOBS="${NUM_BUILD_JOBS}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="${FEEDSIM_THIRD_PARTY_SRC}/build-deps;${FEEDSIM_THIRD_PARTY_SRC}/libtorch" \
     -DCMAKE_C_COMPILER="$BP_CC" \
@@ -468,12 +474,7 @@ cmake -G Ninja \
 # ninja step via ExternalProject_Add. Their build order is declared in
 # third_party/src/CMake/build-*.cmake via add_dependencies() and
 # ExternalProject_Add_StepDependencies(), so ninja respects the DAG under -jN.
-# Use nproc/2 to avoid OOM during heavy template-instantiation steps.
-NINJA_JOBS="${BP_NINJA_JOBS:-$(( $(nproc) / 2 ))}"
-# Guard against non-numeric BP_NINJA_JOBS overrides, which would make the
-# integer comparison below abort the install under `set -e`.
-[[ "$NINJA_JOBS" =~ ^[0-9]+$ ]] || NINJA_JOBS=1
-[ "$NINJA_JOBS" -lt 1 ] && NINJA_JOBS=1
+NINJA_JOBS="${BP_NINJA_JOBS}"
 msg "Building FeedSim with ninja -j${NINJA_JOBS} (set BP_NINJA_JOBS to override)"
 ninja-build -j"${NINJA_JOBS}"
 
