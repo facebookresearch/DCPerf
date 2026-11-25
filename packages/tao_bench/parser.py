@@ -40,6 +40,16 @@ class TaoBenchServerSnapshot:
         return getattr(self, key)
 
 
+def _parse_client_stats_table(lines, metrics):
+    """Extract set_qps/qps from memtier stats table lines."""
+    for line in lines:
+        items = line.split()
+        if line.strip().startswith("Sets"):
+            metrics["set_qps"] = float(items[1])
+        elif line.strip().startswith("Gets"):
+            metrics["qps"] = float(items[1])
+
+
 class TaoBenchParser:
     # Minimum hit rate for a server data point to be considered in
     # result qps calculation
@@ -64,6 +74,10 @@ class TaoBenchParser:
         server_snapshots = []
         warmup_done = False
         exec_done = False
+        # Lines after the most recent ALL STATS marker, kept so a client
+        # log with a single execution (one ALL STATS table) still yields
+        # qps/set_qps below.
+        pending_table_lines = []
         for line in stdout:
             items = line.split()
             # server metrics
@@ -77,11 +91,21 @@ class TaoBenchParser:
                 exec_done = warmup_done
                 warmup_done = True
                 metrics["role"] = "client"
-            if exec_done:
+                pending_table_lines = []
+            elif exec_done:
                 if line.strip().startswith("Sets"):
                     metrics["set_qps"] = float(items[1])
                 elif line.strip().startswith("Gets"):
                     metrics["qps"] = float(items[1])
+            elif warmup_done:
+                pending_table_lines.append(line)
+        if (
+            metrics["role"] == "client"
+            and not exec_done
+            and not server_snapshots
+            and "qps" not in metrics
+        ):
+            _parse_client_stats_table(pending_table_lines, metrics)
         # calcualte server-side QPS
         if metrics["role"] == "server":
             self.process_server_snapshots(metrics, server_snapshots)
