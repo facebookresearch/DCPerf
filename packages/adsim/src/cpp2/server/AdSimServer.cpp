@@ -24,7 +24,7 @@
 #include <fizz/fizz-config.h>
 #include <fizz/server/FizzServerContext.h>
 #include <folly/init/Init.h>
-#include <folly/io/async/test/TestSSLServer.h>
+#include <folly/io/async/testing/TestSSLServer.h>
 #include <folly/json/json.h>
 #include <folly/portability/GFlags.h>
 #include <glog/logging.h>
