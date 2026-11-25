@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import cast, List
+from typing import Any, cast, List
 
 # Force line-buffered stdout so output is written to log files immediately,
 # even when stdout is redirected to a file. Without this, output stays in
@@ -69,11 +69,50 @@ def is_ubuntu():
     return "ubuntu" in id_likes
 
 
+# State for forwarding a process-group SIGUSR1 to the server child
+# process. The autoscale runner kills the whole process group, which
+# includes this Python process; without forwarding, Python dies from the
+# default SIGUSR1 disposition and the server result is invalidated by the
+# kill return code. "target" is the current child process, if any;
+# "pending" records a SIGUSR1 that arrived before the child spawned.
+_SIGUSR1_STATE: dict[str, Any] = {"target": None, "pending": False}
+
+
+def _handle_sigusr1(signum, frame):
+    """Forward SIGUSR1 to the current server child, if any."""
+    target = _SIGUSR1_STATE["target"]
+    if target is None:
+        _SIGUSR1_STATE["pending"] = True
+        return
+    try:
+        if target.poll() is None:
+            os.kill(target.pid, signal.SIGUSR1)
+    except OSError:
+        pass
+
+
+def _install_sigusr1_forwarding():
+    """Install the SIGUSR1 forwarding handler for the server process."""
+    _SIGUSR1_STATE["pending"] = False
+    signal.signal(signal.SIGUSR1, _handle_sigusr1)
+
+
+def _deliver_pending_sigusr1(proc):
+    """Send a pending SIGUSR1 to a newly spawned child, if one arrived early."""
+    if _SIGUSR1_STATE["pending"]:
+        _SIGUSR1_STATE["pending"] = False
+        try:
+            os.kill(proc.pid, signal.SIGUSR1)
+        except OSError:
+            pass
+
+
 def run_cmd(
     cmd: List[str],
     timeout=None,
     for_real=True,
     graceful_signal=None,
+    forward_sigusr1=False,
 ) -> None:
     print(" ".join(cmd))
     if for_real:
@@ -81,6 +120,9 @@ def run_cmd(
             cmd,
             stderr=subprocess.STDOUT,
         )
+        if forward_sigusr1:
+            _SIGUSR1_STATE["target"] = proc
+            _deliver_pending_sigusr1(proc)
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -118,6 +160,9 @@ def run_cmd(
                     proc.kill()
                     proc.wait()
                     print(f"Process {proc.pid} killed successfully")
+        finally:
+            if forward_sigusr1:
+                _SIGUSR1_STATE["target"] = None
 
 
 def profile_server():
@@ -351,7 +396,17 @@ def run_server(args):
 
     timeout = args.warmup_time + args.test_time + args.timeout_buffer
     graceful_sig = signal.SIGUSR1 if args.memory_file else None
-    run_cmd(server_cmd, timeout, args.real, graceful_signal=graceful_sig)
+    # Forward a process-group SIGUSR1 to the server child so a graceful
+    # shutdown request lets this process exit 0 instead of dying from
+    # the default SIGUSR1 disposition.
+    _install_sigusr1_forwarding()
+    run_cmd(
+        server_cmd,
+        timeout,
+        args.real,
+        graceful_signal=graceful_sig,
+        forward_sigusr1=True,
+    )
 
     if "DCPERF_PERF_RECORD" in os.environ and os.environ["DCPERF_PERF_RECORD"] == "1":
         t_prof.cancel()
