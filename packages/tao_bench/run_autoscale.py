@@ -324,8 +324,8 @@ def ensure_shm_capacity(required_gb):
         print(f"WARNING: Could not check /dev/shm capacity: {e}")
 
 
-def graceful_kill_pg(pid, use_sigusr1=False, grace_period=60, proc=None):
-    """Kill a process group, optionally sending SIGUSR1 first for graceful shutdown."""
+def graceful_kill_pg(pid, use_sigusr1=True, grace_period=60, proc=None):
+    """Kill a process group, sending SIGUSR1 first for graceful shutdown."""
     try:
         pgid = os.getpgid(pid)
     except (ProcessLookupError, PermissionError):
@@ -351,6 +351,32 @@ def graceful_kill_pg(pid, use_sigusr1=False, grace_period=60, proc=None):
         os.killpg(pgid, 9)
     except (ProcessLookupError, PermissionError):
         pass
+
+
+def graceful_shutdown_all(procs, grace_period=60):
+    """Gracefully shut down all server process groups.
+
+    Sends SIGUSR1 to every process group in parallel, waits up to
+    grace_period seconds for all of them to exit, then force-kills any
+    survivors. Always tries the graceful request first, regardless of
+    whether a memory file is enabled.
+    """
+    for p in procs:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGUSR1)
+        except (ProcessLookupError, PermissionError):
+            pass
+    deadline = time.time() + grace_period
+    while time.time() < deadline:
+        if all(p.poll() is not None for p in procs):
+            break
+        time.sleep(1)
+    for p in procs:
+        if p.poll() is None:
+            try:
+                os.killpg(os.getpgid(p.pid), 9)
+            except (ProcessLookupError, PermissionError):
+                pass
 
 
 def run_server(args):
@@ -508,27 +534,10 @@ def run_server(args):
         print(f"Waiting {remaining}s for test phase...")
         time.sleep(remaining)
 
-        # Send SIGUSR1 to all process groups in parallel, then wait
-        if args.memory_file:
-            for p in procs:
-                try:
-                    os.killpg(os.getpgid(p.pid), signal.SIGUSR1)
-                except (ProcessLookupError, PermissionError):
-                    pass
-            # Wait up to 60s for all to exit
-            deadline = time.time() + 60
-            while time.time() < deadline:
-                if all(p.poll() is not None for p in procs):
-                    break
-                time.sleep(1)
-
-        # Force kill any remaining
-        for p in procs:
-            if p.poll() is None:
-                try:
-                    os.killpg(os.getpgid(p.pid), 9)
-                except (ProcessLookupError, PermissionError):
-                    pass
+        # Always try a graceful shutdown request first, regardless of
+        # whether a memory file is enabled; force-kill survivors after
+        # the grace period.
+        graceful_shutdown_all(procs)
 
         # Collect processes and flush output
         for p in procs:
@@ -607,7 +616,7 @@ def run_server(args):
             )
             for p in procs:
                 if p.poll() is None:  # Process still running
-                    graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file), proc=p)
+                    graceful_kill_pg(p.pid, use_sigusr1=True, proc=p)
 
         # Ensure all processes are collected and output is flushed
         for p in procs:
@@ -626,7 +635,7 @@ def run_server(args):
 
         # Final cleanup to ensure process groups are terminated
         for p in procs:
-            graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file), proc=p)
+            graceful_kill_pg(p.pid, use_sigusr1=True, proc=p)
     else:
         # Original behavior with fixed timeout
         timeout = (
@@ -640,11 +649,11 @@ def run_server(args):
             try:
                 (out, err) = p.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
-                graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file), proc=p)
+                graceful_kill_pg(p.pid, use_sigusr1=True, proc=p)
                 (out, err) = p.communicate()
             finally:
                 # Ensure cleanup even if process completed successfully
-                graceful_kill_pg(p.pid, use_sigusr1=bool(args.memory_file), proc=p)
+                graceful_kill_pg(p.pid, use_sigusr1=True, proc=p)
     for server in servers:
         server[1].close()
 
