@@ -122,6 +122,7 @@ build_aom()
     pushd "${FFMPEG_SOURCE}"
     clone "$lib" || { echo "ERROR: Failed to clone $lib"; exit 1; }
     cd "$lib" || exit
+    git apply "${BPKGS_FFMPEG_ROOT}/0002-aom.patch"
     mkdir -p _build && cd _build || exit
     if [ "$ARCH" = "x86_64" ]; then
         cmake .. -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX="${FFMPEG_BUILD}"  -DBUILD_SHARED_LIBS=off -DCMAKE_BUILD_TYPE=Release
