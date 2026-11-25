@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import io
 import os
 import pathlib
 import re
@@ -15,14 +16,14 @@ import subprocess
 import sys
 import threading
 import time
-from typing import List
+from typing import cast, List
 
 # Force line-buffered stdout so output is written to log files immediately,
 # even when stdout is redirected to a file. Without this, output stays in
 # a 4096-byte C buffer and is lost if the process is killed (SIGKILL).
 if not sys.stdout.isatty():
-    sys.stdout.reconfigure(line_buffering=True)
-    sys.stderr.reconfigure(line_buffering=True)
+    cast(io.TextIOWrapper, sys.stdout).reconfigure(line_buffering=True)
+    cast(io.TextIOWrapper, sys.stderr).reconfigure(line_buffering=True)
 
 import args_utils
 from warmup_monitor import poll_control_port
@@ -73,7 +74,7 @@ def run_cmd(
     timeout=None,
     for_real=True,
     graceful_signal=None,
-) -> str:
+) -> None:
     print(" ".join(cmd))
     if for_real:
         proc = subprocess.Popen(
@@ -425,6 +426,41 @@ def get_client_cmd(args, n_seconds):
     return client_cmd
 
 
+def _combined_client_seconds(args: argparse.Namespace) -> float:
+    """Test-time for a single client execution spanning warmup and test.
+
+    The memtier client exits on its own once its test-time elapses, so
+    the single invocation must outlive the point where run_client
+    terminates it: warmup completion plus (wait_after_warmup + test_time
+    + test_timeout_buffer). The warmup_timeout_buffer term keeps the
+    invocation alive through the warmup deadline path, where the elapsed
+    warmup time already includes it; it extends only memtier's self-exit
+    horizon, never the observed runtime.
+    """
+    return (
+        args.warmup_time
+        + args.warmup_timeout_buffer
+        + args.wait_after_warmup
+        + args.test_time
+        + args.test_timeout_buffer
+    )
+
+
+def _terminate_client_process(proc: subprocess.Popen) -> None:
+    """Terminate a client process, escalating to kill on timeout.
+
+    No-op if the process already exited.
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 def run_client(args):
     # Only client with ID=1 creates breakdown CSV and logs preprocessing
     if args.client_id == 1:
@@ -438,40 +474,35 @@ def run_client(args):
         breakdown_utils.log_preprocessing_warmup_start(TAO_BENCH_DIR, "")
 
     print("warm up phase ...")
-    if args.control_port > 0 and args.warmup_time > 0:
-        # Auto-warmup: poll control port and terminate warmup early when server
-        # reports READY
-        cmd = get_client_cmd(args, n_seconds=args.warmup_time)
+    # With a control port, execute the client once for the combined
+    # warmup plus test duration so connections persist across the
+    # warmup-to-test transition instead of being torn down and
+    # re-established. Without one, keep the two separate executions below.
+    single_execution = args.control_port > 0 and args.warmup_time > 0
+    warmup_proc = None
+    if single_execution:
+        # Auto-warmup: poll control port until the server reports READY or
+        # the warmup deadline is reached. The single process keeps running
+        # afterwards; it is terminated after the test duration below.
+        cmd = get_client_cmd(args, n_seconds=_combined_client_seconds(args))
         print(" ".join(cmd))
+        poll_interval = 5
         if args.real:
             warmup_proc = subprocess.Popen(cmd, stderr=subprocess.STDOUT)
             warmup_deadline = (
                 time.time() + args.warmup_time + args.warmup_timeout_buffer
             )
-            poll_interval = 5
             while time.time() < warmup_deadline:
                 if warmup_proc.poll() is not None:
                     # Warmup process exited on its own
                     break
                 if poll_control_port(args.server_hostname, args.control_port):
-                    print("[AutoWarmup] Server reports READY, stopping warmup early")
-                    warmup_proc.terminate()
-                    try:
-                        warmup_proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        warmup_proc.kill()
-                        warmup_proc.wait()
+                    print("[AutoWarmup] Server reports READY, warmup complete")
                     break
                 time.sleep(poll_interval)
             else:
                 # Timeout reached
                 print("[AutoWarmup] Max warmup time reached, proceeding to test")
-                warmup_proc.terminate()
-                try:
-                    warmup_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    warmup_proc.kill()
-                    warmup_proc.wait()
     else:
         cmd = get_client_cmd(args, n_seconds=args.warmup_time)
         run_cmd(
@@ -490,8 +521,33 @@ def run_client(args):
         breakdown_utils.log_main_benchmark_start(TAO_BENCH_DIR, "")
 
     print("execution phase ...")
-    cmd = get_client_cmd(args, n_seconds=args.test_time)
-    run_cmd(cmd, timeout=args.test_time + args.test_timeout_buffer, for_real=args.real)
+    if single_execution:
+        if warmup_proc is not None and warmup_proc.poll() is None:
+            # The single execution is still running: keep it running for
+            # (wait_after_warmup + test_time + test_timeout_buffer) more
+            # seconds after warmup completion, then terminate it.
+            additional_deadline = (
+                time.time() + args.test_time + args.test_timeout_buffer
+            )
+            while time.time() < additional_deadline:
+                if warmup_proc.poll() is not None:
+                    break
+                time.sleep(poll_interval)
+            _terminate_client_process(warmup_proc)
+        elif warmup_proc is not None:
+            # The single process exited during warmup; fall back to a
+            # fresh test-phase execution.
+            cmd = get_client_cmd(args, n_seconds=args.test_time)
+            run_cmd(
+                cmd,
+                timeout=args.test_time + args.test_timeout_buffer,
+                for_real=args.real,
+            )
+    else:
+        cmd = get_client_cmd(args, n_seconds=args.test_time)
+        run_cmd(
+            cmd, timeout=args.test_time + args.test_timeout_buffer, for_real=args.real
+        )
 
     # Only client with ID=1 logs breakdown events
     if args.client_id == 1:
