@@ -1,0 +1,29 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# NUL-terminate the generated key prefix in tao_bench_client.
+# Apply after 0005-tao_bench_client_memtier_20230615.diff.
+#
+# 0005 builds the key prefix (--key-bytes) in a malloc'ed buffer, fills
+# key_bytes - 1 letters and passes the pointer to set_key_prefix(), but never
+# writes the terminating '\0'. Every key is built with
+# snprintf("%s%llu", prefix, index), so it also picks up whatever bytes
+# follow the letters in memory. Those bytes are uninitialised heap data and
+# can differ between client launches (e.g. part of a heap address that ASLR
+# changes). Warmup and test are separate client launches, so the test phase
+# can request a key set the warmup never cached: the server hit rate drops to
+# about 0 when the test starts.
+diff --git a/memtier_benchmark.cpp b/memtier_benchmark.cpp
+index 5009ee5..30109cc 100755
+--- a/memtier_benchmark.cpp
++++ b/memtier_benchmark.cpp
+@@ -1603,6 +1603,7 @@ int main(int argc, char *argv[])
+             for (unsigned i = 0; i < cfg.key_bytes - 1; ++i) {
+                 cfg.generated_key[i] = static_cast<char>((rand() % 26) + 97);
+             }
++            cfg.generated_key[cfg.key_bytes - 1] = '\0'; // set_key_prefix() keeps this pointer and keys are built with "%s"
+             obj_gen->set_key_prefix(cfg.generated_key);
+         }
+ 
