@@ -88,7 +88,9 @@ This job provides the following optional parameters that you may be interested i
     default is `eth0`. You will need to specify this parameter if the name of your NIC
     is not `eth0`.
   - `warmup_time`: Time to warm up TaoBench server to let it reach a steady state, in seconds.
-    The default is `10 * memsize` or 1200, whichever is greater.
+    The default is `10 * memsize` or 1200, whichever is greater. When auto-warmup
+    detection is enabled (the default for this job), this is the maximum warmup
+    duration rather than a fixed duration.
   - `test_time`: Time to stress TaoBench server and measure performance, in seconds.
     Optional, default is 720.
   - `bind_cpu`: When running on machines with multiple NUMA nodes, setting this to 1 will
@@ -97,10 +99,12 @@ This job provides the following optional parameters that you may be interested i
     it to 0 to disable.
   - `bind_mem`: When running on machines with multiple NUMA nodes, setting this to 1 will
     bind each server instance to the memory node that is local to the CPU cores assigned
-    to run the server instance. This can also minimize cross-socket traffic. By default
-    it's set to 1. You may want to set this to 0 if you would like to test heterogeneous
-    memory systems such as CXL systems, otherwise the benchmark will not be able to use
-    the CXL memory.
+    to run the server instance. This can also minimize cross-socket traffic. The job
+    configs default this to 0: on systems where total memory includes CPU-less CXL
+    memory, the cache is sized from the system total while a bound instance can only
+    use its local node, which can exhaust that node. With the default of 0, instances
+    are not bound to a memory node and can use all memory. Set this to 1 to bind each
+    instance to its local memory node (the previous default).
   - `sanity`: Sanity check to measure the network bandwidth and latency between the server
     and the client. The default is 0 which is not running the sanity check.
     Please set this to 1 if you would like to run the sanity check and measure
@@ -406,7 +410,10 @@ the pre-filled cache instantly, skipping the lengthy warmup phase.
 This uses memcached's native `-e` flag, which mmaps a file for slab storage.
 On graceful shutdown (SIGUSR1), memcached saves a `.meta` restart file. On the
 next startup with the same memory file, memcached restores all cached items
-from the file.
+from the file. A SIGUSR1 graceful shutdown is always tried first when a run
+ends, whether or not a memory file is configured; without a memory file there
+is no `.meta` file to save, and the servers exit cleanly so their results are
+reported as valid.
 
 ### Usage
 
@@ -446,7 +453,9 @@ mount -o remount,size=800G /dev/shm
 When enabled, TaoBench monitors server statistics during the warmup phase and
 automatically signals clients to stop warmup early once the server reaches a
 warmed-up state. The `warmup_time` parameter becomes the maximum warmup
-duration rather than a fixed duration.
+duration rather than a fixed duration. It is enabled by default
+(`auto_warmup=1`) for `tao_bench_autoscale` and `tao_bench_standalone`;
+set `auto_warmup` to 0 to disable it and run the full fixed warmup.
 
 ### How it works
 
@@ -461,12 +470,22 @@ When both conditions are met for all server instances, the control port responds
 `READY` to client polls. Clients poll the control port every 5 seconds during
 warmup, and terminate the warmup phase early when the server reports `READY`.
 
+With a control port, each client executes only once for the combined warmup
+plus test duration: the client process keeps running for
+`wait_after_warmup + test_time` plus the timeout buffers after warmup
+completes, and is then terminated, so connections persist across the
+warmup-to-test transition instead of being torn down and re-established.
+If the single client process exits on its own during warmup, the client
+falls back to one fresh test-phase execution. Without a control port,
+clients run separate warmup and test executions as before.
+
 ### Usage
 
-Set `auto_warmup` to 1:
+It is enabled by default. To disable it and run the full fixed warmup,
+set `auto_warmup` to 0:
 
 ```bash
-./benchpress_cli.py run tao_bench_autoscale -i '{"auto_warmup": 1}'
+./benchpress_cli.py run tao_bench_autoscale -i '{"auto_warmup": 0}'
 ```
 
 This is most useful combined with the memory file option:
@@ -481,8 +500,9 @@ parameter so clients can poll the server's warmup status.
 
 ### Parameters
 
-  - `auto_warmup`: Set to 1 to enable auto-warmup detection. Default is 0 (disabled)
-  for `tao_bench_autoscale`, 1 (enabled) for `tao_bench_autoscale_v2_beta`.
+  - `auto_warmup`: Set to 1 to enable auto-warmup detection. Default is 1 (enabled)
+  for `tao_bench_autoscale`, `tao_bench_standalone`, and
+  `tao_bench_autoscale_v2_beta`; set to 0 to disable.
   - `target_hit_ratio`: Target hit ratio for warmup completion detection. Default
   is 0.9. Warmup is considered complete when hit ratio reaches 95% of this value.
 
